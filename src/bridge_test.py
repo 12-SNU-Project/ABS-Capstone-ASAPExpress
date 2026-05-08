@@ -1,8 +1,4 @@
-"""수동 local LLM SearchPlan smoke test.
-
-이 파일은 package 내부가 아니라 `src/` 바로 아래에 둔다.
-그래야 `python src/runtime_smoke.py`로 직접 실행해도 `eu_export` import가 안정적이다.
-"""
+"""로컬 LLM bridge 컴포넌트 smoke test."""
 
 import json
 import os
@@ -13,61 +9,68 @@ from dotenv import load_dotenv
 
 from eu_export import (
     BuildRuntimeAdapter,
+    LocalLlmGenerationOptions,
+    LocalLlmRequest,
     LocalLlmRuntimeConfig,
     LocalLlmRuntimeKind,
     RuntimeAdapter,
     RuntimeDependencyStatus,
 )
-from eu_export.product import (
-    LlmQueryInterpreter,
-    QueryAnalysisResult,
-    QueryAnalyzer,
-    QueryPlanningPipeline,
-    QueryPlanningResult,
-    SearchPlan,
-    SearchPlanValidator,
-)
 
 
-DEFAULT_OMLX_ENDPOINT_URL = "http://127.0.0.1:8000"
-DEFAULT_OLLAMA_ENDPOINT_URL = "http://localhost:11434"
 PROJECT_ROOT_PATH = Path(__file__).resolve().parent.parent
 DEFAULT_DOTENV_PATH = PROJECT_ROOT_PATH / ".env"
-DEFAULT_SEARCH_QUERY = "농심 신라면 120g"
+DEFAULT_RUNTIME_KIND = "omlx"
+DEFAULT_OMLX_ENDPOINT_URL = "http://127.0.0.1:8000"
+DEFAULT_OLLAMA_ENDPOINT_URL = "http://localhost:11434"
+DEFAULT_TIMEOUT_SECONDS = 120
+DEFAULT_TEST_PROMPT = "Return exactly this JSON object: {\"status\":\"ok\"}"
 
 
-def LoadRuntimeEnvironment() -> None:
+def LoadEnvironment() -> None:
     load_dotenv(dotenv_path=DEFAULT_DOTENV_PATH)
 
 
-def ReadEnvironmentValue(primaryName: str, legacyName: str | None = None) -> str | None:
-    primaryValue = os.environ.get(primaryName)
-    if primaryValue is not None and primaryValue.strip() != "":
-        return primaryValue
-
-    if legacyName is None:
+def ReadEnvironmentValue(envName: str) -> str | None:
+    envValue = os.environ.get(envName)
+    if envValue is None or envValue.strip() == "":
         return None
+    return envValue.strip()
 
-    legacyValue = os.environ.get(legacyName)
-    if legacyValue is not None and legacyValue.strip() != "":
-        return legacyValue
 
-    return None
+def ReadRequiredEnvironmentValue(envName: str) -> str:
+    envValue = ReadEnvironmentValue(envName)
+    if envValue is None:
+        raise ValueError("Set {0} before running bridge_test.py.".format(envName))
+    return envValue
+
+
+def ReadPositiveInteger(envName: str, defaultValue: int) -> int:
+    envValue = ReadEnvironmentValue(envName)
+    if envValue is None:
+        return defaultValue
+
+    try:
+        parsedValue = int(envValue)
+    except ValueError as error:
+        raise ValueError("{0} must be an integer.".format(envName)) from error
+
+    if parsedValue <= 0:
+        raise ValueError("{0} must be greater than 0.".format(envName))
+
+    return parsedValue
 
 
 def ReadRuntimeKind() -> LocalLlmRuntimeKind:
-    runtimeKind = ReadEnvironmentValue("EU_EXPORT_RUNTIME", "EU_FOOD_RUNTIME")
-    if runtimeKind is None:
-        runtimeKind = "omlx"
-    runtimeKind = runtimeKind.strip().lower()
-    if runtimeKind == "ollama":
+    runtimeKind = ReadEnvironmentValue("EU_EXPORT_RUNTIME") or DEFAULT_RUNTIME_KIND
+    if runtimeKind.lower() == "ollama":
         return LocalLlmRuntimeKind.OLLAMA
     return LocalLlmRuntimeKind.OMLX
 
 
 def ReadEndpointUrl(runtimeKind: LocalLlmRuntimeKind) -> str:
-    endpointUrl = ReadEnvironmentValue("EU_EXPORT_ENDPOINT", "EU_FOOD_ENDPOINT")
-    if endpointUrl is not None and endpointUrl.strip() != "":
+    endpointUrl = ReadEnvironmentValue("EU_EXPORT_ENDPOINT")
+    if endpointUrl is not None:
         return endpointUrl
 
     if runtimeKind == LocalLlmRuntimeKind.OLLAMA:
@@ -75,116 +78,48 @@ def ReadEndpointUrl(runtimeKind: LocalLlmRuntimeKind) -> str:
     return DEFAULT_OMLX_ENDPOINT_URL
 
 
-def ReadModelName() -> str:
-    modelName = ReadEnvironmentValue("EU_EXPORT_MODEL", "EU_FOOD_MODEL")
-    if modelName is None or modelName.strip() == "":
-        raise ValueError("Set EU_EXPORT_MODEL before running runtime_smoke.py.")
-    return modelName
-
-
-def ReadTimeoutSeconds() -> int | None:
-    timeoutSeconds = ReadEnvironmentValue(
-        "EU_EXPORT_TIMEOUT_SECONDS",
-        "EU_FOOD_TIMEOUT_SECONDS",
-    )
-    if timeoutSeconds is None or timeoutSeconds.strip() == "":
-        return None
-
-    try:
-        parsedTimeoutSeconds = int(timeoutSeconds)
-    except ValueError as error:
-        raise ValueError("EU_EXPORT_TIMEOUT_SECONDS must be an integer.") from error
-
-    if parsedTimeoutSeconds <= 0:
-        raise ValueError("EU_EXPORT_TIMEOUT_SECONDS must be greater than 0.")
-
-    return parsedTimeoutSeconds
-
-
-def ReadApiKey() -> str | None:
-    apiKey = ReadEnvironmentValue("EU_EXPORT_API_KEY", "EU_FOOD_API_KEY")
-    if apiKey is None or apiKey.strip() == "":
-        apiKey = os.environ.get("OMLX_API_KEY")
-
-    if apiKey is None or apiKey.strip() == "":
-        return None
-
-    return apiKey
-
-
-def ReadSearchQuery() -> str:
-    searchQuery = ReadEnvironmentValue(
-        "EU_EXPORT_SEARCH_QUERY",
-        "EU_FOOD_SEARCH_QUERY",
-    )
-    if searchQuery is None or searchQuery.strip() == "":
-        return DEFAULT_SEARCH_QUERY
-
-    return searchQuery.strip()
-
-
 def BuildRuntimeAdapterForSmokeTest() -> RuntimeAdapter[Any]:
     runtimeKind = ReadRuntimeKind()
     endpointUrl = ReadEndpointUrl(runtimeKind)
-    modelName = ReadModelName()
-    timeoutSeconds = ReadTimeoutSeconds()
-    apiKey = ReadApiKey()
-    extraOptions: Dict[str, Any] = {}
-    if timeoutSeconds is not None:
-        extraOptions["timeout_seconds"] = timeoutSeconds
+    extraOptions: Dict[str, Any] = {
+        "timeout_seconds": ReadPositiveInteger(
+            "EU_EXPORT_TIMEOUT_SECONDS",
+            DEFAULT_TIMEOUT_SECONDS,
+        ),
+    }
+    apiKey = ReadEnvironmentValue("EU_EXPORT_API_KEY")
     if apiKey is not None:
         extraOptions["api_key"] = apiKey
 
     runtimeConfig = LocalLlmRuntimeConfig(
         runtimeKind=runtimeKind,
-        modelName=modelName,
+        modelName=ReadRequiredEnvironmentValue("EU_EXPORT_MODEL"),
         endpointUrl=endpointUrl,
         extraOptions=extraOptions,
     )
     dependencyStatus = RuntimeDependencyStatus(
         runtimeKind=runtimeKind,
         isAvailable=True,
-        message="manual smoke test",
+        message="manual bridge smoke test",
         endpointUrl=endpointUrl,
     )
 
     return BuildRuntimeAdapter(runtimeConfig, dependencyStatus=dependencyStatus)
 
 
-def BuildAnalysisOutput(analysisResult: QueryAnalysisResult) -> Dict[str, Any]:
-    return {
-        "original_query": analysisResult.originalQuery,
-        "normalized_query": analysisResult.normalizedQuery,
-        "query_type": analysisResult.queryType.value,
-        "product_domain_hint": analysisResult.productDomainHint.value,
-        "confidence": analysisResult.confidence,
-        "reason": analysisResult.reason,
-        "extracted_terms": analysisResult.extractedTerms,
-        "limitations": analysisResult.limitations,
-    }
-
-
-def BuildSearchPlanOutput(searchPlan: SearchPlan) -> Dict[str, Any]:
-    return {
-        "original_query": searchPlan.originalQuery,
-        "normalized_query": searchPlan.normalizedQuery,
-        "query_type": searchPlan.queryType.value,
-        "product_domain_hint": searchPlan.productDomainHint.value,
-        "search_queries": searchPlan.searchQueries,
-        "preferred_source_types": searchPlan.preferredSourceTypes,
-        "requires_web_search": searchPlan.requiresWebSearch,
-        "requires_product_detail_pages": searchPlan.requiresProductDetailPages,
-        "confidence": searchPlan.confidence,
-        "reason": searchPlan.reason,
-        "limitations": searchPlan.limitations,
-    }
-
-
-def BuildPlanningErrorOutput(planningResult: QueryPlanningResult) -> Dict[str, Any]:
-    return {
-        "raw_query": planningResult.rawQuery,
-        "errors": planningResult.errors,
-    }
+def BuildRequest() -> LocalLlmRequest:
+    return LocalLlmRequest(
+        systemPrompt=(
+            "You are testing a local LLM bridge. "
+            "Return only the requested JSON object."
+        ),
+        userPrompt=ReadEnvironmentValue("EU_EXPORT_BRIDGE_TEST_PROMPT")
+        or DEFAULT_TEST_PROMPT,
+        generationOptions=LocalLlmGenerationOptions(
+            temperature=0.0,
+            maxTokens=80,
+        ),
+    )
 
 
 def PrintJson(title: str, data: Dict[str, Any]) -> None:
@@ -192,34 +127,22 @@ def PrintJson(title: str, data: Dict[str, Any]) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
 
-def RunRuntimeSmokeTest() -> None:
-    LoadRuntimeEnvironment()
+def RunBridgeSmokeTest() -> None:
+    LoadEnvironment()
 
-    rawQuery = ReadSearchQuery()
     adapter = BuildRuntimeAdapterForSmokeTest()
-    pipeline = QueryPlanningPipeline(
-        QueryAnalyzer(),
-        LlmQueryInterpreter(adapter),
-        SearchPlanValidator(),
-    )
-    planningResult = pipeline.Plan(rawQuery)
+    response = adapter.Generate(BuildRequest())
 
     PrintJson(
-        "Heuristic Analysis",
-        BuildAnalysisOutput(planningResult.analysisResult),
-    )
-    if planningResult.candidateData:
-        PrintJson("LLM Candidate SearchPlan JSON", planningResult.candidateData)
-
-    if not planningResult.isSuccess or planningResult.searchPlan is None:
-        PrintJson("Query Planning Failed", BuildPlanningErrorOutput(planningResult))
-        return
-
-    PrintJson(
-        "Validated SearchPlan",
-        BuildSearchPlanOutput(planningResult.searchPlan),
+        "Bridge Runtime Response",
+        {
+            "runtime_kind": response.runtimeKind.value,
+            "model_name": response.modelName,
+            "generated_text": response.generatedText,
+            "limitations": response.limitations,
+        },
     )
 
 
 if __name__ == "__main__":
-    RunRuntimeSmokeTest()
+    RunBridgeSmokeTest()
