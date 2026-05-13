@@ -275,10 +275,3 @@ class LlmResponse:
             limitations=list(data.get("limitations", [])),
         )
 
-
-# Backward-compatible aliases. 신규 코드는 Llm* 이름을 사용한다.
-LocalLlmRuntimeKind = LlmRuntimeKind
-LocalLlmGenerationOptions = LlmGenerationOptions
-LocalLlmRuntimeConfig = LlmRuntimeConfig
-LocalLlmRequest = LlmRequest
-LocalLlmResponse = LlmResponse
