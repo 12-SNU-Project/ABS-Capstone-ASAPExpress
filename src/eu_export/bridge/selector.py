@@ -1,4 +1,4 @@
-"""현재 OS에 맞는 로컬 LLM 런타임 선택 로직."""
+"""현재 OS에 맞는 기본 LLM 런타임 선택 로직."""
 
 import platform
 from typing import Optional
@@ -31,7 +31,7 @@ def DetectOperatingSystem(osName: Optional[str] = None) -> OperatingSystemKind:
 def SelectDefaultRuntimeKind(
     operatingSystemKind: OperatingSystemKind,
 ) -> LocalLlmRuntimeKind:
-    """C/C++ 전처리 분기처럼 OS별 기본 LLM 런타임을 선택한다."""
+    """OS별 기본 로컬 LLM 런타임을 선택한다."""
 
     if operatingSystemKind == OperatingSystemKind.MACOS:
         return LocalLlmRuntimeKind.OMLX

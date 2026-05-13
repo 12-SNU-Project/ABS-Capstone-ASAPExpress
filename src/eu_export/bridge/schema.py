@@ -19,6 +19,7 @@ class LocalLlmRuntimeKind(str, Enum):
 
     OMLX = "omlx"
     OLLAMA = "ollama"
+    OPENAI = "openai"
 
 
 @dataclass(frozen=True)

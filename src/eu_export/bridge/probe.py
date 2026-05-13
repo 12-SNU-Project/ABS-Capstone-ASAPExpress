@@ -1,5 +1,6 @@
-"""로컬 LLM runtime dependency probe."""
+"""LLM runtime dependency probe."""
 
+import os
 from importlib.util import find_spec
 from pathlib import Path
 from shutil import which
@@ -16,6 +17,11 @@ DEFAULT_OMLX_MODULE_CANDIDATES = ["omlx", "mlx_lm", "mlx"]
 DEFAULT_OLLAMA_COMMAND_CANDIDATES = ["ollama"]
 DEFAULT_OMLX_ENDPOINT_URL = "http://127.0.0.1:8000"
 DEFAULT_OLLAMA_ENDPOINT_URL = "http://localhost:11434"
+DEFAULT_OPENAI_ENDPOINT_URL = "https://api.openai.com"
+DEFAULT_OPENAI_API_KEY_ENV_NAMES = [
+    "EU_EXPORT_OPENAI_API_KEY",
+    "OPENAI_API_KEY",
+]
 
 
 class UnsupportedRuntimeProbeError(RuntimeError):
@@ -49,10 +55,53 @@ def ProbeRuntimeDependency(
             DEFAULT_OLLAMA_ENDPOINT_URL,
         )
 
+    if runtimeConfig.runtimeKind == LocalLlmRuntimeKind.OPENAI:
+        return _ProbeApiKeyRuntime(
+            runtimeConfig,
+            DEFAULT_OPENAI_ENDPOINT_URL,
+            DEFAULT_OPENAI_API_KEY_ENV_NAMES,
+            "OpenAI API key setting is available.",
+            "OpenAI API key setting is missing.",
+        )
+
     raise UnsupportedRuntimeProbeError(
         "No runtime dependency probe is configured for: {0}".format(
             runtimeConfig.runtimeKind.value,
         )
+    )
+
+
+def _ProbeApiKeyRuntime(
+    runtimeConfig: LocalLlmRuntimeConfig,
+    defaultEndpointUrl: str,
+    apiKeyEnvNames: List[str],
+    availableMessage: str,
+    missingMessage: str,
+) -> RuntimeDependencyStatus:
+    endpointUrl = runtimeConfig.endpointUrl or defaultEndpointUrl
+    apiKey = _ReadApiKey(runtimeConfig, apiKeyEnvNames)
+
+    if apiKey is not None:
+        return RuntimeDependencyStatus(
+            runtimeKind=runtimeConfig.runtimeKind,
+            isAvailable=True,
+            message=availableMessage,
+            endpointUrl=endpointUrl,
+            limitations=[
+                "Dependency probe does not call the external API.",
+                "Runtime availability only means an API key was configured.",
+            ],
+        )
+
+    return RuntimeDependencyStatus(
+        runtimeKind=runtimeConfig.runtimeKind,
+        isAvailable=False,
+        message=missingMessage,
+        endpointUrl=endpointUrl,
+        limitations=[
+            "Set one of: {0}.".format(", ".join(apiKeyEnvNames)),
+            "Alternatively pass extraOptions['api_key'] in LocalLlmRuntimeConfig.",
+        ],
     )
 
 
@@ -155,6 +204,22 @@ def _ResolveExecutablePath(executablePath: str) -> Optional[str]:
     resolvedPath = which(executablePath)
     if resolvedPath is not None:
         return resolvedPath
+
+    return None
+
+
+def _ReadApiKey(
+    runtimeConfig: LocalLlmRuntimeConfig,
+    apiKeyEnvNames: List[str],
+) -> Optional[str]:
+    optionValue = runtimeConfig.extraOptions.get("api_key")
+    if isinstance(optionValue, str) and optionValue.strip() != "":
+        return optionValue.strip()
+
+    for envName in apiKeyEnvNames:
+        envValue = os.environ.get(envName)
+        if envValue is not None and envValue.strip() != "":
+            return envValue.strip()
 
     return None
 

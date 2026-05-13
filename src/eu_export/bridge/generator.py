@@ -46,6 +46,12 @@ def GenerateRuntimeResponse(
             request,
         )
 
+    if runtimeDescriptor.runtimeKind == LocalLlmRuntimeKind.OPENAI:
+        raise RuntimeGenerationError(
+            "OpenAI runtime generation is not implemented yet; "
+            "only runtime settings and dependency probe are configured."
+        )
+
     raise RuntimeGenerationError(
         "No generate implementation is configured for: {0}".format(
             runtimeDescriptor.runtimeKind.value,
