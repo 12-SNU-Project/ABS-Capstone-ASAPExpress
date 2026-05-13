@@ -1,4 +1,4 @@
-"""로컬 LLM 런타임 계층의 데이터 계약."""
+"""LLM 런타임 계층의 데이터 계약."""
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -14,19 +14,26 @@ class OperatingSystemKind(str, Enum):
     UNKNOWN = "unknown"
 
 
-class LocalLlmRuntimeKind(str, Enum):
-    """교체 가능한 로컬 LLM 런타임 종류."""
+class LlmRuntimeKind(str, Enum):
+    """교체 가능한 LLM 런타임 종류."""
 
     OMLX = "omlx"
     OLLAMA = "ollama"
     OPENAI = "openai"
 
 
+class LlmResponseFormat(str, Enum):
+    """LLM 응답 형식에 대한 provider 독립 요청 힌트."""
+
+    TEXT = "text"
+    JSON_OBJECT = "json_object"
+
+
 @dataclass(frozen=True)
 class RuntimeDependencyStatus:
     """현재 환경에서 선택 runtime을 사용할 수 있는지 나타내는 probe 결과."""
 
-    runtimeKind: LocalLlmRuntimeKind
+    runtimeKind: LlmRuntimeKind
     isAvailable: bool
     message: str
     moduleName: Optional[str] = None
@@ -48,7 +55,7 @@ class RuntimeDependencyStatus:
     @classmethod
     def FromDict(cls, data: Dict[str, Any]) -> "RuntimeDependencyStatus":
         return cls(
-            runtimeKind=LocalLlmRuntimeKind(data["runtime_kind"]),
+            runtimeKind=LlmRuntimeKind(data["runtime_kind"]),
             isAvailable=data["is_available"],
             message=data["message"],
             moduleName=data.get("module_name"),
@@ -59,7 +66,7 @@ class RuntimeDependencyStatus:
 
 
 @dataclass(frozen=True)
-class LocalLlmGenerationOptions:
+class LlmGenerationOptions:
     """LLM 호출 시 런타임에 전달할 생성 옵션."""
 
     temperature: float = 0.0
@@ -76,7 +83,7 @@ class LocalLlmGenerationOptions:
         }
 
     @classmethod
-    def FromDict(cls, data: Dict[str, Any]) -> "LocalLlmGenerationOptions":
+    def FromDict(cls, data: Dict[str, Any]) -> "LlmGenerationOptions":
         return cls(
             temperature=data.get("temperature", 0.0),
             maxTokens=data.get("max_tokens"),
@@ -86,10 +93,10 @@ class LocalLlmGenerationOptions:
 
 
 @dataclass(frozen=True)
-class LocalLlmRuntimeConfig:
-    """OS 선택 이후 실제 adapter에 전달할 런타임 설정."""
+class LlmRuntimeConfig:
+    """adapter에 전달할 런타임 설정."""
 
-    runtimeKind: LocalLlmRuntimeKind
+    runtimeKind: LlmRuntimeKind
     modelName: Optional[str] = None
     executablePath: Optional[str] = None
     endpointUrl: Optional[str] = None
@@ -105,9 +112,9 @@ class LocalLlmRuntimeConfig:
         }
 
     @classmethod
-    def FromDict(cls, data: Dict[str, Any]) -> "LocalLlmRuntimeConfig":
+    def FromDict(cls, data: Dict[str, Any]) -> "LlmRuntimeConfig":
         return cls(
-            runtimeKind=LocalLlmRuntimeKind(data["runtime_kind"]),
+            runtimeKind=LlmRuntimeKind(data["runtime_kind"]),
             modelName=data.get("model_name"),
             executablePath=data.get("executable_path"),
             endpointUrl=data.get("endpoint_url"),
@@ -119,7 +126,7 @@ class LocalLlmRuntimeConfig:
 class RuntimeDescriptor:
     """선택 runtime의 실행 방식과 dependency 상태를 설명하는 객체."""
 
-    runtimeKind: LocalLlmRuntimeKind
+    runtimeKind: LlmRuntimeKind
     dependencyStatus: RuntimeDependencyStatus
     moduleName: Optional[str] = None
     executablePath: Optional[str] = None
@@ -139,7 +146,7 @@ class RuntimeDescriptor:
     @classmethod
     def FromDict(cls, data: Dict[str, Any]) -> "RuntimeDescriptor":
         return cls(
-            runtimeKind=LocalLlmRuntimeKind(data["runtime_kind"]),
+            runtimeKind=LlmRuntimeKind(data["runtime_kind"]),
             dependencyStatus=RuntimeDependencyStatus.FromDict(
                 data["dependency_status"],
             ),
@@ -151,14 +158,15 @@ class RuntimeDescriptor:
 
 
 @dataclass(frozen=True)
-class LocalLlmRequest:
+class LlmRequest:
     """RAG 또는 보고서 생성 단계가 LLM adapter에 전달하는 요청."""
 
     userPrompt: str
     systemPrompt: Optional[str] = None
     contextChunks: List[str] = field(default_factory=list)
-    generationOptions: LocalLlmGenerationOptions = field(
-        default_factory=LocalLlmGenerationOptions,
+    responseFormat: LlmResponseFormat = LlmResponseFormat.TEXT
+    generationOptions: LlmGenerationOptions = field(
+        default_factory=LlmGenerationOptions,
     )
 
     def ToDict(self) -> Dict[str, Any]:
@@ -166,27 +174,31 @@ class LocalLlmRequest:
             "user_prompt": self.userPrompt,
             "system_prompt": self.systemPrompt,
             "context_chunks": list(self.contextChunks),
+            "response_format": self.responseFormat.value,
             "generation_options": self.generationOptions.ToDict(),
         }
 
     @classmethod
-    def FromDict(cls, data: Dict[str, Any]) -> "LocalLlmRequest":
+    def FromDict(cls, data: Dict[str, Any]) -> "LlmRequest":
         return cls(
             userPrompt=data["user_prompt"],
             systemPrompt=data.get("system_prompt"),
             contextChunks=list(data.get("context_chunks", [])),
-            generationOptions=LocalLlmGenerationOptions.FromDict(
+            responseFormat=LlmResponseFormat(
+                data.get("response_format", LlmResponseFormat.TEXT.value),
+            ),
+            generationOptions=LlmGenerationOptions.FromDict(
                 data.get("generation_options", {}),
             ),
         )
 
 
 @dataclass(frozen=True)
-class LocalLlmResponse:
+class LlmResponse:
     """LLM adapter가 반환하는 원문 응답과 추적 정보."""
 
     generatedText: str
-    runtimeKind: LocalLlmRuntimeKind
+    runtimeKind: LlmRuntimeKind
     modelName: Optional[str] = None
     rawResponse: Dict[str, Any] = field(default_factory=dict)
     limitations: List[str] = field(default_factory=list)
@@ -201,11 +213,19 @@ class LocalLlmResponse:
         }
 
     @classmethod
-    def FromDict(cls, data: Dict[str, Any]) -> "LocalLlmResponse":
+    def FromDict(cls, data: Dict[str, Any]) -> "LlmResponse":
         return cls(
             generatedText=data["generated_text"],
-            runtimeKind=LocalLlmRuntimeKind(data["runtime_kind"]),
+            runtimeKind=LlmRuntimeKind(data["runtime_kind"]),
             modelName=data.get("model_name"),
             rawResponse=dict(data.get("raw_response", {})),
             limitations=list(data.get("limitations", [])),
         )
+
+
+# Backward-compatible aliases. 신규 코드는 Llm* 이름을 사용한다.
+LocalLlmRuntimeKind = LlmRuntimeKind
+LocalLlmGenerationOptions = LlmGenerationOptions
+LocalLlmRuntimeConfig = LlmRuntimeConfig
+LocalLlmRequest = LlmRequest
+LocalLlmResponse = LlmResponse

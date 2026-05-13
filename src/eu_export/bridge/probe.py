@@ -7,8 +7,8 @@ from shutil import which
 from typing import List, Optional
 
 from eu_export.bridge.schema import (
-    LocalLlmRuntimeConfig,
-    LocalLlmRuntimeKind,
+    LlmRuntimeConfig,
+    LlmRuntimeKind,
     RuntimeDependencyStatus,
 )
 
@@ -29,11 +29,11 @@ class UnsupportedRuntimeProbeError(RuntimeError):
 
 
 def ProbeRuntimeDependency(
-    runtimeConfig: LocalLlmRuntimeConfig,
+    runtimeConfig: LlmRuntimeConfig,
 ) -> RuntimeDependencyStatus:
     """선택 runtime을 현재 환경에서 사용할 수 있는지 확인한다."""
 
-    if runtimeConfig.runtimeKind == LocalLlmRuntimeKind.OMLX:
+    if runtimeConfig.runtimeKind == LlmRuntimeKind.OMLX:
         return _ProbeModuleRuntime(
             runtimeConfig,
             _ReadStringListOption(
@@ -44,7 +44,7 @@ def ProbeRuntimeDependency(
             DEFAULT_OMLX_ENDPOINT_URL,
         )
 
-    if runtimeConfig.runtimeKind == LocalLlmRuntimeKind.OLLAMA:
+    if runtimeConfig.runtimeKind == LlmRuntimeKind.OLLAMA:
         return _ProbeCommandRuntime(
             runtimeConfig,
             _ReadStringListOption(
@@ -55,7 +55,7 @@ def ProbeRuntimeDependency(
             DEFAULT_OLLAMA_ENDPOINT_URL,
         )
 
-    if runtimeConfig.runtimeKind == LocalLlmRuntimeKind.OPENAI:
+    if runtimeConfig.runtimeKind == LlmRuntimeKind.OPENAI:
         return _ProbeApiKeyRuntime(
             runtimeConfig,
             DEFAULT_OPENAI_ENDPOINT_URL,
@@ -72,7 +72,7 @@ def ProbeRuntimeDependency(
 
 
 def _ProbeApiKeyRuntime(
-    runtimeConfig: LocalLlmRuntimeConfig,
+    runtimeConfig: LlmRuntimeConfig,
     defaultEndpointUrl: str,
     apiKeyEnvNames: List[str],
     availableMessage: str,
@@ -100,13 +100,13 @@ def _ProbeApiKeyRuntime(
         endpointUrl=endpointUrl,
         limitations=[
             "Set one of: {0}.".format(", ".join(apiKeyEnvNames)),
-            "Alternatively pass extraOptions['api_key'] in LocalLlmRuntimeConfig.",
+            "Alternatively pass extraOptions['api_key'] in LlmRuntimeConfig.",
         ],
     )
 
 
 def _ProbeModuleRuntime(
-    runtimeConfig: LocalLlmRuntimeConfig,
+    runtimeConfig: LlmRuntimeConfig,
     moduleCandidates: List[str],
     defaultEndpointUrl: str,
 ) -> RuntimeDependencyStatus:
@@ -151,7 +151,7 @@ def _ProbeModuleRuntime(
 
 
 def _ProbeCommandRuntime(
-    runtimeConfig: LocalLlmRuntimeConfig,
+    runtimeConfig: LlmRuntimeConfig,
     commandCandidates: List[str],
     defaultEndpointUrl: str,
 ) -> RuntimeDependencyStatus:
@@ -209,7 +209,7 @@ def _ResolveExecutablePath(executablePath: str) -> Optional[str]:
 
 
 def _ReadApiKey(
-    runtimeConfig: LocalLlmRuntimeConfig,
+    runtimeConfig: LlmRuntimeConfig,
     apiKeyEnvNames: List[str],
 ) -> Optional[str]:
     optionValue = runtimeConfig.extraOptions.get("api_key")
@@ -225,7 +225,7 @@ def _ReadApiKey(
 
 
 def _ReadStringListOption(
-    runtimeConfig: LocalLlmRuntimeConfig,
+    runtimeConfig: LlmRuntimeConfig,
     optionName: str,
     defaultValue: List[str],
 ) -> List[str]:

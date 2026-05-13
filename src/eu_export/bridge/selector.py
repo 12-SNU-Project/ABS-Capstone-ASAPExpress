@@ -4,13 +4,13 @@ import platform
 from typing import Optional
 
 from eu_export.bridge.schema import (
-    LocalLlmRuntimeConfig,
-    LocalLlmRuntimeKind,
+    LlmRuntimeConfig,
+    LlmRuntimeKind,
     OperatingSystemKind,
 )
 
 
-class UnsupportedLocalLlmRuntimeError(RuntimeError):
+class UnsupportedLlmRuntimeError(RuntimeError):
     """현재 OS에 대해 기본 로컬 LLM 런타임을 결정할 수 없을 때 사용한다."""
 
 
@@ -30,30 +30,34 @@ def DetectOperatingSystem(osName: Optional[str] = None) -> OperatingSystemKind:
 
 def SelectDefaultRuntimeKind(
     operatingSystemKind: OperatingSystemKind,
-) -> LocalLlmRuntimeKind:
+) -> LlmRuntimeKind:
     """OS별 기본 로컬 LLM 런타임을 선택한다."""
 
     if operatingSystemKind == OperatingSystemKind.MACOS:
-        return LocalLlmRuntimeKind.OMLX
+        return LlmRuntimeKind.OMLX
     if operatingSystemKind == OperatingSystemKind.WINDOWS:
-        return LocalLlmRuntimeKind.OLLAMA
+        return LlmRuntimeKind.OLLAMA
 
-    raise UnsupportedLocalLlmRuntimeError(
+    raise UnsupportedLlmRuntimeError(
         "No default local LLM runtime is configured for OS: {0}".format(
             operatingSystemKind.value,
         )
     )
 
 
-def BuildDefaultLocalLlmRuntimeConfig(
+def BuildDefaultLlmRuntimeConfig(
     osName: Optional[str] = None,
     modelName: Optional[str] = None,
-) -> LocalLlmRuntimeConfig:
+) -> LlmRuntimeConfig:
     """현재 OS를 기준으로 기본 로컬 LLM 런타임 설정을 만든다."""
 
     operatingSystemKind = DetectOperatingSystem(osName)
     runtimeKind = SelectDefaultRuntimeKind(operatingSystemKind)
-    return LocalLlmRuntimeConfig(
+    return LlmRuntimeConfig(
         runtimeKind=runtimeKind,
         modelName=modelName,
     )
+
+
+UnsupportedLocalLlmRuntimeError = UnsupportedLlmRuntimeError
+BuildDefaultLocalLlmRuntimeConfig = BuildDefaultLlmRuntimeConfig
