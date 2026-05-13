@@ -29,6 +29,16 @@ class LlmResponseFormat(str, Enum):
     JSON_OBJECT = "json_object"
 
 
+class LlmFinishReason(str, Enum):
+    """provider별 종료 사유를 공통 범주로 정규화한 값."""
+
+    STOP = "stop"
+    LENGTH = "length"
+    CONTENT_FILTER = "content_filter"
+    TOOL_CALLS = "tool_calls"
+    UNKNOWN = "unknown"
+
+
 @dataclass(frozen=True)
 class RuntimeDependencyStatus:
     """현재 환경에서 선택 runtime을 사용할 수 있는지 나타내는 probe 결과."""
@@ -62,6 +72,30 @@ class RuntimeDependencyStatus:
             executablePath=data.get("executable_path"),
             endpointUrl=data.get("endpoint_url"),
             limitations=list(data.get("limitations", [])),
+        )
+
+
+@dataclass(frozen=True)
+class LlmTokenUsage:
+    """provider별 token 사용량 필드를 공통 필드로 정규화한 값."""
+
+    inputTokens: Optional[int] = None
+    outputTokens: Optional[int] = None
+    totalTokens: Optional[int] = None
+
+    def ToDict(self) -> Dict[str, Any]:
+        return {
+            "input_tokens": self.inputTokens,
+            "output_tokens": self.outputTokens,
+            "total_tokens": self.totalTokens,
+        }
+
+    @classmethod
+    def FromDict(cls, data: Dict[str, Any]) -> "LlmTokenUsage":
+        return cls(
+            inputTokens=data.get("input_tokens"),
+            outputTokens=data.get("output_tokens"),
+            totalTokens=data.get("total_tokens"),
         )
 
 
@@ -195,11 +229,16 @@ class LlmRequest:
 
 @dataclass(frozen=True)
 class LlmResponse:
-    """LLM adapter가 반환하는 원문 응답과 추적 정보."""
+    """LLM adapter가 반환하는 provider 독립 응답과 추적 정보."""
 
     generatedText: str
     runtimeKind: LlmRuntimeKind
     modelName: Optional[str] = None
+    responseFormat: LlmResponseFormat = LlmResponseFormat.TEXT
+    finishReason: LlmFinishReason = LlmFinishReason.UNKNOWN
+    providerFinishReason: Optional[str] = None
+    tokenUsage: LlmTokenUsage = field(default_factory=LlmTokenUsage)
+    responseId: Optional[str] = None
     rawResponse: Dict[str, Any] = field(default_factory=dict)
     limitations: List[str] = field(default_factory=list)
 
@@ -208,6 +247,11 @@ class LlmResponse:
             "generated_text": self.generatedText,
             "runtime_kind": self.runtimeKind.value,
             "model_name": self.modelName,
+            "response_format": self.responseFormat.value,
+            "finish_reason": self.finishReason.value,
+            "provider_finish_reason": self.providerFinishReason,
+            "token_usage": self.tokenUsage.ToDict(),
+            "response_id": self.responseId,
             "raw_response": dict(self.rawResponse),
             "limitations": list(self.limitations),
         }
@@ -218,6 +262,15 @@ class LlmResponse:
             generatedText=data["generated_text"],
             runtimeKind=LlmRuntimeKind(data["runtime_kind"]),
             modelName=data.get("model_name"),
+            responseFormat=LlmResponseFormat(
+                data.get("response_format", LlmResponseFormat.TEXT.value),
+            ),
+            finishReason=LlmFinishReason(
+                data.get("finish_reason", LlmFinishReason.UNKNOWN.value),
+            ),
+            providerFinishReason=data.get("provider_finish_reason"),
+            tokenUsage=LlmTokenUsage.FromDict(data.get("token_usage", {})),
+            responseId=data.get("response_id"),
             rawResponse=dict(data.get("raw_response", {})),
             limitations=list(data.get("limitations", [])),
         )
