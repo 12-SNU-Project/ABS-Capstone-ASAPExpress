@@ -20,27 +20,19 @@ from eu_export.bridge.schema import (
     LlmRuntimeConfig,
     LlmRuntimeKind,
     LlmTokenUsage,
-    LocalLlmGenerationOptions,
-    LocalLlmRequest,
-    LocalLlmResponse,
-    LocalLlmRuntimeConfig,
-    LocalLlmRuntimeKind,
     OperatingSystemKind,
     RuntimeDescriptor,
     RuntimeDependencyStatus,
 )
 from eu_export.bridge.selector import (
     BuildDefaultLlmRuntimeConfig,
-    BuildDefaultLocalLlmRuntimeConfig,
     DetectOperatingSystem,
     SelectDefaultRuntimeKind,
     UnsupportedLlmRuntimeError,
-    UnsupportedLocalLlmRuntimeError,
 )
 
 __all__ = [
     "BuildDefaultLlmRuntimeConfig",
-    "BuildDefaultLocalLlmRuntimeConfig",
     "BuildRuntimeAdapter",
     "BuildRuntimeDescriptor",
     "DetectOperatingSystem",
@@ -53,11 +45,6 @@ __all__ = [
     "LlmRuntimeConfig",
     "LlmRuntimeKind",
     "LlmTokenUsage",
-    "LocalLlmGenerationOptions",
-    "LocalLlmRequest",
-    "LocalLlmResponse",
-    "LocalLlmRuntimeConfig",
-    "LocalLlmRuntimeKind",
     "OperatingSystemKind",
     "ProbeRuntimeDependency",
     "RuntimeAdapterBuildError",
@@ -67,6 +54,5 @@ __all__ = [
     "RuntimeGenerationError",
     "SelectDefaultRuntimeKind",
     "UnsupportedLlmRuntimeError",
-    "UnsupportedLocalLlmRuntimeError",
     "UnsupportedRuntimeProbeError",
 ]

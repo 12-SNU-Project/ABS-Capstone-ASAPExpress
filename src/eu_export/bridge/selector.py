@@ -57,7 +57,3 @@ def BuildDefaultLlmRuntimeConfig(
         runtimeKind=runtimeKind,
         modelName=modelName,
     )
-
-
-UnsupportedLocalLlmRuntimeError = UnsupportedLlmRuntimeError
-BuildDefaultLocalLlmRuntimeConfig = BuildDefaultLlmRuntimeConfig
