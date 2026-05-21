@@ -1,11 +1,28 @@
-"""상품 웹 검색 전 입력 query를 분류하고 검색 계획을 만든다."""
+"""상품 query 분석과 SearchPlan 생성 계약."""
 
+import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
-from eu_export.utils import FindContainedTerms, IsUrlLike, NormalizeWhitespace
+from eu_export.bridge import (
+    LlmGenerationOptions,
+    LlmRequest,
+    LlmResponseFormat,
+    RuntimeAdapter,
+)
+from eu_export.utils import (
+    ExtractJsonObject,
+    FindContainedTerms,
+    IsUrlLike,
+    NormalizeWhitespace,
+    ReadNumberInRange,
+    ReadOptionalStringList,
+    ReadRequiredBool,
+    ReadRequiredString,
+    ReadStringList,
+)
 
 
 PACKAGING_PATTERN = re.compile(
@@ -123,32 +140,11 @@ ATTRIBUTE_TERMS = {
     "rinse-off",
 }
 
-BRAND_HINT_TERMS = {
-    "농심",
-    "오뚜기",
-    "삼양",
-    "팔도",
-    "cj",
-    "bibigo",
-    "nongshim",
-    "ottogi",
-    "samyang",
-    "paldo",
-    "올리브영",
-    "뷰티컬리",
-    "oliveyoung",
-    "beauty kurly",
-}
-
-
 class ProductDomainHint(str, Enum):
-    """후속 analyzer routing을 위한 상품 도메인 후보."""
-
-    PROCESSED_FOOD = "processed_food"
-    COSMETICS = "cosmetics"
-    AMBIGUOUS = "ambiguous"
-    UNKNOWN = "unknown"
-
+    PROCESSED_FOOD = "가공식품"
+    COSMETICS = "화장품"
+    AMBIGUOUS = "공동 키워드 포함"
+    UNKNOWN = "분류 불가"
 
 class QueryType(str, Enum):
     """상품 정보 수집 단계의 사용자 입력 유형."""
@@ -164,18 +160,12 @@ class QueryType(str, Enum):
 @dataclass(frozen=True)
 class QueryAnalysisResult:
     """사용자 입력 query의 1차 분류 결과."""
-
     originalQuery: str
     normalizedQuery: str
     queryType: QueryType
-    productDomainHint: ProductDomainHint
-    searchProductDomains: List[ProductDomainHint]
-    requiresWebSearch: bool
-    requiresProductDetailPages: bool
-    confidence: float
-    reason: str
-    extractedTerms: Dict[str, List[str]] = field(default_factory=dict)
-    limitations: List[str] = field(default_factory=list)
+    detectedFoodTerms: list[str]
+    detectedCosmeticsTerms: list[str]
+    detectedAttributeTerms: list[str]
 
 
 class QueryAnalyzer:
@@ -188,38 +178,26 @@ class QueryAnalyzer:
                 originalQuery=rawQuery,
                 normalizedQuery=normalizedQuery,
                 queryType=QueryType.AMBIGUOUS,
-                productDomainHint=ProductDomainHint.UNKNOWN,
-                searchProductDomains=[],
-                requiresWebSearch=False,
-                requiresProductDetailPages=False,
-                confidence=0.0,
-                reason="query is empty after normalization",
-                limitations=["Ask the user for a product name or URL."],
+                detectedFoodTerms=[],
+                detectedCosmeticsTerms=[],
+                detectedAttributeTerms=[]
             )
-
-        extractedTerms = self.ExtractTerms(normalizedQuery)
-        queryType, confidence, reason = self.Classify(normalizedQuery, extractedTerms)
-        productDomainHint = self.InferProductDomain(extractedTerms)
-        requiresWebSearch = self.InferRequiresWebSearch(queryType)
+    
+        extractedTerms = self._ExtractKeywords(normalizedQuery)
+        
+        queryType, reason = self._ClassifyQueryType(normalizedQuery, extractedTerms)
+        productDomainHint = self._InferProductDomain(extractedTerms)
 
         return QueryAnalysisResult(
             originalQuery=rawQuery,
             normalizedQuery=normalizedQuery,
             queryType=queryType,
-            productDomainHint=productDomainHint,
-            searchProductDomains=self.InferSearchProductDomains(
-                productDomainHint,
-                requiresWebSearch,
-            ),
-            requiresWebSearch=requiresWebSearch,
-            requiresProductDetailPages=self.InferRequiresProductDetailPages(queryType),
-            confidence=confidence,
-            reason=reason,
-            extractedTerms=extractedTerms,
-            limitations=self.BuildLimitations(queryType),
+            detectedFoodTerms=[t for t in extractedTerms["food_terms"]],
+            detectedCosmeticsTerms=[t for t in extractedTerms["cosmetic_trems"]],
+            detectedAttributeTerms=[t for t in extractedTerms["attribute_terms"]]
         )
 
-    def ExtractTerms(self, normalizedQuery: str) -> Dict[str, List[str]]:
+    def _ExtractKeywords(self, normalizedQuery: str) -> Dict[str, List[str]]:
         return {
             "category_terms": FindContainedTerms(
                 normalizedQuery,
@@ -237,17 +215,13 @@ class QueryAnalyzer:
                 normalizedQuery,
                 ATTRIBUTE_TERMS,
             ),
-            "brand_hint_terms": FindContainedTerms(
-                normalizedQuery,
-                BRAND_HINT_TERMS,
-            ),
         }
 
-    def Classify(
+    def _ClassifyQueryType(
         self,
         normalizedQuery: str,
         extractedTerms: Dict[str, List[str]],
-    ) -> tuple[QueryType, float, str]:
+    ) -> tuple[QueryType, str]:
         loweredQuery = normalizedQuery.lower()
         tokenCount = len(normalizedQuery.split())
         categoryTerms = extractedTerms.get("category_terms", [])
@@ -255,57 +229,50 @@ class QueryAnalyzer:
         brandHintTerms = extractedTerms.get("brand_hint_terms", [])
 
         if IsUrlLike(normalizedQuery):
-            return QueryType.URL, 0.98, "query is a URL or URL-like domain"
+            return QueryType.URL, "query is a URL or URL-like domain"
 
         if categoryTerms and attributeTerms:
             return (
                 QueryType.ATTRIBUTE_ENRICHED_CATEGORY,
-                0.82,
                 "query contains both category and product attribute terms",
             )
 
         if PACKAGING_PATTERN.search(loweredQuery):
             return (
                 QueryType.SPECIFIC_PRODUCT,
-                0.86,
                 "query contains package size or quantity marker",
             )
 
         if brandHintTerms and categoryTerms:
             return (
                 QueryType.SPECIFIC_PRODUCT,
-                0.78,
                 "query contains brand hint and category term",
             )
 
         if brandHintTerms and tokenCount <= 2:
             return (
                 QueryType.BRAND_OR_SERIES,
-                0.72,
                 "query looks like a brand or product series",
             )
 
         if categoryTerms and tokenCount <= 2:
             return (
                 QueryType.GENERIC_CATEGORY,
-                0.76,
                 "query is a short generic product category",
             )
 
         if tokenCount >= 2:
             return (
                 QueryType.SPECIFIC_PRODUCT,
-                0.62,
                 "query has multiple product-like terms but needs source verification",
             )
 
         return (
             QueryType.AMBIGUOUS,
-            0.35,
             "query is too short or lacks recognizable product signals",
         )
 
-    def InferProductDomain(
+    def _InferProductDomain(
         self,
         extractedTerms: Dict[str, List[str]],
     ) -> ProductDomainHint:
@@ -314,45 +281,15 @@ class QueryAnalyzer:
 
         if foodTerms and cosmeticsTerms:
             return ProductDomainHint.AMBIGUOUS
+        
         if foodTerms:
             return ProductDomainHint.PROCESSED_FOOD
         if cosmeticsTerms:
             return ProductDomainHint.COSMETICS
+        
         return ProductDomainHint.UNKNOWN
 
-    def InferRequiresWebSearch(self, queryType: QueryType) -> bool:
-        if queryType in (QueryType.URL, QueryType.AMBIGUOUS):
-            return False
-
-        return True
-
-    def InferRequiresProductDetailPages(self, queryType: QueryType) -> bool:
-        return queryType in (
-            QueryType.URL,
-            QueryType.SPECIFIC_PRODUCT,
-            QueryType.ATTRIBUTE_ENRICHED_CATEGORY,
-        )
-
-    def InferSearchProductDomains(
-        self,
-        productDomainHint: ProductDomainHint,
-        requiresWebSearch: bool,
-    ) -> List[ProductDomainHint]:
-        if not requiresWebSearch:
-            return []
-
-        if productDomainHint == ProductDomainHint.PROCESSED_FOOD:
-            return [ProductDomainHint.PROCESSED_FOOD]
-
-        if productDomainHint == ProductDomainHint.COSMETICS:
-            return [ProductDomainHint.COSMETICS]
-
-        return [
-            ProductDomainHint.PROCESSED_FOOD,
-            ProductDomainHint.COSMETICS,
-        ]
-
-    def BuildLimitations(self, queryType: QueryType) -> List[str]:
+    def _BuildLimitations(self, queryType: QueryType) -> List[str]:
         if queryType == QueryType.URL:
             return ["URL content still needs product fact extraction and validation."]
 
@@ -366,3 +303,122 @@ class QueryAnalyzer:
             return ["Ask the user for brand, product name, or URL."]
 
         return ["Search result evidence is required before product facts are accepted."]
+
+
+SEARCH_PLAN_JSON_FIELDS = [
+    "original_query",
+    "normalized_query",
+    "query_type",
+    "product_domain_hint",
+    "search_product_domains",
+    "search_queries",
+    "preferred_source_types",
+    "requires_web_search",
+    "requires_product_detail_pages",
+    "confidence",
+    "reason",
+    "limitations",
+]
+MAX_SEARCH_QUERY_COUNT = 5
+
+
+def BuildAllowedQueryTypeText() -> str:
+    return ", ".join(queryType.value for queryType in QueryType)
+
+
+def BuildAllowedProductDomainHintText() -> str:
+    return ", ".join(productDomainHint.value for productDomainHint in ProductDomainHint)
+
+
+def BuildSearchPlanFieldText() -> str:
+    return ", ".join(SEARCH_PLAN_JSON_FIELDS)
+
+
+@dataclass(frozen=True)
+class SearchPlan:
+    """상품 정보 수집을 위한 1차 검색 계획."""
+
+    originalQuery: str
+    normalizedQuery: str
+    queryType: QueryType
+    productDomainHint: ProductDomainHint
+    searchProductDomains: List[ProductDomainHint]
+    searchQueries: List[str]
+    preferredSourceTypes: List[str]
+    requiresWebSearch: bool
+    requiresProductDetailPages: bool
+    confidence: float
+    reason: str
+    limitations: List[str] = field(default_factory=list)
+
+
+def BuildSearchPlanSystemPrompt() -> str:
+    return "\n".join(
+        [
+            "You are a query planning component for a Korea-to-EU regulated product export support system.",
+            "Convert the user's product search query into one SearchPlan JSON object.",
+            "Return only valid JSON. Do not return markdown or explanations.",
+            "Allowed query_type values: {0}.".format(BuildAllowedQueryTypeText()),
+            "Allowed product_domain_hint values: {0}.".format(
+                BuildAllowedProductDomainHintText(),
+            ),
+            "Required fields: {0}.".format(BuildSearchPlanFieldText()),
+            "Do not determine HS, CN, TARIC, legal requirements, certification requirements, or document requirements.",
+            "Only create a web search plan for collecting product information.",
+            "Use product_domain_hint only for routing: processed_food, cosmetics, ambiguous, or unknown.",
+            "search_product_domains must contain only concrete search targets: processed_food and/or cosmetics.",
+            "If product_domain_hint is ambiguous or unknown but the query is searchable, search both processed_food and cosmetics.",
+            "If the query is ambiguous or does not require web search, search_product_domains must be an empty list.",
+        ]
+    )
+
+
+class LlmQueryInterpreter:
+    """휴리스틱 분석 결과를 참고자료로 전달해 SearchPlan JSON 후보를 만든다."""
+
+    def __init__(self, runtimeAdapter: RuntimeAdapter[Any]) -> None:
+        self._runtimeAdapter = runtimeAdapter
+
+    def Interpret(
+        self,
+        rawQuery: str,
+        analysisResult: QueryAnalysisResult,
+    ) -> Dict[str, Any]:
+        request = LlmRequest(
+            systemPrompt=self.BuildSystemPrompt(),
+            userPrompt=self.BuildUserPrompt(rawQuery, analysisResult),
+            responseFormat=LlmResponseFormat.JSON_OBJECT,
+            generationOptions=LlmGenerationOptions(
+                temperature=0.0,
+                maxTokens=800,
+            ),
+        )
+
+        response = self._runtimeAdapter.Generate(request)
+        return ExtractJsonObject(response.generatedText)
+
+    def BuildSystemPrompt(self) -> str:
+        return BuildSearchPlanSystemPrompt()
+
+    def BuildUserPrompt(
+        self,
+        rawQuery: str,
+        analysisResult: QueryAnalysisResult,
+    ) -> str:
+        heuristicData = {
+                analysisResult.originalQuery,
+                analysisResult.normalizedQuery,
+                analysisResult.queryType,
+            }
+        return "\n".join(
+            [
+                "User query:",
+                rawQuery,
+                "",
+                "Heuristic analysis for reference only:",
+                json.dumps(heuristicData, ensure_ascii=False, indent=2),
+                "",
+                "Create one SearchPlan JSON object.",
+            ]
+        )
+
