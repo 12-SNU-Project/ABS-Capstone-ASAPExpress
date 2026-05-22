@@ -1,7 +1,8 @@
-"""BeautyKurly 상품 상세 page collector/parser."""
+"""Kurly Market 상품 상세 page collector/parser."""
 
 import re
 from dataclasses import dataclass, field
+from enum import Enum
 from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
@@ -9,7 +10,7 @@ from urllib.parse import urljoin, urlparse
 from eu_export.utils import NormalizeWhitespace
 
 
-PRODUCT_NOTICE_FIELD_LABELS = [
+COSMETICS_PRODUCT_NOTICE_FIELD_LABELS = [
     "내용물의 용량 또는 중량",
     "제품 주요 사양 (피부타입, 색상(호, 번) 등)",
     "제품 주요 사양",
@@ -30,6 +31,31 @@ PRODUCT_NOTICE_FIELD_LABELS = [
     "품질보증기준",
     "소비자 상담 관련 전화번호",
 ]
+FOOD_PRODUCT_NOTICE_FIELD_LABELS = [
+    "제품명",
+    "식품의 유형",
+    "생산자 및 소재지 (수입품의 경우 생산자, 수입자 및 제조국)",
+    "생산자 및 소재지",
+    "제조연월일, 소비기한 또는 품질유지기한",
+    "포장단위별 내용물의 용량(중량), 수량",
+    "포장단위별 내용물의 용량",
+    "원재료명 (｢농수산물의 원산지 표시 등에 관한 법률｣에 따른 원산지 표시 포함) 및 함량(원재료 함량 표시대상 식품에 한함)",
+    "원재료명",
+    "영양성분 (영양성분 표시대상 식품에 한함)",
+    "영양성분",
+    "유전자변형식품에 해당하는 경우의 표시",
+    "소비자 안전을 위한 주의사항 (｢식품 등의 표시ㆍ광고에 관한 법률 시행규칙｣ 제5조 및 [별표 2]에 따른 표시사항을 말함)",
+    "소비자 안전을 위한 주의사항",
+    "수입식품의 경우 “수입식품안전관리 특별법에 따른 수입신고를 필함”의 문구",
+    "수입식품안전관리 특별법에 따른 수입신고를 필함",
+    "소비자 상담 관련 전화번호",
+]
+ALL_PRODUCT_NOTICE_FIELD_LABELS = list(
+    dict.fromkeys(
+        COSMETICS_PRODUCT_NOTICE_FIELD_LABELS
+        + FOOD_PRODUCT_NOTICE_FIELD_LABELS
+    )
+)
 PRODUCT_NOTICE_STOP_MARKERS = {
     "WHY KURLY",
     "상품 후기",
@@ -59,25 +85,34 @@ SUMMARY_FIELD_LABELS = {
 }
 TITLE_SUFFIX_PATTERN = re.compile(r"\s*-\s*(마켓컬리|컬리)\s*$")
 BRACKET_BRAND_PATTERN = re.compile(r"^\[([^\]]+)\]")
-DEFAULT_BEAUTY_KURLY_TIMEOUT_MILLISECONDS = 30000
-DEFAULT_BEAUTY_KURLY_SCROLL_COUNT = 8
-DEFAULT_BEAUTY_KURLY_SCROLL_WAIT_MILLISECONDS = 500
-DEFAULT_BEAUTY_KURLY_VIEWPORT_WIDTH = 1440
-DEFAULT_BEAUTY_KURLY_VIEWPORT_HEIGHT = 1600
-DEFAULT_BEAUTY_KURLY_SCROLL_STEP_RATIO = 0.75
-DEFAULT_BEAUTY_KURLY_USER_AGENT = (
+DEFAULT_KURLY_MARKET_TIMEOUT_MILLISECONDS = 30000
+DEFAULT_KURLY_MARKET_SCROLL_COUNT = 8
+DEFAULT_KURLY_MARKET_SCROLL_WAIT_MILLISECONDS = 500
+DEFAULT_KURLY_MARKET_VIEWPORT_WIDTH = 1440
+DEFAULT_KURLY_MARKET_VIEWPORT_HEIGHT = 1600
+DEFAULT_KURLY_MARKET_SCROLL_STEP_RATIO = 0.75
+DEFAULT_KURLY_MARKET_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
 
 
-class BeautyKurlyCollectionError(RuntimeError):
-    """BeautyKurly 상품 페이지 수집이 실패했을 때 사용한다."""
+class KurlyMarketProductDomain(str, Enum):
+    """Kurly 상품고시정보 기준의 상품 domain."""
+
+    FOOD = "food"
+    COSMETICS = "cosmetics"
+    AMBIGUOUS = "ambiguous"
+    UNKNOWN = "unknown"
+
+
+class KurlyMarketCollectionError(RuntimeError):
+    """KurlyMarket 상품 페이지 수집이 실패했을 때 사용한다."""
 
 
 @dataclass(frozen=True)
-class BeautyKurlyProductNoticeField:
+class KurlyMarketProductNoticeField:
     """상품고시정보 label-value record."""
 
     fieldName: str
@@ -95,11 +130,11 @@ class BeautyKurlyProductNoticeField:
 
 
 @dataclass(frozen=True)
-class BeautyKurlyProductNoticeGroup:
+class KurlyMarketProductNoticeGroup:
     """하나 이상의 상품 옵션에 대응되는 상품고시정보 field group."""
 
     optionNames: List[str] = field(default_factory=list)
-    fields: List[BeautyKurlyProductNoticeField] = field(default_factory=list)
+    fields: List[KurlyMarketProductNoticeField] = field(default_factory=list)
     rawText: str = ""
 
     def ToDict(self) -> Dict[str, object]:
@@ -111,11 +146,11 @@ class BeautyKurlyProductNoticeGroup:
 
 
 @dataclass(frozen=True)
-class BeautyKurlyProductNoticeOptionRecord:
+class KurlyMarketProductNoticeOptionRecord:
     """상품 옵션 하나에 정규화된 상품고시정보 field set."""
 
     optionName: Optional[str] = None
-    fields: List[BeautyKurlyProductNoticeField] = field(default_factory=list)
+    fields: List[KurlyMarketProductNoticeField] = field(default_factory=list)
     rawText: str = ""
 
     def ToDict(self) -> Dict[str, object]:
@@ -127,23 +162,24 @@ class BeautyKurlyProductNoticeOptionRecord:
 
 
 @dataclass(frozen=True)
-class BeautyKurlyProductPageParseResult:
-    """BeautyKurly 상품 상세 parser 결과."""
+class KurlyMarketProductPageParseResult:
+    """KurlyMarket 상품 상세 parser 결과."""
 
     productPageUrl: Optional[str] = None
+    productDomain: KurlyMarketProductDomain = KurlyMarketProductDomain.UNKNOWN
     productName: Optional[str] = None
     shortDescription: Optional[str] = None
     brandName: Optional[str] = None
     packageType: Optional[str] = None
     saleUnit: Optional[str] = None
     productNoticeOptionNames: List[str] = field(default_factory=list)
-    productNoticeFields: List[BeautyKurlyProductNoticeField] = field(
+    productNoticeFields: List[KurlyMarketProductNoticeField] = field(
         default_factory=list,
     )
-    productNoticeGroups: List[BeautyKurlyProductNoticeGroup] = field(
+    productNoticeGroups: List[KurlyMarketProductNoticeGroup] = field(
         default_factory=list,
     )
-    productNoticeOptions: List[BeautyKurlyProductNoticeOptionRecord] = field(
+    productNoticeOptions: List[KurlyMarketProductNoticeOptionRecord] = field(
         default_factory=list,
     )
     rawProductNoticeText: str = ""
@@ -154,6 +190,7 @@ class BeautyKurlyProductPageParseResult:
     def ToDict(self) -> Dict[str, object]:
         return {
             "product_page_url": self.productPageUrl,
+            "product_domain": self.productDomain.value,
             "product_name": self.productName,
             "short_description": self.shortDescription,
             "brand_name": self.brandName,
@@ -178,11 +215,11 @@ class BeautyKurlyProductPageParseResult:
 
 
 @dataclass(frozen=True)
-class BeautyKurlyProductPageCollectionResult:
-    """렌더링된 BeautyKurly 상품 페이지 수집 결과."""
+class KurlyMarketProductPageCollectionResult:
+    """렌더링된 KurlyMarket 상품 페이지 수집 결과."""
 
     productPageUrl: str
-    parsedProductPage: BeautyKurlyProductPageParseResult
+    parsedProductPage: KurlyMarketProductPageParseResult
     visibleTextLineCount: int
     productNoticeTextLineCount: int
     productDetailImageUrls: List[str] = field(default_factory=list)
@@ -202,7 +239,7 @@ class BeautyKurlyProductPageCollectionResult:
 
 
 @dataclass(frozen=True)
-class BeautyKurlyRenderedPageEvidence:
+class KurlyMarketRenderedPageEvidence:
     """Playwright 렌더링 이후 parser에 넘길 원천 증거."""
 
     productPageUrl: str
@@ -219,16 +256,16 @@ class BeautyKurlyRenderedPageEvidence:
         }
 
 
-class BeautyKurlyProductPageCollector:
-    """Playwright로 BeautyKurly 상품 페이지를 제한 스크롤해 수집한다."""
+class KurlyMarketProductPageCollector:
+    """Playwright로 KurlyMarket 상품 페이지를 제한 스크롤해 수집한다."""
 
     def __init__(
         self,
-        parser: Optional["BeautyKurlyProductPageParser"] = None,
+        parser: Optional["KurlyMarketProductPageParser"] = None,
         headless: bool = True,
-        timeoutMilliseconds: int = DEFAULT_BEAUTY_KURLY_TIMEOUT_MILLISECONDS,
-        scrollCount: int = DEFAULT_BEAUTY_KURLY_SCROLL_COUNT,
-        scrollWaitMilliseconds: int = DEFAULT_BEAUTY_KURLY_SCROLL_WAIT_MILLISECONDS,
+        timeoutMilliseconds: int = DEFAULT_KURLY_MARKET_TIMEOUT_MILLISECONDS,
+        scrollCount: int = DEFAULT_KURLY_MARKET_SCROLL_COUNT,
+        scrollWaitMilliseconds: int = DEFAULT_KURLY_MARKET_SCROLL_WAIT_MILLISECONDS,
     ) -> None:
         if timeoutMilliseconds <= 0:
             raise ValueError("timeoutMilliseconds must be greater than 0.")
@@ -239,21 +276,21 @@ class BeautyKurlyProductPageCollector:
                 "scrollWaitMilliseconds must be greater than or equal to 0."
             )
 
-        self._parser = parser or BeautyKurlyProductPageParser()
+        self._parser = parser or KurlyMarketProductPageParser()
         self._headless = headless
         self._timeoutMilliseconds = timeoutMilliseconds
         self._scrollCount = scrollCount
         self._scrollWaitMilliseconds = scrollWaitMilliseconds
 
-    def Collect(self, productPageUrl: str) -> BeautyKurlyProductPageCollectionResult:
+    def Collect(self, productPageUrl: str) -> KurlyMarketProductPageCollectionResult:
         self.ValidateProductPageUrl(productPageUrl)
         renderedPageEvidence = self.CollectRenderedPageEvidence(productPageUrl)
         return self.BuildCollectionResult(renderedPageEvidence)
 
     def ValidateProductPageUrl(self, productPageUrl: str) -> None:
         if not self._parser.IsSupportedProductPageUrl(productPageUrl):
-            raise BeautyKurlyCollectionError(
-                "unsupported BeautyKurly product page URL: {0}".format(
+            raise KurlyMarketCollectionError(
+                "unsupported KurlyMarket product page URL: {0}".format(
                     productPageUrl,
                 )
             )
@@ -261,14 +298,14 @@ class BeautyKurlyProductPageCollector:
     def CollectRenderedPageEvidence(
         self,
         productPageUrl: str,
-    ) -> BeautyKurlyRenderedPageEvidence:
+    ) -> KurlyMarketRenderedPageEvidence:
         self.ValidateProductPageUrl(productPageUrl)
 
         try:
             from playwright.sync_api import sync_playwright
         except ImportError as error:
-            raise BeautyKurlyCollectionError(
-                "playwright is required for BeautyKurlyProductPageCollector."
+            raise KurlyMarketCollectionError(
+                "playwright is required for KurlyMarketProductPageCollector."
             ) from error
 
         try:
@@ -276,10 +313,10 @@ class BeautyKurlyProductPageCollector:
                 browser = playwright.chromium.launch(headless=self._headless)
                 try:
                     context = browser.new_context(
-                        user_agent=DEFAULT_BEAUTY_KURLY_USER_AGENT,
+                        user_agent=DEFAULT_KURLY_MARKET_USER_AGENT,
                         viewport={
-                            "width": DEFAULT_BEAUTY_KURLY_VIEWPORT_WIDTH,
-                            "height": DEFAULT_BEAUTY_KURLY_VIEWPORT_HEIGHT,
+                            "width": DEFAULT_KURLY_MARKET_VIEWPORT_WIDTH,
+                            "height": DEFAULT_KURLY_MARKET_VIEWPORT_HEIGHT,
                         },
                     )
                     try:
@@ -301,11 +338,11 @@ class BeautyKurlyProductPageCollector:
                 finally:
                     browser.close()
         except Exception as error:
-            raise BeautyKurlyCollectionError(
-                "failed to collect BeautyKurly product page: {0}".format(error)
+            raise KurlyMarketCollectionError(
+                "failed to collect KurlyMarket product page: {0}".format(error)
             ) from error
 
-        return BeautyKurlyRenderedPageEvidence(
+        return KurlyMarketRenderedPageEvidence(
             productPageUrl=productPageUrl,
             visibleText=visibleText,
             productNoticeText=productNoticeText,
@@ -314,9 +351,9 @@ class BeautyKurlyProductPageCollector:
 
     def BuildCollectionResult(
         self,
-        renderedPageEvidence: BeautyKurlyRenderedPageEvidence,
-    ) -> BeautyKurlyProductPageCollectionResult:
-        textLines = self._parser._NormalizeTextLines(
+        renderedPageEvidence: KurlyMarketRenderedPageEvidence,
+    ) -> KurlyMarketProductPageCollectionResult:
+        textLines = self._parser.NormalizeTextLines(
             renderedPageEvidence.visibleText.splitlines()
         )
         productNoticeLines = self._parser.NormalizeProductNoticeLines(
@@ -337,7 +374,7 @@ class BeautyKurlyProductPageCollector:
             ocrCandidateImageUrls,
         )
 
-        return BeautyKurlyProductPageCollectionResult(
+        return KurlyMarketProductPageCollectionResult(
             productPageUrl=renderedPageEvidence.productPageUrl,
             parsedProductPage=parsedProductPage,
             visibleTextLineCount=len(textLines),
@@ -357,8 +394,8 @@ class BeautyKurlyProductPageCollector:
         scrollStep = max(
             1,
             int(
-                DEFAULT_BEAUTY_KURLY_VIEWPORT_HEIGHT
-                * DEFAULT_BEAUTY_KURLY_SCROLL_STEP_RATIO
+                DEFAULT_KURLY_MARKET_VIEWPORT_HEIGHT
+                * DEFAULT_KURLY_MARKET_SCROLL_STEP_RATIO
             ),
         )
         noticeFound = False
@@ -551,13 +588,15 @@ class BeautyKurlyProductPageCollector:
             return True
 
         if hostName == "product-image.kurly.com":
-            return "/product/description/" in path
+            if "/product/description/" in path:
+                return True
+            return "/src/product/image/" in path and "%3e1010x" in path
 
         return False
 
     def _BuildOcrCandidateImageUrls(
         self,
-        parsedProductPage: BeautyKurlyProductPageParseResult,
+        parsedProductPage: KurlyMarketProductPageParseResult,
         productDetailImageUrls: List[str],
     ) -> List[str]:
         if not parsedProductPage.requiresOcrFallback:
@@ -566,7 +605,7 @@ class BeautyKurlyProductPageCollector:
 
     def _BuildCollectionWarnings(
         self,
-        parsedProductPage: BeautyKurlyProductPageParseResult,
+        parsedProductPage: KurlyMarketProductPageParseResult,
         productDetailImageUrls: List[str],
         ocrCandidateImageUrls: List[str],
     ) -> List[str]:
@@ -580,8 +619,18 @@ class BeautyKurlyProductPageCollector:
         return warnings
 
 
-class BeautyKurlyProductPageParser:
-    """BeautyKurly 상품 상세 HTML/text에서 분류용 기초 정보를 추출한다."""
+class KurlyMarketBaseProductPageParser:
+    """Kurly Market 상품 상세 공통 parser."""
+
+    def __init__(
+        self,
+        productDomain: KurlyMarketProductDomain = KurlyMarketProductDomain.UNKNOWN,
+        productNoticeFieldLabels: Optional[List[str]] = None,
+    ) -> None:
+        self._productDomain = productDomain
+        self._productNoticeFieldLabels = list(
+            productNoticeFieldLabels or ALL_PRODUCT_NOTICE_FIELD_LABELS
+        )
 
     def IsSupportedProductPageUrl(self, url: str) -> bool:
         parsedUrl = urlparse(url)
@@ -594,23 +643,23 @@ class BeautyKurlyProductPageParser:
         self,
         htmlText: str,
         productPageUrl: Optional[str] = None,
-    ) -> BeautyKurlyProductPageParseResult:
-        textLines = BeautyKurlyHtmlTextExtractor().ExtractTextLines(htmlText)
+    ) -> KurlyMarketProductPageParseResult:
+        textLines = KurlyMarketHtmlTextExtractor().ExtractTextLines(htmlText)
         return self.ParseTextLines(textLines, productPageUrl=productPageUrl)
 
     def ParseText(
         self,
         pageText: str,
         productPageUrl: Optional[str] = None,
-    ) -> BeautyKurlyProductPageParseResult:
-        textLines = self._NormalizeTextLines(pageText.splitlines())
+    ) -> KurlyMarketProductPageParseResult:
+        textLines = self.NormalizeTextLines(pageText.splitlines())
         return self.ParseTextLines(textLines, productPageUrl=productPageUrl)
 
     def ParseTextLines(
         self,
         textLines: List[str],
         productPageUrl: Optional[str] = None,
-    ) -> BeautyKurlyProductPageParseResult:
+    ) -> KurlyMarketProductPageParseResult:
         return self.ParseCollectedTextLines(
             textLines=textLines,
             productNoticeLines=[],
@@ -622,8 +671,8 @@ class BeautyKurlyProductPageParser:
         textLines: List[str],
         productNoticeLines: List[str],
         productPageUrl: Optional[str] = None,
-    ) -> BeautyKurlyProductPageParseResult:
-        normalizedLines = self._NormalizeTextLines(textLines)
+    ) -> KurlyMarketProductPageParseResult:
+        normalizedLines = self.NormalizeTextLines(textLines)
         productName = self._ExtractProductName(normalizedLines)
         noticeLines = productNoticeLines or self._ExtractProductNoticeLines(
             normalizedLines,
@@ -639,8 +688,9 @@ class BeautyKurlyProductPageParser:
             noticeFields,
         )
 
-        return BeautyKurlyProductPageParseResult(
+        return KurlyMarketProductPageParseResult(
             productPageUrl=productPageUrl,
+            productDomain=self._productDomain,
             productName=productName,
             shortDescription=self._ExtractShortDescription(
                 normalizedLines,
@@ -662,7 +712,7 @@ class BeautyKurlyProductPageParser:
         )
 
     def NormalizeProductNoticeLines(self, textLines: List[str]) -> List[str]:
-        normalizedLines = self._NormalizeTextLines(textLines)
+        normalizedLines = self.NormalizeTextLines(textLines)
         noticeLines: List[str] = []
         for line in normalizedLines:
             if line == "상품고시정보" or line.startswith("상품고시정보"):
@@ -674,7 +724,7 @@ class BeautyKurlyProductPageParser:
             noticeLines.append(line)
         return noticeLines
 
-    def _NormalizeTextLines(self, textLines: List[str]) -> List[str]:
+    def NormalizeTextLines(self, textLines: List[str]) -> List[str]:
         normalizedLines: List[str] = []
         for textLine in textLines:
             normalizedLine = NormalizeWhitespace(textLine)
@@ -783,7 +833,7 @@ class BeautyKurlyProductPageParser:
 
     def _ExtractProductNoticeOptionNames(
         self,
-        noticeOptions: List[BeautyKurlyProductNoticeOptionRecord],
+        noticeOptions: List[KurlyMarketProductNoticeOptionRecord],
     ) -> List[str]:
         optionNames: List[str] = []
         seenOptionNames: set[str] = set()
@@ -798,13 +848,13 @@ class BeautyKurlyProductPageParser:
 
     def _BuildProductNoticeOptionRecords(
         self,
-        noticeGroups: List[BeautyKurlyProductNoticeGroup],
-    ) -> List[BeautyKurlyProductNoticeOptionRecord]:
-        optionRecords: List[BeautyKurlyProductNoticeOptionRecord] = []
+        noticeGroups: List[KurlyMarketProductNoticeGroup],
+    ) -> List[KurlyMarketProductNoticeOptionRecord]:
+        optionRecords: List[KurlyMarketProductNoticeOptionRecord] = []
         for noticeGroup in noticeGroups:
             if not noticeGroup.optionNames:
                 optionRecords.append(
-                    BeautyKurlyProductNoticeOptionRecord(
+                    KurlyMarketProductNoticeOptionRecord(
                         optionName=None,
                         fields=list(noticeGroup.fields),
                         rawText=noticeGroup.rawText,
@@ -814,7 +864,7 @@ class BeautyKurlyProductPageParser:
 
             for optionName in noticeGroup.optionNames:
                 optionRecords.append(
-                    BeautyKurlyProductNoticeOptionRecord(
+                    KurlyMarketProductNoticeOptionRecord(
                         optionName=optionName,
                         fields=list(noticeGroup.fields),
                         rawText=noticeGroup.rawText,
@@ -825,9 +875,9 @@ class BeautyKurlyProductPageParser:
 
     def _FlattenProductNoticeFields(
         self,
-        noticeGroups: List[BeautyKurlyProductNoticeGroup],
-    ) -> List[BeautyKurlyProductNoticeField]:
-        fields: List[BeautyKurlyProductNoticeField] = []
+        noticeGroups: List[KurlyMarketProductNoticeGroup],
+    ) -> List[KurlyMarketProductNoticeField]:
+        fields: List[KurlyMarketProductNoticeField] = []
         for noticeGroup in noticeGroups:
             fields.extend(noticeGroup.fields)
         return fields
@@ -835,10 +885,10 @@ class BeautyKurlyProductPageParser:
     def _ExtractProductNoticeGroups(
         self,
         noticeLines: List[str],
-    ) -> List[BeautyKurlyProductNoticeGroup]:
-        groups: List[BeautyKurlyProductNoticeGroup] = []
+    ) -> List[KurlyMarketProductNoticeGroup]:
+        groups: List[KurlyMarketProductNoticeGroup] = []
         currentOptionNames: List[str] = []
-        currentFieldRecords: List[BeautyKurlyProductNoticeField] = []
+        currentFieldRecords: List[KurlyMarketProductNoticeField] = []
         currentRawLines: List[str] = []
 
         index = 0
@@ -888,7 +938,7 @@ class BeautyKurlyProductPageParser:
 
             rawLines = [line] + valueLines
             currentFieldRecords.append(
-                BeautyKurlyProductNoticeField(
+                KurlyMarketProductNoticeField(
                     fieldName=fieldName,
                     fieldValue=fieldValue,
                     requiresOcrFallback=self._NoticeValueRequiresOcr(fieldValue),
@@ -911,10 +961,10 @@ class BeautyKurlyProductPageParser:
     def _BuildProductNoticeGroup(
         self,
         optionNames: List[str],
-        fields: List[BeautyKurlyProductNoticeField],
+        fields: List[KurlyMarketProductNoticeField],
         rawLines: List[str],
-    ) -> BeautyKurlyProductNoticeGroup:
-        return BeautyKurlyProductNoticeGroup(
+    ) -> KurlyMarketProductNoticeGroup:
+        return KurlyMarketProductNoticeGroup(
             optionNames=list(optionNames),
             fields=list(fields),
             rawText="\n".join(rawLines),
@@ -931,7 +981,7 @@ class BeautyKurlyProductPageParser:
 
     def _NormalizeProductNoticeFieldName(self, line: str) -> Optional[str]:
         comparableLine = line.lower().replace(" ", "")
-        for label in PRODUCT_NOTICE_FIELD_LABELS:
+        for label in self._productNoticeFieldLabels:
             comparableLabel = label.lower().replace(" ", "")
             if comparableLine == comparableLabel:
                 return label
@@ -950,7 +1000,7 @@ class BeautyKurlyProductPageParser:
             return None
 
         candidateLabels = sorted(
-            PRODUCT_NOTICE_FIELD_LABELS,
+            self._productNoticeFieldLabels,
             key=lambda label: len(NormalizeWhitespace(label)),
             reverse=True,
         )
@@ -978,7 +1028,7 @@ class BeautyKurlyProductPageParser:
         self,
         textLines: List[str],
         noticeLines: List[str],
-        noticeFields: List[BeautyKurlyProductNoticeField],
+        noticeFields: List[KurlyMarketProductNoticeField],
     ) -> List[str]:
         warnings: List[str] = []
         if not textLines:
@@ -989,7 +1039,159 @@ class BeautyKurlyProductPageParser:
             warnings.append("product notice fields not parsed")
         return warnings
 
-class BeautyKurlyHtmlTextExtractor(HTMLParser):
+
+class KurlyMarketCosmeticsProductPageParser(KurlyMarketBaseProductPageParser):
+    """Kurly 화장품 상품고시정보 parser."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            productDomain=KurlyMarketProductDomain.COSMETICS,
+            productNoticeFieldLabels=COSMETICS_PRODUCT_NOTICE_FIELD_LABELS,
+        )
+
+
+class KurlyMarketFoodProductPageParser(KurlyMarketBaseProductPageParser):
+    """Kurly 식품 상품고시정보 parser."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            productDomain=KurlyMarketProductDomain.FOOD,
+            productNoticeFieldLabels=FOOD_PRODUCT_NOTICE_FIELD_LABELS,
+        )
+
+
+class KurlyMarketProductDomainDetector:
+    """상품고시정보 label hit를 기반으로 Kurly 상품 domain을 추정한다."""
+
+    def Detect(self, productNoticeLines: List[str]) -> KurlyMarketProductDomain:
+        foodScore = self._CountLabelHits(
+            productNoticeLines,
+            FOOD_PRODUCT_NOTICE_FIELD_LABELS,
+        )
+        cosmeticsScore = self._CountLabelHits(
+            productNoticeLines,
+            COSMETICS_PRODUCT_NOTICE_FIELD_LABELS,
+        )
+
+        if foodScore == 0 and cosmeticsScore == 0:
+            return KurlyMarketProductDomain.UNKNOWN
+        if foodScore == cosmeticsScore:
+            return KurlyMarketProductDomain.AMBIGUOUS
+        if foodScore > cosmeticsScore:
+            return KurlyMarketProductDomain.FOOD
+        return KurlyMarketProductDomain.COSMETICS
+
+    def _CountLabelHits(
+        self,
+        productNoticeLines: List[str],
+        fieldLabels: List[str],
+    ) -> int:
+        score = 0
+        for line in productNoticeLines:
+            if self._MatchesAnyLabel(line, fieldLabels):
+                score += 1
+        return score
+
+    def _MatchesAnyLabel(self, line: str, fieldLabels: List[str]) -> bool:
+        comparableLine = line.lower().replace(" ", "")
+        for fieldLabel in fieldLabels:
+            comparableLabel = fieldLabel.lower().replace(" ", "")
+            if comparableLine == comparableLabel:
+                return True
+            if comparableLine.startswith(comparableLabel):
+                return True
+        return False
+
+
+class KurlyMarketProductPageParser:
+    """상품고시정보 domain을 감지해 식품/화장품 parser로 분기한다."""
+
+    def __init__(
+        self,
+        domainDetector: Optional[KurlyMarketProductDomainDetector] = None,
+        foodParser: Optional[KurlyMarketFoodProductPageParser] = None,
+        cosmeticsParser: Optional[KurlyMarketCosmeticsProductPageParser] = None,
+        fallbackParser: Optional[KurlyMarketBaseProductPageParser] = None,
+    ) -> None:
+        self._domainDetector = domainDetector or KurlyMarketProductDomainDetector()
+        self._foodParser = foodParser or KurlyMarketFoodProductPageParser()
+        self._cosmeticsParser = (
+            cosmeticsParser or KurlyMarketCosmeticsProductPageParser()
+        )
+        self._fallbackParser = fallbackParser or KurlyMarketBaseProductPageParser()
+
+    def IsSupportedProductPageUrl(self, url: str) -> bool:
+        return self._fallbackParser.IsSupportedProductPageUrl(url)
+
+    def ParseHtml(
+        self,
+        htmlText: str,
+        productPageUrl: Optional[str] = None,
+    ) -> KurlyMarketProductPageParseResult:
+        textLines = KurlyMarketHtmlTextExtractor().ExtractTextLines(htmlText)
+        return self.ParseTextLines(textLines, productPageUrl=productPageUrl)
+
+    def ParseText(
+        self,
+        pageText: str,
+        productPageUrl: Optional[str] = None,
+    ) -> KurlyMarketProductPageParseResult:
+        textLines = self.NormalizeTextLines(pageText.splitlines())
+        return self.ParseTextLines(textLines, productPageUrl=productPageUrl)
+
+    def ParseTextLines(
+        self,
+        textLines: List[str],
+        productPageUrl: Optional[str] = None,
+    ) -> KurlyMarketProductPageParseResult:
+        return self.ParseCollectedTextLines(
+            textLines=textLines,
+            productNoticeLines=[],
+            productPageUrl=productPageUrl,
+        )
+
+    def ParseCollectedTextLines(
+        self,
+        textLines: List[str],
+        productNoticeLines: List[str],
+        productPageUrl: Optional[str] = None,
+    ) -> KurlyMarketProductPageParseResult:
+        normalizedTextLines = self.NormalizeTextLines(textLines)
+        normalizedNoticeLines = productNoticeLines or (
+            self._fallbackParser._ExtractProductNoticeLines(normalizedTextLines)
+        )
+        parser = self._SelectParser(normalizedNoticeLines)
+        return parser.ParseCollectedTextLines(
+            textLines=normalizedTextLines,
+            productNoticeLines=normalizedNoticeLines,
+            productPageUrl=productPageUrl,
+        )
+
+    def NormalizeProductNoticeLines(self, textLines: List[str]) -> List[str]:
+        return self._fallbackParser.NormalizeProductNoticeLines(textLines)
+
+    def NormalizeTextLines(self, textLines: List[str]) -> List[str]:
+        return self._fallbackParser.NormalizeTextLines(textLines)
+
+    def DetectProductDomain(
+        self,
+        productNoticeLines: List[str],
+    ) -> KurlyMarketProductDomain:
+        return self._domainDetector.Detect(productNoticeLines)
+
+    def _SelectParser(
+        self,
+        productNoticeLines: List[str],
+    ) -> KurlyMarketBaseProductPageParser:
+        productDomain = self.DetectProductDomain(productNoticeLines)
+        if productDomain == KurlyMarketProductDomain.FOOD:
+            return self._foodParser
+        if productDomain == KurlyMarketProductDomain.COSMETICS:
+            return self._cosmeticsParser
+        return self._fallbackParser
+
+
+class KurlyMarketHtmlTextExtractor(HTMLParser):
     """HTML을 block 단위 text line으로 변환한다."""
 
     _BLOCK_TAGS = {

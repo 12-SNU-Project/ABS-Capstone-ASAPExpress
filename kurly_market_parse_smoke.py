@@ -1,4 +1,4 @@
-"""BeautyKurly 상품 페이지 파싱 smoke flow."""
+"""KurlyMarket 상품 페이지 파싱 smoke flow."""
 
 import json
 import sys
@@ -14,13 +14,13 @@ if str(SOURCE_ROOT_PATH) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT_PATH))
 
 from eu_export import (
-    BeautyKurlyProductPageCollector,
-    BeautyKurlyProductSourcePipeline,
-    BeautyKurlyProductSourcePipelineInput,
+    KurlyMarketProductPageCollector,
+    KurlyMarketProductSourcePipeline,
+    KurlyMarketProductSourcePipelineInput,
 )
 
 
-DEFAULT_PRODUCT_URL = "https://www.kurly.com/goods/1000050764?collectionCode=beautybest-skincare"
+DEFAULT_PRODUCT_URL = "https://www.kurly.com/goods/5037259?collectionCode=2605-brthweek-home-01"
 DEFAULT_TIMEOUT_SECONDS = 60
 DEFAULT_SCROLL_COUNT = 8
 DEFAULT_HEADLESS = True
@@ -31,25 +31,25 @@ DEFAULT_MAX_LOGGED_FIELD_VALUE_CHARACTERS = 220
 DEFAULT_MAX_LOGGED_OCR_CANDIDATE_URLS = 5
 
 
-class BeautyKurlyParseSmokeRunner:
-    """BeautyKurly 상품고시정보와 OCR 후보 이미지 URL만 확인한다."""
+class KurlyMarketParseSmokeRunner:
+    """KurlyMarket 상품고시정보와 OCR 후보 이미지 URL만 확인한다."""
 
     def Run(self) -> None:
         self._ConfigureLogger()
         runLogger = self._Logger("Run")
         runLogger.info(
-            "collecting BeautyKurly product page url={}",
+            "collecting KurlyMarket product page url={}",
             DEFAULT_PRODUCT_URL,
         )
 
-        collector = BeautyKurlyProductPageCollector(
+        collector = KurlyMarketProductPageCollector(
             headless=DEFAULT_HEADLESS,
             timeoutMilliseconds=DEFAULT_TIMEOUT_SECONDS * 1000,
             scrollCount=DEFAULT_SCROLL_COUNT,
         )
-        productSourcePipeline = BeautyKurlyProductSourcePipeline(collector)
+        productSourcePipeline = KurlyMarketProductSourcePipeline(collector)
         pipelineResult = productSourcePipeline.Run(
-            BeautyKurlyProductSourcePipelineInput(
+            KurlyMarketProductSourcePipelineInput(
                 productPageUrl=DEFAULT_PRODUCT_URL,
                 runOcrFallback=False,
             )
@@ -72,7 +72,7 @@ class BeautyKurlyParseSmokeRunner:
         logger.remove()
         logger.configure(
             extra={
-                "className": "BeautyKurlyParseSmokeRunner",
+                "className": "KurlyMarketParseSmokeRunner",
                 "functionName": "Run",
             }
         )
@@ -97,6 +97,7 @@ class BeautyKurlyParseSmokeRunner:
             "product_notice_text_line_count": resultData[
                 "product_notice_text_line_count"
             ],
+            "product_domain": parsedProductPage["product_domain"],
             "product_name": parsedProductPage["product_name"],
             "short_description": parsedProductPage["short_description"],
             "brand_name": parsedProductPage["brand_name"],
@@ -141,6 +142,7 @@ class BeautyKurlyParseSmokeRunner:
             )
 
         coreLogger.info("product_name={}", resultData["product_name"])
+        coreLogger.info("product_domain={}", resultData["product_domain"])
         coreLogger.info("brand_name={}", resultData["brand_name"])
         coreLogger.info("package_type={}", resultData["package_type"])
         coreLogger.info("sale_unit={}", resultData["sale_unit"])
@@ -248,4 +250,4 @@ class BeautyKurlyParseSmokeRunner:
 
 
 if __name__ == "__main__":
-    BeautyKurlyParseSmokeRunner().Run()
+    KurlyMarketParseSmokeRunner().Run()

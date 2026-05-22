@@ -1,4 +1,4 @@
-"""상품 정보 수집 단계의 generic pipeline과 BeautyKurly wrapper."""
+"""상품 정보 수집 단계의 generic pipeline과 KurlyMarket wrapper."""
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -7,10 +7,10 @@ from typing import Dict, Generic, List, Optional, TypeVar
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from eu_export.product.beauty_kurly import (
-    BeautyKurlyProductPageCollectionResult,
-    BeautyKurlyProductPageCollector,
-    BeautyKurlyRenderedPageEvidence,
+from eu_export.product.kurly_market import (
+    KurlyMarketProductPageCollectionResult,
+    KurlyMarketProductPageCollector,
+    KurlyMarketRenderedPageEvidence,
 )
 from eu_export.product.paddle_ocr import ProductOcrEngine
 
@@ -54,8 +54,8 @@ class ProductOcrImageResult:
 
 
 @dataclass(frozen=True)
-class BeautyKurlyProductSourcePipelineInput:
-    """BeautyKurly 수집 wrapper 입력."""
+class KurlyMarketProductSourcePipelineInput:
+    """KurlyMarket 수집 wrapper 입력."""
 
     productPageUrl: str
     runOcrFallback: bool = False
@@ -65,7 +65,7 @@ class BeautyKurlyProductSourcePipelineInput:
 
 
 @dataclass(frozen=True)
-class BeautyKurlyProductSourcePipelineStep:
+class KurlyMarketProductSourcePipelineStep:
     """wrapper가 실행한 단계 하나의 상태."""
 
     stepName: str
@@ -81,14 +81,14 @@ class BeautyKurlyProductSourcePipelineStep:
 
 
 @dataclass(frozen=True)
-class BeautyKurlyProductSourcePipelineResult:
-    """BeautyKurly parsing과 선택적 OCR fallback을 묶은 결과."""
+class KurlyMarketProductSourcePipelineResult:
+    """KurlyMarket parsing과 선택적 OCR fallback을 묶은 결과."""
 
-    collectionResult: BeautyKurlyProductPageCollectionResult
-    renderedPageEvidence: Optional[BeautyKurlyRenderedPageEvidence] = None
+    collectionResult: KurlyMarketProductPageCollectionResult
+    renderedPageEvidence: Optional[KurlyMarketRenderedPageEvidence] = None
     ocrImageResults: List[ProductOcrImageResult] = field(default_factory=list)
     combinedOcrText: str = ""
-    steps: List[BeautyKurlyProductSourcePipelineStep] = field(default_factory=list)
+    steps: List[KurlyMarketProductSourcePipelineStep] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
 
     def ToDict(self) -> Dict[str, object]:
@@ -118,17 +118,17 @@ class BeautyKurlyProductSourcePipelineResult:
         }
 
 
-class BeautyKurlyProductSourcePipeline(
+class KurlyMarketProductSourcePipeline(
     Pipeline[
-        BeautyKurlyProductSourcePipelineInput,
-        BeautyKurlyProductSourcePipelineResult,
+        KurlyMarketProductSourcePipelineInput,
+        KurlyMarketProductSourcePipelineResult,
     ],
 ):
-    """BeautyKurly parser와 PaddleOCR fallback을 단계적으로 연결하는 wrapper."""
+    """KurlyMarket parser와 PaddleOCR fallback을 단계적으로 연결하는 wrapper."""
 
     def __init__(
         self,
-        collector: BeautyKurlyProductPageCollector,
+        collector: KurlyMarketProductPageCollector,
         ocrEngine: Optional[ProductOcrEngine] = None,
     ) -> None:
         self._collector = collector
@@ -136,22 +136,22 @@ class BeautyKurlyProductSourcePipeline(
 
     def Run(
         self,
-        pipelineInput: BeautyKurlyProductSourcePipelineInput,
-    ) -> BeautyKurlyProductSourcePipelineResult:
+        pipelineInput: KurlyMarketProductSourcePipelineInput,
+    ) -> KurlyMarketProductSourcePipelineResult:
         return self.Collect(pipelineInput)
 
     def Collect(
         self,
-        pipelineInput: BeautyKurlyProductSourcePipelineInput,
-    ) -> BeautyKurlyProductSourcePipelineResult:
-        steps: List[BeautyKurlyProductSourcePipelineStep] = []
+        pipelineInput: KurlyMarketProductSourcePipelineInput,
+    ) -> KurlyMarketProductSourcePipelineResult:
+        steps: List[KurlyMarketProductSourcePipelineStep] = []
         errors: List[str] = []
 
         self._collector.ValidateProductPageUrl(pipelineInput.productPageUrl)
         steps.append(
-            BeautyKurlyProductSourcePipelineStep(
+            KurlyMarketProductSourcePipelineStep(
                 stepName="validate_product_page_url",
-                message="supported BeautyKurly product page URL",
+                message="supported KurlyMarket product page URL",
             )
         )
 
@@ -159,7 +159,7 @@ class BeautyKurlyProductSourcePipeline(
             pipelineInput.productPageUrl,
         )
         steps.append(
-            BeautyKurlyProductSourcePipelineStep(
+            KurlyMarketProductSourcePipelineStep(
                 stepName="collect_rendered_page_evidence",
                 message=(
                     "visible_text_length={0}, product_notice_text_length={1}, "
@@ -174,7 +174,7 @@ class BeautyKurlyProductSourcePipeline(
 
         collectionResult = self._collector.BuildCollectionResult(renderedPageEvidence)
         steps.append(
-            BeautyKurlyProductSourcePipelineStep(
+            KurlyMarketProductSourcePipelineStep(
                 stepName="parse_product_page_evidence",
                 message=(
                     "product_notice_field_count={0}, "
@@ -198,13 +198,13 @@ class BeautyKurlyProductSourcePipeline(
             )
         else:
             steps.append(
-                BeautyKurlyProductSourcePipelineStep(
+                KurlyMarketProductSourcePipelineStep(
                     stepName="ocr_fallback",
                     message="skipped because runOcrFallback=False",
                 )
             )
 
-        return BeautyKurlyProductSourcePipelineResult(
+        return KurlyMarketProductSourcePipelineResult(
             collectionResult=collectionResult,
             renderedPageEvidence=renderedPageEvidence,
             ocrImageResults=ocrImageResults,
@@ -215,14 +215,14 @@ class BeautyKurlyProductSourcePipeline(
 
     def _RunOcrFallback(
         self,
-        collectionResult: BeautyKurlyProductPageCollectionResult,
-        pipelineInput: BeautyKurlyProductSourcePipelineInput,
-        steps: List[BeautyKurlyProductSourcePipelineStep],
+        collectionResult: KurlyMarketProductPageCollectionResult,
+        pipelineInput: KurlyMarketProductSourcePipelineInput,
+        steps: List[KurlyMarketProductSourcePipelineStep],
         errors: List[str],
     ) -> List[ProductOcrImageResult]:
         if not collectionResult.parsedProductPage.requiresOcrFallback:
             steps.append(
-                BeautyKurlyProductSourcePipelineStep(
+                KurlyMarketProductSourcePipelineStep(
                     stepName="ocr_fallback",
                     message="skipped because structured notice is sufficient",
                 )
@@ -233,7 +233,7 @@ class BeautyKurlyProductSourcePipeline(
             message = "OCR fallback requested but ProductOcrEngine is not configured"
             errors.append(message)
             steps.append(
-                BeautyKurlyProductSourcePipelineStep(
+                KurlyMarketProductSourcePipelineStep(
                     stepName="ocr_fallback",
                     succeeded=False,
                     message=message,
@@ -272,7 +272,7 @@ class BeautyKurlyProductSourcePipeline(
             errors.append("skipped OCR candidate images: {0}".format(skippedImageCount))
 
         steps.append(
-            BeautyKurlyProductSourcePipelineStep(
+            KurlyMarketProductSourcePipelineStep(
                 stepName="ocr_fallback",
                 succeeded=not errors,
                 message="ocr_image_count={0}, error_count={1}".format(
@@ -293,6 +293,7 @@ class BeautyKurlyProductSourcePipeline(
     ) -> ProductOcrImageResult:
         try:
             imageBytes = self._DownloadImage(imageUrl, downloadTimeoutSeconds)
+            artifactDirectory.mkdir(parents=True, exist_ok=True)
             artifactPath = artifactDirectory / self._BuildImageFileName(
                 imageIndex,
                 imageUrl,
