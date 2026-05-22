@@ -1,4 +1,4 @@
-"""로컬 LLM 런타임 선택과 adapter 경계."""
+"""교체 가능한 LLM 런타임 선택과 adapter 경계."""
 
 from eu_export.bridge.adapter import RuntimeAdapter
 from eu_export.bridge.factory import (
@@ -12,33 +12,39 @@ from eu_export.bridge.probe import (
     UnsupportedRuntimeProbeError,
 )
 from eu_export.bridge.schema import (
-    LocalLlmGenerationOptions,
-    LocalLlmRequest,
-    LocalLlmResponse,
-    LocalLlmRuntimeConfig,
-    LocalLlmRuntimeKind,
+    LlmFinishReason,
+    LlmGenerationOptions,
+    LlmRequest,
+    LlmResponse,
+    LlmResponseFormat,
+    LlmRuntimeConfig,
+    LlmRuntimeKind,
+    LlmTokenUsage,
     OperatingSystemKind,
     RuntimeDescriptor,
     RuntimeDependencyStatus,
 )
 from eu_export.bridge.selector import (
-    BuildDefaultLocalLlmRuntimeConfig,
+    BuildDefaultLlmRuntimeConfig,
     DetectOperatingSystem,
     SelectDefaultRuntimeKind,
-    UnsupportedLocalLlmRuntimeError,
+    UnsupportedLlmRuntimeError,
 )
 
 __all__ = [
-    "BuildDefaultLocalLlmRuntimeConfig",
+    "BuildDefaultLlmRuntimeConfig",
     "BuildRuntimeAdapter",
     "BuildRuntimeDescriptor",
     "DetectOperatingSystem",
     "GenerateRuntimeResponse",
-    "LocalLlmGenerationOptions",
-    "LocalLlmRequest",
-    "LocalLlmResponse",
-    "LocalLlmRuntimeConfig",
-    "LocalLlmRuntimeKind",
+    "LlmFinishReason",
+    "LlmGenerationOptions",
+    "LlmRequest",
+    "LlmResponse",
+    "LlmResponseFormat",
+    "LlmRuntimeConfig",
+    "LlmRuntimeKind",
+    "LlmTokenUsage",
     "OperatingSystemKind",
     "ProbeRuntimeDependency",
     "RuntimeAdapterBuildError",
@@ -47,6 +53,6 @@ __all__ = [
     "RuntimeDependencyStatus",
     "RuntimeGenerationError",
     "SelectDefaultRuntimeKind",
-    "UnsupportedLocalLlmRuntimeError",
+    "UnsupportedLlmRuntimeError",
     "UnsupportedRuntimeProbeError",
 ]

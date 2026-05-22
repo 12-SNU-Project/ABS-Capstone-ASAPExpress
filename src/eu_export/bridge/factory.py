@@ -4,7 +4,7 @@ from eu_export.bridge.adapter import RuntimeAdapter
 from eu_export.bridge.generator import GenerateRuntimeResponse
 from eu_export.bridge.probe import ProbeRuntimeDependency
 from eu_export.bridge.schema import (
-    LocalLlmRuntimeConfig,
+    LlmRuntimeConfig,
     RuntimeDescriptor,
     RuntimeDependencyStatus,
 )
@@ -15,7 +15,7 @@ class RuntimeAdapterBuildError(RuntimeError):
 
 
 def BuildRuntimeDescriptor(
-    runtimeConfig: LocalLlmRuntimeConfig,
+    runtimeConfig: LlmRuntimeConfig,
     dependencyStatus: RuntimeDependencyStatus,
 ) -> RuntimeDescriptor:
     """probe 결과를 adapter에 주입 가능한 runtime descriptor로 변환한다."""
@@ -31,7 +31,7 @@ def BuildRuntimeDescriptor(
 
 
 def BuildRuntimeAdapter(
-    runtimeConfig: LocalLlmRuntimeConfig,
+    runtimeConfig: LlmRuntimeConfig,
     dependencyStatus: RuntimeDependencyStatus | None = None,
     requireAvailable: bool = True,
 ) -> RuntimeAdapter[RuntimeDescriptor]:

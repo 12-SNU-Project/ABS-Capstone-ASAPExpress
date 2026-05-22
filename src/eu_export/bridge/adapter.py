@@ -1,19 +1,19 @@
-"""교체 가능한 로컬 LLM 런타임 adapter."""
+"""교체 가능한 LLM 런타임 adapter."""
 
 from typing import Callable, Generic, TypeVar
 
 from eu_export.bridge.schema import (
-    LocalLlmRequest,
-    LocalLlmResponse,
-    LocalLlmRuntimeConfig,
-    LocalLlmRuntimeKind,
+    LlmRequest,
+    LlmResponse,
+    LlmRuntimeConfig,
+    LlmRuntimeKind,
 )
 
 
 RuntimeDescriptorT = TypeVar("RuntimeDescriptorT")
 GenerateCallable = Callable[
-    [RuntimeDescriptorT, LocalLlmRuntimeConfig, LocalLlmRequest],
-    LocalLlmResponse,
+    [RuntimeDescriptorT, LlmRuntimeConfig, LlmRequest],
+    LlmResponse,
 ]
 
 
@@ -22,7 +22,7 @@ class RuntimeAdapter(Generic[RuntimeDescriptorT]):
 
     def __init__(
         self,
-        runtimeConfig: LocalLlmRuntimeConfig,
+        runtimeConfig: LlmRuntimeConfig,
         runtimeDescriptor: RuntimeDescriptorT,
         generateCallable: GenerateCallable[RuntimeDescriptorT],
     ) -> None:
@@ -30,11 +30,11 @@ class RuntimeAdapter(Generic[RuntimeDescriptorT]):
         self._runtimeDescriptor = runtimeDescriptor
         self._generateCallable = generateCallable
 
-    def RuntimeKind(self) -> LocalLlmRuntimeKind:
+    def RuntimeKind(self) -> LlmRuntimeKind:
         """adapter가 감싸는 실제 런타임 종류를 반환한다."""
         return self._runtimeConfig.runtimeKind
 
-    def RuntimeConfig(self) -> LocalLlmRuntimeConfig:
+    def RuntimeConfig(self) -> LlmRuntimeConfig:
         """adapter 생성 시 확정된 런타임 설정을 반환한다."""
         return self._runtimeConfig
 
@@ -42,7 +42,7 @@ class RuntimeAdapter(Generic[RuntimeDescriptorT]):
         """adapter에 주입된 runtime descriptor를 반환한다."""
         return self._runtimeDescriptor
 
-    def Generate(self, request: LocalLlmRequest) -> LocalLlmResponse:
+    def Generate(self, request: LlmRequest) -> LlmResponse:
         """LLM 생성을 수행하고 런타임 독립 응답으로 변환한다."""
         return self._generateCallable(
             self._runtimeDescriptor,

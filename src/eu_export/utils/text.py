@@ -13,6 +13,16 @@ def NormalizeWhitespace(text: str) -> str:
     return " ".join(text.strip().split())
 
 
+def NormalizeWhitespacePreservingLines(text: str) -> str:
+    return "\n".join(
+        normalizedLine
+        for normalizedLine in (
+            NormalizeWhitespace(line) for line in text.splitlines()
+        )
+        if normalizedLine != ""
+    )
+
+
 def IsUrlLike(text: str) -> bool:
     return URL_PATTERN.match(text.strip()) is not None
 

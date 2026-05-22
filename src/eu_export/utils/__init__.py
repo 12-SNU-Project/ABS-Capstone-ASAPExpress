@@ -4,7 +4,12 @@ from eu_export.utils.json_extraction import (
     ExtractJsonObject,
     JsonObjectExtractionError,
 )
-from eu_export.utils.text import FindContainedTerms, IsUrlLike, NormalizeWhitespace
+from eu_export.utils.text import (
+    FindContainedTerms,
+    IsUrlLike,
+    NormalizeWhitespace,
+    NormalizeWhitespacePreservingLines,
+)
 from eu_export.utils.validation import (
     ReadNumberInRange,
     ReadOptionalStringList,
@@ -19,6 +24,7 @@ __all__ = [
     "IsUrlLike",
     "JsonObjectExtractionError",
     "NormalizeWhitespace",
+    "NormalizeWhitespacePreservingLines",
     "ReadNumberInRange",
     "ReadOptionalStringList",
     "ReadRequiredBool",

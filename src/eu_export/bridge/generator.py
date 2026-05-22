@@ -1,19 +1,26 @@
-"""로컬 LLM runtime별 generate callable 구현."""
+"""LLM runtime별 generate callable 구현."""
 
 import json
+import os
+from abc import ABC, abstractmethod
 from typing import Any, Dict, List
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from eu_export.bridge.probe import (
+    DEFAULT_OPENAI_API_KEY_ENV_NAMES,
+    DEFAULT_OPENAI_ENDPOINT_URL,
     DEFAULT_OLLAMA_ENDPOINT_URL,
     DEFAULT_OMLX_ENDPOINT_URL,
 )
 from eu_export.bridge.schema import (
-    LocalLlmRequest,
-    LocalLlmResponse,
-    LocalLlmRuntimeConfig,
-    LocalLlmRuntimeKind,
+    LlmFinishReason,
+    LlmRequest,
+    LlmResponse,
+    LlmResponseFormat,
+    LlmRuntimeConfig,
+    LlmRuntimeKind,
+    LlmTokenUsage,
     RuntimeDescriptor,
 )
 
@@ -22,47 +29,161 @@ DEFAULT_HTTP_TIMEOUT_SECONDS = 120
 
 
 class RuntimeGenerationError(RuntimeError):
-    """local LLM runtime 호출이 실패했을 때 사용한다."""
+    """LLM runtime 호출이 실패했을 때 사용한다."""
 
 
-def GenerateRuntimeResponse(
-    runtimeDescriptor: RuntimeDescriptor,
-    runtimeConfig: LocalLlmRuntimeConfig,
-    request: LocalLlmRequest,
-) -> LocalLlmResponse:
-    """runtimeKind에 따라 실제 generate 호출을 dispatch한다."""
+class RuntimeGenerationStrategy(ABC):
+    """runtime별 generation 구현을 분리하는 strategy interface."""
 
-    if runtimeDescriptor.runtimeKind == LocalLlmRuntimeKind.OMLX:
+    @abstractmethod
+    def Generate(
+        self,
+        runtimeDescriptor: RuntimeDescriptor,
+        runtimeConfig: LlmRuntimeConfig,
+        request: LlmRequest,
+    ) -> LlmResponse:
+        """runtime별 LLM 생성을 수행한다."""
+        ...
+
+
+class OpenAiCompatibleGenerationStrategy(RuntimeGenerationStrategy):
+    """oMLX처럼 OpenAI-compatible chat endpoint를 제공하는 런타임."""
+
+    def Generate(
+        self,
+        runtimeDescriptor: RuntimeDescriptor,
+        runtimeConfig: LlmRuntimeConfig,
+        request: LlmRequest,
+    ) -> LlmResponse:
         return _GenerateWithOpenAiCompatibleRuntime(
             runtimeDescriptor,
             runtimeConfig,
             request,
         )
 
-    if runtimeDescriptor.runtimeKind == LocalLlmRuntimeKind.OLLAMA:
+
+class OllamaGenerationStrategy(RuntimeGenerationStrategy):
+    """Ollama generate endpoint를 사용하는 런타임."""
+
+    def Generate(
+        self,
+        runtimeDescriptor: RuntimeDescriptor,
+        runtimeConfig: LlmRuntimeConfig,
+        request: LlmRequest,
+    ) -> LlmResponse:
         return _GenerateWithOllamaRuntime(
             runtimeDescriptor,
             runtimeConfig,
             request,
         )
 
+
+class OpenAiGenerationStrategy(RuntimeGenerationStrategy):
+    """OpenAI API chat completions endpoint를 사용하는 런타임."""
+
+    def Generate(
+        self,
+        runtimeDescriptor: RuntimeDescriptor,
+        runtimeConfig: LlmRuntimeConfig,
+        request: LlmRequest,
+    ) -> LlmResponse:
+        return _GenerateWithOpenAiRuntime(
+            runtimeDescriptor,
+            runtimeConfig,
+            request,
+        )
+
+
+def GenerateRuntimeResponse(
+    runtimeDescriptor: RuntimeDescriptor,
+    runtimeConfig: LlmRuntimeConfig,
+    request: LlmRequest,
+) -> LlmResponse:
+    """runtimeKind에 따라 실제 generate 호출을 dispatch한다."""
+
+    generationStrategy = _BuildGenerationStrategy(runtimeDescriptor.runtimeKind)
+    return generationStrategy.Generate(runtimeDescriptor, runtimeConfig, request)
+
+
+def _BuildGenerationStrategy(
+    runtimeKind: LlmRuntimeKind,
+) -> RuntimeGenerationStrategy:
+    if runtimeKind == LlmRuntimeKind.OMLX:
+        return OpenAiCompatibleGenerationStrategy()
+
+    if runtimeKind == LlmRuntimeKind.OLLAMA:
+        return OllamaGenerationStrategy()
+
+    if runtimeKind == LlmRuntimeKind.OPENAI:
+        return OpenAiGenerationStrategy()
+
     raise RuntimeGenerationError(
         "No generate implementation is configured for: {0}".format(
-            runtimeDescriptor.runtimeKind.value,
+            runtimeKind.value,
         )
+    )
+
+
+def _GenerateWithOpenAiRuntime(
+    runtimeDescriptor: RuntimeDescriptor,
+    runtimeConfig: LlmRuntimeConfig,
+    request: LlmRequest,
+) -> LlmResponse:
+    endpointUrl = _BuildEndpointUrl(
+        runtimeDescriptor.endpointUrl or DEFAULT_OPENAI_ENDPOINT_URL,
+        "/v1/chat/completions",
+    )
+    payload = _BuildOpenAiChatPayload(
+        runtimeConfig,
+        request,
+        includeResponseFormat=True,
+    )
+    responseData = _PostJson(
+        endpointUrl,
+        payload,
+        _ReadTimeoutSeconds(runtimeConfig),
+        _ReadOpenAiHeaders(runtimeConfig),
+    )
+
+    generatedText = _ExtractOpenAiChatText(responseData)
+    responseModelName = responseData.get("model")
+    if not isinstance(responseModelName, str) or responseModelName.strip() == "":
+        responseModelName = runtimeConfig.modelName
+
+    return LlmResponse(
+        generatedText=generatedText,
+        runtimeKind=runtimeConfig.runtimeKind,
+        modelName=responseModelName,
+        responseFormat=request.responseFormat,
+        finishReason=_NormalizeFinishReason(
+            _ExtractOpenAiProviderFinishReason(responseData),
+        ),
+        providerFinishReason=_ExtractOpenAiProviderFinishReason(responseData),
+        tokenUsage=_ExtractOpenAiTokenUsage(responseData),
+        responseId=_ExtractResponseId(responseData),
+        rawResponse=responseData,
+        limitations=[
+            "OpenAI API output is draft reasoning and must not be treated as official determination.",
+        ],
     )
 
 
 def _GenerateWithOpenAiCompatibleRuntime(
     runtimeDescriptor: RuntimeDescriptor,
-    runtimeConfig: LocalLlmRuntimeConfig,
-    request: LocalLlmRequest,
-) -> LocalLlmResponse:
+    runtimeConfig: LlmRuntimeConfig,
+    request: LlmRequest,
+) -> LlmResponse:
     endpointUrl = _BuildEndpointUrl(
         runtimeDescriptor.endpointUrl or DEFAULT_OMLX_ENDPOINT_URL,
         "/v1/chat/completions",
     )
-    payload = _BuildOpenAiChatPayload(runtimeConfig, request)
+    payload = _BuildOpenAiChatPayload(
+        runtimeConfig,
+        request,
+        includeResponseFormat=_ShouldIncludeOpenAiCompatibleResponseFormat(
+            runtimeConfig,
+        ),
+    )
     responseData = _PostJson(
         endpointUrl,
         payload,
@@ -71,10 +192,17 @@ def _GenerateWithOpenAiCompatibleRuntime(
     )
 
     generatedText = _ExtractOpenAiChatText(responseData)
-    return LocalLlmResponse(
+    return LlmResponse(
         generatedText=generatedText,
         runtimeKind=runtimeConfig.runtimeKind,
         modelName=runtimeConfig.modelName,
+        responseFormat=request.responseFormat,
+        finishReason=_NormalizeFinishReason(
+            _ExtractOpenAiProviderFinishReason(responseData),
+        ),
+        providerFinishReason=_ExtractOpenAiProviderFinishReason(responseData),
+        tokenUsage=_ExtractOpenAiTokenUsage(responseData),
+        responseId=_ExtractResponseId(responseData),
         rawResponse=responseData,
         limitations=[
             "LLM output is draft reasoning and must not be treated as official determination.",
@@ -84,9 +212,9 @@ def _GenerateWithOpenAiCompatibleRuntime(
 
 def _GenerateWithOllamaRuntime(
     runtimeDescriptor: RuntimeDescriptor,
-    runtimeConfig: LocalLlmRuntimeConfig,
-    request: LocalLlmRequest,
-) -> LocalLlmResponse:
+    runtimeConfig: LlmRuntimeConfig,
+    request: LlmRequest,
+) -> LlmResponse:
     endpointUrl = _BuildEndpointUrl(
         runtimeDescriptor.endpointUrl or DEFAULT_OLLAMA_ENDPOINT_URL,
         "/api/generate",
@@ -100,10 +228,16 @@ def _GenerateWithOllamaRuntime(
     )
 
     generatedText = str(responseData.get("response", ""))
-    return LocalLlmResponse(
+    return LlmResponse(
         generatedText=generatedText,
         runtimeKind=runtimeConfig.runtimeKind,
         modelName=runtimeConfig.modelName,
+        responseFormat=request.responseFormat,
+        finishReason=_NormalizeFinishReason(
+            _ExtractOllamaProviderFinishReason(responseData),
+        ),
+        providerFinishReason=_ExtractOllamaProviderFinishReason(responseData),
+        tokenUsage=_ExtractOllamaTokenUsage(responseData),
         rawResponse=responseData,
         limitations=[
             "LLM output is draft reasoning and must not be treated as official determination.",
@@ -112,8 +246,9 @@ def _GenerateWithOllamaRuntime(
 
 
 def _BuildOpenAiChatPayload(
-    runtimeConfig: LocalLlmRuntimeConfig,
-    request: LocalLlmRequest,
+    runtimeConfig: LlmRuntimeConfig,
+    request: LlmRequest,
+    includeResponseFormat: bool,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "model": _ReadModelName(runtimeConfig),
@@ -128,13 +263,18 @@ def _BuildOpenAiChatPayload(
         payload["top_p"] = request.generationOptions.topP
     if request.generationOptions.stopSequences:
         payload["stop"] = list(request.generationOptions.stopSequences)
+    if (
+        includeResponseFormat
+        and request.responseFormat == LlmResponseFormat.JSON_OBJECT
+    ):
+        payload["response_format"] = {"type": "json_object"}
 
     return payload
 
 
 def _BuildOllamaPayload(
-    runtimeConfig: LocalLlmRuntimeConfig,
-    request: LocalLlmRequest,
+    runtimeConfig: LlmRuntimeConfig,
+    request: LlmRequest,
 ) -> Dict[str, Any]:
     options: Dict[str, Any] = {
         "temperature": request.generationOptions.temperature,
@@ -147,15 +287,20 @@ def _BuildOllamaPayload(
     if request.generationOptions.stopSequences:
         options["stop"] = list(request.generationOptions.stopSequences)
 
-    return {
+    payload: Dict[str, Any] = {
         "model": _ReadModelName(runtimeConfig),
         "prompt": _BuildPlainPrompt(request),
         "stream": False,
         "options": options,
     }
 
+    if request.responseFormat == LlmResponseFormat.JSON_OBJECT:
+        payload["format"] = "json"
 
-def _BuildChatMessages(request: LocalLlmRequest) -> List[Dict[str, str]]:
+    return payload
+
+
+def _BuildChatMessages(request: LlmRequest) -> List[Dict[str, str]]:
     messages: List[Dict[str, str]] = []
     systemContent = _BuildSystemContent(request)
     if systemContent != "":
@@ -165,7 +310,7 @@ def _BuildChatMessages(request: LocalLlmRequest) -> List[Dict[str, str]]:
     return messages
 
 
-def _BuildSystemContent(request: LocalLlmRequest) -> str:
+def _BuildSystemContent(request: LlmRequest) -> str:
     parts: List[str] = []
     if request.systemPrompt is not None and request.systemPrompt.strip() != "":
         parts.append(request.systemPrompt.strip())
@@ -179,7 +324,7 @@ def _BuildSystemContent(request: LocalLlmRequest) -> str:
     return "\n\n".join(parts)
 
 
-def _BuildPlainPrompt(request: LocalLlmRequest) -> str:
+def _BuildPlainPrompt(request: LlmRequest) -> str:
     parts: List[str] = []
     systemContent = _BuildSystemContent(request)
     if systemContent != "":
@@ -239,12 +384,8 @@ def _PostJson(
 
 
 def _ExtractOpenAiChatText(responseData: Dict[str, Any]) -> str:
-    choices = responseData.get("choices")
-    if not isinstance(choices, list) or not choices:
-        return ""
-
-    firstChoice = choices[0]
-    if not isinstance(firstChoice, dict):
+    firstChoice = _ReadFirstOpenAiChoice(responseData)
+    if firstChoice is None:
         return ""
 
     message = firstChoice.get("message")
@@ -258,6 +399,108 @@ def _ExtractOpenAiChatText(responseData: Dict[str, Any]) -> str:
         return str(text)
 
     return ""
+
+
+def _ReadFirstOpenAiChoice(responseData: Dict[str, Any]) -> Dict[str, Any] | None:
+    choices = responseData.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return None
+
+    firstChoice = choices[0]
+    if not isinstance(firstChoice, dict):
+        return None
+
+    return firstChoice
+
+
+def _ExtractOpenAiProviderFinishReason(
+    responseData: Dict[str, Any],
+) -> str | None:
+    firstChoice = _ReadFirstOpenAiChoice(responseData)
+    if firstChoice is None:
+        return None
+
+    finishReason = firstChoice.get("finish_reason")
+    if finishReason is None:
+        return None
+
+    return str(finishReason)
+
+
+def _ExtractOllamaProviderFinishReason(
+    responseData: Dict[str, Any],
+) -> str | None:
+    finishReason = responseData.get("done_reason")
+    if finishReason is not None:
+        return str(finishReason)
+
+    if responseData.get("done") is True:
+        return LlmFinishReason.STOP.value
+
+    return None
+
+
+def _NormalizeFinishReason(
+    providerFinishReason: str | None,
+) -> LlmFinishReason:
+    if providerFinishReason is None:
+        return LlmFinishReason.UNKNOWN
+
+    normalizedReason = providerFinishReason.strip().lower()
+    if normalizedReason in {"stop", "complete", "completed"}:
+        return LlmFinishReason.STOP
+    if normalizedReason in {"length", "max_tokens", "max_token", "token_limit"}:
+        return LlmFinishReason.LENGTH
+    if normalizedReason == "content_filter":
+        return LlmFinishReason.CONTENT_FILTER
+    if normalizedReason in {"tool_calls", "function_call"}:
+        return LlmFinishReason.TOOL_CALLS
+
+    return LlmFinishReason.UNKNOWN
+
+
+def _ExtractOpenAiTokenUsage(responseData: Dict[str, Any]) -> LlmTokenUsage:
+    usage = responseData.get("usage")
+    if not isinstance(usage, dict):
+        return LlmTokenUsage()
+
+    return LlmTokenUsage(
+        inputTokens=_ReadOptionalInt(usage, "prompt_tokens"),
+        outputTokens=_ReadOptionalInt(usage, "completion_tokens"),
+        totalTokens=_ReadOptionalInt(usage, "total_tokens"),
+    )
+
+
+def _ExtractOllamaTokenUsage(responseData: Dict[str, Any]) -> LlmTokenUsage:
+    inputTokens = _ReadOptionalInt(responseData, "prompt_eval_count")
+    outputTokens = _ReadOptionalInt(responseData, "eval_count")
+    totalTokens = None
+    if inputTokens is not None and outputTokens is not None:
+        totalTokens = inputTokens + outputTokens
+
+    return LlmTokenUsage(
+        inputTokens=inputTokens,
+        outputTokens=outputTokens,
+        totalTokens=totalTokens,
+    )
+
+
+def _ExtractResponseId(responseData: Dict[str, Any]) -> str | None:
+    responseId = responseData.get("id")
+    if isinstance(responseId, str) and responseId.strip() != "":
+        return responseId
+
+    return None
+
+
+def _ReadOptionalInt(data: Dict[str, Any], fieldName: str) -> int | None:
+    value = data.get(fieldName)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+
+    return None
 
 
 def _BuildEndpointUrl(baseUrl: str, defaultPath: str) -> str:
@@ -279,7 +522,7 @@ def _BuildEndpointUrl(baseUrl: str, defaultPath: str) -> str:
     return normalizedBaseUrl + normalizedDefaultPath
 
 
-def _ReadModelName(runtimeConfig: LocalLlmRuntimeConfig) -> str:
+def _ReadModelName(runtimeConfig: LlmRuntimeConfig) -> str:
     if runtimeConfig.modelName is not None and runtimeConfig.modelName.strip() != "":
         return runtimeConfig.modelName
 
@@ -290,7 +533,7 @@ def _ReadModelName(runtimeConfig: LocalLlmRuntimeConfig) -> str:
     raise RuntimeGenerationError("Runtime generation requires a model name.")
 
 
-def _ReadTimeoutSeconds(runtimeConfig: LocalLlmRuntimeConfig) -> int:
+def _ReadTimeoutSeconds(runtimeConfig: LlmRuntimeConfig) -> int:
     timeoutSeconds = runtimeConfig.extraOptions.get("timeout_seconds")
     if isinstance(timeoutSeconds, int) and timeoutSeconds > 0:
         return timeoutSeconds
@@ -298,7 +541,7 @@ def _ReadTimeoutSeconds(runtimeConfig: LocalLlmRuntimeConfig) -> int:
     return DEFAULT_HTTP_TIMEOUT_SECONDS
 
 
-def _ReadHeaders(runtimeConfig: LocalLlmRuntimeConfig) -> Dict[str, str]:
+def _ReadHeaders(runtimeConfig: LlmRuntimeConfig) -> Dict[str, str]:
     headers: Dict[str, str] = {}
     apiKey = runtimeConfig.extraOptions.get("api_key")
     if isinstance(apiKey, str) and apiKey.strip() != "":
@@ -306,3 +549,42 @@ def _ReadHeaders(runtimeConfig: LocalLlmRuntimeConfig) -> Dict[str, str]:
         headers["x-api-key"] = apiKey
 
     return headers
+
+
+def _ShouldIncludeOpenAiCompatibleResponseFormat(
+    runtimeConfig: LlmRuntimeConfig,
+) -> bool:
+    optionValue = runtimeConfig.extraOptions.get("supports_response_format")
+    if isinstance(optionValue, bool):
+        return optionValue
+
+    return False
+
+
+def _ReadOpenAiHeaders(runtimeConfig: LlmRuntimeConfig) -> Dict[str, str]:
+    apiKey = _ReadApiKey(runtimeConfig, DEFAULT_OPENAI_API_KEY_ENV_NAMES)
+    if apiKey is None:
+        raise RuntimeGenerationError(
+            "OpenAI runtime generation requires EU_EXPORT_OPENAI_API_KEY, "
+            "OPENAI_API_KEY, or extraOptions['api_key']."
+        )
+
+    return {
+        "Authorization": "Bearer {0}".format(apiKey),
+    }
+
+
+def _ReadApiKey(
+    runtimeConfig: LlmRuntimeConfig,
+    apiKeyEnvNames: List[str],
+) -> str | None:
+    optionValue = runtimeConfig.extraOptions.get("api_key")
+    if isinstance(optionValue, str) and optionValue.strip() != "":
+        return optionValue.strip()
+
+    for envName in apiKeyEnvNames:
+        envValue = os.environ.get(envName)
+        if envValue is not None and envValue.strip() != "":
+            return envValue.strip()
+
+    return None
