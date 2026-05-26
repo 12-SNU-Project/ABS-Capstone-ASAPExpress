@@ -141,10 +141,13 @@ ATTRIBUTE_TERMS = {
 }
 
 class ProductDomainHint(str, Enum):
-    PROCESSED_FOOD = "가공식품"
-    COSMETICS = "화장품"
-    AMBIGUOUS = "공동 키워드 포함"
-    UNKNOWN = "분류 불가"
+    """상품 정보 수집 단계의 domain routing hint."""
+
+    PROCESSED_FOOD = "processed_food"
+    COSMETICS = "cosmetics"
+    AMBIGUOUS = "ambiguous"
+    UNKNOWN = "unknown"
+
 
 class QueryType(str, Enum):
     """상품 정보 수집 단계의 사용자 입력 유형."""
@@ -160,12 +163,16 @@ class QueryType(str, Enum):
 @dataclass(frozen=True)
 class QueryAnalysisResult:
     """사용자 입력 query의 1차 분류 결과."""
+
     originalQuery: str
     normalizedQuery: str
     queryType: QueryType
-    detectedFoodTerms: list[str]
-    detectedCosmeticsTerms: list[str]
-    detectedAttributeTerms: list[str]
+    productDomainHint: ProductDomainHint
+    detectedFoodTerms: List[str]
+    detectedCosmeticsTerms: List[str]
+    detectedAttributeTerms: List[str]
+    reason: str
+    limitations: List[str] = field(default_factory=list)
 
 
 class QueryAnalyzer:
@@ -178,13 +185,16 @@ class QueryAnalyzer:
                 originalQuery=rawQuery,
                 normalizedQuery=normalizedQuery,
                 queryType=QueryType.AMBIGUOUS,
+                productDomainHint=ProductDomainHint.UNKNOWN,
                 detectedFoodTerms=[],
                 detectedCosmeticsTerms=[],
-                detectedAttributeTerms=[]
+                detectedAttributeTerms=[],
+                reason="query is empty",
+                limitations=self._BuildLimitations(QueryType.AMBIGUOUS),
             )
-    
+
         extractedTerms = self._ExtractKeywords(normalizedQuery)
-        
+
         queryType, reason = self._ClassifyQueryType(normalizedQuery, extractedTerms)
         productDomainHint = self._InferProductDomain(extractedTerms)
 
@@ -192,9 +202,12 @@ class QueryAnalyzer:
             originalQuery=rawQuery,
             normalizedQuery=normalizedQuery,
             queryType=queryType,
-            detectedFoodTerms=[t for t in extractedTerms["food_terms"]],
-            detectedCosmeticsTerms=[t for t in extractedTerms["cosmetic_trems"]],
-            detectedAttributeTerms=[t for t in extractedTerms["attribute_terms"]]
+            productDomainHint=productDomainHint,
+            detectedFoodTerms=list(extractedTerms["food_terms"]),
+            detectedCosmeticsTerms=list(extractedTerms["cosmetics_terms"]),
+            detectedAttributeTerms=list(extractedTerms["attribute_terms"]),
+            reason=reason,
+            limitations=self._BuildLimitations(queryType),
         )
 
     def _ExtractKeywords(self, normalizedQuery: str) -> Dict[str, List[str]]:
@@ -226,7 +239,6 @@ class QueryAnalyzer:
         tokenCount = len(normalizedQuery.split())
         categoryTerms = extractedTerms.get("category_terms", [])
         attributeTerms = extractedTerms.get("attribute_terms", [])
-        brandHintTerms = extractedTerms.get("brand_hint_terms", [])
 
         if IsUrlLike(normalizedQuery):
             return QueryType.URL, "query is a URL or URL-like domain"
@@ -241,18 +253,6 @@ class QueryAnalyzer:
             return (
                 QueryType.SPECIFIC_PRODUCT,
                 "query contains package size or quantity marker",
-            )
-
-        if brandHintTerms and categoryTerms:
-            return (
-                QueryType.SPECIFIC_PRODUCT,
-                "query contains brand hint and category term",
-            )
-
-        if brandHintTerms and tokenCount <= 2:
-            return (
-                QueryType.BRAND_OR_SERIES,
-                "query looks like a brand or product series",
             )
 
         if categoryTerms and tokenCount <= 2:
@@ -406,10 +406,20 @@ class LlmQueryInterpreter:
         analysisResult: QueryAnalysisResult,
     ) -> str:
         heuristicData = {
-                analysisResult.originalQuery,
-                analysisResult.normalizedQuery,
-                analysisResult.queryType,
-            }
+            "original_query": analysisResult.originalQuery,
+            "normalized_query": analysisResult.normalizedQuery,
+            "query_type": analysisResult.queryType.value,
+            "product_domain_hint": analysisResult.productDomainHint.value,
+            "detected_food_terms": list(analysisResult.detectedFoodTerms),
+            "detected_cosmetics_terms": list(
+                analysisResult.detectedCosmeticsTerms,
+            ),
+            "detected_attribute_terms": list(
+                analysisResult.detectedAttributeTerms,
+            ),
+            "reason": analysisResult.reason,
+            "limitations": list(analysisResult.limitations),
+        }
         return "\n".join(
             [
                 "User query:",
@@ -421,4 +431,3 @@ class LlmQueryInterpreter:
                 "Create one SearchPlan JSON object.",
             ]
         )
-
