@@ -141,7 +141,9 @@ def _GenerateWithOpenAiRuntime(
     payload = _BuildOpenAiChatPayload(
         runtimeConfig,
         request,
-        includeResponseFormat=True,
+        includeResponseFormat=_ShouldIncludeOpenAiRuntimeResponseFormat(
+            runtimeConfig,
+        ),
     )
     responseData = _PostJson(
         endpointUrl,
@@ -180,7 +182,11 @@ def _GenerateWithOpenAiCompatibleRuntime(
 ) -> LlmResponse:
     endpointUrl = _BuildEndpointUrl(
         runtimeDescriptor.endpointUrl or DEFAULT_OMLX_ENDPOINT_URL,
-        "/v1/chat/completions",
+        _ReadStringOption(
+            runtimeConfig,
+            "chat_completions_path",
+            "/v1/chat/completions",
+        ),
     )
     payload = _BuildOpenAiChatPayload(
         runtimeConfig,
@@ -562,6 +568,20 @@ def _ShouldIncludeOpenAiCompatibleResponseFormat(
     optionValue = runtimeConfig.extraOptions.get("supports_response_format")
     if isinstance(optionValue, bool):
         return optionValue
+
+    return False
+
+
+def _ShouldIncludeOpenAiRuntimeResponseFormat(
+    runtimeConfig: LlmRuntimeConfig,
+) -> bool:
+    optionValue = runtimeConfig.extraOptions.get("supports_response_format")
+    if isinstance(optionValue, bool):
+        return optionValue
+
+    providerName = runtimeConfig.extraOptions.get("provider")
+    if isinstance(providerName, str) and providerName.strip().lower() == "openai":
+        return True
 
     return False
 

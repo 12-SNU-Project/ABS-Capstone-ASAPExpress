@@ -15,6 +15,11 @@ DEFAULT_GOOGLE_AI_STUDIO_ENDPOINT_URL = (
     "https://generativelanguage.googleapis.com/v1beta/openai"
 )
 DEFAULT_GOOGLE_AI_STUDIO_CHAT_COMPLETIONS_PATH = "/chat/completions"
+DEFAULT_OPENAI_ENDPOINT_URL = "https://api.openai.com"
+DEFAULT_OMLX_ENDPOINT_URL = "http://127.0.0.1:8000"
+DEFAULT_OLLAMA_ENDPOINT_URL = "http://localhost:11434"
+DEFAULT_OPENAI_CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
+DEFAULT_OMLX_CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 
 
 class UnsupportedLlmRuntimeError(RuntimeError):
@@ -86,16 +91,20 @@ def BuildLlmRuntimeConfigFromEnv(
     if normalizedRuntimeName == LlmRuntimeKind.OPENAI.value:
         return _BuildOpenAiRuntimeConfigFromEnv(envValues)
     if normalizedRuntimeName == LlmRuntimeKind.OMLX.value:
-        return _BuildLocalRuntimeConfigFromEnv(
+        return _BuildApiRuntimeConfigFromEnv(
             LlmRuntimeKind.OMLX,
             envValues,
-            "EU_EXPORT_OMLX_ENDPOINT_URL",
+            DEFAULT_OMLX_ENDPOINT_URL,
+            ["EU_EXPORT_OMLX_ENDPOINT_URL"],
+            DEFAULT_OMLX_CHAT_COMPLETIONS_PATH,
         )
     if normalizedRuntimeName == LlmRuntimeKind.OLLAMA.value:
-        return _BuildLocalRuntimeConfigFromEnv(
+        return _BuildApiRuntimeConfigFromEnv(
             LlmRuntimeKind.OLLAMA,
             envValues,
-            "EU_EXPORT_OLLAMA_ENDPOINT_URL",
+            DEFAULT_OLLAMA_ENDPOINT_URL,
+            ["EU_EXPORT_OLLAMA_ENDPOINT_URL"],
+            None,
         )
 
     raise UnsupportedLlmRuntimeError(
@@ -118,38 +127,49 @@ def _BuildOpenAiRuntimeConfigFromEnv(
         apiKey = _ReadFirstEnvValue(
             envValues,
             [
+                "EU_EXPORT_LLM_API_KEY",
                 "EU_EXPORT_GOOGLE_AI_STUDIO_API_KEY",
                 "GEMINI_API_KEY",
             ],
         )
         if apiKey is not None:
             extraOptions["api_key"] = apiKey
-        extraOptions["chat_completions_path"] = (
-            DEFAULT_GOOGLE_AI_STUDIO_CHAT_COMPLETIONS_PATH
-        )
+        extraOptions["chat_completions_path"] = _ReadFirstEnvValue(
+            envValues,
+            ["EU_EXPORT_LLM_CHAT_COMPLETIONS_PATH"],
+        ) or DEFAULT_GOOGLE_AI_STUDIO_CHAT_COMPLETIONS_PATH
 
         return LlmRuntimeConfig(
             runtimeKind=LlmRuntimeKind.OPENAI,
             modelName=_ReadFirstEnvValue(
                 envValues,
                 [
-                    "EU_EXPORT_GOOGLE_AI_STUDIO_MODEL",
                     "EU_EXPORT_LLM_MODEL",
+                    "EU_EXPORT_GOOGLE_AI_STUDIO_MODEL",
                 ],
             ),
             endpointUrl=(
-                _ReadEnvValue(
+                _ReadFirstEnvValue(
                     envValues,
-                    "EU_EXPORT_GOOGLE_AI_STUDIO_ENDPOINT_URL",
+                    [
+                        "EU_EXPORT_LLM_ENDPOINT_URL",
+                        "EU_EXPORT_GOOGLE_AI_STUDIO_ENDPOINT_URL",
+                    ],
                 )
                 or DEFAULT_GOOGLE_AI_STUDIO_ENDPOINT_URL
             ),
             extraOptions=extraOptions,
         )
 
+    extraOptions["chat_completions_path"] = _ReadFirstEnvValue(
+        envValues,
+        ["EU_EXPORT_LLM_CHAT_COMPLETIONS_PATH"],
+    ) or DEFAULT_OPENAI_CHAT_COMPLETIONS_PATH
+
     apiKey = _ReadFirstEnvValue(
         envValues,
         [
+            "EU_EXPORT_LLM_API_KEY",
             "EU_EXPORT_OPENAI_API_KEY",
             "OPENAI_API_KEY",
         ],
@@ -162,25 +182,65 @@ def _BuildOpenAiRuntimeConfigFromEnv(
         modelName=_ReadFirstEnvValue(
             envValues,
             [
-                "EU_EXPORT_OPENAI_MODEL",
                 "EU_EXPORT_LLM_MODEL",
+                "EU_EXPORT_OPENAI_MODEL",
             ],
         ),
-        endpointUrl=_ReadEnvValue(envValues, "EU_EXPORT_OPENAI_ENDPOINT_URL"),
+        endpointUrl=(
+            _ReadFirstEnvValue(
+                envValues,
+                [
+                    "EU_EXPORT_LLM_ENDPOINT_URL",
+                    "EU_EXPORT_OPENAI_ENDPOINT_URL",
+                ],
+            )
+            or DEFAULT_OPENAI_ENDPOINT_URL
+        ),
         extraOptions=extraOptions,
     )
 
 
-def _BuildLocalRuntimeConfigFromEnv(
+def _BuildApiRuntimeConfigFromEnv(
     runtimeKind: LlmRuntimeKind,
     envValues: Mapping[str, str],
-    endpointEnvName: str,
+    defaultEndpointUrl: str,
+    endpointEnvNames: list[str],
+    defaultChatCompletionsPath: Optional[str],
 ) -> LlmRuntimeConfig:
+    extraOptions = _BuildCommonExtraOptions(envValues)
+    extraOptions["provider"] = runtimeKind.value
+
+    apiKey = _ReadFirstEnvValue(
+        envValues,
+        [
+            "EU_EXPORT_LLM_API_KEY",
+        ],
+    )
+    if apiKey is not None:
+        extraOptions["api_key"] = apiKey
+
+    chatCompletionsPath = _ReadFirstEnvValue(
+        envValues,
+        ["EU_EXPORT_LLM_CHAT_COMPLETIONS_PATH"],
+    )
+    if chatCompletionsPath is not None:
+        extraOptions["chat_completions_path"] = chatCompletionsPath
+    elif defaultChatCompletionsPath is not None:
+        extraOptions["chat_completions_path"] = defaultChatCompletionsPath
+
+    endpointUrl = _ReadFirstEnvValue(
+        envValues,
+        [
+            "EU_EXPORT_LLM_ENDPOINT_URL",
+            *endpointEnvNames,
+        ],
+    )
+
     return LlmRuntimeConfig(
         runtimeKind=runtimeKind,
         modelName=_ReadEnvValue(envValues, "EU_EXPORT_LLM_MODEL"),
-        endpointUrl=_ReadEnvValue(envValues, endpointEnvName),
-        extraOptions=_BuildCommonExtraOptions(envValues),
+        endpointUrl=endpointUrl or defaultEndpointUrl,
+        extraOptions=extraOptions,
     )
 
 
@@ -269,7 +329,25 @@ def _BuildCommonExtraOptions(
     if timeoutSeconds is not None:
         extraOptions["timeout_seconds"] = timeoutSeconds
 
+    supportsResponseFormat = _ReadBooleanEnvValue(
+        envValues,
+        "EU_EXPORT_LLM_SUPPORTS_RESPONSE_FORMAT",
+    )
+    if supportsResponseFormat is not None:
+        extraOptions["supports_response_format"] = supportsResponseFormat
+
     return extraOptions
+
+
+def _ReadBooleanEnvValue(
+    envValues: Mapping[str, str],
+    envName: str,
+) -> Optional[bool]:
+    envValue = _ReadEnvValue(envValues, envName)
+    if envValue is None:
+        return None
+
+    return envValue.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _ReadPositiveIntEnvValue(
