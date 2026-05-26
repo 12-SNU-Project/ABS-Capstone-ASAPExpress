@@ -26,6 +26,7 @@ from eu_export.bridge.schema import (
 )
 from eu_export.bridge.selector import (
     BuildDefaultLlmRuntimeConfig,
+    BuildLlmRuntimeConfigFromEnv,
     DetectOperatingSystem,
     SelectDefaultRuntimeKind,
     UnsupportedLlmRuntimeError,
@@ -33,6 +34,7 @@ from eu_export.bridge.selector import (
 
 __all__ = [
     "BuildDefaultLlmRuntimeConfig",
+    "BuildLlmRuntimeConfigFromEnv",
     "BuildRuntimeAdapter",
     "BuildRuntimeDescriptor",
     "DetectOperatingSystem",

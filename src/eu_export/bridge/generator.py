@@ -26,6 +26,7 @@ from eu_export.bridge.schema import (
 
 
 DEFAULT_HTTP_TIMEOUT_SECONDS = 120
+DEFAULT_OPENAI_CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 
 
 class RuntimeGenerationError(RuntimeError):
@@ -131,7 +132,11 @@ def _GenerateWithOpenAiRuntime(
 ) -> LlmResponse:
     endpointUrl = _BuildEndpointUrl(
         runtimeDescriptor.endpointUrl or DEFAULT_OPENAI_ENDPOINT_URL,
-        "/v1/chat/completions",
+        _ReadStringOption(
+            runtimeConfig,
+            "chat_completions_path",
+            DEFAULT_OPENAI_CHAT_COMPLETIONS_PATH,
+        ),
     )
     payload = _BuildOpenAiChatPayload(
         runtimeConfig,
@@ -559,6 +564,18 @@ def _ShouldIncludeOpenAiCompatibleResponseFormat(
         return optionValue
 
     return False
+
+
+def _ReadStringOption(
+    runtimeConfig: LlmRuntimeConfig,
+    optionName: str,
+    defaultValue: str,
+) -> str:
+    optionValue = runtimeConfig.extraOptions.get(optionName)
+    if isinstance(optionValue, str) and optionValue.strip() != "":
+        return optionValue.strip()
+
+    return defaultValue
 
 
 def _ReadOpenAiHeaders(runtimeConfig: LlmRuntimeConfig) -> Dict[str, str]:
