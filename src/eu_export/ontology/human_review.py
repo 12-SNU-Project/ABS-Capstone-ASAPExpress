@@ -26,6 +26,7 @@ class Stage1HumanReviewPackage:
     packageId: str
     selectedSource: str
     productFacts: Dict[str, Any]
+    candidateGenerationProcess: Dict[str, Any]
     recommendationReport: Dict[str, Any]
     evidenceCitations: List[Dict[str, Any]] = field(default_factory=list)
     sourceEvidenceRecords: List[Dict[str, Any]] = field(default_factory=list)
@@ -42,6 +43,7 @@ class Stage1HumanReviewPackage:
             "package_id": self.packageId,
             "selected_source": self.selectedSource,
             "product_facts": dict(self.productFacts),
+            "candidate_generation_process": dict(self.candidateGenerationProcess),
             "recommendation_report": dict(self.recommendationReport),
             "evidence_citations": list(self.evidenceCitations),
             "source_evidence_records": list(self.sourceEvidenceRecords),
@@ -53,7 +55,7 @@ class Stage1HumanReviewPackage:
 
 
 class Stage1HumanReviewPackageBuilder:
-    """recommendation/evidence/validation/product facts를 human review 단위로 결합한다."""
+    """후보 검토 요약/evidence/validation/product facts를 human review 단위로 결합한다."""
 
     def Build(
         self,
@@ -81,9 +83,9 @@ class Stage1HumanReviewPackageBuilder:
             for evidenceId in citedEvidencePurposes
         }
         for groupName, purpose in [
-            ("recommended_candidate", "recommended_candidate_support"),
-            ("retained_candidates", "retained_candidate_review"),
-            ("rejected_candidates_summary", "candidate_rejection_basis"),
+            ("recommended_candidate", "priority_review_candidate_support"),
+            ("retained_candidates", "comparison_candidate_review"),
+            ("rejected_candidates_summary", "unlikely_candidate_basis"),
         ]:
             groupValue = recommendationData.get(groupName)
             candidateRecords = (
@@ -112,6 +114,9 @@ class Stage1HumanReviewPackageBuilder:
             packageId=self.BuildPackageId(productInput, recommendationReport),
             selectedSource=selectedSource,
             productFacts=self.BuildProductFacts(productInput),
+            candidateGenerationProcess=dict(
+                recommendationData.get("candidate_generation_process", {}),
+            ),
             recommendationReport=recommendationData,
             evidenceCitations=[
                 self.BuildEvidenceCitation(
@@ -179,9 +184,9 @@ class Stage1HumanReviewPackageBuilder:
                 citationPurposes[evidenceRef] = "decision_key_evidence"
 
         for groupName, purpose in [
-            ("recommended_candidate", "recommended_candidate_support"),
-            ("retained_candidates", "retained_candidate_review"),
-            ("rejected_candidates_summary", "candidate_rejection_basis"),
+            ("recommended_candidate", "priority_review_candidate_support"),
+            ("retained_candidates", "comparison_candidate_review"),
+            ("rejected_candidates_summary", "unlikely_candidate_basis"),
         ]:
             groupValue = recommendationData.get(groupName)
             candidateRecords = (
@@ -200,6 +205,19 @@ class Stage1HumanReviewPackageBuilder:
                     citationPurposes[evidenceRef] = self.MergeCitationPurpose(
                         citationPurposes.get(evidenceRef),
                         purpose,
+                    )
+                similarEbtiCases = candidateRecord.get("similar_ebti_cases")
+                if not isinstance(similarEbtiCases, list):
+                    continue
+                for similarEbtiCase in similarEbtiCases:
+                    if not isinstance(similarEbtiCase, Mapping):
+                        continue
+                    evidenceRef = similarEbtiCase.get("evidence_ref")
+                    if not isinstance(evidenceRef, str) or evidenceRef == "":
+                        continue
+                    citationPurposes[evidenceRef] = self.MergeCitationPurpose(
+                        citationPurposes.get(evidenceRef),
+                        "similar_ebti_comparison",
                     )
         return citationPurposes
 
@@ -264,10 +282,13 @@ class Stage1HumanReviewPackageBuilder:
         recommendationData: Mapping[str, Any],
     ) -> List[str]:
         checklist = [
-            "추천 CN8 후보가 상품 사실과 후보 카드의 hard condition을 동시에 만족하는지 확인한다.",
+            "우선 검토 후보의 HS2-HS4-HS6-CN8 계층 검토 코멘트가 상품 정보와 모순되지 않는지 확인한다.",
+            "우선 검토 CN8 후보가 상품 사실과 후보 카드의 hard condition을 동시에 만족하는지 확인한다.",
+            "include/exclude rule 검토 코멘트가 상품고시정보와 OCR 근거를 적절히 반영했는지 확인한다.",
+            "유사 EBTI 사례는 참고 근거일 뿐이므로 실제 상품과의 차이점을 별도로 확인한다.",
             "OCR 또는 상품고시정보에서 추출된 원재료/함량/용도 정보가 실제 상품 페이지와 일치하는지 확인한다.",
-            "추천 후보와 retained 후보의 차이를 비교하고, 배제 후보의 배제 사유가 충분한지 확인한다.",
-            "최종 법적/통관 판단은 공식 BTI, 관세사, 관세당국 등 사람 검토를 거쳐 확정한다.",
+            "우선 검토 후보와 비교 검토 후보의 차이를 비교하고, 배제 가능 후보의 배제 사유가 충분한지 확인한다.",
+            "이 패키지는 후보 산출 결과이며, 최종 법적/통관 판단으로 사용하지 않는다.",
         ]
         remainingRisks = recommendationData.get("remaining_risks")
         if isinstance(remainingRisks, list) and remainingRisks:

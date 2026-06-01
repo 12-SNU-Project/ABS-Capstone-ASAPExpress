@@ -30,7 +30,7 @@ DEFAULT_STAGE1_EVIDENCE_TEXT_MAX_CHARACTERS = 1400
 DEFAULT_STAGE1_PROMPT_EVIDENCE_TEXT_MAX_CHARACTERS = 600
 DEFAULT_STAGE1_PROMPT_COMMON_EVIDENCE_LIMIT = 6
 DEFAULT_STAGE1_PROMPT_CANDIDATE_EVIDENCE_LIMIT = 3
-DEFAULT_STAGE1_CLASSIFICATION_MAX_TOKENS = 1800
+DEFAULT_STAGE1_CLASSIFICATION_MAX_TOKENS = 4096
 TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣]+")
 STAGE1_PROMPT_COMMON_EVIDENCE_TYPE_PRIORITY = [
     "product_fact",
@@ -40,14 +40,20 @@ STAGE1_PROMPT_COMMON_EVIDENCE_TYPE_PRIORITY = [
     "ontology_chunk",
 ]
 STAGE1_PROMPT_CANDIDATE_EVIDENCE_TYPE_PRIORITY = [
-    "cn_candidate_card",
     "bti_case_chunk",
+    "cn_candidate_card",
 ]
 STAGE1_CLASSIFICATION_ALLOWED_STATUSES = {
     "strong_candidate",
     "possible_candidate",
     "unlikely_candidate",
     "insufficient_information",
+}
+STAGE1_CLASSIFICATION_PATH_LEVELS = ["hs2", "hs4", "hs6", "cn8"]
+STAGE1_CLASSIFICATION_PATH_ALLOWED_CONSISTENCIES = {
+    "consistent",
+    "conflicting",
+    "needs_review",
 }
 FINAL_DETERMINATION_WARNING_TERMS = [
     "final determination",
@@ -145,6 +151,40 @@ STAGE1_CLASSIFICATION_JSON_INSTRUCTIONS = {
                 "conflicting_or_exclusion_facts": ["string"],
                 "missing_information": ["string"],
                 "evidence_refs": ["string"],
+                "classification_path_review": {
+                    "hs2": {
+                        "code": "string|null",
+                        "consistency": "consistent|conflicting|needs_review",
+                        "comment": "string",
+                    },
+                    "hs4": {
+                        "code": "string|null",
+                        "consistency": "consistent|conflicting|needs_review",
+                        "comment": "string",
+                    },
+                    "hs6": {
+                        "code": "string|null",
+                        "consistency": "consistent|conflicting|needs_review",
+                        "comment": "string",
+                    },
+                    "cn8": {
+                        "code": "string|null",
+                        "consistency": "consistent|conflicting|needs_review",
+                        "comment": "string",
+                    },
+                },
+                "classification_rule_review": {
+                    "include_rule_comment": "string",
+                    "exclude_rule_comment": "string",
+                    "hard_condition_comment": "string",
+                },
+                "similar_ebti_cases": [
+                    {
+                        "evidence_ref": "string",
+                        "similarity_comment": "string",
+                        "difference_comment": "string",
+                    }
+                ],
                 "reason": "string",
                 "human_review_required": True,
             }
@@ -223,10 +263,17 @@ class CnCandidate:
     searchKeywordMatches: List[str] = field(default_factory=list)
     descriptionMatches: List[str] = field(default_factory=list)
     excludeRuleMatches: List[str] = field(default_factory=list)
+    hs2Code: Optional[str] = None
+    hs2Description: Optional[str] = None
+    hs4Code: Optional[str] = None
+    hs4Description: Optional[str] = None
     hs6Code: Optional[str] = None
     hs6Description: Optional[str] = None
+    hs8Code: Optional[str] = None
     hs8Description: Optional[str] = None
     combinedDescription: str = ""
+    includeRuleKeywords: str = ""
+    excludeRuleKeywords: str = ""
     hardConditions: str = ""
     cnExplanatoryNote: str = ""
     needsHumanReview: bool = True
@@ -242,6 +289,24 @@ class CnCandidate:
             "search_keyword_matches": list(self.searchKeywordMatches),
             "description_matches": list(self.descriptionMatches),
             "exclude_rule_matches": list(self.excludeRuleMatches),
+            "code_hierarchy": {
+                "hs2": {
+                    "code": self.hs2Code,
+                    "description": self.hs2Description,
+                },
+                "hs4": {
+                    "code": self.hs4Code,
+                    "description": self.hs4Description,
+                },
+                "hs6": {
+                    "code": self.hs6Code,
+                    "description": self.hs6Description,
+                },
+                "cn8": {
+                    "code": self.hs8Code or self.hs8,
+                    "description": self.hs8Description,
+                },
+            },
             "score_breakdown": {
                 "include_rule_points": 4.0 * len(self.includeRuleMatches),
                 "search_keyword_points": 2.0 * len(self.searchKeywordMatches),
@@ -252,13 +317,58 @@ class CnCandidate:
                     "description_matches*1; exclude_rule match forces score 0"
                 ),
             },
+            "hs2_code": self.hs2Code,
+            "hs2_description": self.hs2Description,
+            "hs4_code": self.hs4Code,
+            "hs4_description": self.hs4Description,
             "hs6_code": self.hs6Code,
             "hs6_description": self.hs6Description,
+            "hs8_code": self.hs8Code or self.hs8,
             "hs8_description": self.hs8Description,
             "combined_description": self.combinedDescription,
+            "classification_rule_texts": {
+                "include_rule_keywords": self.includeRuleKeywords,
+                "exclude_rule_keywords": self.excludeRuleKeywords,
+                "hard_conditions": self.hardConditions,
+            },
+            "include_rule_keywords": self.includeRuleKeywords,
+            "exclude_rule_keywords": self.excludeRuleKeywords,
             "hard_conditions": self.hardConditions,
             "cn_explanatory_note": self.cnExplanatoryNote,
             "needs_human_review": self.needsHumanReview,
+        }
+
+    def ToPromptDict(self) -> Dict[str, Any]:
+        candidateData = self.ToDict()
+        codeHierarchy = candidateData["code_hierarchy"]
+        hierarchyPathParts: List[str] = []
+        for level in ["hs2", "hs4", "hs6", "cn8"]:
+            levelData = codeHierarchy.get(level)
+            if not isinstance(levelData, Mapping):
+                continue
+            code = levelData.get("code")
+            description = NormalizeWhitespace(str(levelData.get("description") or ""))
+            if isinstance(code, str) and code.strip() and description:
+                hierarchyPathParts.append("{0}: {1}".format(code, description))
+            elif isinstance(code, str) and code.strip():
+                hierarchyPathParts.append(code)
+        return {
+            "hs8": self.hs8,
+            "hs6_code": self.hs6Code,
+            "domain_scope": self.domainScope,
+            "score": self.score,
+            "code_hierarchy": codeHierarchy,
+            "hierarchy_path_text": " > ".join(hierarchyPathParts),
+            "classification_rule_texts": candidateData[
+                "classification_rule_texts"
+            ],
+            "ranking_evidence": {
+                "include_rule_matches": list(self.includeRuleMatches[:8]),
+                "search_keyword_matches": list(self.searchKeywordMatches[:8]),
+                "description_matches": list(self.descriptionMatches[:8]),
+                "exclude_rule_matches": list(self.excludeRuleMatches[:8]),
+            },
+            "cn_explanatory_note": self.cnExplanatoryNote,
         }
 
 
@@ -402,6 +512,20 @@ class Stage1EvidencePackage:
             if evidenceRecord.evidenceId in selectedEvidenceIdSet
         ]
 
+        def BuildPromptEvidenceRecord(
+            evidenceRecord: Stage1EvidenceRecord,
+        ) -> Dict[str, Any]:
+            evidenceData = evidenceRecord.ToDict()
+            evidenceText = evidenceRecord.text
+            if evidenceRecord.evidenceType == "cn_candidate_card":
+                evidenceText = (
+                    "Candidate details are provided in "
+                    "[stage1_cn_candidate_cards]. Use this evidence_id only "
+                    "when citing the CN candidate card itself."
+                )
+            evidenceData["text"] = TrimText(evidenceText)
+            return evidenceData
+
         return {
             "candidate_citation_requirements": [
                 {
@@ -413,10 +537,7 @@ class Stage1EvidencePackage:
                 )
             ],
             "evidence_records": [
-                {
-                    **evidenceRecord.ToDict(),
-                    "text": TrimText(evidenceRecord.text),
-                }
+                BuildPromptEvidenceRecord(evidenceRecord)
                 for evidenceRecord in selectedEvidenceRecords
             ],
             "common_evidence_ids": list(selectedCommonEvidenceIds),
@@ -622,7 +743,11 @@ class Stage1EvidencePackageBuilder:
                 candidateHs8=candidate.hs8,
                 candidateHs6=candidate.hs6Code,
                 text=self._TrimEvidenceText(
-                    json.dumps(candidate.ToDict(), ensure_ascii=False, indent=2),
+                    json.dumps(
+                        candidate.ToPromptDict(),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
                 ),
                 legalStatus="internal_reference",
                 limitations=[
@@ -635,7 +760,10 @@ class Stage1EvidencePackageBuilder:
             chunkId = self._ReadString(row.get("chunk_id")) or "unknown"
             records.append(
                 Stage1EvidenceRecord(
-                    evidenceId="bti_case_chunk:{0}".format(chunkId),
+                    evidenceId="bti_case_chunk:{0}:{1}".format(
+                        candidate.hs8,
+                        chunkId,
+                    ),
                     evidenceType="bti_case_chunk",
                     sourceName="bti_case_chunks",
                     sourceRef=self._ReadString(row.get("bti_reference")) or chunkId,
@@ -1195,10 +1323,17 @@ class CnCandidateRetriever:
             searchKeywordMatches=list(searchKeywordMatches),
             descriptionMatches=list(descriptionMatches),
             excludeRuleMatches=list(excludeRuleMatches),
+            hs2Code=row.get("hs2_code") or None,
+            hs2Description=row.get("hs2_description") or None,
+            hs4Code=row.get("hs4_code") or None,
+            hs4Description=row.get("hs4_description") or None,
             hs6Code=row.get("hs6_code") or None,
             hs6Description=row.get("hs6_description") or None,
+            hs8Code=row.get("hs8_code") or row.get("hs8") or None,
             hs8Description=row.get("hs8_description") or None,
             combinedDescription=row.get("combined_description", ""),
+            includeRuleKeywords=row.get("include_rule_keywords", ""),
+            excludeRuleKeywords=row.get("exclude_rule_keywords", ""),
             hardConditions=row.get("hard_conditions", ""),
             cnExplanatoryNote=row.get("cn_explanatory_note", ""),
             needsHumanReview=True,
@@ -1419,7 +1554,11 @@ class Stage1ClassificationRequestBuilder:
         return "\n".join(
             [
                 "[stage1_product_classification_input]",
-                json.dumps(productData, ensure_ascii=False, indent=2),
+                json.dumps(
+                    productData,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
             ]
         )
 
@@ -1431,9 +1570,9 @@ class Stage1ClassificationRequestBuilder:
             [
                 "[stage1_cn_candidate_cards]",
                 json.dumps(
-                    [candidate.ToDict() for candidate in candidates],
+                    [candidate.ToPromptDict() for candidate in candidates],
                     ensure_ascii=False,
-                    indent=2,
+                    separators=(",", ":"),
                 ),
             ]
         )
@@ -1457,7 +1596,7 @@ class Stage1ClassificationRequestBuilder:
                         candidateCodes=[candidate.hs8 for candidate in candidates],
                     ),
                     ensure_ascii=False,
-                    indent=2,
+                    separators=(",", ":"),
                 ),
             ]
         )
@@ -1470,7 +1609,7 @@ class Stage1ClassificationRequestBuilder:
         instructions = json.dumps(
             STAGE1_CLASSIFICATION_JSON_INSTRUCTIONS,
             ensure_ascii=False,
-            indent=2,
+            separators=(",", ":"),
         )
         evidenceInstructions = [
             (
@@ -1492,6 +1631,9 @@ class Stage1ClassificationRequestBuilder:
             [
                 "아래 product facts와 CN candidate cards를 검토해 Stage 1 HS6/CN8 후보 검토 JSON을 작성하라.",
                 "최종 법적/통관 판단으로 표현하지 말고, 후보별 가능성·배제 근거·부족 정보를 구분하라.",
+                "각 후보의 code_hierarchy를 사용해 HS2, HS4, HS6, CN8 단계가 상품 정보와 논리적으로 이어지는지 검토하라.",
+                "classification_rule_texts의 include_rule_keywords, exclude_rule_keywords, hard_conditions를 후보별 판단 근거로 검토하라.",
+                "유사 EBTI 사례가 제공된 경우 similar_ebti_cases에 유사점과 차이점을 구분해 작성하라.",
                 *evidenceInstructions,
                 "상품명: {0}".format(productInput.productName or "unknown"),
                 "응답 JSON 구조:",
@@ -1814,7 +1956,8 @@ class Stage1ClassificationResponseValidator:
             )
             return
 
-        expectedHs8Set = {candidate.hs8 for candidate in candidates}
+        candidateByHs8 = {candidate.hs8: candidate for candidate in candidates}
+        expectedHs8Set = set(candidateByHs8.keys())
         reviewedHs8List: List[str] = []
 
         for index, candidateReview in enumerate(candidateReviews):
@@ -1883,6 +2026,24 @@ class Stage1ClassificationResponseValidator:
 
             if isinstance(hs8, str) and hs8 in expectedHs8Set:
                 self._ValidateEvidenceRefs(
+                    candidateReview,
+                    hs8,
+                    evidencePackage,
+                    fieldPath,
+                    issues,
+                )
+                self._ValidateClassificationPathReview(
+                    candidateReview,
+                    candidateByHs8[hs8],
+                    fieldPath,
+                    issues,
+                )
+                self._ValidateClassificationRuleReview(
+                    candidateReview,
+                    fieldPath,
+                    issues,
+                )
+                self._ValidateSimilarEbtiCases(
                     candidateReview,
                     hs8,
                     evidencePackage,
@@ -2039,6 +2200,257 @@ class Stage1ClassificationResponseValidator:
                     ", ".join(duplicateHs8Codes),
                 ),
             )
+
+    def _ValidateClassificationPathReview(
+        self,
+        candidateReview: Mapping[str, Any],
+        candidate: CnCandidate,
+        fieldPath: str,
+        issues: List[Stage1ClassificationResponseValidationIssue],
+    ) -> None:
+        pathReview = candidateReview.get("classification_path_review")
+        pathFieldPath = fieldPath + ".classification_path_review"
+        if not isinstance(pathReview, Mapping):
+            self._AddIssue(
+                issues,
+                "error",
+                "missing_classification_path_review",
+                pathFieldPath,
+                "Candidate review must include classification_path_review object.",
+            )
+            return
+
+        expectedCodes = {
+            "hs2": candidate.hs2Code,
+            "hs4": candidate.hs4Code,
+            "hs6": candidate.hs6Code,
+            "cn8": candidate.hs8Code or candidate.hs8,
+        }
+        reviewedCodes: Dict[str, str] = {}
+
+        for level in STAGE1_CLASSIFICATION_PATH_LEVELS:
+            levelReview = pathReview.get(level)
+            levelFieldPath = "{0}.{1}".format(pathFieldPath, level)
+            if not isinstance(levelReview, Mapping):
+                self._AddIssue(
+                    issues,
+                    "error",
+                    "missing_classification_path_level_review",
+                    levelFieldPath,
+                    "classification_path_review must include {0} object.".format(
+                        level,
+                    ),
+                )
+                continue
+
+            code = levelReview.get("code")
+            if code is not None and not isinstance(code, str):
+                self._AddIssue(
+                    issues,
+                    "error",
+                    "invalid_classification_path_code",
+                    levelFieldPath + ".code",
+                    "Path review code must be string or null.",
+                )
+            elif isinstance(code, str) and code.strip() != "":
+                normalizedCode = NormalizeWhitespace(code)
+                reviewedCodes[level] = normalizedCode
+                expectedCode = expectedCodes.get(level)
+                if expectedCode is not None and normalizedCode != expectedCode:
+                    self._AddIssue(
+                        issues,
+                        "warning",
+                        "classification_path_candidate_code_mismatch",
+                        levelFieldPath + ".code",
+                        (
+                            "Path review {0} code should match candidate code "
+                            "{1}, got {2}."
+                        ).format(level, expectedCode, normalizedCode),
+                    )
+
+            consistency = levelReview.get("consistency")
+            if consistency not in STAGE1_CLASSIFICATION_PATH_ALLOWED_CONSISTENCIES:
+                self._AddIssue(
+                    issues,
+                    "error",
+                    "invalid_classification_path_consistency",
+                    levelFieldPath + ".consistency",
+                    (
+                        "Path review consistency must be one of: {0}."
+                    ).format(
+                        ", ".join(
+                            sorted(
+                                STAGE1_CLASSIFICATION_PATH_ALLOWED_CONSISTENCIES,
+                            )
+                        ),
+                    ),
+                )
+
+            comment = levelReview.get("comment")
+            if not isinstance(comment, str) or comment.strip() == "":
+                self._AddIssue(
+                    issues,
+                    "warning",
+                    "missing_classification_path_comment",
+                    levelFieldPath + ".comment",
+                    "Path review should include a non-empty comment.",
+                )
+
+        for childLevel, parentLevel in [
+            ("hs4", "hs2"),
+            ("hs6", "hs4"),
+            ("cn8", "hs6"),
+        ]:
+            childCode = reviewedCodes.get(childLevel)
+            parentCode = reviewedCodes.get(parentLevel)
+            if childCode is None or parentCode is None:
+                continue
+            if not childCode.startswith(parentCode):
+                self._AddIssue(
+                    issues,
+                    "error",
+                    "classification_path_prefix_mismatch",
+                    "{0}.{1}.code".format(pathFieldPath, childLevel),
+                    "{0} code {1} must start with {2} code {3}.".format(
+                        childLevel,
+                        childCode,
+                        parentLevel,
+                        parentCode,
+                    ),
+                )
+
+    def _ValidateClassificationRuleReview(
+        self,
+        candidateReview: Mapping[str, Any],
+        fieldPath: str,
+        issues: List[Stage1ClassificationResponseValidationIssue],
+    ) -> None:
+        ruleReview = candidateReview.get("classification_rule_review")
+        ruleFieldPath = fieldPath + ".classification_rule_review"
+        if not isinstance(ruleReview, Mapping):
+            self._AddIssue(
+                issues,
+                "error",
+                "missing_classification_rule_review",
+                ruleFieldPath,
+                "Candidate review must include classification_rule_review object.",
+            )
+            return
+
+        for fieldName in [
+            "include_rule_comment",
+            "exclude_rule_comment",
+            "hard_condition_comment",
+        ]:
+            value = ruleReview.get(fieldName)
+            if not isinstance(value, str) or value.strip() == "":
+                self._AddIssue(
+                    issues,
+                    "warning",
+                    "missing_classification_rule_comment",
+                    "{0}.{1}".format(ruleFieldPath, fieldName),
+                    "{0} should be a non-empty string.".format(fieldName),
+                )
+
+    def _ValidateSimilarEbtiCases(
+        self,
+        candidateReview: Mapping[str, Any],
+        hs8: str,
+        evidencePackage: Optional[Stage1EvidencePackage],
+        fieldPath: str,
+        issues: List[Stage1ClassificationResponseValidationIssue],
+    ) -> None:
+        similarCases = candidateReview.get("similar_ebti_cases")
+        similarCasesFieldPath = fieldPath + ".similar_ebti_cases"
+        if not isinstance(similarCases, list):
+            self._AddIssue(
+                issues,
+                "warning",
+                "missing_similar_ebti_cases",
+                similarCasesFieldPath,
+                "Candidate review should include similar_ebti_cases list.",
+            )
+            return
+
+        if evidencePackage is None:
+            return
+
+        evidenceRecordsById: Dict[str, List[Stage1EvidenceRecord]] = {}
+        for evidenceRecord in evidencePackage.evidenceRecords:
+            evidenceRecordsById.setdefault(evidenceRecord.evidenceId, []).append(
+                evidenceRecord,
+            )
+        for caseIndex, similarCase in enumerate(similarCases):
+            caseFieldPath = "{0}[{1}]".format(similarCasesFieldPath, caseIndex)
+            if not isinstance(similarCase, Mapping):
+                self._AddIssue(
+                    issues,
+                    "error",
+                    "similar_ebti_case_not_object",
+                    caseFieldPath,
+                    "similar_ebti_cases entries must be objects.",
+                )
+                continue
+
+            evidenceRef = similarCase.get("evidence_ref")
+            if not isinstance(evidenceRef, str) or evidenceRef.strip() == "":
+                self._AddIssue(
+                    issues,
+                    "error",
+                    "invalid_similar_ebti_evidence_ref",
+                    caseFieldPath + ".evidence_ref",
+                    "similar_ebti_cases evidence_ref must be a non-empty string.",
+                )
+                continue
+
+            evidenceRecords = evidenceRecordsById.get(evidenceRef, [])
+            if not evidenceRecords:
+                self._AddIssue(
+                    issues,
+                    "error",
+                    "unknown_similar_ebti_evidence_ref",
+                    caseFieldPath + ".evidence_ref",
+                    "similar EBTI evidence_ref is not in evidence package: {0}.".format(
+                        evidenceRef,
+                    ),
+                )
+                continue
+
+            if not any(
+                evidenceRecord.evidenceType == "bti_case_chunk"
+                for evidenceRecord in evidenceRecords
+            ):
+                self._AddIssue(
+                    issues,
+                    "warning",
+                    "similar_ebti_ref_not_bti_case",
+                    caseFieldPath + ".evidence_ref",
+                    "similar EBTI evidence_ref should point to bti_case_chunk.",
+                )
+            if not any(
+                evidenceRecord.candidateHs8 == hs8
+                for evidenceRecord in evidenceRecords
+            ):
+                self._AddIssue(
+                    issues,
+                    "warning",
+                    "similar_ebti_ref_candidate_mismatch",
+                    caseFieldPath + ".evidence_ref",
+                    "similar EBTI evidence_ref is not mapped to candidate hs8 {0}.".format(
+                        hs8,
+                    ),
+                )
+
+            for fieldName in ["similarity_comment", "difference_comment"]:
+                value = similarCase.get(fieldName)
+                if not isinstance(value, str) or value.strip() == "":
+                    self._AddIssue(
+                        issues,
+                        "warning",
+                        "missing_similar_ebti_comment",
+                        "{0}.{1}".format(caseFieldPath, fieldName),
+                        "{0} should be a non-empty string.".format(fieldName),
+                    )
 
     def _ValidateHumanReviewWarning(
         self,
@@ -2267,7 +2679,7 @@ class Stage1DecisionPolicy:
             evidenceRefs=evidenceRefs,
             limitations=[
                 "Stage 1 decision policy ranks review outcomes but does not make a final legal/customs determination.",
-                "Human review remains required even when one candidate is recommended.",
+                "Human review remains required even when one candidate is prioritized.",
             ],
         )
 

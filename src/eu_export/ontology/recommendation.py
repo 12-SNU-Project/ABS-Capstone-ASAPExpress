@@ -1,4 +1,4 @@
-"""Stage 1 classification recommendation report."""
+"""Stage 1 classification candidate report."""
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence
@@ -16,11 +16,13 @@ from eu_export.utils import NormalizeWhitespace
 
 @dataclass(frozen=True)
 class Stage1ClassificationRecommendationReport:
-    """LLM 후보 리뷰와 traversal 결과를 제품 단위 추천 의견으로 요약한다."""
+    """LLM 후보 리뷰와 traversal 결과를 제품 단위 후보 검토 의견으로 요약한다."""
 
     productName: Optional[str]
     productDomain: str
     recommendationLevel: str
+    candidateOutputMode: str = "candidate_generation_for_human_review"
+    candidateGenerationProcess: Dict[str, Any] = field(default_factory=dict)
     recommendedCandidate: Optional[Dict[str, Any]] = None
     retainedCandidates: List[Dict[str, Any]] = field(default_factory=list)
     rejectedCandidatesSummary: List[Dict[str, Any]] = field(default_factory=list)
@@ -35,7 +37,12 @@ class Stage1ClassificationRecommendationReport:
         return {
             "product_name": self.productName,
             "product_domain": self.productDomain,
+            "candidate_output_mode": self.candidateOutputMode,
             "recommendation_level": self.recommendationLevel,
+            "candidate_generation_process": dict(self.candidateGenerationProcess),
+            "priority_review_candidate": self.recommendedCandidate,
+            "comparison_review_candidates": list(self.retainedCandidates),
+            "unlikely_candidates_summary": list(self.rejectedCandidatesSummary),
             "recommended_candidate": self.recommendedCandidate,
             "retained_candidates": list(self.retainedCandidates),
             "rejected_candidates_summary": list(self.rejectedCandidatesSummary),
@@ -49,7 +56,7 @@ class Stage1ClassificationRecommendationReport:
 
 
 class Stage1ClassificationRecommendationReportBuilder:
-    """Stage 1 결과 묶음을 user-facing recommendation report로 변환한다."""
+    """Stage 1 결과 묶음을 user-facing 후보 검토 report로 변환한다."""
 
     def Build(
         self,
@@ -96,6 +103,10 @@ class Stage1ClassificationRecommendationReportBuilder:
             productName=productInput.productName,
             productDomain=productInput.productDomain,
             recommendationLevel=self._BuildRecommendationLevel(decisionReport),
+            candidateGenerationProcess=self._BuildCandidateGenerationProcess(
+                productInput,
+                candidates,
+            ),
             recommendedCandidate=recommendedCandidate,
             retainedCandidates=retainedCandidates,
             rejectedCandidatesSummary=rejectedCandidatesSummary,
@@ -117,8 +128,8 @@ class Stage1ClassificationRecommendationReportBuilder:
                     *decisionReport.limitations,
                     *traversalReport.limitations,
                     (
-                        "This recommendation is a provisional system recommendation "
-                        "for human review, not a final legal/customs determination."
+                        "This report surfaces review candidates for human review; "
+                        "it is not a final legal/customs determination."
                     ),
                 ]
             ),
@@ -142,7 +153,32 @@ class Stage1ClassificationRecommendationReportBuilder:
             "evidence_refs": list(candidateReview.get("evidence_refs", []))
             if isinstance(candidateReview.get("evidence_refs"), list)
             else [],
+            "classification_path_review": (
+                dict(candidateReview.get("classification_path_review", {}))
+                if isinstance(
+                    candidateReview.get("classification_path_review"),
+                    Mapping,
+                )
+                else {}
+            ),
+            "classification_rule_review": (
+                dict(candidateReview.get("classification_rule_review", {}))
+                if isinstance(
+                    candidateReview.get("classification_rule_review"),
+                    Mapping,
+                )
+                else {}
+            ),
+            "similar_ebti_cases": list(
+                candidateReview.get("similar_ebti_cases", []),
+            )
+            if isinstance(candidateReview.get("similar_ebti_cases"), list)
+            else [],
         }
+        if candidate is not None:
+            record["candidate_scoring_detail"] = self._BuildCandidateScoringDetail(
+                candidate,
+            )
         if summaryOnly:
             record["conflicting_or_exclusion_facts"] = list(
                 candidateReview.get("conflicting_or_exclusion_facts", []),
@@ -178,6 +214,16 @@ class Stage1ClassificationRecommendationReportBuilder:
                     candidateReview.get("missing_information"),
                     list,
                 ) else [],
+                "code_hierarchy": (
+                    candidate.ToDict().get("code_hierarchy")
+                    if candidate is not None
+                    else {}
+                ),
+                "classification_rule_texts": (
+                    candidate.ToDict().get("classification_rule_texts")
+                    if candidate is not None
+                    else {}
+                ),
                 "hard_conditions": (
                     candidate.hardConditions if candidate is not None else ""
                 ),
@@ -187,6 +233,62 @@ class Stage1ClassificationRecommendationReportBuilder:
             }
         )
         return record
+
+    def _BuildCandidateGenerationProcess(
+        self,
+        productInput: ProductClassificationInput,
+        candidates: Sequence[CnCandidate],
+    ) -> Dict[str, Any]:
+        return {
+            "output_purpose": (
+                "Generate HS6/CN8 candidates and explain why each candidate "
+                "was surfaced. This is not a final classification decision."
+            ),
+            "product_domain": productInput.productDomain,
+            "domain_scopes": list(productInput.domainScopes),
+            "search_text_length": len(productInput.BuildSearchText()),
+            "scoring_rule": {
+                "include_rule_keyword_match": "+4 per match",
+                "search_keyword_match": "+2 per match",
+                "description_token_match": "+1 per match",
+                "exclude_rule_match": "candidate score forced to 0",
+            },
+            "generated_candidate_count": len(candidates),
+            "generated_candidate_codes": [candidate.hs8 for candidate in candidates],
+            "generated_candidates": [
+                {
+                    "hs8": candidate.hs8,
+                    "hs6_code": candidate.hs6Code,
+                    **self._BuildCandidateScoringDetail(candidate),
+                }
+                for candidate in candidates
+            ],
+            "human_review_note": (
+                "The first retained candidate is a priority review candidate, "
+                "not a legally confirmed CN code."
+            ),
+        }
+
+    def _BuildCandidateScoringDetail(
+        self,
+        candidate: CnCandidate,
+    ) -> Dict[str, Any]:
+        candidateData = candidate.ToDict()
+        return {
+            "score": candidate.score,
+            "score_breakdown": candidateData.get("score_breakdown", {}),
+            "matched_terms": list(candidate.matchedTerms),
+            "include_rule_matches": list(candidate.includeRuleMatches),
+            "search_keyword_matches": list(candidate.searchKeywordMatches),
+            "description_matches": list(candidate.descriptionMatches),
+            "exclude_rule_matches": list(candidate.excludeRuleMatches),
+            "code_hierarchy": candidateData.get("code_hierarchy", {}),
+            "classification_rule_texts": candidateData.get(
+                "classification_rule_texts",
+                {},
+            ),
+            "combined_description": candidate.combinedDescription,
+        }
 
     def _BuildEvidenceSummary(
         self,
@@ -222,9 +324,9 @@ class Stage1ClassificationRecommendationReportBuilder:
         decisionReport: Stage1DecisionReport,
     ) -> str:
         if decisionReport.decisionStatus == "single_strong_candidate_for_human_review":
-            return "provisional_system_recommendation"
+            return "single_priority_candidate_for_human_review"
         if decisionReport.decisionStatus == "possible_candidates_need_review":
-            return "tentative_system_recommendation"
+            return "priority_candidate_for_human_review"
         if decisionReport.decisionStatus == "multiple_strong_candidates_need_review":
             return "candidate_comparison_required"
         if decisionReport.decisionStatus == "insufficient_information_before_code_selection":

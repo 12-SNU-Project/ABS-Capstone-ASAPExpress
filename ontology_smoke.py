@@ -193,13 +193,13 @@ class OntologySmokeRunner:
             decisionPolicySummary,
         )
 
-        runLogger.info("STEP 12/13 최종 선택된 LLM 추론 결과를 추천 요약으로 정리합니다")
+        runLogger.info("STEP 12/13 선택된 LLM 후보 검토 결과를 후보 산출 요약으로 정리합니다")
         recommendationReportSummary = self._RunStage1RecommendationReportSmoke(
             llmResponseValidationSummary,
             backtrackingRetrySummary,
         )
 
-        runLogger.info("STEP 13/13 최종 선택된 LLM 추론 결과를 검토용 JSON 패키지로 만듭니다")
+        runLogger.info("STEP 13/13 선택된 LLM 후보 검토 결과를 검토용 JSON 패키지로 만듭니다")
         humanReviewPackageSummary = self._RunStage1HumanReviewPackageSmoke(
             llmResponseValidationSummary,
             backtrackingRetrySummary,
@@ -410,6 +410,44 @@ class OntologySmokeRunner:
                         "domain_scopes": list(productInput.domainScopes),
                         "search_text_length": len(searchText),
                         "search_text_preview": self._BuildTextPreview(searchText),
+                    },
+                    "candidate_generation_process": {
+                        "purpose": "HS6/CN8 후보 산출 과정 설명",
+                        "domain_scope_filter": list(productInput.domainScopes),
+                        "scoring_rule": {
+                            "include_rule_keyword_match": "+4",
+                            "search_keyword_match": "+2",
+                            "description_token_match": "+1",
+                            "exclude_rule_match": "score forced to 0",
+                        },
+                        "candidate_rows": [
+                            {
+                                "rank": candidateIndex,
+                                "hs8": candidate.hs8,
+                                "hs6_code": candidate.hs6Code,
+                                "score": candidate.score,
+                                "score_breakdown": candidate.ToDict().get(
+                                    "score_breakdown",
+                                    {},
+                                ),
+                                "include_rule_matches": list(
+                                    candidate.includeRuleMatches,
+                                ),
+                                "search_keyword_matches": list(
+                                    candidate.searchKeywordMatches,
+                                ),
+                                "description_matches": list(
+                                    candidate.descriptionMatches,
+                                ),
+                                "exclude_rule_matches": list(
+                                    candidate.excludeRuleMatches,
+                                ),
+                            }
+                            for candidateIndex, candidate in enumerate(
+                                candidates,
+                                start=1,
+                            )
+                        ],
                     },
                     "candidate_count": len(candidates),
                     "candidates": [
@@ -868,7 +906,7 @@ class OntologySmokeRunner:
                 (
                     "stage=7 llm_response_valid={} errors={} warnings={} "
                     "generated_text_length={} decision_status={} "
-                    "recommended_hs8={} backtracking={} next_action={}"
+                    "priority_review_hs8={} backtracking={} next_action={}"
                 ),
                 responseValidation["is_valid"],
                 responseValidation["error_count"],
@@ -1209,9 +1247,10 @@ class OntologySmokeRunner:
             retryDecisionReport = self._BuildStage1DecisionReportFromData(
                 llmConnectionResult["decision"],
             )
-            if llmConnectionResult["traversal"]["next_action"] == (
-                "backtrack_candidate_scope"
-            ):
+            retryNextAction = llmConnectionResult["traversal"]["next_action"]
+            if retryNextAction == "retry_llm_response":
+                nextRetryStopReason = "retry_llm_response_required"
+            elif retryNextAction == "backtrack_candidate_scope":
                 nextRetryCandidates = controller.BuildBacktrackingCandidates(
                     productInput=productInput,
                     currentCandidates=backtrackingCandidates,
@@ -1237,8 +1276,12 @@ class OntologySmokeRunner:
                     if not nextRetryCandidates
                     else None
                 )
-            else:
+            elif retryNextAction == "prepare_human_review_package":
                 nextRetryStopReason = "retry_not_required"
+            else:
+                nextRetryStopReason = "unhandled_retry_next_action:{0}".format(
+                    retryNextAction,
+                )
             if isinstance(llmConnectionResult.get("recommendation"), dict):
                 llmConnectionResult["recommendation"]["backtracking_summary"][
                     "next_retry_stop_reason"
@@ -1302,6 +1345,33 @@ class OntologySmokeRunner:
                 selectedSource = "stage11_backtracking_retry"
                 selectedLlmConnection = retryLlmConnection
 
+        selectedValidation = selectedLlmConnection.get("validation", {})
+        if (
+            isinstance(selectedValidation, dict)
+            and "is_valid" in selectedValidation
+            and selectedValidation.get("is_valid") is not True
+        ):
+            result = {
+                "status": "skipped",
+                "reason": "selected llm response is invalid",
+                "selected_source": selectedSource,
+                "upstream_llm_status": selectedLlmConnection.get("status"),
+                "validation_error_count": selectedValidation.get("error_count"),
+                "validation_warning_count": selectedValidation.get("warning_count"),
+                "validation_issues": selectedValidation.get("issues", []),
+            }
+            self._Logger("Stage12RecommendationReport").warning(
+                (
+                    "status=skipped reason={} selected_source={} "
+                    "validation_errors={} validation_warnings={}"
+                ),
+                result["reason"],
+                result["selected_source"],
+                result["validation_error_count"],
+                result["validation_warning_count"],
+            )
+            return result
+
         recommendationReport = selectedLlmConnection.get("recommendation")
         if not isinstance(recommendationReport, dict):
             result = {
@@ -1340,7 +1410,8 @@ class OntologySmokeRunner:
         self._Logger("Stage12RecommendationReport").info(
             (
                 "stage=12 source={} recommendation_level={} "
-                "recommended_hs8={} retained={} rejected={}"
+                "priority_review_hs8={} comparison_candidates={} "
+                "unlikely_candidates={}"
             ),
             result["selected_source"],
             recommendationReport.get("recommendation_level"),
@@ -1350,7 +1421,7 @@ class OntologySmokeRunner:
         )
         if "natural_language_answer" in result:
             self._Logger("Stage12RecommendationReport").info(
-                "최종 선택된 LLM 추론 자연어 결과\n{}",
+                "선택된 LLM 후보 검토 자연어 결과\n{}",
                 result["natural_language_answer"],
             )
         return result
@@ -1374,6 +1445,33 @@ class OntologySmokeRunner:
             if retryScenarioKind == "actual_backtracking_inference":
                 selectedSource = "stage11_backtracking_retry"
                 selectedLlmConnection = retryLlmConnection
+
+        selectedValidation = selectedLlmConnection.get("validation", {})
+        if (
+            isinstance(selectedValidation, dict)
+            and "is_valid" in selectedValidation
+            and selectedValidation.get("is_valid") is not True
+        ):
+            result = {
+                "status": "skipped",
+                "reason": "selected llm response is invalid",
+                "selected_source": selectedSource,
+                "upstream_llm_status": selectedLlmConnection.get("status"),
+                "validation_error_count": selectedValidation.get("error_count"),
+                "validation_warning_count": selectedValidation.get("warning_count"),
+                "validation_issues": selectedValidation.get("issues", []),
+            }
+            self._Logger("Stage13HumanReviewPackage").warning(
+                (
+                    "status=skipped reason={} selected_source={} "
+                    "validation_errors={} validation_warnings={}"
+                ),
+                result["reason"],
+                result["selected_source"],
+                result["validation_error_count"],
+                result["validation_warning_count"],
+            )
+            return result
 
         packageData = selectedLlmConnection.get("human_review_package")
         if not isinstance(packageData, dict):
@@ -1425,16 +1523,16 @@ class OntologySmokeRunner:
                 packageData.get("source_evidence_records", []),
             ),
             "validation_issue_count": len(packageData.get("validation_issues", [])),
-            "recommended_hs8": recommendedHs8,
+            "priority_review_hs8": recommendedHs8,
         }
         self._Logger("Stage13HumanReviewPackage").info(
             (
-                "stage=13 source={} package_id={} recommended_hs8={} "
+                "stage=13 source={} package_id={} priority_review_hs8={} "
                 "citations={} source_evidence={} validation_issues={}"
             ),
             result["selected_source"],
             result["package_id"],
-            result["recommended_hs8"],
+            result["priority_review_hs8"],
             result["evidence_citation_count"],
             result["source_evidence_record_count"],
             result["validation_issue_count"],
@@ -1710,35 +1808,92 @@ class OntologySmokeRunner:
         evidencePackage: Stage1EvidencePackage,
         candidateStatus: str = "possible_candidate",
     ) -> str:
+        candidateReviews: List[Dict[str, Any]] = []
+        for candidate in candidates:
+            candidateData = candidate.ToDict()
+            codeHierarchy = candidateData.get("code_hierarchy", {})
+            classificationPathReview = {}
+            if isinstance(codeHierarchy, dict):
+                for level in ["hs2", "hs4", "hs6", "cn8"]:
+                    levelData = codeHierarchy.get(level, {})
+                    classificationPathReview[level] = {
+                        "code": (
+                            levelData.get("code")
+                            if isinstance(levelData, dict)
+                            else None
+                        ),
+                        "consistency": "needs_review",
+                        "comment": (
+                            "Smoke fixture keeps hierarchy review explicit; "
+                            "actual consistency must be inferred by LLM and "
+                            "confirmed by human review."
+                        ),
+                    }
+
+            similarEbtiCases = []
+            for evidenceRecord in evidencePackage.evidenceRecords:
+                if evidenceRecord.candidateHs8 != candidate.hs8:
+                    continue
+                if evidenceRecord.evidenceType != "bti_case_chunk":
+                    continue
+                similarEbtiCases.append(
+                    {
+                        "evidence_ref": evidenceRecord.evidenceId,
+                        "similarity_comment": (
+                            "Smoke fixture references a BTI case mapped to the "
+                            "same candidate for comparative review."
+                        ),
+                        "difference_comment": (
+                            "Actual product-specific differences must be checked "
+                            "from product facts and BTI evidence text."
+                        ),
+                    }
+                )
+                break
+
+            candidateReviews.append(
+                {
+                    "hs8": candidate.hs8,
+                    "hs6_code": candidate.hs6Code,
+                    "status": candidateStatus,
+                    "supporting_product_facts": [
+                        "Smoke fixture uses the candidate card and product collection result.",
+                    ],
+                    "conflicting_or_exclusion_facts": [],
+                    "missing_information": [
+                        "Human review must confirm classification-specific facts.",
+                    ],
+                    "evidence_refs": self._BuildStage1FixtureEvidenceRefs(
+                        candidate,
+                        evidencePackage,
+                    ),
+                    "classification_path_review": classificationPathReview,
+                    "classification_rule_review": {
+                        "include_rule_comment": (
+                            "Review include_rule_keywords against product facts."
+                        ),
+                        "exclude_rule_comment": (
+                            "Review exclude_rule_keywords as rejection conditions."
+                        ),
+                        "hard_condition_comment": (
+                            "Review hard_conditions before accepting the candidate."
+                        ),
+                    },
+                    "similar_ebti_cases": similarEbtiCases,
+                    "reason": (
+                        "Fixture response for validator smoke; not an actual "
+                        "classification decision."
+                    ),
+                    "human_review_required": True,
+                }
+            )
+
         responseData = {
             "classification_result": {
                 "product_name": productInput.productName,
                 "product_domain": productInput.productDomain,
                 "domain_scopes": list(productInput.domainScopes),
-                "candidate_reviews": [
-                    {
-                        "hs8": candidate.hs8,
-                        "hs6_code": candidate.hs6Code,
-                        "status": candidateStatus,
-                        "supporting_product_facts": [
-                            "Smoke fixture uses the candidate card and product collection result.",
-                        ],
-                        "conflicting_or_exclusion_facts": [],
-                        "missing_information": [
-                            "Human review must confirm classification-specific facts.",
-                        ],
-                        "evidence_refs": self._BuildStage1FixtureEvidenceRefs(
-                            candidate,
-                            evidencePackage,
-                        ),
-                        "reason": (
-                            "Fixture response for validator smoke; not an actual "
-                            "classification decision."
-                        ),
-                        "human_review_required": True,
-                    }
-                    for candidate in candidates
-                ],
+                "candidate_reviews": candidateReviews,
                 "not_enough_information": [
                     "Official classification must be reviewed by a human.",
                 ],
