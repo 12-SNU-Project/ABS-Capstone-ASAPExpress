@@ -64,7 +64,7 @@ DEFAULT_MAX_PRODUCT_SMOKE_INPUTS = 2
 DEFAULT_PHASE_ID = "stage1_classification"
 DEFAULT_WRITE_SUMMARY_ARTIFACT = True
 DEFAULT_TEXT_PREVIEW_CHARACTERS = 700
-DEFAULT_VALIDATION_ISSUE_PREVIEW_COUNT = 5
+DEFAULT_VALIDATION_ISSUE_PREVIEW_COUNT = 3
 DEFAULT_RESOURCE_CHECK_PREVIEW_COUNT = 8
 DEFAULT_MAX_VALIDATION_FIXTURE_CANDIDATES = 3
 DEFAULT_STAGE1_BACKTRACKING_RETRY_ATTEMPT = 0
@@ -171,7 +171,7 @@ class OntologySmokeRunner:
             contextBuilder,
         )
 
-        runLogger.info("STEP 7/13 LLM 응답 JSON이 약속한 구조를 지키는지 검증합니다")
+        runLogger.info("STEP 7/13 메인 LLM 후보 검토 응답을 생성하고 검증합니다")
         llmResponseValidationSummary = self._RunLlmResponseValidationSmoke(
             contextBuilder,
         )
@@ -179,27 +179,27 @@ class OntologySmokeRunner:
         runLogger.info("STEP 8/13 후보 판단에 사용할 근거 묶음을 만듭니다")
         evidencePackageSummary = self._RunEvidencePackageSmoke(contextBuilder)
 
-        runLogger.info("STEP 9/13 검증된 후보 리뷰를 진행/보류/되돌림 판단으로 정리합니다")
+        runLogger.info("STEP 9/13 후보 리뷰 정책을 fixture 시나리오로 검증합니다")
         decisionPolicySummary = self._RunStage1DecisionPolicySmoke(contextBuilder)
 
-        runLogger.info("STEP 10/13 다음 파이프라인 동작을 결정합니다")
+        runLogger.info("STEP 10/13 fixture 시나리오의 다음 파이프라인 동작을 확인합니다")
         traversalControllerSummary = self._RunStage1TraversalControllerSmoke(
             decisionPolicySummary,
         )
 
-        runLogger.info("STEP 11/13 후보 선택이 부적절할 때 같은 계층의 대체 후보를 준비합니다")
+        runLogger.info("STEP 11/13 백트래킹 예외 경로를 fixture 시나리오로 검증합니다")
         backtrackingRetrySummary = self._RunStage1BacktrackingRetrySmoke(
             contextBuilder,
             decisionPolicySummary,
         )
 
-        runLogger.info("STEP 12/13 최종 후보 추천 요약을 만듭니다")
+        runLogger.info("STEP 12/13 최종 선택된 LLM 추론 결과를 추천 요약으로 정리합니다")
         recommendationReportSummary = self._RunStage1RecommendationReportSmoke(
             llmResponseValidationSummary,
             backtrackingRetrySummary,
         )
 
-        runLogger.info("STEP 13/13 사람이 검토할 최종 JSON 패키지를 만듭니다")
+        runLogger.info("STEP 13/13 최종 선택된 LLM 추론 결과를 검토용 JSON 패키지로 만듭니다")
         humanReviewPackageSummary = self._RunStage1HumanReviewPackageSmoke(
             llmResponseValidationSummary,
             backtrackingRetrySummary,
@@ -879,10 +879,6 @@ class OntologySmokeRunner:
                 responseDecision["backtracking_recommended"],
                 responseTraversal["next_action"],
             )
-            validationLogger.info(
-                "stage=7 LLM 자연어 요약\n{}",
-                result["llm_connection"]["natural_language_answer"],
-            )
         elif result["llm_connection"]["status"] == "failed":
             validationLogger.warning(
                 "stage=7 llm_connection_error={}",
@@ -981,6 +977,8 @@ class OntologySmokeRunner:
         )
         result = {
             "status": "completed",
+            "scenario_kind": "policy_fixture_decision",
+            "is_main_flow": False,
             "product_name": productInput.productName,
             "candidate_count": len(candidates),
             "possible_fixture_decision": possibleDecisionReport.ToDict(),
@@ -988,9 +986,10 @@ class OntologySmokeRunner:
         }
         self._Logger("Stage9DecisionPolicy").info(
             (
-                "stage=9 product={} candidates={} possible_status={} "
+                "stage=9 scenario={} product={} candidates={} possible_status={} "
                 "backtracking_status={} backtracking_recommended={}"
             ),
+            result["scenario_kind"],
             result["product_name"],
             result["candidate_count"],
             result["possible_fixture_decision"]["decision_status"],
@@ -1059,6 +1058,8 @@ class OntologySmokeRunner:
         )
         result = {
             "status": "completed",
+            "scenario_kind": "policy_fixture_traversal",
+            "is_main_flow": False,
             "possible_fixture_traversal": possibleTraversalReport.ToDict(),
             "backtracking_fixture_traversal": backtrackingTraversalReport.ToDict(),
             "backtracking_candidate_count": len(backtrackingCandidates),
@@ -1072,10 +1073,11 @@ class OntologySmokeRunner:
         traversalLogger = self._Logger("Stage10TraversalController")
         traversalLogger.info(
             (
-                "stage=10 possible_action={} possible_status={} "
+                "stage=10 scenario={} possible_action={} possible_status={} "
                 "backtracking_action={} backtracking_status={} "
                 "backtracking_candidates={} codes={}"
             ),
+            result["scenario_kind"],
             result["possible_fixture_traversal"]["next_action"],
             result["possible_fixture_traversal"]["traversal_status"],
             result["backtracking_fixture_traversal"]["next_action"],
@@ -1244,6 +1246,8 @@ class OntologySmokeRunner:
 
         result = {
             "status": "completed",
+            "scenario_kind": "policy_fixture_backtracking_inference",
+            "is_main_flow": False,
             "product_name": productInput.productName,
             "max_retry_count": DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
             "completed_retry_count": DEFAULT_STAGE1_BACKTRACKING_RETRY_ATTEMPT + 1,
@@ -1258,9 +1262,10 @@ class OntologySmokeRunner:
         retryLogger = self._Logger("Stage11BacktrackingRetry")
         retryLogger.info(
             (
-                "stage=11 product={} retry_candidates={} codes={} "
+                "stage=11 scenario={} product={} retry_candidates={} codes={} "
                 "evidence_records={} llm_status={} next_retry_stop={}"
             ),
+            result["scenario_kind"],
             result["product_name"],
             result["retry_candidate_count"],
             result["retry_candidate_codes"],
@@ -1274,10 +1279,6 @@ class OntologySmokeRunner:
                 "stage=11 retry_next_action={} retry_status={}",
                 retryTraversal["next_action"],
                 retryTraversal["traversal_status"],
-            )
-            retryLogger.info(
-                "stage=11 LLM 자연어 요약\n{}",
-                result["llm_connection"]["natural_language_answer"],
             )
         return result
 
@@ -1296,8 +1297,10 @@ class OntologySmokeRunner:
             {},
         )
         if retryLlmConnection.get("status") == "completed":
-            selectedSource = "stage11_backtracking_retry"
-            selectedLlmConnection = retryLlmConnection
+            retryScenarioKind = backtrackingRetrySummary.get("scenario_kind")
+            if retryScenarioKind == "actual_backtracking_inference":
+                selectedSource = "stage11_backtracking_retry"
+                selectedLlmConnection = retryLlmConnection
 
         recommendationReport = selectedLlmConnection.get("recommendation")
         if not isinstance(recommendationReport, dict):
@@ -1305,11 +1308,18 @@ class OntologySmokeRunner:
                 "status": "skipped",
                 "reason": "recommendation report is unavailable",
                 "selected_source": selectedSource,
+                "upstream_llm_status": selectedLlmConnection.get("status"),
+                "upstream_llm_error": selectedLlmConnection.get("error"),
             }
             self._Logger("Stage12RecommendationReport").warning(
-                "status=skipped reason={} selected_source={}",
+                (
+                    "status=skipped reason={} selected_source={} "
+                    "upstream_llm_status={} upstream_llm_error={}"
+                ),
                 result["reason"],
                 result["selected_source"],
+                result["upstream_llm_status"],
+                result["upstream_llm_error"],
             )
             return result
 
@@ -1318,6 +1328,9 @@ class OntologySmokeRunner:
             "selected_source": selectedSource,
             "recommendation_report": recommendationReport,
         }
+        naturalLanguageAnswer = selectedLlmConnection.get("natural_language_answer")
+        if isinstance(naturalLanguageAnswer, str) and naturalLanguageAnswer.strip():
+            result["natural_language_answer"] = naturalLanguageAnswer
         recommendedCandidate = recommendationReport.get("recommended_candidate")
         recommendedHs8 = (
             recommendedCandidate.get("hs8")
@@ -1335,6 +1348,11 @@ class OntologySmokeRunner:
             len(recommendationReport.get("retained_candidates", [])),
             len(recommendationReport.get("rejected_candidates_summary", [])),
         )
+        if "natural_language_answer" in result:
+            self._Logger("Stage12RecommendationReport").info(
+                "최종 선택된 LLM 추론 자연어 결과\n{}",
+                result["natural_language_answer"],
+            )
         return result
 
     def _RunStage1HumanReviewPackageSmoke(
@@ -1352,8 +1370,10 @@ class OntologySmokeRunner:
             {},
         )
         if retryLlmConnection.get("status") == "completed":
-            selectedSource = "stage11_backtracking_retry"
-            selectedLlmConnection = retryLlmConnection
+            retryScenarioKind = backtrackingRetrySummary.get("scenario_kind")
+            if retryScenarioKind == "actual_backtracking_inference":
+                selectedSource = "stage11_backtracking_retry"
+                selectedLlmConnection = retryLlmConnection
 
         packageData = selectedLlmConnection.get("human_review_package")
         if not isinstance(packageData, dict):
@@ -1361,11 +1381,18 @@ class OntologySmokeRunner:
                 "status": "skipped",
                 "reason": "human review package is unavailable",
                 "selected_source": selectedSource,
+                "upstream_llm_status": selectedLlmConnection.get("status"),
+                "upstream_llm_error": selectedLlmConnection.get("error"),
             }
             self._Logger("Stage13HumanReviewPackage").warning(
-                "status=skipped reason={} selected_source={}",
+                (
+                    "status=skipped reason={} selected_source={} "
+                    "upstream_llm_status={} upstream_llm_error={}"
+                ),
                 result["reason"],
                 result["selected_source"],
+                result["upstream_llm_status"],
+                result["upstream_llm_error"],
             )
             return result
 
