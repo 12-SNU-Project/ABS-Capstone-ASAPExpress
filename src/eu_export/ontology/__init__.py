@@ -5,10 +5,23 @@ from eu_export.ontology.classification import (
     CnCandidateRetriever,
     ProductClassificationInput,
     ProductClassificationInputNormalizer,
+    Stage1EvidencePackageBuilder,
+    Stage1EvidencePackage,
+    Stage1EvidenceRecord,
+    Stage1ClassificationResponseValidationIssue,
+    Stage1ClassificationResponseValidationReport,
+    Stage1ClassificationResponseValidator,
     Stage1ClassificationRequestBuilder,
+    Stage1DecisionPolicy,
+    Stage1DecisionReport,
 )
 from eu_export.ontology.context import ContextPackager
 from eu_export.ontology.context_builder import OntologyContextBuilder
+from eu_export.ontology.human_review import (
+    Stage1HumanReviewPackage,
+    Stage1HumanReviewPackageBuilder,
+    Stage1HumanReviewReportFormatter,
+)
 from eu_export.ontology.loader import OntologyDocumentLoader
 from eu_export.ontology.request_builder import LlmRequestBuilder, OntologyRequestBuilder
 from eu_export.ontology.resource_resolver import (
@@ -17,12 +30,21 @@ from eu_export.ontology.resource_resolver import (
     OntologyResourceResolver,
 )
 from eu_export.ontology.retriever import OntologyRetriever
+from eu_export.ontology.recommendation import (
+    Stage1ClassificationRecommendationReport,
+    Stage1ClassificationRecommendationReportBuilder,
+)
 from eu_export.ontology.schema import (
     OntologyChunk,
     OntologyDocument,
     OntologyDocumentKind,
     OntologyRetrievalResult,
     PackagedOntologyContext,
+)
+from eu_export.ontology.traversal import (
+    DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
+    Stage1TraversalController,
+    Stage1TraversalReport,
 )
 from eu_export.ontology.validator import (
     OntologyGraphValidator,
@@ -43,7 +65,12 @@ __all__ = [
     "OntologyDocumentKind",
     "OntologyDocumentLoader",
     "OntologyGraphValidator",
+    "Stage1HumanReviewPackage",
+    "Stage1HumanReviewPackageBuilder",
+    "Stage1HumanReviewReportFormatter",
     "OntologyRequestBuilder",
+    "Stage1ClassificationRecommendationReport",
+    "Stage1ClassificationRecommendationReportBuilder",
     "OntologyResourceResolutionReport",
     "OntologyResourceResolver",
     "OntologyRetrievalResult",
@@ -54,5 +81,16 @@ __all__ = [
     "PackagedOntologyContext",
     "ProductClassificationInput",
     "ProductClassificationInputNormalizer",
+    "Stage1EvidencePackageBuilder",
+    "Stage1EvidencePackage",
+    "Stage1EvidenceRecord",
+    "Stage1ClassificationResponseValidationIssue",
+    "Stage1ClassificationResponseValidationReport",
+    "Stage1ClassificationResponseValidator",
     "Stage1ClassificationRequestBuilder",
+    "Stage1DecisionPolicy",
+    "Stage1DecisionReport",
+    "DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT",
+    "Stage1TraversalController",
+    "Stage1TraversalReport",
 ]
