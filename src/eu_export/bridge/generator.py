@@ -3,6 +3,7 @@
 import json
 import os
 from abc import ABC, abstractmethod
+from http.client import HTTPException
 from typing import Any, Dict, List
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -376,6 +377,10 @@ def _PostJson(
     except URLError as error:
         raise RuntimeGenerationError(
             "Runtime endpoint is not reachable: {0}".format(error.reason)
+        ) from error
+    except (HTTPException, TimeoutError, OSError) as error:
+        raise RuntimeGenerationError(
+            "Runtime HTTP response could not be read: {0}".format(error)
         ) from error
 
     if responseBody.strip() == "":
