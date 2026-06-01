@@ -52,21 +52,37 @@ class KurlyMarketSmokeRunner:
         self._ConfigureLogger()
         runLogger = self._Logger("Run")
         runLogger.info(
-            "starting KurlyMarket smoke url_count={} run_ocr_fallback={}",
+            "KurlyMarket 상품 수집 smoke를 시작합니다 url_count={} run_ocr_fallback={}",
             len(DEFAULT_PRODUCT_URLS),
             DEFAULT_RUN_OCR_FALLBACK,
         )
 
+        runLogger.info("STEP 1/4 상품 페이지 수집/OCR 파이프라인을 준비합니다")
         productSourcePipeline = self._BuildProductSourcePipeline()
+
+        runLogger.info(
+            "STEP 2/4 KurlyMarket 상품 페이지를 수집합니다 url_count={}",
+            len(DEFAULT_PRODUCT_URLS),
+        )
         results: List[Dict[str, Any]] = []
-        for productUrl in DEFAULT_PRODUCT_URLS:
+        for productIndex, productUrl in enumerate(DEFAULT_PRODUCT_URLS, start=1):
+            runLogger.info(
+                "STEP 2/4 상품 페이지 수집 index={}/{} url={}",
+                productIndex,
+                len(DEFAULT_PRODUCT_URLS),
+                productUrl,
+            )
             resultData = self._RunOne(productSourcePipeline, productUrl)
             results.append(resultData)
             self._LogOne(resultData)
 
+        runLogger.info("STEP 3/4 상품 수집 결과를 요약합니다")
         self._LogSummary(results)
         if DEFAULT_WRITE_SUMMARY_ARTIFACT:
+            runLogger.info("STEP 4/4 상품 수집 결과 JSON artifact를 저장합니다")
             self._WriteSummaryArtifact(results)
+        else:
+            runLogger.info("STEP 4/4 상품 수집 결과 JSON artifact 저장을 건너뜁니다")
 
     def _BuildProductSourcePipeline(self) -> KurlyMarketProductSourcePipeline:
         collector = KurlyMarketProductPageCollector(
@@ -133,6 +149,11 @@ class KurlyMarketSmokeRunner:
 
         return {
             "product_page_url": productUrl,
+            "collection_result": collectionResult,
+            "rendered_page_evidence": pipelineResultData["rendered_page_evidence"],
+            "ocr_image_results": ocrImageResults,
+            "combined_ocr_text": combinedOcrText,
+            "steps": pipelineResultData["steps"],
             "status": {
                 "is_parse_ok": self._IsParseOk(collectionResult, parsedProductPage),
                 "is_ocr_fallback_ok": isOcrFallbackOk,
@@ -429,6 +450,9 @@ class KurlyMarketSmokeRunner:
 
     def _ConfigureLogger(self) -> None:
         logger.remove()
+        logger.level("INFO", color="<green>")
+        logger.level("WARNING", color="<yellow>")
+        logger.level("ERROR", color="<red>")
         logger.configure(
             extra={
                 "className": "KurlyMarketSmokeRunner",
@@ -437,8 +461,12 @@ class KurlyMarketSmokeRunner:
         )
         logger.add(
             sys.stderr,
-            format="[{level}] {extra[className]}::{extra[functionName]}: {message}",
+            format=(
+                "<level>[{level}]</level> "
+                "<cyan>{extra[className]}::{extra[functionName]}: {message}</cyan>"
+            ),
             level="INFO",
+            colorize=True,
         )
 
     def _Logger(self, functionName: str) -> Any:
