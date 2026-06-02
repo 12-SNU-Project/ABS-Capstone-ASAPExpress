@@ -21,7 +21,6 @@ from eu_export.product.kurly_market_schema import (
 )
 from eu_export.product.pipeline import (
     KurlyMarketProductSourcePipeline,
-    Pipeline,
 )
 from eu_export.product.pipeline_schema import (
     KurlyMarketProductSourcePipelineInput,
@@ -66,7 +65,6 @@ __all__ = [
     "KurlyMarketRenderedPageEvidence",
     "LlmQueryInterpreter",
     "PaddleOcrEngine",
-    "Pipeline",
     "ProductDomainHint",
     "ProductOcrFallbackRunner",
     "ProductOcrEngine",

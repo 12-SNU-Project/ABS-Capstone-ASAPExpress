@@ -9,6 +9,8 @@ from eu_export.ontology.classification import (
     DEFAULT_CN_CANDIDATE_TOP_K,
     ProductClassificationInput,
     Stage1ClassificationResponseValidationReport,
+)
+from eu_export.ontology.decision_policy import (
     Stage1DecisionPolicy,
     Stage1DecisionReport,
 )

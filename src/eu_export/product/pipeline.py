@@ -1,7 +1,6 @@
-"""상품 정보 수집 단계의 generic pipeline과 KurlyMarket wrapper."""
+"""상품 정보 수집 단계의 KurlyMarket wrapper."""
 
-from abc import ABC, abstractmethod
-from typing import Generic, List, Optional, TypeVar
+from typing import List, Optional
 
 from eu_export.product.kurly_market_collector import KurlyMarketProductPageCollector
 from eu_export.product.kurly_market_schema import KurlyMarketProductPageCollectionResult
@@ -16,24 +15,8 @@ from eu_export.product.pipeline_schema import (
     KurlyMarketProductSourcePipelineStep,
 )
 
-PipelineInputT = TypeVar("PipelineInputT")
-PipelineOutputT = TypeVar("PipelineOutputT")
 
-
-class Pipeline(ABC, Generic[PipelineInputT, PipelineOutputT]):
-    """입력 하나를 받아 결과 하나를 반환하는 pipeline interface."""
-
-    @abstractmethod
-    def Run(self, pipelineInput: PipelineInputT) -> PipelineOutputT:
-        raise NotImplementedError
-
-
-class KurlyMarketProductSourcePipeline(
-    Pipeline[
-        KurlyMarketProductSourcePipelineInput,
-        KurlyMarketProductSourcePipelineResult,
-    ],
-):
+class KurlyMarketProductSourcePipeline:
     """KurlyMarket parser와 PaddleOCR fallback을 단계적으로 연결하는 wrapper."""
 
     def __init__(

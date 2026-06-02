@@ -1,6 +1,5 @@
-"""Stage 1 human review package and report formatting."""
+"""Stage 1 human review package."""
 
-import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
@@ -336,10 +335,3 @@ class Stage1HumanReviewPackageBuilder:
             seenValues.add(normalizedValue)
             uniqueValues.append(normalizedValue)
         return uniqueValues
-
-
-class Stage1HumanReviewReportFormatter:
-    """HumanReviewPackage를 GUI가 소비할 JSON 문자열로 출력한다."""
-
-    def FormatJson(self, package: Stage1HumanReviewPackage) -> str:
-        return json.dumps(package.ToDict(), ensure_ascii=False, indent=2)

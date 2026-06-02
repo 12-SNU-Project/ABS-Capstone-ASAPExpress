@@ -7,9 +7,9 @@ from eu_export.ontology.classification import (
     CnCandidate,
     ProductClassificationInput,
     Stage1ClassificationResponseValidationReport,
-    Stage1DecisionReport,
     Stage1EvidencePackage,
 )
+from eu_export.ontology.decision_policy import Stage1DecisionReport
 from eu_export.ontology.traversal import Stage1TraversalReport
 from eu_export.utils import NormalizeWhitespace
 

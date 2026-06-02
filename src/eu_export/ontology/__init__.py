@@ -12,15 +12,16 @@ from eu_export.ontology.classification import (
     Stage1ClassificationResponseValidationReport,
     Stage1ClassificationResponseValidator,
     Stage1ClassificationRequestBuilder,
-    Stage1DecisionPolicy,
-    Stage1DecisionReport,
 )
 from eu_export.ontology.context import ContextPackager
 from eu_export.ontology.context_builder import OntologyContextBuilder
+from eu_export.ontology.decision_policy import (
+    Stage1DecisionPolicy,
+    Stage1DecisionReport,
+)
 from eu_export.ontology.human_review import (
     Stage1HumanReviewPackage,
     Stage1HumanReviewPackageBuilder,
-    Stage1HumanReviewReportFormatter,
 )
 from eu_export.ontology.loader import OntologyDocumentLoader
 from eu_export.ontology.request_builder import LlmRequestBuilder, OntologyRequestBuilder
@@ -67,7 +68,6 @@ __all__ = [
     "OntologyGraphValidator",
     "Stage1HumanReviewPackage",
     "Stage1HumanReviewPackageBuilder",
-    "Stage1HumanReviewReportFormatter",
     "OntologyRequestBuilder",
     "Stage1ClassificationRecommendationReport",
     "Stage1ClassificationRecommendationReportBuilder",
