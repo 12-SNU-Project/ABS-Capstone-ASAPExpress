@@ -1,27 +1,34 @@
 """식품/화장품 공통 SearchPlan, KurlyMarket parser, OCR package."""
 
 from eu_export.product.kurly_market import (
-    KurlyMarketCollectionError,
     KurlyMarketBaseProductPageParser,
     KurlyMarketCosmeticsProductPageParser,
     KurlyMarketFoodProductPageParser,
-    KurlyMarketProductDomain,
     KurlyMarketProductDomainDetector,
+    KurlyMarketProductPageParser,
+)
+from eu_export.product.kurly_market_collector import (
+    KurlyMarketCollectionError,
+    KurlyMarketProductPageCollector,
+)
+from eu_export.product.kurly_market_schema import (
+    KurlyMarketProductDomain,
     KurlyMarketProductNoticeField,
-    KurlyMarketProductNoticeGroup,
     KurlyMarketProductNoticeOptionRecord,
     KurlyMarketProductPageCollectionResult,
-    KurlyMarketProductPageCollector,
     KurlyMarketProductPageParseResult,
-    KurlyMarketProductPageParser,
     KurlyMarketRenderedPageEvidence,
 )
 from eu_export.product.pipeline import (
     KurlyMarketProductSourcePipeline,
+)
+from eu_export.product.pipeline_schema import (
     KurlyMarketProductSourcePipelineInput,
     KurlyMarketProductSourcePipelineResult,
     KurlyMarketProductSourcePipelineStep,
-    Pipeline,
+)
+from eu_export.product.ocr_fallback import (
+    ProductOcrFallbackRunner,
     ProductOcrImageResult,
 )
 from eu_export.product.search_plan import (
@@ -46,7 +53,6 @@ __all__ = [
     "KurlyMarketProductDomain",
     "KurlyMarketProductDomainDetector",
     "KurlyMarketProductNoticeField",
-    "KurlyMarketProductNoticeGroup",
     "KurlyMarketProductNoticeOptionRecord",
     "KurlyMarketProductPageCollectionResult",
     "KurlyMarketProductPageCollector",
@@ -59,8 +65,8 @@ __all__ = [
     "KurlyMarketRenderedPageEvidence",
     "LlmQueryInterpreter",
     "PaddleOcrEngine",
-    "Pipeline",
     "ProductDomainHint",
+    "ProductOcrFallbackRunner",
     "ProductOcrEngine",
     "ProductOcrError",
     "ProductOcrImageResult",

@@ -1,13 +1,37 @@
-"""Kurly Market 상품 상세 page collector/parser."""
+"""KurlyMarket 상품 상세 parser.
+
+Collector와 HTML extractor는 전용 모듈에 있지만, 기존 import 경로 호환을
+위해 이 모듈에서도 alias로 노출한다.
+"""
 
 import re
-from dataclasses import dataclass, field
-from enum import Enum
-from html.parser import HTMLParser
-from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin, urlparse
+from typing import List, Optional
+from urllib.parse import urlparse
 
+from eu_export.product.kurly_market_collector import (
+    KurlyMarketCollectionError,
+    KurlyMarketProductPageCollector,
+)
+from eu_export.product.kurly_market_html import KurlyMarketHtmlTextExtractor
+from eu_export.product.kurly_market_schema import (
+    KurlyMarketProductDomain,
+    KurlyMarketProductNoticeField,
+    KurlyMarketProductNoticeOptionRecord,
+    KurlyMarketProductPageParseResult,
+)
 from eu_export.utils import NormalizeWhitespace
+
+
+__all__ = [
+    "KurlyMarketBaseProductPageParser",
+    "KurlyMarketCosmeticsProductPageParser",
+    "KurlyMarketFoodProductPageParser",
+    "KurlyMarketProductDomainDetector",
+    "KurlyMarketProductPageParser",
+    "KurlyMarketCollectionError",
+    "KurlyMarketProductPageCollector",
+    "KurlyMarketHtmlTextExtractor",
+]
 
 
 COSMETICS_PRODUCT_NOTICE_FIELD_LABELS = [
@@ -85,538 +109,6 @@ SUMMARY_FIELD_LABELS = {
 }
 TITLE_SUFFIX_PATTERN = re.compile(r"\s*-\s*(마켓컬리|컬리)\s*$")
 BRACKET_BRAND_PATTERN = re.compile(r"^\[([^\]]+)\]")
-DEFAULT_KURLY_MARKET_TIMEOUT_MILLISECONDS = 30000
-DEFAULT_KURLY_MARKET_SCROLL_COUNT = 8
-DEFAULT_KURLY_MARKET_SCROLL_WAIT_MILLISECONDS = 500
-DEFAULT_KURLY_MARKET_VIEWPORT_WIDTH = 1440
-DEFAULT_KURLY_MARKET_VIEWPORT_HEIGHT = 1600
-DEFAULT_KURLY_MARKET_SCROLL_STEP_RATIO = 0.75
-DEFAULT_KURLY_MARKET_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
-
-
-class KurlyMarketProductDomain(str, Enum):
-    """Kurly 상품고시정보 기준의 상품 domain."""
-
-    FOOD = "food"
-    COSMETICS = "cosmetics"
-    AMBIGUOUS = "ambiguous"
-    UNKNOWN = "unknown"
-
-
-class KurlyMarketCollectionError(RuntimeError):
-    """KurlyMarket 상품 페이지 수집이 실패했을 때 사용한다."""
-
-
-@dataclass(frozen=True)
-class KurlyMarketProductNoticeField:
-    """상품고시정보 label-value record."""
-
-    fieldName: str
-    fieldValue: Optional[str] = None
-    requiresOcrFallback: bool = False
-    rawText: str = ""
-
-    def ToDict(self) -> Dict[str, object]:
-        return {
-            "field_name": self.fieldName,
-            "field_value": self.fieldValue,
-            "requires_ocr_fallback": self.requiresOcrFallback,
-            "raw_text": self.rawText,
-        }
-
-
-@dataclass(frozen=True)
-class KurlyMarketProductNoticeGroup:
-    """하나 이상의 상품 옵션에 대응되는 상품고시정보 field group."""
-
-    optionNames: List[str] = field(default_factory=list)
-    fields: List[KurlyMarketProductNoticeField] = field(default_factory=list)
-    rawText: str = ""
-
-    def ToDict(self) -> Dict[str, object]:
-        return {
-            "option_names": list(self.optionNames),
-            "fields": [fieldRecord.ToDict() for fieldRecord in self.fields],
-            "raw_text": self.rawText,
-        }
-
-
-@dataclass(frozen=True)
-class KurlyMarketProductNoticeOptionRecord:
-    """상품 옵션 하나에 정규화된 상품고시정보 field set."""
-
-    optionName: Optional[str] = None
-    fields: List[KurlyMarketProductNoticeField] = field(default_factory=list)
-    rawText: str = ""
-
-    def ToDict(self) -> Dict[str, object]:
-        return {
-            "option_name": self.optionName,
-            "fields": [fieldRecord.ToDict() for fieldRecord in self.fields],
-            "raw_text": self.rawText,
-        }
-
-
-@dataclass(frozen=True)
-class KurlyMarketProductPageParseResult:
-    """KurlyMarket 상품 상세 parser 결과."""
-
-    productPageUrl: Optional[str] = None
-    productDomain: KurlyMarketProductDomain = KurlyMarketProductDomain.UNKNOWN
-    productName: Optional[str] = None
-    shortDescription: Optional[str] = None
-    brandName: Optional[str] = None
-    packageType: Optional[str] = None
-    saleUnit: Optional[str] = None
-    productNoticeOptionNames: List[str] = field(default_factory=list)
-    productNoticeFields: List[KurlyMarketProductNoticeField] = field(
-        default_factory=list,
-    )
-    productNoticeGroups: List[KurlyMarketProductNoticeGroup] = field(
-        default_factory=list,
-    )
-    productNoticeOptions: List[KurlyMarketProductNoticeOptionRecord] = field(
-        default_factory=list,
-    )
-    rawProductNoticeText: str = ""
-    imageReferenceDetected: bool = False
-    requiresOcrFallback: bool = False
-    warnings: List[str] = field(default_factory=list)
-
-    def ToDict(self) -> Dict[str, object]:
-        return {
-            "product_page_url": self.productPageUrl,
-            "product_domain": self.productDomain.value,
-            "product_name": self.productName,
-            "short_description": self.shortDescription,
-            "brand_name": self.brandName,
-            "package_type": self.packageType,
-            "sale_unit": self.saleUnit,
-            "product_notice_option_names": list(self.productNoticeOptionNames),
-            "product_notice_fields": [
-                fieldRecord.ToDict() for fieldRecord in self.productNoticeFields
-            ],
-            "product_notice_groups": [
-                noticeGroup.ToDict() for noticeGroup in self.productNoticeGroups
-            ],
-            "product_notice_options": [
-                noticeOption.ToDict()
-                for noticeOption in self.productNoticeOptions
-            ],
-            "raw_product_notice_text": self.rawProductNoticeText,
-            "image_reference_detected": self.imageReferenceDetected,
-            "requires_ocr_fallback": self.requiresOcrFallback,
-            "warnings": list(self.warnings),
-        }
-
-
-@dataclass(frozen=True)
-class KurlyMarketProductPageCollectionResult:
-    """렌더링된 KurlyMarket 상품 페이지 수집 결과."""
-
-    productPageUrl: str
-    parsedProductPage: KurlyMarketProductPageParseResult
-    visibleTextLineCount: int
-    productNoticeTextLineCount: int
-    productDetailImageUrls: List[str] = field(default_factory=list)
-    ocrCandidateImageUrls: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
-
-    def ToDict(self) -> Dict[str, object]:
-        return {
-            "product_page_url": self.productPageUrl,
-            "parsed_product_page": self.parsedProductPage.ToDict(),
-            "visible_text_line_count": self.visibleTextLineCount,
-            "product_notice_text_line_count": self.productNoticeTextLineCount,
-            "product_detail_image_urls": list(self.productDetailImageUrls),
-            "ocr_candidate_image_urls": list(self.ocrCandidateImageUrls),
-            "warnings": list(self.warnings),
-        }
-
-
-@dataclass(frozen=True)
-class KurlyMarketRenderedPageEvidence:
-    """Playwright 렌더링 이후 parser에 넘길 원천 증거."""
-
-    productPageUrl: str
-    visibleText: str = ""
-    productNoticeText: str = ""
-    productDetailImageUrls: List[str] = field(default_factory=list)
-
-    def ToDict(self) -> Dict[str, object]:
-        return {
-            "product_page_url": self.productPageUrl,
-            "visible_text": self.visibleText,
-            "product_notice_text": self.productNoticeText,
-            "product_detail_image_urls": list(self.productDetailImageUrls),
-        }
-
-
-class KurlyMarketProductPageCollector:
-    """Playwright로 KurlyMarket 상품 페이지를 제한 스크롤해 수집한다."""
-
-    def __init__(
-        self,
-        parser: Optional["KurlyMarketProductPageParser"] = None,
-        headless: bool = True,
-        timeoutMilliseconds: int = DEFAULT_KURLY_MARKET_TIMEOUT_MILLISECONDS,
-        scrollCount: int = DEFAULT_KURLY_MARKET_SCROLL_COUNT,
-        scrollWaitMilliseconds: int = DEFAULT_KURLY_MARKET_SCROLL_WAIT_MILLISECONDS,
-    ) -> None:
-        if timeoutMilliseconds <= 0:
-            raise ValueError("timeoutMilliseconds must be greater than 0.")
-        if scrollCount < 0:
-            raise ValueError("scrollCount must be greater than or equal to 0.")
-        if scrollWaitMilliseconds < 0:
-            raise ValueError(
-                "scrollWaitMilliseconds must be greater than or equal to 0."
-            )
-
-        self._parser = parser or KurlyMarketProductPageParser()
-        self._headless = headless
-        self._timeoutMilliseconds = timeoutMilliseconds
-        self._scrollCount = scrollCount
-        self._scrollWaitMilliseconds = scrollWaitMilliseconds
-
-    def Collect(self, productPageUrl: str) -> KurlyMarketProductPageCollectionResult:
-        self.ValidateProductPageUrl(productPageUrl)
-        renderedPageEvidence = self.CollectRenderedPageEvidence(productPageUrl)
-        return self.BuildCollectionResult(renderedPageEvidence)
-
-    def ValidateProductPageUrl(self, productPageUrl: str) -> None:
-        if not self._parser.IsSupportedProductPageUrl(productPageUrl):
-            raise KurlyMarketCollectionError(
-                "unsupported KurlyMarket product page URL: {0}".format(
-                    productPageUrl,
-                )
-            )
-
-    def CollectRenderedPageEvidence(
-        self,
-        productPageUrl: str,
-    ) -> KurlyMarketRenderedPageEvidence:
-        self.ValidateProductPageUrl(productPageUrl)
-
-        try:
-            from playwright.sync_api import sync_playwright
-        except ImportError as error:
-            raise KurlyMarketCollectionError(
-                "playwright is required for KurlyMarketProductPageCollector."
-            ) from error
-
-        try:
-            with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=self._headless)
-                try:
-                    context = browser.new_context(
-                        user_agent=DEFAULT_KURLY_MARKET_USER_AGENT,
-                        viewport={
-                            "width": DEFAULT_KURLY_MARKET_VIEWPORT_WIDTH,
-                            "height": DEFAULT_KURLY_MARKET_VIEWPORT_HEIGHT,
-                        },
-                    )
-                    try:
-                        page = context.new_page()
-                        page.route("**/*", self._BlockUnnecessaryResource)
-                        page.goto(
-                            productPageUrl,
-                            wait_until="domcontentloaded",
-                            timeout=self._timeoutMilliseconds,
-                        )
-                        self._ScrollUntilProductNoticeLoaded(page)
-                        visibleText = self._ReadVisibleText(page)
-                        productNoticeText = self._ReadProductNoticeText(page)
-                        productDetailImageUrls = self._ReadProductDetailImageUrls(
-                            page,
-                        )
-                    finally:
-                        context.close()
-                finally:
-                    browser.close()
-        except Exception as error:
-            raise KurlyMarketCollectionError(
-                "failed to collect KurlyMarket product page: {0}".format(error)
-            ) from error
-
-        return KurlyMarketRenderedPageEvidence(
-            productPageUrl=productPageUrl,
-            visibleText=visibleText,
-            productNoticeText=productNoticeText,
-            productDetailImageUrls=productDetailImageUrls,
-        )
-
-    def BuildCollectionResult(
-        self,
-        renderedPageEvidence: KurlyMarketRenderedPageEvidence,
-    ) -> KurlyMarketProductPageCollectionResult:
-        textLines = self._parser.NormalizeTextLines(
-            renderedPageEvidence.visibleText.splitlines()
-        )
-        productNoticeLines = self._parser.NormalizeProductNoticeLines(
-            renderedPageEvidence.productNoticeText.splitlines(),
-        )
-        parsedProductPage = self._parser.ParseCollectedTextLines(
-            textLines=textLines,
-            productNoticeLines=productNoticeLines,
-            productPageUrl=renderedPageEvidence.productPageUrl,
-        )
-        ocrCandidateImageUrls = self._BuildOcrCandidateImageUrls(
-            parsedProductPage,
-            renderedPageEvidence.productDetailImageUrls,
-        )
-        warnings = self._BuildCollectionWarnings(
-            parsedProductPage,
-            renderedPageEvidence.productDetailImageUrls,
-            ocrCandidateImageUrls,
-        )
-
-        return KurlyMarketProductPageCollectionResult(
-            productPageUrl=renderedPageEvidence.productPageUrl,
-            parsedProductPage=parsedProductPage,
-            visibleTextLineCount=len(textLines),
-            productNoticeTextLineCount=len(productNoticeLines),
-            productDetailImageUrls=renderedPageEvidence.productDetailImageUrls,
-            ocrCandidateImageUrls=ocrCandidateImageUrls,
-            warnings=warnings,
-        )
-
-    def _BlockUnnecessaryResource(self, route: Any) -> None:
-        if route.request.resource_type in ("media", "font"):
-            route.abort()
-            return
-        route.continue_()
-
-    def _ScrollUntilProductNoticeLoaded(self, page: Any) -> None:
-        scrollStep = max(
-            1,
-            int(
-                DEFAULT_KURLY_MARKET_VIEWPORT_HEIGHT
-                * DEFAULT_KURLY_MARKET_SCROLL_STEP_RATIO
-            ),
-        )
-        noticeFound = False
-        for _ in range(self._scrollCount):
-            bodyText = self._ReadVisibleText(page)
-            if "상품고시정보" in bodyText:
-                noticeFound = True
-            if noticeFound and "WHY KURLY" in bodyText:
-                return
-
-            page.evaluate("(step) => window.scrollBy(0, step)", scrollStep)
-            if self._scrollWaitMilliseconds > 0:
-                page.wait_for_timeout(self._scrollWaitMilliseconds)
-
-    def _ReadVisibleText(self, page: Any) -> str:
-        try:
-            value = page.locator("body").inner_text(
-                timeout=self._timeoutMilliseconds,
-            )
-        except Exception:
-            return ""
-        if not isinstance(value, str):
-            return ""
-        return value
-
-    def _ReadProductNoticeText(self, page: Any) -> str:
-        try:
-            value = page.evaluate(
-                """
-                () => {
-                    const normalize = (text) => (
-                        text || ""
-                    ).replace(/\\s+/g, " ").trim();
-                    const mainRoot = document.body;
-                    const lines = [];
-                    const pushLine = (text) => {
-                        const line = normalize(text);
-                        if (!line) {
-                            return;
-                        }
-                        if (lines.length > 0 && lines[lines.length - 1] === line) {
-                            return;
-                        }
-                        lines.push(line);
-                    };
-                    const readText = (element) => normalize(
-                        element.innerText || element.textContent || ""
-                    );
-                    const isStopText = (text) => (
-                        text === "WHY KURLY"
-                        || text.startsWith("상품 후기")
-                        || text.startsWith("고객 후기")
-                        || text.startsWith("상품 리뷰")
-                        || text.startsWith("고객 리뷰")
-                        || text.startsWith("상품 문의")
-                        || text.startsWith("고객행복센터")
-                    );
-                    const headingCandidates = Array.from(
-                        mainRoot.querySelectorAll("h2,h3,h4,h5,[role='heading']")
-                    );
-                    const noticeHeadingFromSemanticNodes = (
-                        headingCandidates.find((element) => {
-                            const text = readText(element);
-                            return text === "상품고시정보"
-                                || text.startsWith("상품고시정보");
-                        })
-                    );
-                    const noticeHeading = noticeHeadingFromSemanticNodes || (
-                        Array.from(
-                            mainRoot.querySelectorAll(
-                                "button,a,span,strong,p,dt,th,div"
-                            )
-                        )
-                            .filter((element) => {
-                                const text = readText(element);
-                                return text === "상품고시정보"
-                                    || text.startsWith("상품고시정보");
-                            })
-                            .sort((left, right) => (
-                                readText(left).length - readText(right).length
-                            ))[0]
-                    );
-                    if (!noticeHeading) {
-                        return "";
-                    }
-                    pushLine(readText(noticeHeading));
-
-                    const blockSelector = [
-                        "h2",
-                        "h3",
-                        "h4",
-                        "h5",
-                        "li",
-                        "p",
-                        "dt",
-                        "dd",
-                        "th",
-                        "td",
-                        "div"
-                    ].join(",");
-                    const hasChildBlock = (node) => !!node.querySelector(
-                        blockSelector
-                    );
-                    const allNodes = Array.from(
-                        mainRoot.querySelectorAll(blockSelector)
-                    );
-                    let collecting = false;
-                    for (const node of allNodes) {
-                        if (node === noticeHeading) {
-                            collecting = true;
-                            continue;
-                        }
-                        if (!collecting) {
-                            continue;
-                        }
-                        const text = readText(node);
-                        if (!text) {
-                            continue;
-                        }
-                        if (isStopText(text)) {
-                            break;
-                        }
-                        const tagName = node.tagName.toLowerCase();
-                        if (tagName === "div" && hasChildBlock(node)) {
-                            continue;
-                        }
-                        pushLine(text);
-                    }
-                    return lines.join("\\n");
-                }
-                """
-            )
-        except Exception:
-            return ""
-        if not isinstance(value, str):
-            return ""
-        return value
-
-    def _ReadProductDetailImageUrls(self, page: Any) -> List[str]:
-        values = page.evaluate(
-            """
-            () => {
-                const readUrlValues = (element) => [
-                    element.currentSrc || "",
-                    element.src || "",
-                    element.getAttribute("src") || "",
-                    element.getAttribute("data-src") || "",
-                    element.getAttribute("data-original") || "",
-                    element.getAttribute("data-lazy") || "",
-                    element.getAttribute("srcset") || ""
-                ];
-                return Array.from(document.querySelectorAll("img"))
-                    .flatMap((element) => readUrlValues(element))
-                    .filter((value) => value && value.trim() !== "");
-            }
-            """
-        )
-        if not isinstance(values, list):
-            return []
-
-        imageUrls: List[str] = []
-        seenUrls: set[str] = set()
-        for value in values:
-            if not isinstance(value, str):
-                continue
-            for imageUrl in self._ExpandImageUrlValue(page.url, value):
-                if imageUrl in seenUrls:
-                    continue
-                if not self._LooksProductDetailImageUrl(imageUrl):
-                    continue
-                seenUrls.add(imageUrl)
-                imageUrls.append(imageUrl)
-        return imageUrls
-
-    def _ExpandImageUrlValue(self, baseUrl: str, value: str) -> List[str]:
-        imageUrls: List[str] = []
-        for token in value.split(","):
-            candidate = token.strip().split(" ")[0].strip()
-            if candidate == "":
-                continue
-            imageUrls.append(urljoin(baseUrl, candidate))
-        return imageUrls
-
-    def _LooksProductDetailImageUrl(self, imageUrl: str) -> bool:
-        parsedUrl = urlparse(imageUrl)
-        hostName = parsedUrl.netloc.lower()
-        path = parsedUrl.path.lower()
-
-        if hostName == "img-cf.kurly.com" and "/goodsview/" in path:
-            return True
-
-        if hostName == "product-image.kurly.com":
-            if "/product/description/" in path:
-                return True
-            return "/src/product/image/" in path and "%3e1010x" in path
-
-        return False
-
-    def _BuildOcrCandidateImageUrls(
-        self,
-        parsedProductPage: KurlyMarketProductPageParseResult,
-        productDetailImageUrls: List[str],
-    ) -> List[str]:
-        if not parsedProductPage.requiresOcrFallback:
-            return []
-        return list(productDetailImageUrls)
-
-    def _BuildCollectionWarnings(
-        self,
-        parsedProductPage: KurlyMarketProductPageParseResult,
-        productDetailImageUrls: List[str],
-        ocrCandidateImageUrls: List[str],
-    ) -> List[str]:
-        warnings = list(parsedProductPage.warnings)
-        if not productDetailImageUrls:
-            warnings.append("product detail image URLs not found")
-        if parsedProductPage.requiresOcrFallback and not ocrCandidateImageUrls:
-            warnings.append(
-                "OCR fallback is required but no OCR candidate image URLs were found"
-            )
-        return warnings
 
 
 class KurlyMarketBaseProductPageParser:
@@ -677,10 +169,9 @@ class KurlyMarketBaseProductPageParser:
         noticeLines = productNoticeLines or self._ExtractProductNoticeLines(
             normalizedLines,
         )
-        noticeGroups = self._ExtractProductNoticeGroups(noticeLines)
-        noticeOptions = self._BuildProductNoticeOptionRecords(noticeGroups)
+        noticeOptions = self._ExtractProductNoticeOptionRecords(noticeLines)
         noticeOptionNames = self._ExtractProductNoticeOptionNames(noticeOptions)
-        noticeFields = self._FlattenProductNoticeFields(noticeGroups)
+        noticeFields = self._BuildRepresentativeProductNoticeFields(noticeOptions)
         imageReferenceDetected = self._HasImageReference(noticeLines)
         warnings = self._BuildWarnings(
             normalizedLines,
@@ -701,7 +192,6 @@ class KurlyMarketBaseProductPageParser:
             saleUnit=self._ExtractSummaryField(normalizedLines, "판매단위"),
             productNoticeOptionNames=noticeOptionNames,
             productNoticeFields=noticeFields,
-            productNoticeGroups=noticeGroups,
             productNoticeOptions=noticeOptions,
             rawProductNoticeText="\n".join(noticeLines),
             imageReferenceDetected=imageReferenceDetected,
@@ -846,47 +336,26 @@ class KurlyMarketBaseProductPageParser:
             optionNames.append(noticeOption.optionName)
         return optionNames
 
-    def _BuildProductNoticeOptionRecords(
+    def _BuildRepresentativeProductNoticeFields(
         self,
-        noticeGroups: List[KurlyMarketProductNoticeGroup],
-    ) -> List[KurlyMarketProductNoticeOptionRecord]:
-        optionRecords: List[KurlyMarketProductNoticeOptionRecord] = []
-        for noticeGroup in noticeGroups:
-            if not noticeGroup.optionNames:
-                optionRecords.append(
-                    KurlyMarketProductNoticeOptionRecord(
-                        optionName=None,
-                        fields=list(noticeGroup.fields),
-                        rawText=noticeGroup.rawText,
-                    )
-                )
-                continue
-
-            for optionName in noticeGroup.optionNames:
-                optionRecords.append(
-                    KurlyMarketProductNoticeOptionRecord(
-                        optionName=optionName,
-                        fields=list(noticeGroup.fields),
-                        rawText=noticeGroup.rawText,
-                    )
-                )
-
-        return optionRecords
-
-    def _FlattenProductNoticeFields(
-        self,
-        noticeGroups: List[KurlyMarketProductNoticeGroup],
+        noticeOptions: List[KurlyMarketProductNoticeOptionRecord],
     ) -> List[KurlyMarketProductNoticeField]:
         fields: List[KurlyMarketProductNoticeField] = []
-        for noticeGroup in noticeGroups:
-            fields.extend(noticeGroup.fields)
+        seenFieldKeys: set[tuple[str, Optional[str]]] = set()
+        for noticeOption in noticeOptions:
+            for fieldRecord in noticeOption.fields:
+                fieldKey = (fieldRecord.fieldName, fieldRecord.fieldValue)
+                if fieldKey in seenFieldKeys:
+                    continue
+                seenFieldKeys.add(fieldKey)
+                fields.append(fieldRecord)
         return fields
 
-    def _ExtractProductNoticeGroups(
+    def _ExtractProductNoticeOptionRecords(
         self,
         noticeLines: List[str],
-    ) -> List[KurlyMarketProductNoticeGroup]:
-        groups: List[KurlyMarketProductNoticeGroup] = []
+    ) -> List[KurlyMarketProductNoticeOptionRecord]:
+        optionRecords: List[KurlyMarketProductNoticeOptionRecord] = []
         currentOptionNames: List[str] = []
         currentFieldRecords: List[KurlyMarketProductNoticeField] = []
         currentRawLines: List[str] = []
@@ -897,8 +366,8 @@ class KurlyMarketBaseProductPageParser:
             fieldName = self._NormalizeProductNoticeFieldName(line)
             if fieldName is None:
                 if currentFieldRecords and self._LooksProductNoticeOptionName(line):
-                    groups.append(
-                        self._BuildProductNoticeGroup(
+                    optionRecords.extend(
+                        self._BuildProductNoticeOptionRecords(
                             currentOptionNames,
                             currentFieldRecords,
                             currentRawLines,
@@ -948,27 +417,40 @@ class KurlyMarketBaseProductPageParser:
             currentRawLines.extend(rawLines)
 
         if currentOptionNames or currentFieldRecords:
-            groups.append(
-                self._BuildProductNoticeGroup(
+            optionRecords.extend(
+                self._BuildProductNoticeOptionRecords(
                     currentOptionNames,
                     currentFieldRecords,
                     currentRawLines,
                 )
             )
 
-        return groups
+        return optionRecords
 
-    def _BuildProductNoticeGroup(
+    def _BuildProductNoticeOptionRecords(
         self,
         optionNames: List[str],
         fields: List[KurlyMarketProductNoticeField],
         rawLines: List[str],
-    ) -> KurlyMarketProductNoticeGroup:
-        return KurlyMarketProductNoticeGroup(
-            optionNames=list(optionNames),
-            fields=list(fields),
-            rawText="\n".join(rawLines),
-        )
+    ) -> List[KurlyMarketProductNoticeOptionRecord]:
+        rawText = "\n".join(rawLines)
+        if not optionNames:
+            return [
+                KurlyMarketProductNoticeOptionRecord(
+                    optionName=None,
+                    fields=list(fields),
+                    rawText=rawText,
+                )
+            ]
+
+        return [
+            KurlyMarketProductNoticeOptionRecord(
+                optionName=optionName,
+                fields=list(fields),
+                rawText=rawText,
+            )
+            for optionName in optionNames
+        ]
 
     def _LooksProductNoticeOptionName(self, line: str) -> bool:
         if self._NormalizeProductNoticeFieldName(line) is not None:
@@ -1189,79 +671,3 @@ class KurlyMarketProductPageParser:
         if productDomain == KurlyMarketProductDomain.COSMETICS:
             return self._cosmeticsParser
         return self._fallbackParser
-
-
-class KurlyMarketHtmlTextExtractor(HTMLParser):
-    """HTML을 block 단위 text line으로 변환한다."""
-
-    _BLOCK_TAGS = {
-        "article",
-        "br",
-        "dd",
-        "div",
-        "dt",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "li",
-        "main",
-        "p",
-        "section",
-        "td",
-        "th",
-        "title",
-        "tr",
-        "ul",
-    }
-    _SKIP_TAGS = {"script", "style", "noscript"}
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self._parts: List[str] = []
-        self._skipDepth = 0
-
-    def ExtractTextLines(self, htmlText: str) -> List[str]:
-        self._parts = []
-        self._skipDepth = 0
-        self.feed(htmlText)
-        self.close()
-        return self._BuildTextLines()
-
-    def handle_starttag(self, tag: str, attrs: List[tuple[str, Optional[str]]]) -> None:
-        loweredTag = tag.lower()
-        if loweredTag in self._SKIP_TAGS:
-            self._skipDepth += 1
-            return
-        if self._skipDepth > 0:
-            return
-        if loweredTag in self._BLOCK_TAGS:
-            self._parts.append("\n")
-
-    def handle_endtag(self, tag: str) -> None:
-        loweredTag = tag.lower()
-        if loweredTag in self._SKIP_TAGS:
-            self._skipDepth = max(0, self._skipDepth - 1)
-            return
-        if self._skipDepth > 0:
-            return
-        if loweredTag in self._BLOCK_TAGS:
-            self._parts.append("\n")
-
-    def handle_data(self, data: str) -> None:
-        if self._skipDepth > 0:
-            return
-        if data.strip() == "":
-            return
-        self._parts.append(data)
-
-    def _BuildTextLines(self) -> List[str]:
-        text = "".join(self._parts)
-        return [
-            normalizedLine
-            for normalizedLine in (
-                NormalizeWhitespace(line) for line in text.splitlines()
-            )
-            if normalizedLine != ""
-        ]
