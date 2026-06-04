@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from eu_export.ontology.classification import (
     CnCandidate,
-    Stage1ClassificationResponseValidationReport,
+    Stage1ResponseValidationReport,
 )
 from eu_export.utils import NormalizeWhitespace
 
@@ -55,7 +55,7 @@ class Stage1DecisionPolicy:
 
     def BuildDecision(
         self,
-        validationReport: Stage1ClassificationResponseValidationReport,
+        validationReport: Stage1ResponseValidationReport,
         candidates: Sequence[CnCandidate],
     ) -> Stage1DecisionReport:
         if not validationReport.isValid:

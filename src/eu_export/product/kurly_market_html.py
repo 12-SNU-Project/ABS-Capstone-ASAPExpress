@@ -6,7 +6,7 @@ from typing import List, Optional
 from eu_export.utils import NormalizeWhitespace
 
 
-class KurlyMarketHtmlTextExtractor(HTMLParser):
+class KurlyHtmlTextExtractor(HTMLParser):
     """HTML을 block 단위 text line으로 변환한다."""
 
     _BLOCK_TAGS = {

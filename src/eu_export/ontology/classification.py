@@ -1478,7 +1478,7 @@ class CnCandidateRetriever:
         return term not in LOW_VALUE_MATCH_TERMS and not term.isdigit()
 
 
-class Stage1ClassificationRequestBuilder:
+class Stage1RequestBuilder:
     """ProductClassificationInput과 CN 후보를 LLM 검토 요청으로 묶는다."""
 
     def __init__(
@@ -1657,7 +1657,7 @@ class Stage1ClassificationRequestBuilder:
 
 
 @dataclass(frozen=True)
-class Stage1ClassificationResponseValidationIssue:
+class Stage1ResponseValidationIssue:
     """Stage 1 LLM 응답 구조 검증 결과의 단일 이슈."""
 
     severity: str
@@ -1675,12 +1675,12 @@ class Stage1ClassificationResponseValidationIssue:
 
 
 @dataclass(frozen=True)
-class Stage1ClassificationResponseValidationReport:
+class Stage1ResponseValidationReport:
     """Stage 1 LLM 응답이 후보 검토 JSON 계약을 만족하는지 나타낸다."""
 
     isValid: bool
     parsedResponse: Dict[str, Any] = field(default_factory=dict)
-    issues: List[Stage1ClassificationResponseValidationIssue] = field(
+    issues: List[Stage1ResponseValidationIssue] = field(
         default_factory=list,
     )
 
@@ -1700,7 +1700,7 @@ class Stage1ClassificationResponseValidationReport:
         }
 
 
-class Stage1ClassificationResponseValidator:
+class Stage1ResponseValidator:
     """LLM의 Stage 1 후보 검토 JSON 응답을 구조적으로 검증한다."""
 
     def ValidateResponse(
@@ -1709,7 +1709,7 @@ class Stage1ClassificationResponseValidator:
         productInput: ProductClassificationInput,
         candidates: Sequence[CnCandidate],
         evidencePackage: Optional[Stage1EvidencePackage] = None,
-    ) -> Stage1ClassificationResponseValidationReport:
+    ) -> Stage1ResponseValidationReport:
         return self.ValidateText(
             llmResponse.generatedText,
             productInput,
@@ -1723,11 +1723,11 @@ class Stage1ClassificationResponseValidator:
         productInput: ProductClassificationInput,
         candidates: Sequence[CnCandidate],
         evidencePackage: Optional[Stage1EvidencePackage] = None,
-    ) -> Stage1ClassificationResponseValidationReport:
-        issues: List[Stage1ClassificationResponseValidationIssue] = []
+    ) -> Stage1ResponseValidationReport:
+        issues: List[Stage1ResponseValidationIssue] = []
         parsedResponse = self._ParseResponseText(responseText, issues)
         if parsedResponse is None:
-            return Stage1ClassificationResponseValidationReport(
+            return Stage1ResponseValidationReport(
                 isValid=False,
                 parsedResponse={},
                 issues=issues,
@@ -1749,7 +1749,7 @@ class Stage1ClassificationResponseValidator:
         )
         self._DetectFinalDeterminationLanguage(responseText, issues)
 
-        return Stage1ClassificationResponseValidationReport(
+        return Stage1ResponseValidationReport(
             isValid=not any(issue.severity == "error" for issue in issues),
             parsedResponse=parsedResponse,
             issues=issues,
@@ -1800,7 +1800,7 @@ class Stage1ClassificationResponseValidator:
     def _ParseResponseText(
         self,
         responseText: str,
-        issues: List[Stage1ClassificationResponseValidationIssue],
+        issues: List[Stage1ResponseValidationIssue],
     ) -> Optional[Dict[str, Any]]:
         strippedText = responseText.strip()
         if strippedText == "":
@@ -1900,7 +1900,7 @@ class Stage1ClassificationResponseValidator:
         productInput: ProductClassificationInput,
         candidates: Sequence[CnCandidate],
         evidencePackage: Optional[Stage1EvidencePackage],
-        issues: List[Stage1ClassificationResponseValidationIssue],
+        issues: List[Stage1ResponseValidationIssue],
     ) -> None:
         classificationResult = parsedResponse.get("classification_result")
         if not isinstance(classificationResult, Mapping):
@@ -1926,7 +1926,7 @@ class Stage1ClassificationResponseValidator:
         self,
         classificationResult: Mapping[str, Any],
         productInput: ProductClassificationInput,
-        issues: List[Stage1ClassificationResponseValidationIssue],
+        issues: List[Stage1ResponseValidationIssue],
     ) -> None:
         productName = classificationResult.get("product_name")
         if not isinstance(productName, str) or productName.strip() == "":
@@ -1957,7 +1957,7 @@ class Stage1ClassificationResponseValidator:
         classificationResult: Mapping[str, Any],
         candidates: Sequence[CnCandidate],
         evidencePackage: Optional[Stage1EvidencePackage],
-        issues: List[Stage1ClassificationResponseValidationIssue],
+        issues: List[Stage1ResponseValidationIssue],
     ) -> None:
         candidateReviews = classificationResult.get("candidate_reviews")
         if not isinstance(candidateReviews, list):
@@ -2077,7 +2077,7 @@ class Stage1ClassificationResponseValidator:
         hs8: str,
         evidencePackage: Optional[Stage1EvidencePackage],
         fieldPath: str,
-        issues: List[Stage1ClassificationResponseValidationIssue],
+        issues: List[Stage1ResponseValidationIssue],
     ) -> None:
         if evidencePackage is None:
             return
@@ -2183,7 +2183,7 @@ class Stage1ClassificationResponseValidator:
         self,
         reviewedHs8List: Sequence[str],
         expectedHs8Set: Set[str],
-        issues: List[Stage1ClassificationResponseValidationIssue],
+        issues: List[Stage1ResponseValidationIssue],
     ) -> None:
         reviewedHs8Set = set(reviewedHs8List)
         missingHs8Codes = sorted(expectedHs8Set.difference(reviewedHs8Set))
@@ -2220,7 +2220,7 @@ class Stage1ClassificationResponseValidator:
         candidateReview: Mapping[str, Any],
         candidate: CnCandidate,
         fieldPath: str,
-        issues: List[Stage1ClassificationResponseValidationIssue],
+        issues: List[Stage1ResponseValidationIssue],
     ) -> None:
         pathReview = candidateReview.get("classification_path_review")
         pathFieldPath = fieldPath + ".classification_path_review"
@@ -2337,7 +2337,7 @@ class Stage1ClassificationResponseValidator:
         self,
         candidateReview: Mapping[str, Any],
         fieldPath: str,
-        issues: List[Stage1ClassificationResponseValidationIssue],
+        issues: List[Stage1ResponseValidationIssue],
     ) -> None:
         ruleReview = candidateReview.get("classification_rule_review")
         ruleFieldPath = fieldPath + ".classification_rule_review"
@@ -2372,7 +2372,7 @@ class Stage1ClassificationResponseValidator:
         hs8: str,
         evidencePackage: Optional[Stage1EvidencePackage],
         fieldPath: str,
-        issues: List[Stage1ClassificationResponseValidationIssue],
+        issues: List[Stage1ResponseValidationIssue],
     ) -> None:
         similarCases = candidateReview.get("similar_ebti_cases")
         similarCasesFieldPath = fieldPath + ".similar_ebti_cases"
@@ -2469,7 +2469,7 @@ class Stage1ClassificationResponseValidator:
     def _ValidateHumanReviewWarning(
         self,
         classificationResult: Mapping[str, Any],
-        issues: List[Stage1ClassificationResponseValidationIssue],
+        issues: List[Stage1ResponseValidationIssue],
     ) -> None:
         humanReviewWarning = classificationResult.get("human_review_warning")
         if (
@@ -2487,7 +2487,7 @@ class Stage1ClassificationResponseValidator:
     def _DetectFinalDeterminationLanguage(
         self,
         responseText: str,
-        issues: List[Stage1ClassificationResponseValidationIssue],
+        issues: List[Stage1ResponseValidationIssue],
     ) -> None:
         normalizedResponseText = responseText.lower()
         for warningTerm in FINAL_DETERMINATION_WARNING_TERMS:
@@ -2506,14 +2506,14 @@ class Stage1ClassificationResponseValidator:
 
     def _AddIssue(
         self,
-        issues: List[Stage1ClassificationResponseValidationIssue],
+        issues: List[Stage1ResponseValidationIssue],
         severity: str,
         issueCode: str,
         fieldPath: str,
         message: str,
     ) -> None:
         issues.append(
-            Stage1ClassificationResponseValidationIssue(
+            Stage1ResponseValidationIssue(
                 severity=severity,
                 issueCode=issueCode,
                 fieldPath=fieldPath,

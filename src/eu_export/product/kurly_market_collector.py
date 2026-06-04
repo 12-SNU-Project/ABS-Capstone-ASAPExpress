@@ -4,9 +4,9 @@ from typing import Any, List, Optional, Protocol
 from urllib.parse import urljoin, urlparse
 
 from eu_export.product.kurly_market_schema import (
-    KurlyMarketProductPageCollectionResult,
-    KurlyMarketProductPageParseResult,
-    KurlyMarketRenderedPageEvidence,
+    KurlyCollectionResult,
+    KurlyProductPage,
+    RenderedPageEvidence,
 )
 
 
@@ -23,7 +23,7 @@ DEFAULT_KURLY_MARKET_USER_AGENT = (
 )
 
 
-class KurlyMarketProductPageParserProtocol(Protocol):
+class KurlyPageParserProtocol(Protocol):
     """Collector가 요구하는 KurlyMarket parser 최소 interface."""
 
     def IsSupportedProductPageUrl(self, url: str) -> bool:
@@ -40,20 +40,20 @@ class KurlyMarketProductPageParserProtocol(Protocol):
         textLines: List[str],
         productNoticeLines: List[str],
         productPageUrl: Optional[str] = None,
-    ) -> KurlyMarketProductPageParseResult:
+    ) -> KurlyProductPage:
         raise NotImplementedError
 
 
-class KurlyMarketCollectionError(RuntimeError):
+class KurlyCollectionError(RuntimeError):
     """KurlyMarket 상품 페이지 수집이 실패했을 때 사용한다."""
 
 
-class KurlyMarketProductPageCollector:
+class KurlyPageCollector:
     """Playwright로 KurlyMarket 상품 페이지를 제한 스크롤해 수집한다."""
 
     def __init__(
         self,
-        parser: Optional[KurlyMarketProductPageParserProtocol] = None,
+        parser: Optional[KurlyPageParserProtocol] = None,
         headless: bool = True,
         timeoutMilliseconds: int = DEFAULT_KURLY_MARKET_TIMEOUT_MILLISECONDS,
         scrollCount: int = DEFAULT_KURLY_MARKET_SCROLL_COUNT,
@@ -74,14 +74,14 @@ class KurlyMarketProductPageCollector:
         self._scrollCount = scrollCount
         self._scrollWaitMilliseconds = scrollWaitMilliseconds
 
-    def Collect(self, productPageUrl: str) -> KurlyMarketProductPageCollectionResult:
+    def Collect(self, productPageUrl: str) -> KurlyCollectionResult:
         self.ValidateProductPageUrl(productPageUrl)
         renderedPageEvidence = self.CollectRenderedPageEvidence(productPageUrl)
         return self.BuildCollectionResult(renderedPageEvidence)
 
     def ValidateProductPageUrl(self, productPageUrl: str) -> None:
         if not self._parser.IsSupportedProductPageUrl(productPageUrl):
-            raise KurlyMarketCollectionError(
+            raise KurlyCollectionError(
                 "unsupported KurlyMarket product page URL: {0}".format(
                     productPageUrl,
                 )
@@ -90,14 +90,14 @@ class KurlyMarketProductPageCollector:
     def CollectRenderedPageEvidence(
         self,
         productPageUrl: str,
-    ) -> KurlyMarketRenderedPageEvidence:
+    ) -> RenderedPageEvidence:
         self.ValidateProductPageUrl(productPageUrl)
 
         try:
             from playwright.sync_api import sync_playwright
         except ImportError as error:
-            raise KurlyMarketCollectionError(
-                "playwright is required for KurlyMarketProductPageCollector."
+            raise KurlyCollectionError(
+                "playwright is required for KurlyPageCollector."
             ) from error
 
         try:
@@ -130,11 +130,11 @@ class KurlyMarketProductPageCollector:
                 finally:
                     browser.close()
         except Exception as error:
-            raise KurlyMarketCollectionError(
+            raise KurlyCollectionError(
                 "failed to collect KurlyMarket product page: {0}".format(error)
             ) from error
 
-        return KurlyMarketRenderedPageEvidence(
+        return RenderedPageEvidence(
             productPageUrl=productPageUrl,
             visibleText=visibleText,
             productNoticeText=productNoticeText,
@@ -143,8 +143,8 @@ class KurlyMarketProductPageCollector:
 
     def BuildCollectionResult(
         self,
-        renderedPageEvidence: KurlyMarketRenderedPageEvidence,
-    ) -> KurlyMarketProductPageCollectionResult:
+        renderedPageEvidence: RenderedPageEvidence,
+    ) -> KurlyCollectionResult:
         textLines = self._parser.NormalizeTextLines(
             renderedPageEvidence.visibleText.splitlines()
         )
@@ -166,7 +166,7 @@ class KurlyMarketProductPageCollector:
             ocrCandidateImageUrls,
         )
 
-        return KurlyMarketProductPageCollectionResult(
+        return KurlyCollectionResult(
             productPageUrl=renderedPageEvidence.productPageUrl,
             parsedProductPage=parsedProductPage,
             visibleTextLineCount=len(textLines),
@@ -176,10 +176,10 @@ class KurlyMarketProductPageCollector:
             warnings=warnings,
         )
 
-    def _BuildDefaultParser(self) -> KurlyMarketProductPageParserProtocol:
-        from eu_export.product.kurly_market import KurlyMarketProductPageParser
+    def _BuildDefaultParser(self) -> KurlyPageParserProtocol:
+        from eu_export.product.kurly_market import KurlyPageParser
 
-        return KurlyMarketProductPageParser()
+        return KurlyPageParser()
 
     def _BlockUnnecessaryResource(self, route: Any) -> None:
         if route.request.resource_type in ("media", "font"):
@@ -393,7 +393,7 @@ class KurlyMarketProductPageCollector:
 
     def _BuildOcrCandidateImageUrls(
         self,
-        parsedProductPage: KurlyMarketProductPageParseResult,
+        parsedProductPage: KurlyProductPage,
         productDetailImageUrls: List[str],
     ) -> List[str]:
         if not parsedProductPage.requiresOcrFallback:
@@ -402,7 +402,7 @@ class KurlyMarketProductPageCollector:
 
     def _BuildCollectionWarnings(
         self,
-        parsedProductPage: KurlyMarketProductPageParseResult,
+        parsedProductPage: KurlyProductPage,
         productDetailImageUrls: List[str],
         ocrCandidateImageUrls: List[str],
     ) -> List[str]:

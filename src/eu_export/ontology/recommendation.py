@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from eu_export.ontology.classification import (
     CnCandidate,
     ProductClassificationInput,
-    Stage1ClassificationResponseValidationReport,
+    Stage1ResponseValidationReport,
     Stage1EvidencePackage,
 )
 from eu_export.ontology.decision_policy import Stage1DecisionReport
@@ -15,7 +15,7 @@ from eu_export.utils import NormalizeWhitespace
 
 
 @dataclass(frozen=True)
-class Stage1ClassificationRecommendationReport:
+class Stage1RecommendationReport:
     """LLM 후보 리뷰와 traversal 결과를 제품 단위 후보 검토 의견으로 요약한다."""
 
     productName: Optional[str]
@@ -52,19 +52,19 @@ class Stage1ClassificationRecommendationReport:
         }
 
 
-class Stage1ClassificationRecommendationReportBuilder:
+class Stage1RecommendationReportBuilder:
     """Stage 1 결과 묶음을 user-facing 후보 검토 report로 변환한다."""
 
     def Build(
         self,
         productInput: ProductClassificationInput,
         candidates: Sequence[CnCandidate],
-        validationReport: Stage1ClassificationResponseValidationReport,
+        validationReport: Stage1ResponseValidationReport,
         decisionReport: Stage1DecisionReport,
         traversalReport: Stage1TraversalReport,
         evidencePackage: Optional[Stage1EvidencePackage] = None,
         backtrackingSummary: Optional[Mapping[str, Any]] = None,
-    ) -> Stage1ClassificationRecommendationReport:
+    ) -> Stage1RecommendationReport:
         candidateByHs8 = {candidate.hs8: candidate for candidate in candidates}
         candidateReviews = self._ReadCandidateReviews(validationReport)
         reviewByHs8 = {
@@ -96,7 +96,7 @@ class Stage1ClassificationRecommendationReportBuilder:
                 )
             )
 
-        return Stage1ClassificationRecommendationReport(
+        return Stage1RecommendationReport(
             productName=productInput.productName,
             productDomain=productInput.productDomain,
             recommendationLevel=self._BuildRecommendationLevel(decisionReport),
@@ -327,7 +327,7 @@ class Stage1ClassificationRecommendationReportBuilder:
 
     def _ReadCandidateReviews(
         self,
-        validationReport: Stage1ClassificationResponseValidationReport,
+        validationReport: Stage1ResponseValidationReport,
     ) -> List[Mapping[str, Any]]:
         classificationResult = validationReport.parsedResponse.get(
             "classification_result",

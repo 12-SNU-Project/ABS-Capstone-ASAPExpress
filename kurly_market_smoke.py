@@ -14,9 +14,9 @@ if str(SOURCE_ROOT_PATH) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT_PATH))
 
 from eu_export.product import (  # noqa: E402
-    KurlyMarketProductPageCollector,
-    KurlyMarketProductSourcePipeline,
-    KurlyMarketProductSourcePipelineInput,
+    KurlyPageCollector,
+    KurlyProductPipeline,
+    KurlyPipelineInput,
     PaddleOcrEngine,
 )
 
@@ -82,28 +82,28 @@ class KurlyMarketSmokeRunner:
         else:
             runLogger.info("STEP 4/4 상품 수집 결과 JSON artifact 저장을 건너뜁니다")
 
-    def _BuildProductSourcePipeline(self) -> KurlyMarketProductSourcePipeline:
-        collector = KurlyMarketProductPageCollector(
+    def _BuildProductSourcePipeline(self) -> KurlyProductPipeline:
+        collector = KurlyPageCollector(
             headless=DEFAULT_HEADLESS,
             timeoutMilliseconds=DEFAULT_TIMEOUT_SECONDS * 1000,
             scrollCount=DEFAULT_SCROLL_COUNT,
         )
         if not DEFAULT_RUN_OCR_FALLBACK:
-            return KurlyMarketProductSourcePipeline(collector=collector)
+            return KurlyProductPipeline(collector=collector)
 
-        return KurlyMarketProductSourcePipeline(
+        return KurlyProductPipeline(
             collector=collector,
             ocrEngine=PaddleOcrEngine(),
         )
 
     def _RunOne(
         self,
-        productSourcePipeline: KurlyMarketProductSourcePipeline,
+        productSourcePipeline: KurlyProductPipeline,
         productUrl: str,
     ) -> Dict[str, Any]:
         try:
             pipelineResult = productSourcePipeline.Run(
-                KurlyMarketProductSourcePipelineInput(
+                KurlyPipelineInput(
                     productPageUrl=productUrl,
                     runOcrFallback=DEFAULT_RUN_OCR_FALLBACK,
                     artifactRootPath=DEFAULT_ARTIFACT_ROOT_PATH,

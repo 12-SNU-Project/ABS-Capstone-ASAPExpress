@@ -2,26 +2,26 @@
 
 from typing import List, Optional
 
-from eu_export.product.kurly_market_collector import KurlyMarketProductPageCollector
-from eu_export.product.kurly_market_schema import KurlyMarketProductPageCollectionResult
+from eu_export.product.kurly_market_collector import KurlyPageCollector
+from eu_export.product.kurly_market_schema import KurlyCollectionResult
 from eu_export.product.ocr_fallback import (
     ProductOcrFallbackRunner,
     ProductOcrImageResult,
 )
 from eu_export.product.paddle_ocr import ProductOcrEngine
 from eu_export.product.pipeline_schema import (
-    KurlyMarketProductSourcePipelineInput,
-    KurlyMarketProductSourcePipelineResult,
-    KurlyMarketProductSourcePipelineStep,
+    KurlyPipelineInput,
+    KurlyPipelineResult,
+    PipelineStep,
 )
 
 
-class KurlyMarketProductSourcePipeline:
+class KurlyProductPipeline:
     """KurlyMarket parser와 PaddleOCR fallback을 단계적으로 연결하는 wrapper."""
 
     def __init__(
         self,
-        collector: KurlyMarketProductPageCollector,
+        collector: KurlyPageCollector,
         ocrEngine: Optional[ProductOcrEngine] = None,
     ) -> None:
         self._collector = collector
@@ -29,20 +29,20 @@ class KurlyMarketProductSourcePipeline:
 
     def Run(
         self,
-        pipelineInput: KurlyMarketProductSourcePipelineInput,
-    ) -> KurlyMarketProductSourcePipelineResult:
+        pipelineInput: KurlyPipelineInput,
+    ) -> KurlyPipelineResult:
         return self.Collect(pipelineInput)
 
     def Collect(
         self,
-        pipelineInput: KurlyMarketProductSourcePipelineInput,
-    ) -> KurlyMarketProductSourcePipelineResult:
-        steps: List[KurlyMarketProductSourcePipelineStep] = []
+        pipelineInput: KurlyPipelineInput,
+    ) -> KurlyPipelineResult:
+        steps: List[PipelineStep] = []
         errors: List[str] = []
 
         self._collector.ValidateProductPageUrl(pipelineInput.productPageUrl)
         steps.append(
-            KurlyMarketProductSourcePipelineStep(
+            PipelineStep(
                 stepName="validate_product_page_url",
                 message="supported KurlyMarket product page URL",
             )
@@ -52,7 +52,7 @@ class KurlyMarketProductSourcePipeline:
             pipelineInput.productPageUrl,
         )
         steps.append(
-            KurlyMarketProductSourcePipelineStep(
+            PipelineStep(
                 stepName="collect_rendered_page_evidence",
                 message=(
                     "visible_text_length={0}, product_notice_text_length={1}, "
@@ -67,7 +67,7 @@ class KurlyMarketProductSourcePipeline:
 
         collectionResult = self._collector.BuildCollectionResult(renderedPageEvidence)
         steps.append(
-            KurlyMarketProductSourcePipelineStep(
+            PipelineStep(
                 stepName="parse_product_page_evidence",
                 message=(
                     "product_notice_field_count={0}, "
@@ -91,13 +91,13 @@ class KurlyMarketProductSourcePipeline:
             )
         else:
             steps.append(
-                KurlyMarketProductSourcePipelineStep(
+                PipelineStep(
                     stepName="ocr_fallback",
                     message="skipped because runOcrFallback=False",
                 )
             )
 
-        return KurlyMarketProductSourcePipelineResult(
+        return KurlyPipelineResult(
             collectionResult=collectionResult,
             renderedPageEvidence=renderedPageEvidence,
             ocrImageResults=ocrImageResults,
@@ -110,14 +110,14 @@ class KurlyMarketProductSourcePipeline:
 
     def _RunOcrFallback(
         self,
-        collectionResult: KurlyMarketProductPageCollectionResult,
-        pipelineInput: KurlyMarketProductSourcePipelineInput,
-        steps: List[KurlyMarketProductSourcePipelineStep],
+        collectionResult: KurlyCollectionResult,
+        pipelineInput: KurlyPipelineInput,
+        steps: List[PipelineStep],
         errors: List[str],
     ) -> List[ProductOcrImageResult]:
         if not collectionResult.parsedProductPage.requiresOcrFallback:
             steps.append(
-                KurlyMarketProductSourcePipelineStep(
+                PipelineStep(
                     stepName="ocr_fallback",
                     message="skipped because structured notice is sufficient",
                 )
@@ -128,7 +128,7 @@ class KurlyMarketProductSourcePipeline:
             message = "OCR fallback requested but ProductOcrEngine is not configured"
             errors.append(message)
             steps.append(
-                KurlyMarketProductSourcePipelineStep(
+                PipelineStep(
                     stepName="ocr_fallback",
                     succeeded=False,
                     message=message,
@@ -158,7 +158,7 @@ class KurlyMarketProductSourcePipeline:
             errors.append("skipped OCR candidate images: {0}".format(skippedImageCount))
 
         steps.append(
-            KurlyMarketProductSourcePipelineStep(
+            PipelineStep(
                 stepName="ocr_fallback",
                 succeeded=not errors,
                 message="ocr_image_count={0}, error_count={1}".format(

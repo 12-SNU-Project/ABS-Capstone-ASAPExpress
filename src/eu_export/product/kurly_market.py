@@ -1,36 +1,32 @@
-"""KurlyMarket 상품 상세 parser.
-
-Collector와 HTML extractor는 전용 모듈에 있지만, 기존 import 경로 호환을
-위해 이 모듈에서도 alias로 노출한다.
-"""
+"""KurlyMarket 상품 상세 parser."""
 
 import re
 from typing import List, Optional
 from urllib.parse import urlparse
 
 from eu_export.product.kurly_market_collector import (
-    KurlyMarketCollectionError,
-    KurlyMarketProductPageCollector,
+    KurlyCollectionError,
+    KurlyPageCollector,
 )
-from eu_export.product.kurly_market_html import KurlyMarketHtmlTextExtractor
+from eu_export.product.kurly_market_html import KurlyHtmlTextExtractor
 from eu_export.product.kurly_market_schema import (
-    KurlyMarketProductDomain,
-    KurlyMarketProductNoticeField,
-    KurlyMarketProductNoticeOptionRecord,
-    KurlyMarketProductPageParseResult,
+    KurlyProductDomain,
+    ProductNoticeField,
+    ProductNoticeOption,
+    KurlyProductPage,
 )
 from eu_export.utils import NormalizeWhitespace
 
 
 __all__ = [
-    "KurlyMarketBaseProductPageParser",
-    "KurlyMarketCosmeticsProductPageParser",
-    "KurlyMarketFoodProductPageParser",
-    "KurlyMarketProductDomainDetector",
-    "KurlyMarketProductPageParser",
-    "KurlyMarketCollectionError",
-    "KurlyMarketProductPageCollector",
-    "KurlyMarketHtmlTextExtractor",
+    "KurlyBasePageParser",
+    "KurlyCosmeticsPageParser",
+    "KurlyFoodPageParser",
+    "KurlyDomainDetector",
+    "KurlyPageParser",
+    "KurlyCollectionError",
+    "KurlyPageCollector",
+    "KurlyHtmlTextExtractor",
 ]
 
 
@@ -111,12 +107,12 @@ TITLE_SUFFIX_PATTERN = re.compile(r"\s*-\s*(마켓컬리|컬리)\s*$")
 BRACKET_BRAND_PATTERN = re.compile(r"^\[([^\]]+)\]")
 
 
-class KurlyMarketBaseProductPageParser:
+class KurlyBasePageParser:
     """Kurly Market 상품 상세 공통 parser."""
 
     def __init__(
         self,
-        productDomain: KurlyMarketProductDomain = KurlyMarketProductDomain.UNKNOWN,
+        productDomain: KurlyProductDomain = KurlyProductDomain.UNKNOWN,
         productNoticeFieldLabels: Optional[List[str]] = None,
     ) -> None:
         self._productDomain = productDomain
@@ -135,15 +131,15 @@ class KurlyMarketBaseProductPageParser:
         self,
         htmlText: str,
         productPageUrl: Optional[str] = None,
-    ) -> KurlyMarketProductPageParseResult:
-        textLines = KurlyMarketHtmlTextExtractor().ExtractTextLines(htmlText)
+    ) -> KurlyProductPage:
+        textLines = KurlyHtmlTextExtractor().ExtractTextLines(htmlText)
         return self.ParseTextLines(textLines, productPageUrl=productPageUrl)
 
     def ParseText(
         self,
         pageText: str,
         productPageUrl: Optional[str] = None,
-    ) -> KurlyMarketProductPageParseResult:
+    ) -> KurlyProductPage:
         textLines = self.NormalizeTextLines(pageText.splitlines())
         return self.ParseTextLines(textLines, productPageUrl=productPageUrl)
 
@@ -151,7 +147,7 @@ class KurlyMarketBaseProductPageParser:
         self,
         textLines: List[str],
         productPageUrl: Optional[str] = None,
-    ) -> KurlyMarketProductPageParseResult:
+    ) -> KurlyProductPage:
         return self.ParseCollectedTextLines(
             textLines=textLines,
             productNoticeLines=[],
@@ -163,7 +159,7 @@ class KurlyMarketBaseProductPageParser:
         textLines: List[str],
         productNoticeLines: List[str],
         productPageUrl: Optional[str] = None,
-    ) -> KurlyMarketProductPageParseResult:
+    ) -> KurlyProductPage:
         normalizedLines = self.NormalizeTextLines(textLines)
         productName = self._ExtractProductName(normalizedLines)
         noticeLines = productNoticeLines or self._ExtractProductNoticeLines(
@@ -179,7 +175,7 @@ class KurlyMarketBaseProductPageParser:
             noticeFields,
         )
 
-        return KurlyMarketProductPageParseResult(
+        return KurlyProductPage(
             productPageUrl=productPageUrl,
             productDomain=self._productDomain,
             productName=productName,
@@ -323,7 +319,7 @@ class KurlyMarketBaseProductPageParser:
 
     def _ExtractProductNoticeOptionNames(
         self,
-        noticeOptions: List[KurlyMarketProductNoticeOptionRecord],
+        noticeOptions: List[ProductNoticeOption],
     ) -> List[str]:
         optionNames: List[str] = []
         seenOptionNames: set[str] = set()
@@ -338,9 +334,9 @@ class KurlyMarketBaseProductPageParser:
 
     def _BuildRepresentativeProductNoticeFields(
         self,
-        noticeOptions: List[KurlyMarketProductNoticeOptionRecord],
-    ) -> List[KurlyMarketProductNoticeField]:
-        fields: List[KurlyMarketProductNoticeField] = []
+        noticeOptions: List[ProductNoticeOption],
+    ) -> List[ProductNoticeField]:
+        fields: List[ProductNoticeField] = []
         seenFieldKeys: set[tuple[str, Optional[str]]] = set()
         for noticeOption in noticeOptions:
             for fieldRecord in noticeOption.fields:
@@ -354,10 +350,10 @@ class KurlyMarketBaseProductPageParser:
     def _ExtractProductNoticeOptionRecords(
         self,
         noticeLines: List[str],
-    ) -> List[KurlyMarketProductNoticeOptionRecord]:
-        optionRecords: List[KurlyMarketProductNoticeOptionRecord] = []
+    ) -> List[ProductNoticeOption]:
+        optionRecords: List[ProductNoticeOption] = []
         currentOptionNames: List[str] = []
-        currentFieldRecords: List[KurlyMarketProductNoticeField] = []
+        currentFieldRecords: List[ProductNoticeField] = []
         currentRawLines: List[str] = []
 
         index = 0
@@ -407,7 +403,7 @@ class KurlyMarketBaseProductPageParser:
 
             rawLines = [line] + valueLines
             currentFieldRecords.append(
-                KurlyMarketProductNoticeField(
+                ProductNoticeField(
                     fieldName=fieldName,
                     fieldValue=fieldValue,
                     requiresOcrFallback=self._NoticeValueRequiresOcr(fieldValue),
@@ -430,13 +426,13 @@ class KurlyMarketBaseProductPageParser:
     def _BuildProductNoticeOptionRecords(
         self,
         optionNames: List[str],
-        fields: List[KurlyMarketProductNoticeField],
+        fields: List[ProductNoticeField],
         rawLines: List[str],
-    ) -> List[KurlyMarketProductNoticeOptionRecord]:
+    ) -> List[ProductNoticeOption]:
         rawText = "\n".join(rawLines)
         if not optionNames:
             return [
-                KurlyMarketProductNoticeOptionRecord(
+                ProductNoticeOption(
                     optionName=None,
                     fields=list(fields),
                     rawText=rawText,
@@ -444,7 +440,7 @@ class KurlyMarketBaseProductPageParser:
             ]
 
         return [
-            KurlyMarketProductNoticeOptionRecord(
+            ProductNoticeOption(
                 optionName=optionName,
                 fields=list(fields),
                 rawText=rawText,
@@ -510,7 +506,7 @@ class KurlyMarketBaseProductPageParser:
         self,
         textLines: List[str],
         noticeLines: List[str],
-        noticeFields: List[KurlyMarketProductNoticeField],
+        noticeFields: List[ProductNoticeField],
     ) -> List[str]:
         warnings: List[str] = []
         if not textLines:
@@ -522,30 +518,30 @@ class KurlyMarketBaseProductPageParser:
         return warnings
 
 
-class KurlyMarketCosmeticsProductPageParser(KurlyMarketBaseProductPageParser):
+class KurlyCosmeticsPageParser(KurlyBasePageParser):
     """Kurly 화장품 상품고시정보 parser."""
 
     def __init__(self) -> None:
         super().__init__(
-            productDomain=KurlyMarketProductDomain.COSMETICS,
+            productDomain=KurlyProductDomain.COSMETICS,
             productNoticeFieldLabels=COSMETICS_PRODUCT_NOTICE_FIELD_LABELS,
         )
 
 
-class KurlyMarketFoodProductPageParser(KurlyMarketBaseProductPageParser):
+class KurlyFoodPageParser(KurlyBasePageParser):
     """Kurly 식품 상품고시정보 parser."""
 
     def __init__(self) -> None:
         super().__init__(
-            productDomain=KurlyMarketProductDomain.FOOD,
+            productDomain=KurlyProductDomain.FOOD,
             productNoticeFieldLabels=FOOD_PRODUCT_NOTICE_FIELD_LABELS,
         )
 
 
-class KurlyMarketProductDomainDetector:
+class KurlyDomainDetector:
     """상품고시정보 label hit를 기반으로 Kurly 상품 domain을 추정한다."""
 
-    def Detect(self, productNoticeLines: List[str]) -> KurlyMarketProductDomain:
+    def Detect(self, productNoticeLines: List[str]) -> KurlyProductDomain:
         foodScore = self._CountLabelHits(
             productNoticeLines,
             FOOD_PRODUCT_NOTICE_FIELD_LABELS,
@@ -556,12 +552,12 @@ class KurlyMarketProductDomainDetector:
         )
 
         if foodScore == 0 and cosmeticsScore == 0:
-            return KurlyMarketProductDomain.UNKNOWN
+            return KurlyProductDomain.UNKNOWN
         if foodScore == cosmeticsScore:
-            return KurlyMarketProductDomain.AMBIGUOUS
+            return KurlyProductDomain.AMBIGUOUS
         if foodScore > cosmeticsScore:
-            return KurlyMarketProductDomain.FOOD
-        return KurlyMarketProductDomain.COSMETICS
+            return KurlyProductDomain.FOOD
+        return KurlyProductDomain.COSMETICS
 
     def _CountLabelHits(
         self,
@@ -585,22 +581,22 @@ class KurlyMarketProductDomainDetector:
         return False
 
 
-class KurlyMarketProductPageParser:
+class KurlyPageParser:
     """상품고시정보 domain을 감지해 식품/화장품 parser로 분기한다."""
 
     def __init__(
         self,
-        domainDetector: Optional[KurlyMarketProductDomainDetector] = None,
-        foodParser: Optional[KurlyMarketFoodProductPageParser] = None,
-        cosmeticsParser: Optional[KurlyMarketCosmeticsProductPageParser] = None,
-        fallbackParser: Optional[KurlyMarketBaseProductPageParser] = None,
+        domainDetector: Optional[KurlyDomainDetector] = None,
+        foodParser: Optional[KurlyFoodPageParser] = None,
+        cosmeticsParser: Optional[KurlyCosmeticsPageParser] = None,
+        fallbackParser: Optional[KurlyBasePageParser] = None,
     ) -> None:
-        self._domainDetector = domainDetector or KurlyMarketProductDomainDetector()
-        self._foodParser = foodParser or KurlyMarketFoodProductPageParser()
+        self._domainDetector = domainDetector or KurlyDomainDetector()
+        self._foodParser = foodParser or KurlyFoodPageParser()
         self._cosmeticsParser = (
-            cosmeticsParser or KurlyMarketCosmeticsProductPageParser()
+            cosmeticsParser or KurlyCosmeticsPageParser()
         )
-        self._fallbackParser = fallbackParser or KurlyMarketBaseProductPageParser()
+        self._fallbackParser = fallbackParser or KurlyBasePageParser()
 
     def IsSupportedProductPageUrl(self, url: str) -> bool:
         return self._fallbackParser.IsSupportedProductPageUrl(url)
@@ -609,15 +605,15 @@ class KurlyMarketProductPageParser:
         self,
         htmlText: str,
         productPageUrl: Optional[str] = None,
-    ) -> KurlyMarketProductPageParseResult:
-        textLines = KurlyMarketHtmlTextExtractor().ExtractTextLines(htmlText)
+    ) -> KurlyProductPage:
+        textLines = KurlyHtmlTextExtractor().ExtractTextLines(htmlText)
         return self.ParseTextLines(textLines, productPageUrl=productPageUrl)
 
     def ParseText(
         self,
         pageText: str,
         productPageUrl: Optional[str] = None,
-    ) -> KurlyMarketProductPageParseResult:
+    ) -> KurlyProductPage:
         textLines = self.NormalizeTextLines(pageText.splitlines())
         return self.ParseTextLines(textLines, productPageUrl=productPageUrl)
 
@@ -625,7 +621,7 @@ class KurlyMarketProductPageParser:
         self,
         textLines: List[str],
         productPageUrl: Optional[str] = None,
-    ) -> KurlyMarketProductPageParseResult:
+    ) -> KurlyProductPage:
         return self.ParseCollectedTextLines(
             textLines=textLines,
             productNoticeLines=[],
@@ -637,7 +633,7 @@ class KurlyMarketProductPageParser:
         textLines: List[str],
         productNoticeLines: List[str],
         productPageUrl: Optional[str] = None,
-    ) -> KurlyMarketProductPageParseResult:
+    ) -> KurlyProductPage:
         normalizedTextLines = self.NormalizeTextLines(textLines)
         normalizedNoticeLines = productNoticeLines or (
             self._fallbackParser._ExtractProductNoticeLines(normalizedTextLines)
@@ -658,16 +654,16 @@ class KurlyMarketProductPageParser:
     def DetectProductDomain(
         self,
         productNoticeLines: List[str],
-    ) -> KurlyMarketProductDomain:
+    ) -> KurlyProductDomain:
         return self._domainDetector.Detect(productNoticeLines)
 
     def _SelectParser(
         self,
         productNoticeLines: List[str],
-    ) -> KurlyMarketBaseProductPageParser:
+    ) -> KurlyBasePageParser:
         productDomain = self.DetectProductDomain(productNoticeLines)
-        if productDomain == KurlyMarketProductDomain.FOOD:
+        if productDomain == KurlyProductDomain.FOOD:
             return self._foodParser
-        if productDomain == KurlyMarketProductDomain.COSMETICS:
+        if productDomain == KurlyProductDomain.COSMETICS:
             return self._cosmeticsParser
         return self._fallbackParser

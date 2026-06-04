@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from eu_export.product.kurly_market_schema import (
-    KurlyMarketProductPageCollectionResult,
-    KurlyMarketRenderedPageEvidence,
+    KurlyCollectionResult,
+    RenderedPageEvidence,
 )
 from eu_export.product.ocr_fallback import (
     DEFAULT_PRODUCT_OCR_IMAGE_ARTIFACT_ROOT_PATH,
@@ -16,7 +16,7 @@ from eu_export.product.ocr_fallback import (
 
 
 @dataclass(frozen=True)
-class KurlyMarketProductSourcePipelineInput:
+class KurlyPipelineInput:
     """KurlyMarket 수집 wrapper 입력."""
 
     productPageUrl: str
@@ -27,7 +27,7 @@ class KurlyMarketProductSourcePipelineInput:
 
 
 @dataclass(frozen=True)
-class KurlyMarketProductSourcePipelineStep:
+class PipelineStep:
     """wrapper가 실행한 단계 하나의 상태."""
 
     stepName: str
@@ -43,14 +43,14 @@ class KurlyMarketProductSourcePipelineStep:
 
 
 @dataclass(frozen=True)
-class KurlyMarketProductSourcePipelineResult:
+class KurlyPipelineResult:
     """KurlyMarket parsing과 선택적 OCR fallback을 묶은 결과."""
 
-    collectionResult: KurlyMarketProductPageCollectionResult
-    renderedPageEvidence: Optional[KurlyMarketRenderedPageEvidence] = None
+    collectionResult: KurlyCollectionResult
+    renderedPageEvidence: Optional[RenderedPageEvidence] = None
     ocrImageResults: List[ProductOcrImageResult] = field(default_factory=list)
     combinedOcrText: str = ""
-    steps: List[KurlyMarketProductSourcePipelineStep] = field(default_factory=list)
+    steps: List[PipelineStep] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
 
     def ToDict(self) -> Dict[str, object]:

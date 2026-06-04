@@ -5,12 +5,12 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from eu_export.ontology.classification import (
     ProductClassificationInput,
-    Stage1ClassificationResponseValidationReport,
+    Stage1ResponseValidationReport,
     Stage1EvidencePackage,
     Stage1EvidenceRecord,
 )
 from eu_export.ontology.recommendation import (
-    Stage1ClassificationRecommendationReport,
+    Stage1RecommendationReport,
 )
 from eu_export.utils import NormalizeWhitespace
 
@@ -57,8 +57,8 @@ class Stage1HumanReviewPackageBuilder:
     def Build(
         self,
         productInput: ProductClassificationInput,
-        recommendationReport: Stage1ClassificationRecommendationReport,
-        validationReport: Stage1ClassificationResponseValidationReport,
+        recommendationReport: Stage1RecommendationReport,
+        validationReport: Stage1ResponseValidationReport,
         evidencePackage: Stage1EvidencePackage,
         selectedSource: str,
     ) -> Stage1HumanReviewPackage:
@@ -135,7 +135,7 @@ class Stage1HumanReviewPackageBuilder:
     def BuildPackageId(
         self,
         productInput: ProductClassificationInput,
-        recommendationReport: Stage1ClassificationRecommendationReport,
+        recommendationReport: Stage1RecommendationReport,
     ) -> str:
         recommendedCandidate = recommendationReport.recommendedCandidate or {}
         recommendedHs8 = recommendedCandidate.get("hs8") or "unresolved"
@@ -215,7 +215,7 @@ class Stage1HumanReviewPackageBuilder:
 
     def BuildSystemRequiredCitationIds(
         self,
-        validationReport: Stage1ClassificationResponseValidationReport,
+        validationReport: Stage1ResponseValidationReport,
     ) -> set[str]:
         classificationResult = validationReport.parsedResponse.get(
             "classification_result",

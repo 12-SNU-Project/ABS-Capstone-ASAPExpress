@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Dict, List, Optional
 
 
-class KurlyMarketProductDomain(str, Enum):
+class KurlyProductDomain(str, Enum):
     """Kurly 상품고시정보 기준의 상품 domain."""
 
     FOOD = "food"
@@ -15,7 +15,7 @@ class KurlyMarketProductDomain(str, Enum):
 
 
 @dataclass(frozen=True)
-class KurlyMarketProductNoticeField:
+class ProductNoticeField:
     """상품고시정보 label-value record."""
 
     fieldName: str
@@ -32,11 +32,11 @@ class KurlyMarketProductNoticeField:
 
 
 @dataclass(frozen=True)
-class KurlyMarketProductNoticeOptionRecord:
+class ProductNoticeOption:
     """상품 옵션 하나에 정규화된 상품고시정보 field set."""
 
     optionName: Optional[str] = None
-    fields: List[KurlyMarketProductNoticeField] = field(default_factory=list)
+    fields: List[ProductNoticeField] = field(default_factory=list)
     rawText: str = ""
 
     def ToDict(self) -> Dict[str, object]:
@@ -47,21 +47,21 @@ class KurlyMarketProductNoticeOptionRecord:
 
 
 @dataclass(frozen=True)
-class KurlyMarketProductPageParseResult:
+class KurlyProductPage:
     """KurlyMarket 상품 상세 parser 결과."""
 
     productPageUrl: Optional[str] = None
-    productDomain: KurlyMarketProductDomain = KurlyMarketProductDomain.UNKNOWN
+    productDomain: KurlyProductDomain = KurlyProductDomain.UNKNOWN
     productName: Optional[str] = None
     shortDescription: Optional[str] = None
     brandName: Optional[str] = None
     packageType: Optional[str] = None
     saleUnit: Optional[str] = None
     productNoticeOptionNames: List[str] = field(default_factory=list)
-    productNoticeFields: List[KurlyMarketProductNoticeField] = field(
+    productNoticeFields: List[ProductNoticeField] = field(
         default_factory=list,
     )
-    productNoticeOptions: List[KurlyMarketProductNoticeOptionRecord] = field(
+    productNoticeOptions: List[ProductNoticeOption] = field(
         default_factory=list,
     )
     rawProductNoticeText: str = ""
@@ -94,11 +94,11 @@ class KurlyMarketProductPageParseResult:
 
 
 @dataclass(frozen=True)
-class KurlyMarketProductPageCollectionResult:
+class KurlyCollectionResult:
     """렌더링된 KurlyMarket 상품 페이지 수집 결과."""
 
     productPageUrl: str
-    parsedProductPage: KurlyMarketProductPageParseResult
+    parsedProductPage: KurlyProductPage
     visibleTextLineCount: int
     productNoticeTextLineCount: int
     productDetailImageUrls: List[str] = field(default_factory=list)
@@ -118,7 +118,7 @@ class KurlyMarketProductPageCollectionResult:
 
 
 @dataclass(frozen=True)
-class KurlyMarketRenderedPageEvidence:
+class RenderedPageEvidence:
     """Playwright 렌더링 이후 parser에 넘길 원천 증거."""
 
     productPageUrl: str

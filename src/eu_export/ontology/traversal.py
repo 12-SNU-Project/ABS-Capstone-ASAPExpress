@@ -8,7 +8,7 @@ from eu_export.ontology.classification import (
     CnCandidateRetriever,
     DEFAULT_CN_CANDIDATE_TOP_K,
     ProductClassificationInput,
-    Stage1ClassificationResponseValidationReport,
+    Stage1ResponseValidationReport,
 )
 from eu_export.ontology.decision_policy import (
     Stage1DecisionPolicy,
@@ -58,7 +58,7 @@ class Stage1TraversalController:
 
     def BuildReport(
         self,
-        validationReport: Stage1ClassificationResponseValidationReport,
+        validationReport: Stage1ResponseValidationReport,
         candidates: Sequence[CnCandidate],
     ) -> Stage1TraversalReport:
         decisionReport = self._decisionPolicy.BuildDecision(

@@ -35,9 +35,9 @@ from eu_export.ontology import (  # noqa: E402
     OntologyResourceResolver,
     ProductClassificationInput,
     ProductClassificationInputNormalizer,
-    Stage1ClassificationRecommendationReportBuilder,
-    Stage1ClassificationResponseValidator,
-    Stage1ClassificationRequestBuilder,
+    Stage1RecommendationReportBuilder,
+    Stage1ResponseValidator,
+    Stage1RequestBuilder,
     Stage1DecisionPolicy,
     Stage1DecisionReport,
     Stage1EvidencePackage,
@@ -567,7 +567,7 @@ class OntologySmokeRunner:
             ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
             projectRootPath=PROJECT_ROOT_PATH,
         )
-        requestBuilder = Stage1ClassificationRequestBuilder()
+        requestBuilder = Stage1RequestBuilder()
 
         requestResults: List[Dict[str, Any]] = []
         for smokeRecord in smokeRecords[:DEFAULT_MAX_PRODUCT_SMOKE_INPUTS]:
@@ -719,7 +719,7 @@ class OntologySmokeRunner:
             ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
             projectRootPath=PROJECT_ROOT_PATH,
         )
-        requestBuilder = Stage1ClassificationRequestBuilder()
+        requestBuilder = Stage1RequestBuilder()
 
         productResults: List[Dict[str, Any]] = []
         for smokeRecord in smokeRecords[:DEFAULT_MAX_PRODUCT_SMOKE_INPUTS]:
@@ -803,7 +803,7 @@ class OntologySmokeRunner:
         contextBuilder: OntologyContextBuilder,
     ) -> Dict[str, Any]:
         smokeRecords = self._LoadProductSmokeRecords()
-        validator = Stage1ClassificationResponseValidator()
+        validator = Stage1ResponseValidator()
 
         if not smokeRecords:
             result = {
@@ -822,7 +822,7 @@ class OntologySmokeRunner:
             ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
             projectRootPath=PROJECT_ROOT_PATH,
         )
-        requestBuilder = Stage1ClassificationRequestBuilder()
+        requestBuilder = Stage1RequestBuilder()
         evidencePackageBuilder = Stage1EvidencePackageBuilder(
             ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
             projectRootPath=PROJECT_ROOT_PATH,
@@ -945,12 +945,12 @@ class OntologySmokeRunner:
             ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
             projectRootPath=PROJECT_ROOT_PATH,
         )
-        requestBuilder = Stage1ClassificationRequestBuilder()
+        requestBuilder = Stage1RequestBuilder()
         evidencePackageBuilder = Stage1EvidencePackageBuilder(
             ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
             projectRootPath=PROJECT_ROOT_PATH,
         )
-        validator = Stage1ClassificationResponseValidator()
+        validator = Stage1ResponseValidator()
         decisionPolicy = Stage1DecisionPolicy()
 
         productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecords[0])
@@ -1158,7 +1158,7 @@ class OntologySmokeRunner:
             ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
             projectRootPath=PROJECT_ROOT_PATH,
         )
-        requestBuilder = Stage1ClassificationRequestBuilder()
+        requestBuilder = Stage1RequestBuilder()
         evidencePackageBuilder = Stage1EvidencePackageBuilder(
             ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
             projectRootPath=PROJECT_ROOT_PATH,
@@ -1237,7 +1237,7 @@ class OntologySmokeRunner:
             productInput=productInput,
             candidates=backtrackingCandidates,
             requestBuilder=requestBuilder,
-            validator=Stage1ClassificationResponseValidator(),
+            validator=Stage1ResponseValidator(),
             evidencePackage=evidencePackage,
             backtrackingSummary=backtrackingSummary,
         )
@@ -1579,8 +1579,8 @@ class OntologySmokeRunner:
         contextBuilder: OntologyContextBuilder,
         productInput: ProductClassificationInput,
         candidates: List[CnCandidate],
-        requestBuilder: Stage1ClassificationRequestBuilder,
-        validator: Stage1ClassificationResponseValidator,
+        requestBuilder: Stage1RequestBuilder,
+        validator: Stage1ResponseValidator,
         evidencePackage: Stage1EvidencePackage,
         backtrackingSummary: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -1660,7 +1660,7 @@ class OntologySmokeRunner:
                 candidates,
             )
             recommendationReport = (
-                Stage1ClassificationRecommendationReportBuilder().Build(
+                Stage1RecommendationReportBuilder().Build(
                     productInput=productInput,
                     candidates=candidates,
                     validationReport=validationReport,

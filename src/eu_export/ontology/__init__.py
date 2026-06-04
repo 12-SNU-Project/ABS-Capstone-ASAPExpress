@@ -8,10 +8,10 @@ from eu_export.ontology.classification import (
     Stage1EvidencePackageBuilder,
     Stage1EvidencePackage,
     Stage1EvidenceRecord,
-    Stage1ClassificationResponseValidationIssue,
-    Stage1ClassificationResponseValidationReport,
-    Stage1ClassificationResponseValidator,
-    Stage1ClassificationRequestBuilder,
+    Stage1ResponseValidationIssue,
+    Stage1ResponseValidationReport,
+    Stage1ResponseValidator,
+    Stage1RequestBuilder,
 )
 from eu_export.ontology.context import ContextPackager
 from eu_export.ontology.context_builder import OntologyContextBuilder
@@ -32,8 +32,8 @@ from eu_export.ontology.resource_resolver import (
 )
 from eu_export.ontology.retriever import OntologyRetriever
 from eu_export.ontology.recommendation import (
-    Stage1ClassificationRecommendationReport,
-    Stage1ClassificationRecommendationReportBuilder,
+    Stage1RecommendationReport,
+    Stage1RecommendationReportBuilder,
 )
 from eu_export.ontology.schema import (
     OntologyChunk,
@@ -69,8 +69,8 @@ __all__ = [
     "Stage1HumanReviewPackage",
     "Stage1HumanReviewPackageBuilder",
     "OntologyRequestBuilder",
-    "Stage1ClassificationRecommendationReport",
-    "Stage1ClassificationRecommendationReportBuilder",
+    "Stage1RecommendationReport",
+    "Stage1RecommendationReportBuilder",
     "OntologyResourceResolutionReport",
     "OntologyResourceResolver",
     "OntologyRetrievalResult",
@@ -84,10 +84,10 @@ __all__ = [
     "Stage1EvidencePackageBuilder",
     "Stage1EvidencePackage",
     "Stage1EvidenceRecord",
-    "Stage1ClassificationResponseValidationIssue",
-    "Stage1ClassificationResponseValidationReport",
-    "Stage1ClassificationResponseValidator",
-    "Stage1ClassificationRequestBuilder",
+    "Stage1ResponseValidationIssue",
+    "Stage1ResponseValidationReport",
+    "Stage1ResponseValidator",
+    "Stage1RequestBuilder",
     "Stage1DecisionPolicy",
     "Stage1DecisionReport",
     "DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT",
