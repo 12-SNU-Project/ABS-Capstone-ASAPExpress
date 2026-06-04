@@ -28,7 +28,6 @@ class KurlyMarketProductNoticeField:
             "field_name": self.fieldName,
             "field_value": self.fieldValue,
             "requires_ocr_fallback": self.requiresOcrFallback,
-            "raw_text": self.rawText,
         }
 
 
@@ -44,7 +43,6 @@ class KurlyMarketProductNoticeOptionRecord:
         return {
             "option_name": self.optionName,
             "fields": [fieldRecord.ToDict() for fieldRecord in self.fields],
-            "raw_text": self.rawText,
         }
 
 
@@ -88,7 +86,7 @@ class KurlyMarketProductPageParseResult:
                 noticeOption.ToDict()
                 for noticeOption in self.productNoticeOptions
             ],
-            "raw_product_notice_text": self.rawProductNoticeText,
+            "raw_product_notice_text_length": len(self.rawProductNoticeText),
             "image_reference_detected": self.imageReferenceDetected,
             "requires_ocr_fallback": self.requiresOcrFallback,
             "warnings": list(self.warnings),
@@ -113,8 +111,8 @@ class KurlyMarketProductPageCollectionResult:
             "parsed_product_page": self.parsedProductPage.ToDict(),
             "visible_text_line_count": self.visibleTextLineCount,
             "product_notice_text_line_count": self.productNoticeTextLineCount,
-            "product_detail_image_urls": list(self.productDetailImageUrls),
-            "ocr_candidate_image_urls": list(self.ocrCandidateImageUrls),
+            "product_detail_image_url_count": len(self.productDetailImageUrls),
+            "ocr_candidate_image_url_count": len(self.ocrCandidateImageUrls),
             "warnings": list(self.warnings),
         }
 
@@ -131,7 +129,7 @@ class KurlyMarketRenderedPageEvidence:
     def ToDict(self) -> Dict[str, object]:
         return {
             "product_page_url": self.productPageUrl,
-            "visible_text": self.visibleText,
-            "product_notice_text": self.productNoticeText,
-            "product_detail_image_urls": list(self.productDetailImageUrls),
+            "visible_text_length": len(self.visibleText),
+            "product_notice_text_length": len(self.productNoticeText),
+            "product_detail_image_url_count": len(self.productDetailImageUrls),
         }

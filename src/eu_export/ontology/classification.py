@@ -317,23 +317,12 @@ class CnCandidate:
                     "description_matches*1; exclude_rule match forces score 0"
                 ),
             },
-            "hs2_code": self.hs2Code,
-            "hs2_description": self.hs2Description,
-            "hs4_code": self.hs4Code,
-            "hs4_description": self.hs4Description,
-            "hs6_code": self.hs6Code,
-            "hs6_description": self.hs6Description,
-            "hs8_code": self.hs8Code or self.hs8,
-            "hs8_description": self.hs8Description,
             "combined_description": self.combinedDescription,
             "classification_rule_texts": {
                 "include_rule_keywords": self.includeRuleKeywords,
                 "exclude_rule_keywords": self.excludeRuleKeywords,
                 "hard_conditions": self.hardConditions,
             },
-            "include_rule_keywords": self.includeRuleKeywords,
-            "exclude_rule_keywords": self.excludeRuleKeywords,
-            "hard_conditions": self.hardConditions,
             "cn_explanatory_note": self.cnExplanatoryNote,
             "needs_human_review": self.needsHumanReview,
         }
@@ -426,7 +415,6 @@ class Stage1EvidencePackage:
                 candidateCode: list(evidenceIds)
                 for candidateCode, evidenceIds in self.candidateEvidenceIds.items()
             },
-            "valid_evidence_ids": sorted(self.validEvidenceIds),
         }
 
     def ToPromptDict(
@@ -909,6 +897,8 @@ class ProductClassificationInputNormalizer:
         self,
         pipelineResultData: Mapping[str, Any],
     ) -> ProductClassificationInput:
+        if "parsed_product_page" in pipelineResultData:
+            return self._BuildFromSlimKurlyPipelineResultData(pipelineResultData)
         if "collection_result" in pipelineResultData:
             return self._BuildFromCurrentKurlyPipelineResultData(pipelineResultData)
         if "product" in pipelineResultData and "notice" in pipelineResultData:
@@ -923,6 +913,22 @@ class ProductClassificationInputNormalizer:
         if not callable(toDict):
             raise TypeError("pipelineResult must provide ToDict().")
         return self.BuildFromKurlyPipelineResultData(toDict())
+
+    def _BuildFromSlimKurlyPipelineResultData(
+        self,
+        pipelineResultData: Mapping[str, Any],
+    ) -> ProductClassificationInput:
+        parsedProductPage = self._ReadMapping(
+            pipelineResultData.get("parsed_product_page"),
+        )
+        return self._BuildInput(
+            productPageUrl=self._ReadString(pipelineResultData.get("product_page_url")),
+            parsedProductPage=parsedProductPage,
+            combinedOcrText=self._ReadString(
+                pipelineResultData.get("combined_ocr_text"),
+            )
+            or "",
+        )
 
     def _BuildFromCurrentKurlyPipelineResultData(
         self,
@@ -1050,6 +1056,12 @@ class ProductClassificationInputNormalizer:
             rawText = self._ReadString(noticeOption.get("raw_text"))
             if rawText is not None:
                 rawTexts.append(rawText)
+                continue
+            optionName = self._ReadString(noticeOption.get("option_name"))
+            optionFields = self._ReadMappingList(noticeOption.get("fields"))
+            if optionName is not None:
+                rawTexts.append(optionName)
+            rawTexts.extend(self._BuildNoticeFieldTexts(optionFields))
         if not rawTexts:
             rawTexts = [
                 rawText
@@ -1059,6 +1071,8 @@ class ProductClassificationInputNormalizer:
                 )
                 if rawText is not None
             ]
+        if not rawTexts:
+            rawTexts = self._BuildNoticeFieldTexts(noticeFields)
         return NormalizeWhitespacePreservingLines("\n".join(rawTexts))
 
     def _ExtractNoticeOptionNames(

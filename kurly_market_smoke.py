@@ -22,11 +22,9 @@ from eu_export.product import (  # noqa: E402
 
 
 DEFAULT_PRODUCT_URLS = [
-    "https://www.kurly.com/goods/5037259",
-    "https://www.kurly.com/goods/1000319181",
-    "https://www.kurly.com/goods/1001109031",
-    "https://www.kurly.com/goods/1002127593",
+    """여기에 링크 추가하셈."""
 ]
+
 DEFAULT_TIMEOUT_SECONDS = 60
 DEFAULT_SCROLL_COUNT = 8
 DEFAULT_HEADLESS = True
@@ -128,9 +126,16 @@ class KurlyMarketSmokeRunner:
         productUrl: str,
         pipelineResultData: Dict[str, Any],
     ) -> Dict[str, Any]:
-        collectionResult = pipelineResultData["collection_result"]
-        parsedProductPage = collectionResult["parsed_product_page"]
-        ocrImageResults = pipelineResultData["ocr_image_results"]
+        collectionResult = pipelineResultData.get("collection_result")
+        if not isinstance(collectionResult, dict):
+            collectionResult = pipelineResultData.get("collection_summary", {})
+        parsedProductPage = pipelineResultData.get("parsed_product_page")
+        if not isinstance(parsedProductPage, dict):
+            parsedProductPage = collectionResult["parsed_product_page"]
+        ocrSummary = pipelineResultData.get("ocr_summary", {})
+        if not isinstance(ocrSummary, dict):
+            ocrSummary = {}
+        ocrImageResults = pipelineResultData.get("ocr_image_results", [])
         combinedOcrText = pipelineResultData["combined_ocr_text"]
         requiresOcrFallback = parsedProductPage["requires_ocr_fallback"]
 
@@ -139,19 +144,25 @@ class KurlyMarketSmokeRunner:
             for imageResult in ocrImageResults
             if imageResult["error"] is None and len(imageResult["ocr_text"]) > 0
         ]
+        successfulOcrImageCount = int(
+            ocrSummary.get("successful_image_count", len(successfulOcrResults)),
+        )
         isOcrFallbackOk = (
             not requiresOcrFallback
             or (
                 DEFAULT_RUN_OCR_FALLBACK
-                and len(successfulOcrResults) > 0
+                and successfulOcrImageCount > 0
             )
         )
 
         return {
             "product_page_url": productUrl,
-            "collection_result": collectionResult,
-            "rendered_page_evidence": pipelineResultData["rendered_page_evidence"],
-            "ocr_image_results": ocrImageResults,
+            "parsed_product_page": parsedProductPage,
+            "collection_summary": collectionResult,
+            "rendered_page_evidence_summary": pipelineResultData.get(
+                "rendered_page_evidence_summary",
+            ),
+            "ocr_summary": ocrSummary,
             "combined_ocr_text": combinedOcrText,
             "steps": pipelineResultData["steps"],
             "status": {
@@ -183,18 +194,30 @@ class KurlyMarketSmokeRunner:
                 ],
             },
             "ocr": {
-                "product_detail_image_url_count": len(
-                    collectionResult["product_detail_image_urls"]
+                "product_detail_image_url_count": collectionResult.get(
+                    "product_detail_image_url_count",
+                    len(collectionResult.get("product_detail_image_urls", [])),
                 ),
-                "candidate_image_url_count": len(
-                    collectionResult["ocr_candidate_image_urls"]
+                "candidate_image_url_count": collectionResult.get(
+                    "ocr_candidate_image_url_count",
+                    len(collectionResult.get("ocr_candidate_image_urls", [])),
                 ),
-                "candidate_image_urls_preview": collectionResult[
-                    "ocr_candidate_image_urls"
-                ][:DEFAULT_MAX_LOGGED_OCR_CANDIDATE_URLS],
-                "image_result_count": len(ocrImageResults),
-                "successful_image_count": len(successfulOcrResults),
-                "image_artifacts": self._BuildOcrImageArtifacts(ocrImageResults),
+                "candidate_image_urls_preview": collectionResult.get(
+                    "ocr_candidate_image_urls",
+                    [],
+                )[:DEFAULT_MAX_LOGGED_OCR_CANDIDATE_URLS],
+                "image_result_count": ocrSummary.get(
+                    "image_result_count",
+                    len(ocrImageResults),
+                ),
+                "successful_image_count": ocrSummary.get(
+                    "successful_image_count",
+                    len(successfulOcrResults),
+                ),
+                "image_artifacts": ocrSummary.get(
+                    "image_artifacts",
+                    self._BuildOcrImageArtifacts(ocrImageResults),
+                ),
                 "combined_text_length": len(combinedOcrText),
                 "combined_text_preview": self._BuildTextPreview(
                     combinedOcrText,

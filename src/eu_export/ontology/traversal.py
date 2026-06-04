@@ -29,14 +29,9 @@ class Stage1TraversalReport:
     currentCandidateHs8Codes: List[str] = field(default_factory=list)
     retainedCandidateHs8Codes: List[str] = field(default_factory=list)
     rejectedCandidateHs8Codes: List[str] = field(default_factory=list)
-    recommendedCandidateHs8: Optional[str] = None
     backtrackingRecommended: bool = False
     backtrackingTargetLevel: Optional[str] = None
     backtrackingReason: Optional[str] = None
-    missingInformation: List[str] = field(default_factory=list)
-    evidenceRefs: List[str] = field(default_factory=list)
-    humanReviewRequired: bool = True
-    limitations: List[str] = field(default_factory=list)
 
     def ToDict(self) -> Dict[str, Any]:
         return {
@@ -46,14 +41,9 @@ class Stage1TraversalReport:
             "current_candidate_hs8_codes": list(self.currentCandidateHs8Codes),
             "retained_candidate_hs8_codes": list(self.retainedCandidateHs8Codes),
             "rejected_candidate_hs8_codes": list(self.rejectedCandidateHs8Codes),
-            "recommended_candidate_hs8": self.recommendedCandidateHs8,
             "backtracking_recommended": self.backtrackingRecommended,
             "backtracking_target_level": self.backtrackingTargetLevel,
             "backtracking_reason": self.backtrackingReason,
-            "missing_information": list(self.missingInformation),
-            "evidence_refs": list(self.evidenceRefs),
-            "human_review_required": self.humanReviewRequired,
-            "limitations": list(self.limitations),
         }
 
 
@@ -128,20 +118,9 @@ class Stage1TraversalController:
             currentCandidateHs8Codes=currentCandidateHs8Codes,
             retainedCandidateHs8Codes=retainedCandidateHs8Codes,
             rejectedCandidateHs8Codes=list(decisionReport.unlikelyCandidateHs8Codes),
-            recommendedCandidateHs8=decisionReport.recommendedCandidateHs8,
             backtrackingRecommended=decisionReport.backtrackingRecommended,
             backtrackingTargetLevel=decisionReport.backtrackingTargetLevel,
             backtrackingReason=decisionReport.backtrackingReason,
-            missingInformation=list(decisionReport.missingInformation),
-            evidenceRefs=list(decisionReport.evidenceRefs),
-            humanReviewRequired=decisionReport.humanReviewRequired,
-            limitations=[
-                *decisionReport.limitations,
-                (
-                    "BuildFromDecision selects the next pipeline action; "
-                    "candidate regeneration must be called explicitly."
-                ),
-            ],
         )
 
     def BuildBacktrackingCandidates(

@@ -40,9 +40,6 @@ class Stage1ClassificationRecommendationReport:
             "candidate_output_mode": self.candidateOutputMode,
             "recommendation_level": self.recommendationLevel,
             "candidate_generation_process": dict(self.candidateGenerationProcess),
-            "priority_review_candidate": self.recommendedCandidate,
-            "comparison_review_candidates": list(self.retainedCandidates),
-            "unlikely_candidates_summary": list(self.rejectedCandidatesSummary),
             "recommended_candidate": self.recommendedCandidate,
             "retained_candidates": list(self.retainedCandidates),
             "rejected_candidates_summary": list(self.rejectedCandidatesSummary),
@@ -85,7 +82,7 @@ class Stage1ClassificationRecommendationReportBuilder:
                 candidateByHs8.get(candidateCode),
                 reviewByHs8.get(candidateCode, {}),
             )
-            if candidateCode == traversalReport.recommendedCandidateHs8:
+            if candidateCode == decisionReport.recommendedCandidateHs8:
                 recommendedCandidate = candidateRecord
             else:
                 retainedCandidates.append(candidateRecord)
@@ -117,16 +114,16 @@ class Stage1ClassificationRecommendationReportBuilder:
                 evidencePackage,
             ),
             remainingRisks=self._BuildUniqueStrings(
-                [
-                    *decisionReport.missingInformation,
-                    *traversalReport.missingInformation,
-                ]
+                decisionReport.missingInformation,
             ),
             humanReviewRequired=True,
             limitations=self._BuildUniqueStrings(
                 [
                     *decisionReport.limitations,
-                    *traversalReport.limitations,
+                    (
+                        "Traversal selected the next pipeline action: "
+                        "{0}.".format(traversalReport.nextAction)
+                    ),
                     (
                         "This report surfaces review candidates for human review; "
                         "it is not a final legal/customs determination."
@@ -190,12 +187,6 @@ class Stage1ClassificationRecommendationReportBuilder:
 
         record.update(
             {
-                "score": candidate.score if candidate is not None else None,
-                "matched_terms": (
-                    list(candidate.matchedTerms)
-                    if candidate is not None
-                    else []
-                ),
                 "supporting_product_facts": list(
                     candidateReview.get("supporting_product_facts", []),
                 ) if isinstance(
@@ -244,7 +235,6 @@ class Stage1ClassificationRecommendationReportBuilder:
                 "Generate HS6/CN8 candidates and explain why each candidate "
                 "was surfaced. This is not a final classification decision."
             ),
-            "product_domain": productInput.productDomain,
             "domain_scopes": list(productInput.domainScopes),
             "search_text_length": len(productInput.BuildSearchText()),
             "scoring_rule": {

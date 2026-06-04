@@ -55,11 +55,24 @@ class KurlyMarketProductSourcePipelineResult:
 
     def ToDict(self) -> Dict[str, object]:
         return {
-            "collection_result": self.collectionResult.ToDict(),
-            "rendered_page_evidence": self._BuildRenderedPageEvidenceSummary(),
-            "ocr_image_results": [
-                imageResult.ToDict() for imageResult in self.ocrImageResults
-            ],
+            "product_page_url": self.collectionResult.productPageUrl,
+            "parsed_product_page": self.collectionResult.parsedProductPage.ToDict(),
+            "collection_summary": {
+                "product_page_url": self.collectionResult.productPageUrl,
+                "visible_text_line_count": self.collectionResult.visibleTextLineCount,
+                "product_notice_text_line_count": (
+                    self.collectionResult.productNoticeTextLineCount
+                ),
+                "product_detail_image_url_count": len(
+                    self.collectionResult.productDetailImageUrls,
+                ),
+                "ocr_candidate_image_url_count": len(
+                    self.collectionResult.ocrCandidateImageUrls,
+                ),
+                "warnings": list(self.collectionResult.warnings),
+            },
+            "rendered_page_evidence_summary": self._BuildRenderedPageEvidenceSummary(),
+            "ocr_summary": self._BuildOcrSummary(),
             "combined_ocr_text": self.combinedOcrText,
             "steps": [step.ToDict() for step in self.steps],
             "errors": list(self.errors),
@@ -77,4 +90,35 @@ class KurlyMarketProductSourcePipelineResult:
             "product_detail_image_url_count": len(
                 self.renderedPageEvidence.productDetailImageUrls
             ),
+        }
+
+    def _BuildOcrSummary(self) -> Dict[str, object]:
+        successfulImageResults = [
+            imageResult
+            for imageResult in self.ocrImageResults
+            if imageResult.error is None and imageResult.ocrText.strip() != ""
+        ]
+        return {
+            "image_result_count": len(self.ocrImageResults),
+            "successful_image_count": len(successfulImageResults),
+            "failed_image_count": (
+                len(self.ocrImageResults) - len(successfulImageResults)
+            ),
+            "combined_text_length": len(self.combinedOcrText),
+            "image_artifacts": [
+                {
+                    "index": imageIndex,
+                    "image_path": (
+                        str(imageResult.imagePath)
+                        if imageResult.imagePath is not None
+                        else None
+                    ),
+                    "text_length": len(imageResult.ocrText),
+                    "error": imageResult.error,
+                }
+                for imageIndex, imageResult in enumerate(
+                    self.ocrImageResults,
+                    start=1,
+                )
+            ],
         }

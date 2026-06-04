@@ -25,7 +25,6 @@ class Stage1HumanReviewPackage:
     packageId: str
     selectedSource: str
     productFacts: Dict[str, Any]
-    candidateGenerationProcess: Dict[str, Any]
     recommendationReport: Dict[str, Any]
     evidenceCitations: List[Dict[str, Any]] = field(default_factory=list)
     sourceEvidenceRecords: List[Dict[str, Any]] = field(default_factory=list)
@@ -42,7 +41,6 @@ class Stage1HumanReviewPackage:
             "package_id": self.packageId,
             "selected_source": self.selectedSource,
             "product_facts": dict(self.productFacts),
-            "candidate_generation_process": dict(self.candidateGenerationProcess),
             "recommendation_report": dict(self.recommendationReport),
             "evidence_citations": list(self.evidenceCitations),
             "source_evidence_records": list(self.sourceEvidenceRecords),
@@ -113,9 +111,6 @@ class Stage1HumanReviewPackageBuilder:
             packageId=self.BuildPackageId(productInput, recommendationReport),
             selectedSource=selectedSource,
             productFacts=self.BuildProductFacts(productInput),
-            candidateGenerationProcess=dict(
-                recommendationData.get("candidate_generation_process", {}),
-            ),
             recommendationReport=recommendationData,
             evidenceCitations=[
                 self.BuildEvidenceCitation(
@@ -165,8 +160,6 @@ class Stage1HumanReviewPackageBuilder:
     ) -> Dict[str, Any]:
         return {
             **productInput.ToDict(),
-            "notice_option_names": list(productInput.noticeOptionNames),
-            "notice_field_texts": list(productInput.noticeFieldTexts),
             "product_notice_text_preview": self.BuildTextPreview(
                 productInput.productNoticeText,
             ),
@@ -263,8 +256,6 @@ class Stage1HumanReviewPackageBuilder:
             "candidate_hs8": evidenceRecord.candidateHs8,
             "candidate_hs6": evidenceRecord.candidateHs6,
             "legal_status": evidenceRecord.legalStatus,
-            "text": evidenceRecord.text,
-            "text_preview": self.BuildTextPreview(evidenceRecord.text),
             "limitations": list(evidenceRecord.limitations),
         }
 
@@ -272,9 +263,7 @@ class Stage1HumanReviewPackageBuilder:
         self,
         evidenceRecord: Stage1EvidenceRecord,
     ) -> Dict[str, Any]:
-        evidenceData = evidenceRecord.ToDict()
-        evidenceData["text_preview"] = self.BuildTextPreview(evidenceRecord.text)
-        return evidenceData
+        return evidenceRecord.ToDict()
 
     def BuildReviewChecklist(
         self,

@@ -31,7 +31,6 @@ class OntologyDocument:
             "source_path": self.sourcePath,
             "relative_path": self.relativePath,
             "title": self.title,
-            "content": self.content,
             "content_length": len(self.content),
             "frontmatter": dict(self.frontmatter),
             "document_kind": self.documentKind.value,
@@ -68,8 +67,8 @@ class OntologyChunk:
             "document_id": self.documentId,
             "source_path": self.sourcePath,
             "relative_path": self.relativePath,
-            "text": self.text,
             "text_length": len(self.text),
+            "text_preview": self.text[:300],
             "heading_path": list(self.headingPath),
             "token_estimate": self.tokenEstimate,
             "metadata": dict(self.metadata),
@@ -104,7 +103,7 @@ class PackagedOntologyContext:
 
     def ToDict(self) -> Dict[str, Any]:
         return {
-            "context_chunks": list(self.contextChunks),
+            "context_chunk_count": len(self.contextChunks),
             "selected_results": [
                 selectedResult.ToDict() for selectedResult in self.selectedResults
             ],
