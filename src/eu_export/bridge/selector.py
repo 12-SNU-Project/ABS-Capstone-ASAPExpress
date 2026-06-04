@@ -5,6 +5,10 @@ import platform
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
+from eu_export.app_config import (
+    LoadAppConfig,
+    ReadConfigSection,
+)
 from eu_export.bridge.schema import (
     LlmRuntimeConfig,
     LlmRuntimeKind,
@@ -75,10 +79,17 @@ def BuildLlmRuntimeConfigFromEnv(
     envFilePath: Optional[str | Path] = ".env",
     environment: Optional[Mapping[str, str]] = None,
     osName: Optional[str] = None,
+    appConfigPath: Optional[str | Path] = None,
+    projectRootPath: Optional[str | Path] = None,
 ) -> LlmRuntimeConfig:
-    """환경 변수와 .env 값을 LlmRuntimeConfig로 분배한다."""
+    """.appconfig 기본값과 .env/환경 변수 값을 LlmRuntimeConfig로 분배한다."""
 
-    envValues = _ReadMergedEnvValues(envFilePath, environment)
+    envValues = _ReadMergedRuntimeValues(
+        envFilePath,
+        environment,
+        appConfigPath,
+        projectRootPath,
+    )
     runtimeName = _ReadEnvValue(envValues, "EU_EXPORT_LLM_RUNTIME")
 
     if runtimeName is None:
@@ -259,6 +270,77 @@ def _ReadMergedEnvValues(
             envValues[envName] = envValue.strip()
 
     return envValues
+
+
+def _ReadMergedRuntimeValues(
+    envFilePath: Optional[str | Path],
+    environment: Optional[Mapping[str, str]],
+    appConfigPath: Optional[str | Path],
+    projectRootPath: Optional[str | Path],
+) -> Dict[str, str]:
+    runtimeValues = _ReadAppConfigRuntimeValues(
+        envFilePath,
+        appConfigPath,
+        projectRootPath,
+    )
+    runtimeValues.update(_ReadMergedEnvValues(envFilePath, environment))
+    return runtimeValues
+
+
+def _ReadAppConfigRuntimeValues(
+    envFilePath: Optional[str | Path],
+    appConfigPath: Optional[str | Path],
+    projectRootPath: Optional[str | Path],
+) -> Dict[str, str]:
+    resolvedProjectRootPath = _ResolveProjectRootPath(
+        envFilePath,
+        projectRootPath,
+    )
+    appConfig = LoadAppConfig(resolvedProjectRootPath, appConfigPath)
+    llmConfig = ReadConfigSection(appConfig, "llm")
+    if len(llmConfig) == 0:
+        return {}
+
+    runtimeValues: Dict[str, str] = {}
+    stringKeyMap = {
+        "runtime": "EU_EXPORT_LLM_RUNTIME",
+        "provider": "EU_EXPORT_LLM_PROVIDER",
+        "model": "EU_EXPORT_LLM_MODEL",
+        "endpoint_url": "EU_EXPORT_LLM_ENDPOINT_URL",
+        "chat_completions_path": "EU_EXPORT_LLM_CHAT_COMPLETIONS_PATH",
+    }
+    for configKey, envName in stringKeyMap.items():
+        value = llmConfig.get(configKey)
+        if isinstance(value, str) and value.strip() != "":
+            runtimeValues[envName] = value.strip()
+
+    timeoutSeconds = llmConfig.get("timeout_seconds")
+    if (
+        isinstance(timeoutSeconds, int)
+        and not isinstance(timeoutSeconds, bool)
+        and timeoutSeconds > 0
+    ):
+        runtimeValues["EU_EXPORT_LLM_TIMEOUT_SECONDS"] = str(timeoutSeconds)
+
+    supportsResponseFormat = llmConfig.get("supports_response_format")
+    if isinstance(supportsResponseFormat, bool):
+        runtimeValues["EU_EXPORT_LLM_SUPPORTS_RESPONSE_FORMAT"] = (
+            "true" if supportsResponseFormat else "false"
+        )
+    return runtimeValues
+
+
+def _ResolveProjectRootPath(
+    envFilePath: Optional[str | Path],
+    projectRootPath: Optional[str | Path],
+) -> Path:
+    if projectRootPath is not None:
+        return Path(projectRootPath)
+    if envFilePath is not None:
+        resolvedEnvFilePath = Path(envFilePath)
+        if resolvedEnvFilePath.name != "":
+            return resolvedEnvFilePath.parent
+    return Path.cwd()
 
 
 def _ReadEnvFile(envFilePath: str | Path) -> Dict[str, str]:

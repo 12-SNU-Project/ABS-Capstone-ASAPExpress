@@ -19,40 +19,93 @@ from eu_export.product import (  # noqa: E402
     KurlyPipelineInput,
     PaddleOcrEngine,
 )
-
-
-DEFAULT_PRODUCT_URLS = [
-    """여기에 링크 추가하셈."""
-]
-
-DEFAULT_TIMEOUT_SECONDS = 60
-DEFAULT_SCROLL_COUNT = 8
-DEFAULT_HEADLESS = True
-DEFAULT_RUN_OCR_FALLBACK = True
-DEFAULT_MAX_OCR_IMAGE_COUNT = 8
-DEFAULT_WRITE_SUMMARY_ARTIFACT = True
-DEFAULT_LOG_FULL_RESULT = False
-DEFAULT_ARTIFACT_ROOT_PATH = PROJECT_ROOT_PATH / "artifacts" / "kurly-market-smoke"
-DEFAULT_SUMMARY_ARTIFACT_PATH = (
-    DEFAULT_ARTIFACT_ROOT_PATH / "runtime-smoke-summary.json"
+from eu_export.app_config import (  # noqa: E402
+    LoadAppConfig,
+    ReadConfigBool,
+    ReadConfigInt,
+    ReadConfigPath,
+    ReadConfigSection,
+    ReadConfigStringList,
 )
-DEFAULT_MAX_LOGGED_NOTICE_OPTIONS = 3
-DEFAULT_MAX_LOGGED_FIELDS_PER_OPTION = 5
-DEFAULT_MAX_LOGGED_OCR_CANDIDATE_URLS = 5
-DEFAULT_FIELD_VALUE_PREVIEW_CHARACTERS = 220
-DEFAULT_OCR_TEXT_PREVIEW_CHARACTERS = 500
 
 
 class KurlyMarketSmokeRunner:
     """실제 KurlyMarket URL에서 parser와 선택적 OCR fallback을 확인한다."""
+
+    def __init__(self) -> None:
+        appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
+        pathConfig = ReadConfigSection(appConfig, "paths")
+        smokeConfig = ReadConfigSection(appConfig, "kurly_smoke")
+
+        self._productUrls = ReadConfigStringList(
+            smokeConfig,
+            "product_urls",
+            ["""여기에 링크 추가하셈."""],
+        )
+        self._timeoutSeconds = ReadConfigInt(smokeConfig, "timeout_seconds", 60)
+        self._scrollCount = ReadConfigInt(smokeConfig, "scroll_count", 8)
+        self._headless = ReadConfigBool(smokeConfig, "headless", True)
+        self._runOcrFallback = ReadConfigBool(
+            smokeConfig,
+            "run_ocr_fallback",
+            True,
+        )
+        self._maxOcrImageCount = ReadConfigInt(
+            smokeConfig,
+            "max_ocr_image_count",
+            8,
+        )
+        self._writeSummaryArtifact = ReadConfigBool(
+            smokeConfig,
+            "write_summary_artifact",
+            True,
+        )
+        self._logFullResult = ReadConfigBool(smokeConfig, "log_full_result", False)
+        self._artifactRootPath = ReadConfigPath(
+            pathConfig,
+            "kurly_smoke_artifact_root",
+            PROJECT_ROOT_PATH,
+            "artifacts/kurly-market-smoke",
+        )
+        self._summaryArtifactPath = ReadConfigPath(
+            pathConfig,
+            "kurly_smoke_summary_artifact",
+            PROJECT_ROOT_PATH,
+            "artifacts/kurly-market-smoke/runtime-smoke-summary.json",
+        )
+        self._maxLoggedNoticeOptions = ReadConfigInt(
+            smokeConfig,
+            "max_logged_notice_options",
+            3,
+        )
+        self._maxLoggedFieldsPerOption = ReadConfigInt(
+            smokeConfig,
+            "max_logged_fields_per_option",
+            5,
+        )
+        self._maxLoggedOcrCandidateUrls = ReadConfigInt(
+            smokeConfig,
+            "max_logged_ocr_candidate_urls",
+            5,
+        )
+        self._fieldValuePreviewCharacters = ReadConfigInt(
+            smokeConfig,
+            "field_value_preview_characters",
+            220,
+        )
+        self._ocrTextPreviewCharacters = ReadConfigInt(
+            smokeConfig,
+            "ocr_text_preview_characters",
+            500,
+        )
 
     def Run(self) -> None:
         self._ConfigureLogger()
         runLogger = self._Logger("Run")
         runLogger.info(
             "KurlyMarket 상품 수집 smoke를 시작합니다 url_count={} run_ocr_fallback={}",
-            len(DEFAULT_PRODUCT_URLS),
-            DEFAULT_RUN_OCR_FALLBACK,
+            len(self._productUrls),
+            self._runOcrFallback,
         )
 
         runLogger.info("STEP 1/4 상품 페이지 수집/OCR 파이프라인을 준비합니다")
@@ -60,14 +113,14 @@ class KurlyMarketSmokeRunner:
 
         runLogger.info(
             "STEP 2/4 KurlyMarket 상품 페이지를 수집합니다 url_count={}",
-            len(DEFAULT_PRODUCT_URLS),
+            len(self._productUrls),
         )
         results: List[Dict[str, Any]] = []
-        for productIndex, productUrl in enumerate(DEFAULT_PRODUCT_URLS, start=1):
+        for productIndex, productUrl in enumerate(self._productUrls, start=1):
             runLogger.info(
                 "STEP 2/4 상품 페이지 수집 index={}/{} url={}",
                 productIndex,
-                len(DEFAULT_PRODUCT_URLS),
+                len(self._productUrls),
                 productUrl,
             )
             resultData = self._RunOne(productSourcePipeline, productUrl)
@@ -76,7 +129,7 @@ class KurlyMarketSmokeRunner:
 
         runLogger.info("STEP 3/4 상품 수집 결과를 요약합니다")
         self._LogSummary(results)
-        if DEFAULT_WRITE_SUMMARY_ARTIFACT:
+        if self._writeSummaryArtifact:
             runLogger.info("STEP 4/4 상품 수집 결과 JSON artifact를 저장합니다")
             self._WriteSummaryArtifact(results)
         else:
@@ -84,11 +137,11 @@ class KurlyMarketSmokeRunner:
 
     def _BuildProductSourcePipeline(self) -> KurlyProductPipeline:
         collector = KurlyPageCollector(
-            headless=DEFAULT_HEADLESS,
-            timeoutMilliseconds=DEFAULT_TIMEOUT_SECONDS * 1000,
-            scrollCount=DEFAULT_SCROLL_COUNT,
+            headless=self._headless,
+            timeoutMilliseconds=self._timeoutSeconds * 1000,
+            scrollCount=self._scrollCount,
         )
-        if not DEFAULT_RUN_OCR_FALLBACK:
+        if not self._runOcrFallback:
             return KurlyProductPipeline(collector=collector)
 
         return KurlyProductPipeline(
@@ -105,9 +158,9 @@ class KurlyMarketSmokeRunner:
             pipelineResult = productSourcePipeline.Run(
                 KurlyPipelineInput(
                     productPageUrl=productUrl,
-                    runOcrFallback=DEFAULT_RUN_OCR_FALLBACK,
-                    artifactRootPath=DEFAULT_ARTIFACT_ROOT_PATH,
-                    maxOcrImageCount=DEFAULT_MAX_OCR_IMAGE_COUNT,
+                    runOcrFallback=self._runOcrFallback,
+                    artifactRootPath=self._artifactRootPath,
+                    maxOcrImageCount=self._maxOcrImageCount,
                 )
             )
             return self._BuildResult(productUrl, pipelineResult.ToDict())
@@ -150,7 +203,7 @@ class KurlyMarketSmokeRunner:
         isOcrFallbackOk = (
             not requiresOcrFallback
             or (
-                DEFAULT_RUN_OCR_FALLBACK
+                self._runOcrFallback
                 and successfulOcrImageCount > 0
             )
         )
@@ -205,7 +258,7 @@ class KurlyMarketSmokeRunner:
                 "candidate_image_urls_preview": collectionResult.get(
                     "ocr_candidate_image_urls",
                     [],
-                )[:DEFAULT_MAX_LOGGED_OCR_CANDIDATE_URLS],
+                )[:self._maxLoggedOcrCandidateUrls],
                 "image_result_count": ocrSummary.get(
                     "image_result_count",
                     len(ocrImageResults),
@@ -221,7 +274,7 @@ class KurlyMarketSmokeRunner:
                 "combined_text_length": len(combinedOcrText),
                 "combined_text_preview": self._BuildTextPreview(
                     combinedOcrText,
-                    DEFAULT_OCR_TEXT_PREVIEW_CHARACTERS,
+                    self._ocrTextPreviewCharacters,
                 ),
             },
             "pipeline_steps": pipelineResultData["steps"],
@@ -387,21 +440,21 @@ class KurlyMarketSmokeRunner:
             ocrOkCount,
             len(results),
         )
-        if DEFAULT_LOG_FULL_RESULT:
+        if self._logFullResult:
             summaryLogger.info(
                 "\n{}",
                 json.dumps(results, ensure_ascii=False, indent=2),
             )
 
     def _WriteSummaryArtifact(self, results: List[Dict[str, Any]]) -> None:
-        DEFAULT_SUMMARY_ARTIFACT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        DEFAULT_SUMMARY_ARTIFACT_PATH.write_text(
+        self._summaryArtifactPath.parent.mkdir(parents=True, exist_ok=True)
+        self._summaryArtifactPath.write_text(
             json.dumps(results, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         self._Logger("_WriteSummaryArtifact").info(
             "summary_artifact_path={}",
-            DEFAULT_SUMMARY_ARTIFACT_PATH,
+            self._summaryArtifactPath,
         )
 
     def _BuildTextPreview(self, text: Any, maxCharacters: int) -> Any:
@@ -417,7 +470,7 @@ class KurlyMarketSmokeRunner:
     ) -> List[Dict[str, Any]]:
         return [
             self._BuildFieldRecordPreview(fieldRecord)
-            for fieldRecord in fieldRecords[:DEFAULT_MAX_LOGGED_FIELDS_PER_OPTION]
+            for fieldRecord in fieldRecords[:self._maxLoggedFieldsPerOption]
         ]
 
     def _BuildOptionPreview(
@@ -426,7 +479,7 @@ class KurlyMarketSmokeRunner:
     ) -> List[Dict[str, Any]]:
         optionPreview: List[Dict[str, Any]] = []
         for optionIndex, noticeOption in enumerate(
-            noticeOptions[:DEFAULT_MAX_LOGGED_NOTICE_OPTIONS],
+            noticeOptions[:self._maxLoggedNoticeOptions],
             start=1,
         ):
             optionPreview.append(
@@ -437,7 +490,7 @@ class KurlyMarketSmokeRunner:
                     "fields_preview": [
                         self._BuildFieldRecordPreview(fieldRecord)
                         for fieldRecord in noticeOption["fields"][
-                            :DEFAULT_MAX_LOGGED_FIELDS_PER_OPTION
+                            :self._maxLoggedFieldsPerOption
                         ]
                     ],
                 }
@@ -452,7 +505,7 @@ class KurlyMarketSmokeRunner:
             "field_name": fieldRecord["field_name"],
             "field_value": self._BuildTextPreview(
                 fieldRecord["field_value"],
-                DEFAULT_FIELD_VALUE_PREVIEW_CHARACTERS,
+                self._fieldValuePreviewCharacters,
             ),
             "requires_ocr_fallback": fieldRecord["requires_ocr_fallback"],
         }
