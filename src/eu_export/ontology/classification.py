@@ -9,6 +9,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set
 
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictStr,
+    ValidationError,
+)
+
 from eu_export.bridge import (
     LlmGenerationOptions,
     LlmRequest,
@@ -1700,6 +1709,89 @@ class Stage1ResponseValidationReport:
         }
 
 
+class Stage1PathLevelReviewPayload(BaseModel):
+    """LLM 응답의 HS/CN 계층 단일 레벨 검토 payload."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    code: Optional[StrictStr] = None
+    consistency: Optional[StrictStr] = None
+    comment: Optional[StrictStr] = None
+
+
+class Stage1PathReviewPayload(BaseModel):
+    """LLM 응답의 HS2/HS4/HS6/CN8 계층 검토 payload."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    hs2: Optional[Stage1PathLevelReviewPayload] = None
+    hs4: Optional[Stage1PathLevelReviewPayload] = None
+    hs6: Optional[Stage1PathLevelReviewPayload] = None
+    cn8: Optional[Stage1PathLevelReviewPayload] = None
+
+
+class Stage1RuleReviewPayload(BaseModel):
+    """LLM 응답의 분류 규칙 검토 payload."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    include_rule_comment: Optional[StrictStr] = None
+    exclude_rule_comment: Optional[StrictStr] = None
+    hard_condition_comment: Optional[StrictStr] = None
+
+
+class Stage1SimilarEbtiCasePayload(BaseModel):
+    """LLM 응답의 유사 EBTI 사례 검토 payload."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    evidence_ref: Optional[StrictStr] = None
+    similarity_comment: Optional[StrictStr] = None
+    difference_comment: Optional[StrictStr] = None
+
+
+class Stage1CandidateReviewPayload(BaseModel):
+    """LLM 응답의 후보별 검토 payload."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    hs8: Optional[StrictStr] = None
+    hs6_code: Optional[StrictStr] = None
+    status: Optional[StrictStr] = None
+    supporting_product_facts: Optional[List[StrictStr]] = None
+    conflicting_or_exclusion_facts: Optional[List[StrictStr]] = None
+    missing_information: Optional[List[StrictStr]] = None
+    evidence_refs: Optional[List[StrictStr]] = None
+    system_required_evidence_refs: List[StrictStr] = Field(default_factory=list)
+    classification_path_review: Optional[Stage1PathReviewPayload] = None
+    classification_rule_review: Optional[Stage1RuleReviewPayload] = None
+    similar_ebti_cases: Optional[List[Stage1SimilarEbtiCasePayload]] = None
+    reason: Optional[StrictStr] = None
+    human_review_required: Optional[StrictBool] = None
+
+
+class Stage1ClassificationResultPayload(BaseModel):
+    """LLM 응답의 classification_result payload."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    product_name: Optional[StrictStr] = None
+    product_domain: Optional[StrictStr] = None
+    domain_scopes: Optional[List[StrictStr]] = None
+    candidate_reviews: Optional[List[Stage1CandidateReviewPayload]] = None
+    not_enough_information: Optional[List[StrictStr]] = None
+    recommended_next_action: Optional[StrictStr] = None
+    human_review_warning: Optional[StrictStr] = None
+
+
+class Stage1ClassificationResponsePayload(BaseModel):
+    """LLM Stage 1 응답 root payload."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    classification_result: Optional[Stage1ClassificationResultPayload] = None
+
+
 class Stage1ResponseValidator:
     """LLM의 Stage 1 후보 검토 JSON 응답을 구조적으로 검증한다."""
 
@@ -1846,7 +1938,28 @@ class Stage1ResponseValidator:
             )
             return None
 
-        return parsedResponse
+        try:
+            responsePayload = Stage1ClassificationResponsePayload.model_validate(
+                parsedResponse,
+            )
+        except ValidationError as error:
+            for validationError in error.errors():
+                location = validationError.get("loc", ())
+                fieldPath = "$"
+                if isinstance(location, tuple) and location:
+                    fieldPath = "$." + ".".join(str(part) for part in location)
+                self._AddIssue(
+                    issues,
+                    "error",
+                    "invalid_response_schema",
+                    fieldPath,
+                    "LLM response field type is invalid: {0}".format(
+                        validationError.get("msg", "unknown validation error"),
+                    ),
+                )
+            return None
+
+        return responsePayload.model_dump(mode="json")
 
     def _ExtractJsonObjectText(self, responseText: str) -> Optional[str]:
         directText = responseText.strip()

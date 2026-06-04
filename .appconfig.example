@@ -33,7 +33,6 @@ supports_response_format = false
 
 [paths]
 ontology_root = "eu_export_ontology_v1"
-ontology_smoke_artifact_root = "artifacts/ontology-smoke"
 ontology_smoke_summary_artifact = "artifacts/ontology-smoke/runtime-smoke-summary.json"
 ontology_human_review_package_artifact = "artifacts/ontology-smoke/stage1-human-review-package.json"
 kurly_smoke_artifact_root = "artifacts/kurly-market-smoke"

@@ -10,6 +10,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+)
 
 
 PROJECT_ROOT_PATH = Path(__file__).resolve().parent
@@ -51,140 +60,102 @@ from eu_export.utils import NormalizeWhitespace  # noqa: E402
 NO_CN_CANDIDATE_REASON = "no CN candidates found for product input"
 
 
+class ProductSmokeProductPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    product_name: Optional[StrictStr] = None
+    product_domain: Optional[StrictStr] = None
+    short_description: Optional[StrictStr] = None
+    brand_name: Optional[StrictStr] = None
+    package_type: Optional[StrictStr] = None
+    sale_unit: Optional[StrictStr] = None
+
+
+class ProductSmokeNoticePayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    line_count: Optional[StrictInt] = None
+    field_count: Optional[StrictInt] = None
+    option_count: Optional[StrictInt] = None
+    option_names: List[StrictStr] = Field(default_factory=list)
+    fields_preview: List[Dict[str, Any]] = Field(default_factory=list)
+    options_preview: List[Dict[str, Any]] = Field(default_factory=list)
+    requires_ocr_fallback: Optional[StrictBool] = None
+    image_reference_detected: Optional[StrictBool] = None
+
+
+class ProductSmokeOcrPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    product_detail_image_url_count: Optional[StrictInt] = None
+    candidate_image_url_count: Optional[StrictInt] = None
+    candidate_image_urls_preview: List[StrictStr] = Field(default_factory=list)
+    image_result_count: Optional[StrictInt] = None
+    successful_image_count: Optional[StrictInt] = None
+    image_artifacts: List[Dict[str, Any]] = Field(default_factory=list)
+    combined_text_length: Optional[StrictInt] = None
+    combined_text_preview: Optional[StrictStr] = None
+
+
+class ProductSmokeSummaryPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    product_page_url: Optional[StrictStr] = None
+    parsed_product_page: Optional[Dict[str, Any]] = None
+    collection_summary: Optional[Dict[str, Any]] = None
+    rendered_page_evidence_summary: Optional[Dict[str, Any]] = None
+    ocr_summary: Optional[Dict[str, Any]] = None
+    combined_ocr_text: Optional[StrictStr] = None
+    steps: Optional[List[Dict[str, Any]]] = None
+    pipeline_steps: Optional[List[Dict[str, Any]]] = None
+    warnings: List[Any] = Field(default_factory=list)
+    errors: List[Any] = Field(default_factory=list)
+    status: Dict[str, Any] = Field(default_factory=dict)
+    product: Optional[ProductSmokeProductPayload] = None
+    notice: Optional[ProductSmokeNoticePayload] = None
+    ocr: Optional[ProductSmokeOcrPayload] = None
+
+
 class OntologySmokeRunner:
     """ontology 문서 로드, 검색 context, LLM request 생성을 확인한다."""
 
     def __init__(self) -> None:
         appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
-        pathConfig = appConfig.get("paths", {})
-        smokeConfig = appConfig.get("ontology_smoke", {})
-        if not isinstance(pathConfig, dict):
-            pathConfig = {}
-        if not isinstance(smokeConfig, dict):
-            smokeConfig = {}
+        pathConfig = appConfig.paths
+        smokeConfig = appConfig.ontology_smoke
 
-        ontologyRootPath = Path(
-            pathConfig.get("ontology_root")
-            if isinstance(pathConfig.get("ontology_root"), str)
-            else "eu_export_ontology_v1"
-        ).expanduser()
-        summaryArtifactPath = Path(
-            pathConfig.get("ontology_smoke_summary_artifact")
-            if isinstance(pathConfig.get("ontology_smoke_summary_artifact"), str)
-            else "artifacts/ontology-smoke/runtime-smoke-summary.json"
-        ).expanduser()
-        humanReviewPackageArtifactPath = Path(
-            pathConfig.get("ontology_human_review_package_artifact")
-            if isinstance(pathConfig.get("ontology_human_review_package_artifact"), str)
-            else "artifacts/ontology-smoke/stage1-human-review-package.json"
-        ).expanduser()
-        productSmokeSummaryArtifactPath = Path(
-            pathConfig.get("kurly_smoke_summary_artifact")
-            if isinstance(pathConfig.get("kurly_smoke_summary_artifact"), str)
-            else "artifacts/kurly-market-smoke/runtime-smoke-summary.json"
-        ).expanduser()
-
-        self._ontologyRootPath = (
-            ontologyRootPath
-            if ontologyRootPath.is_absolute()
-            else PROJECT_ROOT_PATH / ontologyRootPath
+        self._ontologyRootPath = pathConfig.ResolvePath(
+            PROJECT_ROOT_PATH,
+            pathConfig.ontology_root,
         )
-        self._summaryArtifactPath = (
-            summaryArtifactPath
-            if summaryArtifactPath.is_absolute()
-            else PROJECT_ROOT_PATH / summaryArtifactPath
+        self._summaryArtifactPath = pathConfig.ResolvePath(
+            PROJECT_ROOT_PATH,
+            pathConfig.ontology_smoke_summary_artifact,
         )
-        self._humanReviewPackageArtifactPath = (
-            humanReviewPackageArtifactPath
-            if humanReviewPackageArtifactPath.is_absolute()
-            else PROJECT_ROOT_PATH / humanReviewPackageArtifactPath
+        self._humanReviewPackageArtifactPath = pathConfig.ResolvePath(
+            PROJECT_ROOT_PATH,
+            pathConfig.ontology_human_review_package_artifact,
         )
-        self._productSmokeSummaryArtifactPath = (
-            productSmokeSummaryArtifactPath
-            if productSmokeSummaryArtifactPath.is_absolute()
-            else PROJECT_ROOT_PATH / productSmokeSummaryArtifactPath
+        self._productSmokeSummaryArtifactPath = pathConfig.ResolvePath(
+            PROJECT_ROOT_PATH,
+            pathConfig.kurly_smoke_summary_artifact,
         )
 
-        phaseIdValue = smokeConfig.get("phase_id")
-        self._phaseId = (
-            phaseIdValue.strip()
-            if isinstance(phaseIdValue, str) and phaseIdValue.strip() != ""
-            else "stage1_classification"
-        )
-        topK = smokeConfig.get("top_k")
-        maxResultCount = smokeConfig.get("max_result_count")
-        cnCandidateTopK = smokeConfig.get("cn_candidate_top_k")
-        maxProductSmokeInputs = smokeConfig.get("max_product_smoke_inputs")
-        textPreviewCharacters = smokeConfig.get("text_preview_characters")
-        validationIssuePreviewCount = smokeConfig.get("validation_issue_preview_count")
-        resourceCheckPreviewCount = smokeConfig.get("resource_check_preview_count")
-        maxValidationFixtureCandidates = smokeConfig.get(
-            "max_validation_fixture_candidates"
-        )
-        stage1BacktrackingRetryAttempt = smokeConfig.get(
-            "stage1_backtracking_retry_attempt"
-        )
-
-        self._topK = (
-            topK
-            if isinstance(topK, int) and not isinstance(topK, bool)
-            else 8
-        )
-        self._maxResultCount = (
-            maxResultCount
-            if isinstance(maxResultCount, int) and not isinstance(maxResultCount, bool)
-            else 6
-        )
-        self._cnCandidateTopK = (
-            cnCandidateTopK
-            if isinstance(cnCandidateTopK, int) and not isinstance(cnCandidateTopK, bool)
-            else 5
-        )
-        self._maxProductSmokeInputs = (
-            maxProductSmokeInputs
-            if isinstance(maxProductSmokeInputs, int)
-            and not isinstance(maxProductSmokeInputs, bool)
-            else 2
-        )
-        self._writeSummaryArtifact = (
-            smokeConfig["write_summary_artifact"]
-            if isinstance(smokeConfig.get("write_summary_artifact"), bool)
-            else True
-        )
-        self._runLlmConnectionSmoke = (
-            smokeConfig["run_llm_connection_smoke"]
-            if isinstance(smokeConfig.get("run_llm_connection_smoke"), bool)
-            else False
-        )
-        self._textPreviewCharacters = (
-            textPreviewCharacters
-            if isinstance(textPreviewCharacters, int)
-            and not isinstance(textPreviewCharacters, bool)
-            else 700
-        )
-        self._validationIssuePreviewCount = (
-            validationIssuePreviewCount
-            if isinstance(validationIssuePreviewCount, int)
-            and not isinstance(validationIssuePreviewCount, bool)
-            else 3
-        )
-        self._resourceCheckPreviewCount = (
-            resourceCheckPreviewCount
-            if isinstance(resourceCheckPreviewCount, int)
-            and not isinstance(resourceCheckPreviewCount, bool)
-            else 8
-        )
+        self._phaseId = smokeConfig.phase_id
+        self._topK = smokeConfig.top_k
+        self._maxResultCount = smokeConfig.max_result_count
+        self._cnCandidateTopK = smokeConfig.cn_candidate_top_k
+        self._maxProductSmokeInputs = smokeConfig.max_product_smoke_inputs
+        self._writeSummaryArtifact = smokeConfig.write_summary_artifact
+        self._runLlmConnectionSmoke = smokeConfig.run_llm_connection_smoke
+        self._textPreviewCharacters = smokeConfig.text_preview_characters
+        self._validationIssuePreviewCount = smokeConfig.validation_issue_preview_count
+        self._resourceCheckPreviewCount = smokeConfig.resource_check_preview_count
         self._maxValidationFixtureCandidates = (
-            maxValidationFixtureCandidates
-            if isinstance(maxValidationFixtureCandidates, int)
-            and not isinstance(maxValidationFixtureCandidates, bool)
-            else 3
+            smokeConfig.max_validation_fixture_candidates
         )
         self._stage1BacktrackingRetryAttempt = (
-            stage1BacktrackingRetryAttempt
-            if isinstance(stage1BacktrackingRetryAttempt, int)
-            and not isinstance(stage1BacktrackingRetryAttempt, bool)
-            else 0
+            smokeConfig.stage1_backtracking_retry_attempt
         )
         self._smokeQueries = [
             {
@@ -2063,15 +2034,30 @@ class OntologySmokeRunner:
             )
         except Exception:
             return []
+
+        rawRecords: List[Any]
         if isinstance(rawData, list):
-            return [
-                item
-                for item in rawData
-                if isinstance(item, dict)
-            ]
-        if isinstance(rawData, dict):
-            return [rawData]
-        return []
+            rawRecords = rawData
+        elif isinstance(rawData, dict):
+            rawRecords = [rawData]
+        else:
+            return []
+
+        productSmokeRecords: List[Dict[str, Any]] = []
+        for rawRecord in rawRecords:
+            if not isinstance(rawRecord, dict):
+                continue
+            try:
+                validatedRecord = ProductSmokeSummaryPayload.model_validate(rawRecord)
+            except ValidationError:
+                continue
+            productSmokeRecords.append(
+                validatedRecord.model_dump(
+                    mode="json",
+                    exclude_none=True,
+                )
+            )
+        return productSmokeRecords
 
     def _BuildTextPreview(self, text: str) -> str:
         if len(text) <= self._textPreviewCharacters:

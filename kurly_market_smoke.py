@@ -27,121 +27,30 @@ class KurlyMarketSmokeRunner:
 
     def __init__(self) -> None:
         appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
-        pathConfig = appConfig.get("paths", {})
-        smokeConfig = appConfig.get("kurly_smoke", {})
-        if not isinstance(pathConfig, dict):
-            pathConfig = {}
-        if not isinstance(smokeConfig, dict):
-            smokeConfig = {}
+        pathConfig = appConfig.paths
+        smokeConfig = appConfig.kurly_smoke
 
-        productUrls = smokeConfig.get("product_urls")
-        self._productUrls = (
-            [
-                item.strip()
-                for item in productUrls
-                if isinstance(item, str) and item.strip() != ""
-            ]
-            if isinstance(productUrls, list)
-            else ["""여기에 링크 추가하셈."""]
+        self._productUrls = list(smokeConfig.product_urls)
+        self._timeoutSeconds = smokeConfig.timeout_seconds
+        self._scrollCount = smokeConfig.scroll_count
+        self._headless = smokeConfig.headless
+        self._runOcrFallback = smokeConfig.run_ocr_fallback
+        self._maxOcrImageCount = smokeConfig.max_ocr_image_count
+        self._writeSummaryArtifact = smokeConfig.write_summary_artifact
+        self._logFullResult = smokeConfig.log_full_result
+        self._artifactRootPath = pathConfig.ResolvePath(
+            PROJECT_ROOT_PATH,
+            pathConfig.kurly_smoke_artifact_root,
         )
-
-        timeoutSeconds = smokeConfig.get("timeout_seconds")
-        scrollCount = smokeConfig.get("scroll_count")
-        maxOcrImageCount = smokeConfig.get("max_ocr_image_count")
-        maxLoggedNoticeOptions = smokeConfig.get("max_logged_notice_options")
-        maxLoggedFieldsPerOption = smokeConfig.get("max_logged_fields_per_option")
-        maxLoggedOcrCandidateUrls = smokeConfig.get("max_logged_ocr_candidate_urls")
-        fieldValuePreviewCharacters = smokeConfig.get("field_value_preview_characters")
-        ocrTextPreviewCharacters = smokeConfig.get("ocr_text_preview_characters")
-
-        self._timeoutSeconds = (
-            timeoutSeconds
-            if isinstance(timeoutSeconds, int) and not isinstance(timeoutSeconds, bool)
-            else 60
+        self._summaryArtifactPath = pathConfig.ResolvePath(
+            PROJECT_ROOT_PATH,
+            pathConfig.kurly_smoke_summary_artifact,
         )
-        self._scrollCount = (
-            scrollCount
-            if isinstance(scrollCount, int) and not isinstance(scrollCount, bool)
-            else 8
-        )
-        self._headless = (
-            smokeConfig["headless"]
-            if isinstance(smokeConfig.get("headless"), bool)
-            else True
-        )
-        self._runOcrFallback = (
-            smokeConfig["run_ocr_fallback"]
-            if isinstance(smokeConfig.get("run_ocr_fallback"), bool)
-            else True
-        )
-        self._maxOcrImageCount = (
-            maxOcrImageCount
-            if isinstance(maxOcrImageCount, int)
-            and not isinstance(maxOcrImageCount, bool)
-            else 8
-        )
-        self._writeSummaryArtifact = (
-            smokeConfig["write_summary_artifact"]
-            if isinstance(smokeConfig.get("write_summary_artifact"), bool)
-            else True
-        )
-        self._logFullResult = (
-            smokeConfig["log_full_result"]
-            if isinstance(smokeConfig.get("log_full_result"), bool)
-            else False
-        )
-
-        artifactRootPath = Path(
-            pathConfig.get("kurly_smoke_artifact_root")
-            if isinstance(pathConfig.get("kurly_smoke_artifact_root"), str)
-            else "artifacts/kurly-market-smoke"
-        ).expanduser()
-        summaryArtifactPath = Path(
-            pathConfig.get("kurly_smoke_summary_artifact")
-            if isinstance(pathConfig.get("kurly_smoke_summary_artifact"), str)
-            else "artifacts/kurly-market-smoke/runtime-smoke-summary.json"
-        ).expanduser()
-        self._artifactRootPath = (
-            artifactRootPath
-            if artifactRootPath.is_absolute()
-            else PROJECT_ROOT_PATH / artifactRootPath
-        )
-        self._summaryArtifactPath = (
-            summaryArtifactPath
-            if summaryArtifactPath.is_absolute()
-            else PROJECT_ROOT_PATH / summaryArtifactPath
-        )
-
-        self._maxLoggedNoticeOptions = (
-            maxLoggedNoticeOptions
-            if isinstance(maxLoggedNoticeOptions, int)
-            and not isinstance(maxLoggedNoticeOptions, bool)
-            else 3
-        )
-        self._maxLoggedFieldsPerOption = (
-            maxLoggedFieldsPerOption
-            if isinstance(maxLoggedFieldsPerOption, int)
-            and not isinstance(maxLoggedFieldsPerOption, bool)
-            else 5
-        )
-        self._maxLoggedOcrCandidateUrls = (
-            maxLoggedOcrCandidateUrls
-            if isinstance(maxLoggedOcrCandidateUrls, int)
-            and not isinstance(maxLoggedOcrCandidateUrls, bool)
-            else 5
-        )
-        self._fieldValuePreviewCharacters = (
-            fieldValuePreviewCharacters
-            if isinstance(fieldValuePreviewCharacters, int)
-            and not isinstance(fieldValuePreviewCharacters, bool)
-            else 220
-        )
-        self._ocrTextPreviewCharacters = (
-            ocrTextPreviewCharacters
-            if isinstance(ocrTextPreviewCharacters, int)
-            and not isinstance(ocrTextPreviewCharacters, bool)
-            else 500
-        )
+        self._maxLoggedNoticeOptions = smokeConfig.max_logged_notice_options
+        self._maxLoggedFieldsPerOption = smokeConfig.max_logged_fields_per_option
+        self._maxLoggedOcrCandidateUrls = smokeConfig.max_logged_ocr_candidate_urls
+        self._fieldValuePreviewCharacters = smokeConfig.field_value_preview_characters
+        self._ocrTextPreviewCharacters = smokeConfig.ocr_text_preview_characters
 
     def Run(self) -> None:
         self._ConfigureLogger()

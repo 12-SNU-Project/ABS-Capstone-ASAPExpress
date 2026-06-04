@@ -294,24 +294,21 @@ def _ReadAppConfigRuntimeValues(
         projectRootPath,
     )
     appConfig = LoadAppConfig(resolvedProjectRootPath, appConfigPath)
-    llmConfig = appConfig.get("llm")
-    if not isinstance(llmConfig, Mapping) or len(llmConfig) == 0:
-        return {}
+    llmConfig = appConfig.llm
 
     runtimeValues: Dict[str, str] = {}
-    stringKeyMap = {
-        "runtime": "EU_EXPORT_LLM_RUNTIME",
-        "provider": "EU_EXPORT_LLM_PROVIDER",
-        "model": "EU_EXPORT_LLM_MODEL",
-        "endpoint_url": "EU_EXPORT_LLM_ENDPOINT_URL",
-        "chat_completions_path": "EU_EXPORT_LLM_CHAT_COMPLETIONS_PATH",
-    }
-    for configKey, envName in stringKeyMap.items():
-        value = llmConfig.get(configKey)
+    stringValues = [
+        (llmConfig.runtime, "EU_EXPORT_LLM_RUNTIME"),
+        (llmConfig.provider, "EU_EXPORT_LLM_PROVIDER"),
+        (llmConfig.model, "EU_EXPORT_LLM_MODEL"),
+        (llmConfig.endpoint_url, "EU_EXPORT_LLM_ENDPOINT_URL"),
+        (llmConfig.chat_completions_path, "EU_EXPORT_LLM_CHAT_COMPLETIONS_PATH"),
+    ]
+    for value, envName in stringValues:
         if isinstance(value, str) and value.strip() != "":
             runtimeValues[envName] = value.strip()
 
-    timeoutSeconds = llmConfig.get("timeout_seconds")
+    timeoutSeconds = llmConfig.timeout_seconds
     if (
         isinstance(timeoutSeconds, int)
         and not isinstance(timeoutSeconds, bool)
@@ -319,7 +316,7 @@ def _ReadAppConfigRuntimeValues(
     ):
         runtimeValues["EU_EXPORT_LLM_TIMEOUT_SECONDS"] = str(timeoutSeconds)
 
-    supportsResponseFormat = llmConfig.get("supports_response_format")
+    supportsResponseFormat = llmConfig.supports_response_format
     if isinstance(supportsResponseFormat, bool):
         runtimeValues["EU_EXPORT_LLM_SUPPORTS_RESPONSE_FORMAT"] = (
             "true" if supportsResponseFormat else "false"
