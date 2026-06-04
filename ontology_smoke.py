@@ -427,72 +427,125 @@ class OntologySmokeRunner:
             )
         return result
 
-    def _RunClassificationCandidateSmoke(self) -> Dict[str, Any]:
+    def _BuildStage1PreparedProducts(
+        self,
+        topK: int,
+        maxProductCount: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         smokeRecords = self._LoadProductSmokeRecords()
         normalizer = ProductClassificationInputNormalizer()
         candidateRetriever = CnCandidateRetriever(
             ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
+        productLimit = (
+            self._maxProductSmokeInputs
+            if maxProductCount is None
+            else maxProductCount
+        )
+        preparedProducts: List[Dict[str, Any]] = []
+        for smokeRecord in smokeRecords[:productLimit]:
+            productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecord)
+            preparedProducts.append(
+                {
+                    "product_input": productInput,
+                    "candidates": candidateRetriever.FindCandidates(
+                        productInput,
+                        topK=topK,
+                    ),
+                }
+            )
+        return preparedProducts
+
+    def _BuildStage1ContextEvidenceData(
+        self,
+        contextBuilder: OntologyContextBuilder,
+        requestBuilder: Stage1RequestBuilder,
+        evidencePackageBuilder: Stage1EvidencePackageBuilder,
+        productInput: ProductClassificationInput,
+        candidates: List[CnCandidate],
+    ) -> Dict[str, Any]:
+        ontologyQuery = requestBuilder.BuildOntologyQuery(productInput, candidates)
+        packagedContext = contextBuilder.BuildContext(
+            query=ontologyQuery,
+            phaseId=self._phaseId,
+            topK=self._topK,
+            maxResultCount=self._maxResultCount,
+        )
+        evidencePackage = evidencePackageBuilder.Build(
+            productInput=productInput,
+            candidates=candidates,
+            packagedContext=packagedContext,
+        )
+        return {
+            "ontology_query": ontologyQuery,
+            "packaged_context": packagedContext,
+            "evidence_package": evidencePackage,
+        }
+
+    def _RunClassificationCandidateSmoke(self) -> Dict[str, Any]:
+        smokeRecords = self._LoadProductSmokeRecords()
+        preparedProducts = self._BuildStage1PreparedProducts(
+            topK=self._cnCandidateTopK,
+        )
 
         productResults: List[Dict[str, Any]] = []
-        for smokeRecord in smokeRecords[:self._maxProductSmokeInputs]:
-            productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecord)
+        for preparedProduct in preparedProducts:
+            productInput = preparedProduct["product_input"]
+            candidates = preparedProduct["candidates"]
             searchText = productInput.BuildSearchText()
-            candidates = candidateRetriever.FindCandidates(
-                productInput,
-                topK=self._cnCandidateTopK,
-            )
             productResults.append(
                 {
-                    "product_input": productInput.ToDict(),
-                    "scoring_input": {
+                    "product_input": {
+                        "product_name": productInput.productName,
+                        "product_domain": productInput.productDomain,
                         "domain_scopes": list(productInput.domainScopes),
+                        "notice_field_count": len(productInput.noticeFieldTexts),
+                        "ocr_text_length": len(productInput.ocrText),
+                    },
+                    "scoring_input": {
                         "search_text_length": len(searchText),
                         "search_text_preview": self._BuildTextPreview(searchText),
                     },
-                    "candidate_generation_process": {
-                        "purpose": "HS6/CN8 후보 산출 과정 설명",
-                        "domain_scope_filter": list(productInput.domainScopes),
-                        "scoring_rule": {
-                            "include_rule_keyword_match": "+4",
-                            "search_keyword_match": "+2",
-                            "description_token_match": "+1",
-                            "exclude_rule_match": "score forced to 0",
-                        },
-                        "candidate_rows": [
-                            {
-                                "rank": candidateIndex,
-                                "hs8": candidate.hs8,
-                                "hs6_code": candidate.hs6Code,
-                                "score": candidate.score,
-                                "score_breakdown": candidate.ToDict().get(
-                                    "score_breakdown",
-                                    {},
-                                ),
-                                "include_rule_matches": list(
-                                    candidate.includeRuleMatches,
-                                ),
-                                "search_keyword_matches": list(
-                                    candidate.searchKeywordMatches,
-                                ),
-                                "description_matches": list(
-                                    candidate.descriptionMatches,
-                                ),
-                                "exclude_rule_matches": list(
-                                    candidate.excludeRuleMatches,
-                                ),
-                            }
-                            for candidateIndex, candidate in enumerate(
-                                candidates,
-                                start=1,
-                            )
-                        ],
+                    "scoring_rule": {
+                        "include_rule_keyword_match": "+4",
+                        "search_keyword_match": "+2",
+                        "description_token_match": "+1",
+                        "exclude_rule_match": "score forced to 0",
                     },
                     "candidate_count": len(candidates),
-                    "candidates": [
-                        candidate.ToDict()
-                        for candidate in candidates
+                    "candidate_scores": [
+                        {
+                            "rank": candidateIndex,
+                            "hs8": candidate.hs8,
+                            "hs6_code": candidate.hs6Code,
+                            "score": candidate.score,
+                            "score_breakdown": {
+                                "include_rule_points": (
+                                    4.0 * len(candidate.includeRuleMatches)
+                                ),
+                                "search_keyword_points": (
+                                    2.0 * len(candidate.searchKeywordMatches)
+                                ),
+                                "description_points": (
+                                    1.0 * len(candidate.descriptionMatches)
+                                ),
+                                "exclude_rule_triggered": (
+                                    len(candidate.excludeRuleMatches) > 0
+                                ),
+                            },
+                            "include_rule_matches": list(candidate.includeRuleMatches),
+                            "search_keyword_matches": list(
+                                candidate.searchKeywordMatches,
+                            ),
+                            "description_matches": list(candidate.descriptionMatches),
+                            "exclude_rule_matches": list(candidate.excludeRuleMatches),
+                            "combined_description": candidate.combinedDescription,
+                        }
+                        for candidateIndex, candidate in enumerate(
+                            candidates,
+                            start=1,
+                        )
                     ],
                 }
             )
@@ -533,7 +586,7 @@ class OntologySmokeRunner:
             scoringInput = productResult["scoring_input"]
             candidateCodes = [
                 candidate["hs8"]
-                for candidate in productResult["candidates"]
+                for candidate in productResult["candidate_scores"]
             ]
             candidateLogger.info(
                 (
@@ -542,9 +595,9 @@ class OntologySmokeRunner:
                 ),
                 productInput["product_name"],
                 productInput["product_domain"],
-                scoringInput["domain_scopes"],
+                productInput["domain_scopes"],
                 scoringInput["search_text_length"],
-                len(productInput["notice_field_texts"]),
+                productInput["notice_field_count"],
                 productInput["ocr_text_length"],
                 candidateCodes,
             )
@@ -554,7 +607,7 @@ class OntologySmokeRunner:
                 scoringInput["search_text_preview"],
             )
             for candidateIndex, candidate in enumerate(
-                productResult["candidates"],
+                productResult["candidate_scores"],
                 start=1,
             ):
                 scoreBreakdown = candidate["score_breakdown"]
@@ -597,11 +650,8 @@ class OntologySmokeRunner:
         self,
         contextBuilder: OntologyContextBuilder,
     ) -> Dict[str, Any]:
-        smokeRecords = self._LoadProductSmokeRecords()
-        normalizer = ProductClassificationInputNormalizer()
-        candidateRetriever = CnCandidateRetriever(
-            ontologyRootPath=self._ontologyRootPath,
-            projectRootPath=PROJECT_ROOT_PATH,
+        preparedProducts = self._BuildStage1PreparedProducts(
+            topK=self._cnCandidateTopK,
         )
         evidencePackageBuilder = Stage1EvidencePackageBuilder(
             ontologyRootPath=self._ontologyRootPath,
@@ -610,12 +660,9 @@ class OntologySmokeRunner:
         requestBuilder = Stage1RequestBuilder()
 
         requestResults: List[Dict[str, Any]] = []
-        for smokeRecord in smokeRecords[:self._maxProductSmokeInputs]:
-            productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecord)
-            candidates = candidateRetriever.FindCandidates(
-                productInput,
-                topK=self._cnCandidateTopK,
-            )
+        for preparedProduct in preparedProducts:
+            productInput = preparedProduct["product_input"]
+            candidates = preparedProduct["candidates"]
             if not candidates:
                 requestResults.append(
                     {
@@ -628,18 +675,16 @@ class OntologySmokeRunner:
                 )
                 continue
 
-            ontologyQuery = requestBuilder.BuildOntologyQuery(productInput, candidates)
-            packagedContext = contextBuilder.BuildContext(
-                query=ontologyQuery,
-                phaseId=self._phaseId,
-                topK=self._topK,
-                maxResultCount=self._maxResultCount,
+            contextEvidenceData = self._BuildStage1ContextEvidenceData(
+                contextBuilder,
+                requestBuilder,
+                evidencePackageBuilder,
+                productInput,
+                candidates,
             )
-            evidencePackage = evidencePackageBuilder.Build(
-                productInput=productInput,
-                candidates=candidates,
-                packagedContext=packagedContext,
-            )
+            ontologyQuery = contextEvidenceData["ontology_query"]
+            packagedContext = contextEvidenceData["packaged_context"]
+            evidencePackage = contextEvidenceData["evidence_package"]
             llmRequest = requestBuilder.BuildRequest(
                 productInput=productInput,
                 candidates=candidates,
@@ -749,11 +794,8 @@ class OntologySmokeRunner:
         self,
         contextBuilder: OntologyContextBuilder,
     ) -> Dict[str, Any]:
-        smokeRecords = self._LoadProductSmokeRecords()
-        normalizer = ProductClassificationInputNormalizer()
-        candidateRetriever = CnCandidateRetriever(
-            ontologyRootPath=self._ontologyRootPath,
-            projectRootPath=PROJECT_ROOT_PATH,
+        preparedProducts = self._BuildStage1PreparedProducts(
+            topK=self._cnCandidateTopK,
         )
         evidencePackageBuilder = Stage1EvidencePackageBuilder(
             ontologyRootPath=self._ontologyRootPath,
@@ -762,24 +804,17 @@ class OntologySmokeRunner:
         requestBuilder = Stage1RequestBuilder()
 
         productResults: List[Dict[str, Any]] = []
-        for smokeRecord in smokeRecords[:self._maxProductSmokeInputs]:
-            productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecord)
-            candidates = candidateRetriever.FindCandidates(
+        for preparedProduct in preparedProducts:
+            productInput = preparedProduct["product_input"]
+            candidates = preparedProduct["candidates"]
+            contextEvidenceData = self._BuildStage1ContextEvidenceData(
+                contextBuilder,
+                requestBuilder,
+                evidencePackageBuilder,
                 productInput,
-                topK=self._cnCandidateTopK,
+                candidates,
             )
-            ontologyQuery = requestBuilder.BuildOntologyQuery(productInput, candidates)
-            packagedContext = contextBuilder.BuildContext(
-                query=ontologyQuery,
-                phaseId=self._phaseId,
-                topK=self._topK,
-                maxResultCount=self._maxResultCount,
-            )
-            evidencePackage = evidencePackageBuilder.Build(
-                productInput=productInput,
-                candidates=candidates,
-                packagedContext=packagedContext,
-            )
+            evidencePackage = contextEvidenceData["evidence_package"]
             evidenceData = evidencePackage.ToDict()
             evidenceRecords = evidenceData["evidence_records"]
             productResults.append(
@@ -842,10 +877,12 @@ class OntologySmokeRunner:
         self,
         contextBuilder: OntologyContextBuilder,
     ) -> Dict[str, Any]:
-        smokeRecords = self._LoadProductSmokeRecords()
         validator = Stage1ResponseValidator()
-
-        if not smokeRecords:
+        preparedProducts = self._BuildStage1PreparedProducts(
+            topK=self._maxValidationFixtureCandidates,
+            maxProductCount=1,
+        )
+        if not preparedProducts:
             result = {
                 "status": "skipped",
                 "reason": "product smoke artifact is empty",
@@ -857,22 +894,14 @@ class OntologySmokeRunner:
             )
             return result
 
-        normalizer = ProductClassificationInputNormalizer()
-        candidateRetriever = CnCandidateRetriever(
-            ontologyRootPath=self._ontologyRootPath,
-            projectRootPath=PROJECT_ROOT_PATH,
-        )
         requestBuilder = Stage1RequestBuilder()
         evidencePackageBuilder = Stage1EvidencePackageBuilder(
             ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
 
-        productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecords[0])
-        candidates = candidateRetriever.FindCandidates(
-            productInput,
-            topK=self._maxValidationFixtureCandidates,
-        )
+        productInput = preparedProducts[0]["product_input"]
+        candidates = preparedProducts[0]["candidates"]
         if not candidates:
             result = {
                 "status": "skipped",
@@ -888,18 +917,14 @@ class OntologySmokeRunner:
             )
             return result
 
-        ontologyQuery = requestBuilder.BuildOntologyQuery(productInput, candidates)
-        packagedContext = contextBuilder.BuildContext(
-            query=ontologyQuery,
-            phaseId=self._phaseId,
-            topK=self._topK,
-            maxResultCount=self._maxResultCount,
+        contextEvidenceData = self._BuildStage1ContextEvidenceData(
+            contextBuilder,
+            requestBuilder,
+            evidencePackageBuilder,
+            productInput,
+            candidates,
         )
-        evidencePackage = evidencePackageBuilder.Build(
-            productInput=productInput,
-            candidates=candidates,
-            packagedContext=packagedContext,
-        )
+        evidencePackage = contextEvidenceData["evidence_package"]
         fixtureResponseText = self._BuildStage1FixtureResponseText(
             productInput,
             candidates,
@@ -968,8 +993,11 @@ class OntologySmokeRunner:
         self,
         contextBuilder: OntologyContextBuilder,
     ) -> Dict[str, Any]:
-        smokeRecords = self._LoadProductSmokeRecords()
-        if not smokeRecords:
+        preparedProducts = self._BuildStage1PreparedProducts(
+            topK=self._maxValidationFixtureCandidates,
+            maxProductCount=1,
+        )
+        if not preparedProducts:
             result = {
                 "status": "skipped",
                 "reason": "product smoke artifact is empty",
@@ -980,11 +1008,6 @@ class OntologySmokeRunner:
             )
             return result
 
-        normalizer = ProductClassificationInputNormalizer()
-        candidateRetriever = CnCandidateRetriever(
-            ontologyRootPath=self._ontologyRootPath,
-            projectRootPath=PROJECT_ROOT_PATH,
-        )
         requestBuilder = Stage1RequestBuilder()
         evidencePackageBuilder = Stage1EvidencePackageBuilder(
             ontologyRootPath=self._ontologyRootPath,
@@ -993,11 +1016,8 @@ class OntologySmokeRunner:
         validator = Stage1ResponseValidator()
         decisionPolicy = Stage1DecisionPolicy()
 
-        productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecords[0])
-        candidates = candidateRetriever.FindCandidates(
-            productInput,
-            topK=self._maxValidationFixtureCandidates,
-        )
+        productInput = preparedProducts[0]["product_input"]
+        candidates = preparedProducts[0]["candidates"]
         if not candidates:
             result = {
                 "status": "skipped",
@@ -1012,18 +1032,14 @@ class OntologySmokeRunner:
             )
             return result
 
-        ontologyQuery = requestBuilder.BuildOntologyQuery(productInput, candidates)
-        packagedContext = contextBuilder.BuildContext(
-            query=ontologyQuery,
-            phaseId=self._phaseId,
-            topK=self._topK,
-            maxResultCount=self._maxResultCount,
+        contextEvidenceData = self._BuildStage1ContextEvidenceData(
+            contextBuilder,
+            requestBuilder,
+            evidencePackageBuilder,
+            productInput,
+            candidates,
         )
-        evidencePackage = evidencePackageBuilder.Build(
-            productInput=productInput,
-            candidates=candidates,
-            packagedContext=packagedContext,
-        )
+        evidencePackage = contextEvidenceData["evidence_package"]
         possibleFixtureReport = validator.ValidateText(
             self._BuildStage1FixtureResponseText(
                 productInput,
@@ -1091,8 +1107,11 @@ class OntologySmokeRunner:
             )
             return result
 
-        smokeRecords = self._LoadProductSmokeRecords()
-        if not smokeRecords:
+        preparedProducts = self._BuildStage1PreparedProducts(
+            topK=self._maxValidationFixtureCandidates,
+            maxProductCount=1,
+        )
+        if not preparedProducts:
             result = {
                 "status": "skipped",
                 "reason": "product smoke artifact is empty",
@@ -1103,16 +1122,12 @@ class OntologySmokeRunner:
             )
             return result
 
-        normalizer = ProductClassificationInputNormalizer()
         candidateRetriever = CnCandidateRetriever(
             ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
-        productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecords[0])
-        candidates = candidateRetriever.FindCandidates(
-            productInput,
-            topK=self._maxValidationFixtureCandidates,
-        )
+        productInput = preparedProducts[0]["product_input"]
+        candidates = preparedProducts[0]["candidates"]
         controller = Stage1TraversalController()
         possibleTraversalReport = controller.BuildFromDecision(
             self._BuildStage1DecisionReportFromData(
@@ -1181,8 +1196,11 @@ class OntologySmokeRunner:
             )
             return result
 
-        smokeRecords = self._LoadProductSmokeRecords()
-        if not smokeRecords:
+        preparedProducts = self._BuildStage1PreparedProducts(
+            topK=self._maxValidationFixtureCandidates,
+            maxProductCount=1,
+        )
+        if not preparedProducts:
             result = {
                 "status": "skipped",
                 "reason": "product smoke artifact is empty",
@@ -1193,7 +1211,6 @@ class OntologySmokeRunner:
             )
             return result
 
-        normalizer = ProductClassificationInputNormalizer()
         candidateRetriever = CnCandidateRetriever(
             ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
@@ -1203,11 +1220,8 @@ class OntologySmokeRunner:
             ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
-        productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecords[0])
-        currentCandidates = candidateRetriever.FindCandidates(
-            productInput,
-            topK=self._maxValidationFixtureCandidates,
-        )
+        productInput = preparedProducts[0]["product_input"]
+        currentCandidates = preparedProducts[0]["candidates"]
         if not currentCandidates:
             result = {
                 "status": "skipped",
@@ -1250,21 +1264,14 @@ class OntologySmokeRunner:
 
         retryCandidateCodes = [candidate.hs8 for candidate in backtrackingCandidates]
         visitedCandidateCodes = [*currentCandidateCodes, *retryCandidateCodes]
-        ontologyQuery = requestBuilder.BuildOntologyQuery(
+        contextEvidenceData = self._BuildStage1ContextEvidenceData(
+            contextBuilder,
+            requestBuilder,
+            evidencePackageBuilder,
             productInput,
             backtrackingCandidates,
         )
-        packagedContext = contextBuilder.BuildContext(
-            query=ontologyQuery,
-            phaseId=self._phaseId,
-            topK=self._topK,
-            maxResultCount=self._maxResultCount,
-        )
-        evidencePackage = evidencePackageBuilder.Build(
-            productInput=productInput,
-            candidates=backtrackingCandidates,
-            packagedContext=packagedContext,
-        )
+        evidencePackage = contextEvidenceData["evidence_package"]
         backtrackingSummary = {
             "initial_candidate_hs8_codes": currentCandidateCodes,
             "retry_candidate_hs8_codes": retryCandidateCodes,
@@ -1370,36 +1377,18 @@ class OntologySmokeRunner:
         llmResponseValidationSummary: Dict[str, Any],
         backtrackingRetrySummary: Dict[str, Any],
     ) -> Dict[str, Any]:
-        selectedSource = "stage7_initial_llm_review"
-        selectedLlmConnection = llmResponseValidationSummary.get(
-            "llm_connection",
-            {},
+        selectedLlmConnectionData = self._SelectStage1LlmConnection(
+            llmResponseValidationSummary,
+            backtrackingRetrySummary,
         )
-        retryLlmConnection = backtrackingRetrySummary.get(
-            "llm_connection",
-            {},
-        )
-        if retryLlmConnection.get("status") == "completed":
-            retryScenarioKind = backtrackingRetrySummary.get("scenario_kind")
-            if retryScenarioKind == "actual_backtracking_inference":
-                selectedSource = "stage11_backtracking_retry"
-                selectedLlmConnection = retryLlmConnection
+        selectedSource = selectedLlmConnectionData["selected_source"]
+        selectedLlmConnection = selectedLlmConnectionData["llm_connection"]
 
-        selectedValidation = selectedLlmConnection.get("validation", {})
-        if (
-            isinstance(selectedValidation, dict)
-            and "is_valid" in selectedValidation
-            and selectedValidation.get("is_valid") is not True
-        ):
-            result = {
-                "status": "skipped",
-                "reason": "selected llm response is invalid",
-                "selected_source": selectedSource,
-                "upstream_llm_status": selectedLlmConnection.get("status"),
-                "validation_error_count": selectedValidation.get("error_count"),
-                "validation_warning_count": selectedValidation.get("warning_count"),
-                "validation_issues": selectedValidation.get("issues", []),
-            }
+        result = self._BuildSelectedLlmInvalidResult(
+            selectedSource,
+            selectedLlmConnection,
+        )
+        if result is not None:
             self._Logger("Stage12RecommendationReport").warning(
                 (
                     "status=skipped reason={} selected_source={} "
@@ -1471,36 +1460,18 @@ class OntologySmokeRunner:
         llmResponseValidationSummary: Dict[str, Any],
         backtrackingRetrySummary: Dict[str, Any],
     ) -> Dict[str, Any]:
-        selectedSource = "stage7_initial_llm_review"
-        selectedLlmConnection = llmResponseValidationSummary.get(
-            "llm_connection",
-            {},
+        selectedLlmConnectionData = self._SelectStage1LlmConnection(
+            llmResponseValidationSummary,
+            backtrackingRetrySummary,
         )
-        retryLlmConnection = backtrackingRetrySummary.get(
-            "llm_connection",
-            {},
-        )
-        if retryLlmConnection.get("status") == "completed":
-            retryScenarioKind = backtrackingRetrySummary.get("scenario_kind")
-            if retryScenarioKind == "actual_backtracking_inference":
-                selectedSource = "stage11_backtracking_retry"
-                selectedLlmConnection = retryLlmConnection
+        selectedSource = selectedLlmConnectionData["selected_source"]
+        selectedLlmConnection = selectedLlmConnectionData["llm_connection"]
 
-        selectedValidation = selectedLlmConnection.get("validation", {})
-        if (
-            isinstance(selectedValidation, dict)
-            and "is_valid" in selectedValidation
-            and selectedValidation.get("is_valid") is not True
-        ):
-            result = {
-                "status": "skipped",
-                "reason": "selected llm response is invalid",
-                "selected_source": selectedSource,
-                "upstream_llm_status": selectedLlmConnection.get("status"),
-                "validation_error_count": selectedValidation.get("error_count"),
-                "validation_warning_count": selectedValidation.get("warning_count"),
-                "validation_issues": selectedValidation.get("issues", []),
-            }
+        result = self._BuildSelectedLlmInvalidResult(
+            selectedSource,
+            selectedLlmConnection,
+        )
+        if result is not None:
             self._Logger("Stage13HumanReviewPackage").warning(
                 (
                     "status=skipped reason={} selected_source={} "
@@ -1578,6 +1549,54 @@ class OntologySmokeRunner:
             result["validation_issue_count"],
         )
         return result
+
+    def _SelectStage1LlmConnection(
+        self,
+        llmResponseValidationSummary: Dict[str, Any],
+        backtrackingRetrySummary: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        selectedSource = "stage7_initial_llm_review"
+        selectedLlmConnection = llmResponseValidationSummary.get(
+            "llm_connection",
+            {},
+        )
+        retryLlmConnection = backtrackingRetrySummary.get(
+            "llm_connection",
+            {},
+        )
+        if (
+            retryLlmConnection.get("status") == "completed"
+            and backtrackingRetrySummary.get("scenario_kind")
+            == "actual_backtracking_inference"
+        ):
+            selectedSource = "stage11_backtracking_retry"
+            selectedLlmConnection = retryLlmConnection
+        return {
+            "selected_source": selectedSource,
+            "llm_connection": selectedLlmConnection,
+        }
+
+    def _BuildSelectedLlmInvalidResult(
+        self,
+        selectedSource: str,
+        selectedLlmConnection: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        selectedValidation = selectedLlmConnection.get("validation", {})
+        if (
+            not isinstance(selectedValidation, dict)
+            or "is_valid" not in selectedValidation
+            or selectedValidation.get("is_valid") is True
+        ):
+            return None
+        return {
+            "status": "skipped",
+            "reason": "selected llm response is invalid",
+            "selected_source": selectedSource,
+            "upstream_llm_status": selectedLlmConnection.get("status"),
+            "validation_error_count": selectedValidation.get("error_count"),
+            "validation_warning_count": selectedValidation.get("warning_count"),
+            "validation_issues": selectedValidation.get("issues", []),
+        }
 
     def _BuildStage1DecisionReportFromData(
         self,
