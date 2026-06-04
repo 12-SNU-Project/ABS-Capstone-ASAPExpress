@@ -173,6 +173,32 @@ class Stage1RecommendationReportBuilder:
             else [],
         }
         if candidate is not None:
+            record["candidate_reference"] = {
+                "code_hierarchy": {
+                    "hs2": {
+                        "code": candidate.hs2Code,
+                        "description": candidate.hs2Description,
+                    },
+                    "hs4": {
+                        "code": candidate.hs4Code,
+                        "description": candidate.hs4Description,
+                    },
+                    "hs6": {
+                        "code": candidate.hs6Code,
+                        "description": candidate.hs6Description,
+                    },
+                    "cn8": {
+                        "code": candidate.hs8Code or candidate.hs8,
+                        "description": candidate.hs8Description,
+                    },
+                },
+                "classification_rule_texts": {
+                    "include_rule_keywords": candidate.includeRuleKeywords,
+                    "exclude_rule_keywords": candidate.excludeRuleKeywords,
+                    "hard_conditions": candidate.hardConditions,
+                },
+                "combined_description": candidate.combinedDescription,
+            }
             record["candidate_scoring_detail"] = self._BuildCandidateScoringDetail(
                 candidate,
             )
@@ -205,22 +231,6 @@ class Stage1RecommendationReportBuilder:
                     candidateReview.get("missing_information"),
                     list,
                 ) else [],
-                "code_hierarchy": (
-                    candidate.ToDict().get("code_hierarchy")
-                    if candidate is not None
-                    else {}
-                ),
-                "classification_rule_texts": (
-                    candidate.ToDict().get("classification_rule_texts")
-                    if candidate is not None
-                    else {}
-                ),
-                "hard_conditions": (
-                    candidate.hardConditions if candidate is not None else ""
-                ),
-                "combined_description": (
-                    candidate.combinedDescription if candidate is not None else ""
-                ),
             }
         )
         return record
@@ -263,21 +273,23 @@ class Stage1RecommendationReportBuilder:
         self,
         candidate: CnCandidate,
     ) -> Dict[str, Any]:
-        candidateData = candidate.ToDict()
         return {
             "score": candidate.score,
-            "score_breakdown": candidateData.get("score_breakdown", {}),
+            "score_breakdown": {
+                "include_rule_points": 4.0 * len(candidate.includeRuleMatches),
+                "search_keyword_points": 2.0 * len(candidate.searchKeywordMatches),
+                "description_points": 1.0 * len(candidate.descriptionMatches),
+                "exclude_rule_triggered": len(candidate.excludeRuleMatches) > 0,
+                "formula": (
+                    "include_rule_keywords*4 + search_keywords*2 + "
+                    "description_matches*1; exclude_rule match forces score 0"
+                ),
+            },
             "matched_terms": list(candidate.matchedTerms),
             "include_rule_matches": list(candidate.includeRuleMatches),
             "search_keyword_matches": list(candidate.searchKeywordMatches),
             "description_matches": list(candidate.descriptionMatches),
             "exclude_rule_matches": list(candidate.excludeRuleMatches),
-            "code_hierarchy": candidateData.get("code_hierarchy", {}),
-            "classification_rule_texts": candidateData.get(
-                "classification_rule_texts",
-                {},
-            ),
-            "combined_description": candidate.combinedDescription,
         }
 
     def _BuildEvidenceSummary(

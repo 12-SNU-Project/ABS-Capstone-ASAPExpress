@@ -122,7 +122,7 @@ class Stage1HumanReviewPackageBuilder:
                 if evidenceId in evidenceRecordsById
             ],
             sourceEvidenceRecords=[
-                self.BuildSourceEvidenceRecord(evidenceRecord)
+                evidenceRecord.ToDict()
                 for evidenceRecord in evidencePackage.evidenceRecords
             ],
             validationIssues=[
@@ -250,20 +250,7 @@ class Stage1HumanReviewPackageBuilder:
             "evidence_id": evidenceRecord.evidenceId,
             "purpose": purpose,
             "citation_origin": citationOrigin,
-            "evidence_type": evidenceRecord.evidenceType,
-            "source_name": evidenceRecord.sourceName,
-            "source_ref": evidenceRecord.sourceRef,
-            "candidate_hs8": evidenceRecord.candidateHs8,
-            "candidate_hs6": evidenceRecord.candidateHs6,
-            "legal_status": evidenceRecord.legalStatus,
-            "limitations": list(evidenceRecord.limitations),
         }
-
-    def BuildSourceEvidenceRecord(
-        self,
-        evidenceRecord: Stage1EvidenceRecord,
-    ) -> Dict[str, Any]:
-        return evidenceRecord.ToDict()
 
     def BuildReviewChecklist(
         self,
