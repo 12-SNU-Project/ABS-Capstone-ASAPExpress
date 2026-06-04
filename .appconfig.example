@@ -32,8 +32,26 @@ supports_response_format = false
 # endpoint_url = "http://localhost:11434"
 
 [paths]
+ontology_root = "eu_export_ontology_v1"
+ontology_smoke_artifact_root = "artifacts/ontology-smoke"
+ontology_smoke_summary_artifact = "artifacts/ontology-smoke/runtime-smoke-summary.json"
+ontology_human_review_package_artifact = "artifacts/ontology-smoke/stage1-human-review-package.json"
 kurly_smoke_artifact_root = "artifacts/kurly-market-smoke"
 kurly_smoke_summary_artifact = "artifacts/kurly-market-smoke/runtime-smoke-summary.json"
+
+[ontology_smoke]
+phase_id = "stage1_classification"
+top_k = 8
+max_result_count = 6
+cn_candidate_top_k = 5
+max_product_smoke_inputs = 2
+write_summary_artifact = true
+run_llm_connection_smoke = false
+text_preview_characters = 700
+validation_issue_preview_count = 3
+resource_check_preview_count = 8
+max_validation_fixture_candidates = 3
+stage1_backtracking_retry_attempt = 0
 
 [kurly_smoke]
 product_urls = [

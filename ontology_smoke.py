@@ -5,7 +5,6 @@
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -25,6 +24,7 @@ from eu_export.bridge import (  # noqa: E402
     RuntimeAdapterBuildError,
     RuntimeGenerationError,
 )
+from eu_export.app_config import LoadAppConfig  # noqa: E402
 from eu_export.ontology import (  # noqa: E402
     CnCandidate,
     CnCandidateRetriever,
@@ -48,105 +48,174 @@ from eu_export.ontology import (  # noqa: E402
 from eu_export.utils import NormalizeWhitespace  # noqa: E402
 
 
-DEFAULT_ONTOLOGY_ROOT_PATH = PROJECT_ROOT_PATH / "eu_export_ontology_v1"
-DEFAULT_ARTIFACT_ROOT_PATH = PROJECT_ROOT_PATH / "artifacts" / "ontology-smoke"
-DEFAULT_SUMMARY_ARTIFACT_PATH = DEFAULT_ARTIFACT_ROOT_PATH / "runtime-smoke-summary.json"
-DEFAULT_HUMAN_REVIEW_PACKAGE_ARTIFACT_PATH = (
-    DEFAULT_ARTIFACT_ROOT_PATH / "stage1-human-review-package.json"
-)
-DEFAULT_PRODUCT_SMOKE_SUMMARY_ARTIFACT_PATH = (
-    PROJECT_ROOT_PATH / "artifacts" / "kurly-market-smoke" / "runtime-smoke-summary.json"
-)
-DEFAULT_TOP_K = 8
-DEFAULT_MAX_RESULT_COUNT = 6
-DEFAULT_CN_CANDIDATE_TOP_K = 5
-DEFAULT_MAX_PRODUCT_SMOKE_INPUTS = 2
-DEFAULT_PHASE_ID = "stage1_classification"
-DEFAULT_WRITE_SUMMARY_ARTIFACT = True
-DEFAULT_TEXT_PREVIEW_CHARACTERS = 700
-DEFAULT_VALIDATION_ISSUE_PREVIEW_COUNT = 3
-DEFAULT_RESOURCE_CHECK_PREVIEW_COUNT = 8
-DEFAULT_MAX_VALIDATION_FIXTURE_CANDIDATES = 3
-DEFAULT_STAGE1_BACKTRACKING_RETRY_ATTEMPT = 0
 NO_CN_CANDIDATE_REASON = "no CN candidates found for product input"
-
-DEFAULT_SMOKE_QUERIES = [
-    {
-        "name": "stage1_cosmetics_classification",
-        "phase_id": DEFAULT_PHASE_ID,
-        "query": (
-            "화장품 HS6 CN8 후보 분류 stage1 classification "
-            "cn_leaf_code_cards classification evidence"
-        ),
-        "user_prompt": "화장품 제품의 HS6/CN8 후보 분류 기준을 설명해줘.",
-    },
-    {
-        "name": "stage1_food_classification",
-        "phase_id": DEFAULT_PHASE_ID,
-        "query": (
-            "식품 HS6 CN8 후보 분류 stage1 classification "
-            "food cn_leaf_code_cards domain scope"
-        ),
-        "user_prompt": "식품 제품의 HS6/CN8 후보 분류 기준을 설명해줘.",
-    },
-]
-
-
-def _ReadBooleanSmokeSetting(envName: str, defaultValue: bool) -> bool:
-    value = _ReadSmokeSetting(envName)
-    if value is None:
-        return defaultValue
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _ReadSmokeSetting(envName: str) -> str | None:
-    envValue = os.environ.get(envName)
-    if envValue is not None and envValue.strip() != "":
-        return envValue.strip()
-
-    envFilePath = PROJECT_ROOT_PATH / ".env"
-    if not envFilePath.exists():
-        return None
-
-    for line in envFilePath.read_text(encoding="utf-8").splitlines():
-        strippedLine = line.strip()
-        if strippedLine == "" or strippedLine.startswith("#"):
-            continue
-        if strippedLine.startswith("export "):
-            strippedLine = strippedLine[len("export ") :].strip()
-        if "=" not in strippedLine:
-            continue
-        key, rawValue = strippedLine.split("=", 1)
-        if key.strip() == envName:
-            return _NormalizeSmokeSettingValue(rawValue)
-    return None
-
-
-def _NormalizeSmokeSettingValue(rawValue: str) -> str:
-    value = rawValue.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        return value[1:-1].strip()
-    return value
-
-
-DEFAULT_RUN_LLM_CONNECTION_SMOKE = _ReadBooleanSmokeSetting(
-    "EU_EXPORT_ONTOLOGY_SMOKE_RUN_LLM",
-    False,
-)
 
 
 class OntologySmokeRunner:
     """ontology 문서 로드, 검색 context, LLM request 생성을 확인한다."""
+
+    def __init__(self) -> None:
+        appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
+        pathConfig = appConfig.get("paths", {})
+        smokeConfig = appConfig.get("ontology_smoke", {})
+        if not isinstance(pathConfig, dict):
+            pathConfig = {}
+        if not isinstance(smokeConfig, dict):
+            smokeConfig = {}
+
+        ontologyRootPath = Path(
+            pathConfig.get("ontology_root")
+            if isinstance(pathConfig.get("ontology_root"), str)
+            else "eu_export_ontology_v1"
+        ).expanduser()
+        summaryArtifactPath = Path(
+            pathConfig.get("ontology_smoke_summary_artifact")
+            if isinstance(pathConfig.get("ontology_smoke_summary_artifact"), str)
+            else "artifacts/ontology-smoke/runtime-smoke-summary.json"
+        ).expanduser()
+        humanReviewPackageArtifactPath = Path(
+            pathConfig.get("ontology_human_review_package_artifact")
+            if isinstance(pathConfig.get("ontology_human_review_package_artifact"), str)
+            else "artifacts/ontology-smoke/stage1-human-review-package.json"
+        ).expanduser()
+        productSmokeSummaryArtifactPath = Path(
+            pathConfig.get("kurly_smoke_summary_artifact")
+            if isinstance(pathConfig.get("kurly_smoke_summary_artifact"), str)
+            else "artifacts/kurly-market-smoke/runtime-smoke-summary.json"
+        ).expanduser()
+
+        self._ontologyRootPath = (
+            ontologyRootPath
+            if ontologyRootPath.is_absolute()
+            else PROJECT_ROOT_PATH / ontologyRootPath
+        )
+        self._summaryArtifactPath = (
+            summaryArtifactPath
+            if summaryArtifactPath.is_absolute()
+            else PROJECT_ROOT_PATH / summaryArtifactPath
+        )
+        self._humanReviewPackageArtifactPath = (
+            humanReviewPackageArtifactPath
+            if humanReviewPackageArtifactPath.is_absolute()
+            else PROJECT_ROOT_PATH / humanReviewPackageArtifactPath
+        )
+        self._productSmokeSummaryArtifactPath = (
+            productSmokeSummaryArtifactPath
+            if productSmokeSummaryArtifactPath.is_absolute()
+            else PROJECT_ROOT_PATH / productSmokeSummaryArtifactPath
+        )
+
+        phaseIdValue = smokeConfig.get("phase_id")
+        self._phaseId = (
+            phaseIdValue.strip()
+            if isinstance(phaseIdValue, str) and phaseIdValue.strip() != ""
+            else "stage1_classification"
+        )
+        topK = smokeConfig.get("top_k")
+        maxResultCount = smokeConfig.get("max_result_count")
+        cnCandidateTopK = smokeConfig.get("cn_candidate_top_k")
+        maxProductSmokeInputs = smokeConfig.get("max_product_smoke_inputs")
+        textPreviewCharacters = smokeConfig.get("text_preview_characters")
+        validationIssuePreviewCount = smokeConfig.get("validation_issue_preview_count")
+        resourceCheckPreviewCount = smokeConfig.get("resource_check_preview_count")
+        maxValidationFixtureCandidates = smokeConfig.get(
+            "max_validation_fixture_candidates"
+        )
+        stage1BacktrackingRetryAttempt = smokeConfig.get(
+            "stage1_backtracking_retry_attempt"
+        )
+
+        self._topK = (
+            topK
+            if isinstance(topK, int) and not isinstance(topK, bool)
+            else 8
+        )
+        self._maxResultCount = (
+            maxResultCount
+            if isinstance(maxResultCount, int) and not isinstance(maxResultCount, bool)
+            else 6
+        )
+        self._cnCandidateTopK = (
+            cnCandidateTopK
+            if isinstance(cnCandidateTopK, int) and not isinstance(cnCandidateTopK, bool)
+            else 5
+        )
+        self._maxProductSmokeInputs = (
+            maxProductSmokeInputs
+            if isinstance(maxProductSmokeInputs, int)
+            and not isinstance(maxProductSmokeInputs, bool)
+            else 2
+        )
+        self._writeSummaryArtifact = (
+            smokeConfig["write_summary_artifact"]
+            if isinstance(smokeConfig.get("write_summary_artifact"), bool)
+            else True
+        )
+        self._runLlmConnectionSmoke = (
+            smokeConfig["run_llm_connection_smoke"]
+            if isinstance(smokeConfig.get("run_llm_connection_smoke"), bool)
+            else False
+        )
+        self._textPreviewCharacters = (
+            textPreviewCharacters
+            if isinstance(textPreviewCharacters, int)
+            and not isinstance(textPreviewCharacters, bool)
+            else 700
+        )
+        self._validationIssuePreviewCount = (
+            validationIssuePreviewCount
+            if isinstance(validationIssuePreviewCount, int)
+            and not isinstance(validationIssuePreviewCount, bool)
+            else 3
+        )
+        self._resourceCheckPreviewCount = (
+            resourceCheckPreviewCount
+            if isinstance(resourceCheckPreviewCount, int)
+            and not isinstance(resourceCheckPreviewCount, bool)
+            else 8
+        )
+        self._maxValidationFixtureCandidates = (
+            maxValidationFixtureCandidates
+            if isinstance(maxValidationFixtureCandidates, int)
+            and not isinstance(maxValidationFixtureCandidates, bool)
+            else 3
+        )
+        self._stage1BacktrackingRetryAttempt = (
+            stage1BacktrackingRetryAttempt
+            if isinstance(stage1BacktrackingRetryAttempt, int)
+            and not isinstance(stage1BacktrackingRetryAttempt, bool)
+            else 0
+        )
+        self._smokeQueries = [
+            {
+                "name": "stage1_cosmetics_classification",
+                "phase_id": self._phaseId,
+                "query": (
+                    "화장품 HS6 CN8 후보 분류 stage1 classification "
+                    "cn_leaf_code_cards classification evidence"
+                ),
+                "user_prompt": "화장품 제품의 HS6/CN8 후보 분류 기준을 설명해줘.",
+            },
+            {
+                "name": "stage1_food_classification",
+                "phase_id": self._phaseId,
+                "query": (
+                    "식품 HS6 CN8 후보 분류 stage1 classification "
+                    "food cn_leaf_code_cards domain scope"
+                ),
+                "user_prompt": "식품 제품의 HS6/CN8 후보 분류 기준을 설명해줘.",
+            },
+        ]
 
     def Run(self) -> None:
         self._ConfigureLogger()
         runLogger = self._Logger("Run")
         runLogger.info(
             "온톨로지 smoke를 시작합니다 ontology_root={}",
-            DEFAULT_ONTOLOGY_ROOT_PATH,
+            self._ontologyRootPath,
         )
 
-        contextBuilder = OntologyContextBuilder(DEFAULT_ONTOLOGY_ROOT_PATH)
+        contextBuilder = OntologyContextBuilder(self._ontologyRootPath)
 
         runLogger.info("STEP 1/13 온톨로지 마크다운 문서를 로드합니다")
         documentSummary = self._RunDocumentLoadSmoke(contextBuilder)
@@ -154,7 +223,7 @@ class OntologySmokeRunner:
         runLogger.info("STEP 2/13 문서 검색 결과가 LLM 요청 컨텍스트로 변환되는지 확인합니다")
         queryResults = [
             self._RunQuerySmoke(contextBuilder, queryCase)
-            for queryCase in DEFAULT_SMOKE_QUERIES
+            for queryCase in self._smokeQueries
         ]
 
         runLogger.info("STEP 3/13 문서 참조 관계와 frontmatter 메타데이터를 검증합니다")
@@ -206,7 +275,7 @@ class OntologySmokeRunner:
         )
 
         summary = {
-            "ontology_root_path": str(DEFAULT_ONTOLOGY_ROOT_PATH),
+            "ontology_root_path": str(self._ontologyRootPath),
             "document_summary": documentSummary,
             "query_results": queryResults,
             "validation_summary": validationSummary,
@@ -222,7 +291,7 @@ class OntologySmokeRunner:
             "stage1_human_review_package_summary": humanReviewPackageSummary,
         }
         self._LogSummary(summary)
-        if DEFAULT_WRITE_SUMMARY_ARTIFACT:
+        if self._writeSummaryArtifact:
             self._WriteSummaryArtifact(summary)
 
     def _RunDocumentLoadSmoke(
@@ -231,11 +300,11 @@ class OntologySmokeRunner:
     ) -> Dict[str, Any]:
         documents = contextBuilder.LoadDocuments()
         retrievalDocuments = contextBuilder.LoadRetrievalDocuments(
-            phaseId=DEFAULT_PHASE_ID,
+            phaseId=self._phaseId,
         )
         result = {
             "document_count": len(documents),
-            "phase_id": DEFAULT_PHASE_ID,
+            "phase_id": self._phaseId,
             "retrieval_document_count": len(retrievalDocuments),
             "retrieval_document_paths": [
                 document.relativePath for document in retrievalDocuments
@@ -257,8 +326,8 @@ class OntologySmokeRunner:
         context = contextBuilder.BuildContext(
             query=queryCase["query"],
             phaseId=queryCase["phase_id"],
-            topK=DEFAULT_TOP_K,
-            maxResultCount=DEFAULT_MAX_RESULT_COUNT,
+            topK=self._topK,
+            maxResultCount=self._maxResultCount,
         )
         llmRequest = LlmRequestBuilder().BuildRequest(
             userPrompt=queryCase["user_prompt"],
@@ -314,7 +383,7 @@ class OntologySmokeRunner:
     ) -> Dict[str, Any]:
         documents = contextBuilder.LoadDocuments()
         validationReport = OntologyGraphValidator(
-            DEFAULT_ONTOLOGY_ROOT_PATH,
+            self._ontologyRootPath,
         ).Validate(documents)
         validationData = validationReport.ToDict()
         issues = list(validationData["issues"])
@@ -323,7 +392,7 @@ class OntologySmokeRunner:
             "error_count": validationData["error_count"],
             "warning_count": validationData["warning_count"],
             "issues": issues,
-            "issues_preview": issues[:DEFAULT_VALIDATION_ISSUE_PREVIEW_COUNT],
+            "issues_preview": issues[:self._validationIssuePreviewCount],
         }
         validationLogger = self._Logger("Stage3GraphValidation")
         validationLogger.info(
@@ -349,7 +418,7 @@ class OntologySmokeRunner:
     ) -> Dict[str, Any]:
         documents = contextBuilder.LoadDocuments()
         resourceReport = OntologyResourceResolver(
-            DEFAULT_ONTOLOGY_ROOT_PATH,
+            self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         ).Resolve(documents)
         resourceData = resourceReport.ToDict()
@@ -361,7 +430,7 @@ class OntologySmokeRunner:
             "missing_count": resourceData["missing_count"],
             "invalid_count": resourceData["invalid_count"],
             "data_source_checks": checks,
-            "checks_preview": checks[:DEFAULT_RESOURCE_CHECK_PREVIEW_COUNT],
+            "checks_preview": checks[:self._resourceCheckPreviewCount],
         }
         resourceLogger = self._Logger("Stage4ResourceResolution")
         resourceLogger.info(
@@ -391,17 +460,17 @@ class OntologySmokeRunner:
         smokeRecords = self._LoadProductSmokeRecords()
         normalizer = ProductClassificationInputNormalizer()
         candidateRetriever = CnCandidateRetriever(
-            ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
+            ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
 
         productResults: List[Dict[str, Any]] = []
-        for smokeRecord in smokeRecords[:DEFAULT_MAX_PRODUCT_SMOKE_INPUTS]:
+        for smokeRecord in smokeRecords[:self._maxProductSmokeInputs]:
             productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecord)
             searchText = productInput.BuildSearchText()
             candidates = candidateRetriever.FindCandidates(
                 productInput,
-                topK=DEFAULT_CN_CANDIDATE_TOP_K,
+                topK=self._cnCandidateTopK,
             )
             productResults.append(
                 {
@@ -459,11 +528,11 @@ class OntologySmokeRunner:
 
         result = {
             "product_smoke_summary_path": str(
-                DEFAULT_PRODUCT_SMOKE_SUMMARY_ARTIFACT_PATH,
+                self._productSmokeSummaryArtifactPath,
             ),
             "product_smoke_record_count": len(smokeRecords),
             "used_product_count": len(productResults),
-            "candidate_top_k": DEFAULT_CN_CANDIDATE_TOP_K,
+            "candidate_top_k": self._cnCandidateTopK,
             "products": productResults,
         }
         self._LogCandidateScoring(result)
@@ -560,21 +629,21 @@ class OntologySmokeRunner:
         smokeRecords = self._LoadProductSmokeRecords()
         normalizer = ProductClassificationInputNormalizer()
         candidateRetriever = CnCandidateRetriever(
-            ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
+            ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
         evidencePackageBuilder = Stage1EvidencePackageBuilder(
-            ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
+            ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
         requestBuilder = Stage1RequestBuilder()
 
         requestResults: List[Dict[str, Any]] = []
-        for smokeRecord in smokeRecords[:DEFAULT_MAX_PRODUCT_SMOKE_INPUTS]:
+        for smokeRecord in smokeRecords[:self._maxProductSmokeInputs]:
             productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecord)
             candidates = candidateRetriever.FindCandidates(
                 productInput,
-                topK=DEFAULT_CN_CANDIDATE_TOP_K,
+                topK=self._cnCandidateTopK,
             )
             if not candidates:
                 requestResults.append(
@@ -591,9 +660,9 @@ class OntologySmokeRunner:
             ontologyQuery = requestBuilder.BuildOntologyQuery(productInput, candidates)
             packagedContext = contextBuilder.BuildContext(
                 query=ontologyQuery,
-                phaseId=DEFAULT_PHASE_ID,
-                topK=DEFAULT_TOP_K,
-                maxResultCount=DEFAULT_MAX_RESULT_COUNT,
+                phaseId=self._phaseId,
+                topK=self._topK,
+                maxResultCount=self._maxResultCount,
             )
             evidencePackage = evidencePackageBuilder.Build(
                 productInput=productInput,
@@ -605,13 +674,13 @@ class OntologySmokeRunner:
                 candidates=candidates,
                 packagedContext=packagedContext,
                 evidencePackage=evidencePackage,
-                maxCandidateCount=DEFAULT_CN_CANDIDATE_TOP_K,
+                maxCandidateCount=self._cnCandidateTopK,
             )
             evidenceData = evidencePackage.ToDict()
             promptEvidenceData = evidencePackage.ToPromptDict(
                 candidateCodes=[
                     candidate.hs8
-                    for candidate in candidates[:DEFAULT_CN_CANDIDATE_TOP_K]
+                    for candidate in candidates[:self._cnCandidateTopK]
                 ],
             )
             requestResults.append(
@@ -712,28 +781,28 @@ class OntologySmokeRunner:
         smokeRecords = self._LoadProductSmokeRecords()
         normalizer = ProductClassificationInputNormalizer()
         candidateRetriever = CnCandidateRetriever(
-            ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
+            ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
         evidencePackageBuilder = Stage1EvidencePackageBuilder(
-            ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
+            ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
         requestBuilder = Stage1RequestBuilder()
 
         productResults: List[Dict[str, Any]] = []
-        for smokeRecord in smokeRecords[:DEFAULT_MAX_PRODUCT_SMOKE_INPUTS]:
+        for smokeRecord in smokeRecords[:self._maxProductSmokeInputs]:
             productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecord)
             candidates = candidateRetriever.FindCandidates(
                 productInput,
-                topK=DEFAULT_CN_CANDIDATE_TOP_K,
+                topK=self._cnCandidateTopK,
             )
             ontologyQuery = requestBuilder.BuildOntologyQuery(productInput, candidates)
             packagedContext = contextBuilder.BuildContext(
                 query=ontologyQuery,
-                phaseId=DEFAULT_PHASE_ID,
-                topK=DEFAULT_TOP_K,
-                maxResultCount=DEFAULT_MAX_RESULT_COUNT,
+                phaseId=self._phaseId,
+                topK=self._topK,
+                maxResultCount=self._maxResultCount,
             )
             evidencePackage = evidencePackageBuilder.Build(
                 productInput=productInput,
@@ -809,7 +878,7 @@ class OntologySmokeRunner:
             result = {
                 "status": "skipped",
                 "reason": "product smoke artifact is empty",
-                "llm_connection_enabled": DEFAULT_RUN_LLM_CONNECTION_SMOKE,
+                "llm_connection_enabled": self._runLlmConnectionSmoke,
             }
             self._Logger("Stage7ResponseValidation").warning(
                 "status=skipped reason={}",
@@ -819,19 +888,19 @@ class OntologySmokeRunner:
 
         normalizer = ProductClassificationInputNormalizer()
         candidateRetriever = CnCandidateRetriever(
-            ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
+            ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
         requestBuilder = Stage1RequestBuilder()
         evidencePackageBuilder = Stage1EvidencePackageBuilder(
-            ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
+            ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
 
         productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecords[0])
         candidates = candidateRetriever.FindCandidates(
             productInput,
-            topK=DEFAULT_MAX_VALIDATION_FIXTURE_CANDIDATES,
+            topK=self._maxValidationFixtureCandidates,
         )
         if not candidates:
             result = {
@@ -839,7 +908,7 @@ class OntologySmokeRunner:
                 "reason": NO_CN_CANDIDATE_REASON,
                 "product_name": productInput.productName,
                 "candidate_count": 0,
-                "llm_connection_enabled": DEFAULT_RUN_LLM_CONNECTION_SMOKE,
+                "llm_connection_enabled": self._runLlmConnectionSmoke,
             }
             self._Logger("Stage7ResponseValidation").warning(
                 "status=skipped product={} reason={}",
@@ -851,9 +920,9 @@ class OntologySmokeRunner:
         ontologyQuery = requestBuilder.BuildOntologyQuery(productInput, candidates)
         packagedContext = contextBuilder.BuildContext(
             query=ontologyQuery,
-            phaseId=DEFAULT_PHASE_ID,
-            topK=DEFAULT_TOP_K,
-            maxResultCount=DEFAULT_MAX_RESULT_COUNT,
+            phaseId=self._phaseId,
+            topK=self._topK,
+            maxResultCount=self._maxResultCount,
         )
         evidencePackage = evidencePackageBuilder.Build(
             productInput=productInput,
@@ -942,12 +1011,12 @@ class OntologySmokeRunner:
 
         normalizer = ProductClassificationInputNormalizer()
         candidateRetriever = CnCandidateRetriever(
-            ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
+            ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
         requestBuilder = Stage1RequestBuilder()
         evidencePackageBuilder = Stage1EvidencePackageBuilder(
-            ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
+            ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
         validator = Stage1ResponseValidator()
@@ -956,7 +1025,7 @@ class OntologySmokeRunner:
         productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecords[0])
         candidates = candidateRetriever.FindCandidates(
             productInput,
-            topK=DEFAULT_MAX_VALIDATION_FIXTURE_CANDIDATES,
+            topK=self._maxValidationFixtureCandidates,
         )
         if not candidates:
             result = {
@@ -975,9 +1044,9 @@ class OntologySmokeRunner:
         ontologyQuery = requestBuilder.BuildOntologyQuery(productInput, candidates)
         packagedContext = contextBuilder.BuildContext(
             query=ontologyQuery,
-            phaseId=DEFAULT_PHASE_ID,
-            topK=DEFAULT_TOP_K,
-            maxResultCount=DEFAULT_MAX_RESULT_COUNT,
+            phaseId=self._phaseId,
+            topK=self._topK,
+            maxResultCount=self._maxResultCount,
         )
         evidencePackage = evidencePackageBuilder.Build(
             productInput=productInput,
@@ -1065,13 +1134,13 @@ class OntologySmokeRunner:
 
         normalizer = ProductClassificationInputNormalizer()
         candidateRetriever = CnCandidateRetriever(
-            ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
+            ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
         productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecords[0])
         candidates = candidateRetriever.FindCandidates(
             productInput,
-            topK=DEFAULT_MAX_VALIDATION_FIXTURE_CANDIDATES,
+            topK=self._maxValidationFixtureCandidates,
         )
         controller = Stage1TraversalController()
         possibleTraversalReport = controller.BuildFromDecision(
@@ -1092,7 +1161,7 @@ class OntologySmokeRunner:
             currentCandidates=candidates,
             decisionReport=backtrackingDecisionReport,
             candidateRetriever=candidateRetriever,
-            topK=DEFAULT_MAX_VALIDATION_FIXTURE_CANDIDATES,
+            topK=self._maxValidationFixtureCandidates,
         )
         result = {
             "status": "completed",
@@ -1155,18 +1224,18 @@ class OntologySmokeRunner:
 
         normalizer = ProductClassificationInputNormalizer()
         candidateRetriever = CnCandidateRetriever(
-            ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
+            ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
         requestBuilder = Stage1RequestBuilder()
         evidencePackageBuilder = Stage1EvidencePackageBuilder(
-            ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
+            ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
         productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecords[0])
         currentCandidates = candidateRetriever.FindCandidates(
             productInput,
-            topK=DEFAULT_MAX_VALIDATION_FIXTURE_CANDIDATES,
+            topK=self._maxValidationFixtureCandidates,
         )
         if not currentCandidates:
             result = {
@@ -1192,9 +1261,9 @@ class OntologySmokeRunner:
             currentCandidates=currentCandidates,
             decisionReport=backtrackingDecisionReport,
             candidateRetriever=candidateRetriever,
-            topK=DEFAULT_MAX_VALIDATION_FIXTURE_CANDIDATES,
+            topK=self._maxValidationFixtureCandidates,
             visitedHs8Codes=currentCandidateCodes,
-            completedRetryCount=DEFAULT_STAGE1_BACKTRACKING_RETRY_ATTEMPT,
+            completedRetryCount=self._stage1BacktrackingRetryAttempt,
             maxRetryCount=DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
         )
         if not backtrackingCandidates:
@@ -1216,9 +1285,9 @@ class OntologySmokeRunner:
         )
         packagedContext = contextBuilder.BuildContext(
             query=ontologyQuery,
-            phaseId=DEFAULT_PHASE_ID,
-            topK=DEFAULT_TOP_K,
-            maxResultCount=DEFAULT_MAX_RESULT_COUNT,
+            phaseId=self._phaseId,
+            topK=self._topK,
+            maxResultCount=self._maxResultCount,
         )
         evidencePackage = evidencePackageBuilder.Build(
             productInput=productInput,
@@ -1230,7 +1299,7 @@ class OntologySmokeRunner:
             "retry_candidate_hs8_codes": retryCandidateCodes,
             "visited_candidate_hs8_codes": visitedCandidateCodes,
             "max_retry_count": DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
-            "completed_retry_count": DEFAULT_STAGE1_BACKTRACKING_RETRY_ATTEMPT + 1,
+            "completed_retry_count": self._stage1BacktrackingRetryAttempt + 1,
         }
         llmConnectionResult = self._RunOptionalLlmConnectionSmoke(
             contextBuilder=contextBuilder,
@@ -1256,10 +1325,10 @@ class OntologySmokeRunner:
                     currentCandidates=backtrackingCandidates,
                     decisionReport=retryDecisionReport,
                     candidateRetriever=candidateRetriever,
-                    topK=DEFAULT_MAX_VALIDATION_FIXTURE_CANDIDATES,
+                    topK=self._maxValidationFixtureCandidates,
                     visitedHs8Codes=visitedCandidateCodes,
                     completedRetryCount=(
-                        DEFAULT_STAGE1_BACKTRACKING_RETRY_ATTEMPT + 1
+                        self._stage1BacktrackingRetryAttempt + 1
                     ),
                     maxRetryCount=DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
                 )
@@ -1269,7 +1338,7 @@ class OntologySmokeRunner:
                 nextRetryStopReason = (
                     "max_retry_count_reached"
                     if (
-                        DEFAULT_STAGE1_BACKTRACKING_RETRY_ATTEMPT + 1
+                        self._stage1BacktrackingRetryAttempt + 1
                         >= DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT
                     )
                     else "no_unvisited_backtracking_candidates"
@@ -1293,7 +1362,7 @@ class OntologySmokeRunner:
             "is_main_flow": False,
             "product_name": productInput.productName,
             "max_retry_count": DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
-            "completed_retry_count": DEFAULT_STAGE1_BACKTRACKING_RETRY_ATTEMPT + 1,
+            "completed_retry_count": self._stage1BacktrackingRetryAttempt + 1,
             "visited_candidate_codes": visitedCandidateCodes,
             "retry_candidate_count": len(backtrackingCandidates),
             "retry_candidate_codes": retryCandidateCodes,
@@ -1494,11 +1563,11 @@ class OntologySmokeRunner:
             )
             return result
 
-        DEFAULT_HUMAN_REVIEW_PACKAGE_ARTIFACT_PATH.parent.mkdir(
+        self._humanReviewPackageArtifactPath.parent.mkdir(
             parents=True,
             exist_ok=True,
         )
-        DEFAULT_HUMAN_REVIEW_PACKAGE_ARTIFACT_PATH.write_text(
+        self._humanReviewPackageArtifactPath.write_text(
             json.dumps(packageData, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
@@ -1517,7 +1586,7 @@ class OntologySmokeRunner:
             "status": "completed",
             "selected_source": selectedSource,
             "package_id": packageData.get("package_id"),
-            "package_artifact_path": str(DEFAULT_HUMAN_REVIEW_PACKAGE_ARTIFACT_PATH),
+            "package_artifact_path": str(self._humanReviewPackageArtifactPath),
             "evidence_citation_count": len(packageData.get("evidence_citations", [])),
             "source_evidence_record_count": len(
                 packageData.get("source_evidence_records", []),
@@ -1586,17 +1655,18 @@ class OntologySmokeRunner:
     ) -> Dict[str, Any]:
         if not candidates:
             return {
-                "enabled": DEFAULT_RUN_LLM_CONNECTION_SMOKE,
+                "enabled": self._runLlmConnectionSmoke,
                 "status": "skipped",
                 "reason": NO_CN_CANDIDATE_REASON,
             }
 
         runtimeConfig = BuildLlmRuntimeConfigFromEnv(
             envFilePath=PROJECT_ROOT_PATH / ".env",
+            projectRootPath=PROJECT_ROOT_PATH,
         )
         dependencyStatus = ProbeRuntimeDependency(runtimeConfig)
         baseResult = {
-            "enabled": DEFAULT_RUN_LLM_CONNECTION_SMOKE,
+            "enabled": self._runLlmConnectionSmoke,
             "runtime_kind": runtimeConfig.runtimeKind.value,
             "model_name": runtimeConfig.modelName,
             "endpoint_url": runtimeConfig.endpointUrl,
@@ -1605,13 +1675,13 @@ class OntologySmokeRunner:
             "dependency_limitations": list(dependencyStatus.limitations),
         }
 
-        if not DEFAULT_RUN_LLM_CONNECTION_SMOKE:
+        if not self._runLlmConnectionSmoke:
             return {
                 **baseResult,
                 "status": "skipped",
                 "reason": (
-                    "Set EU_EXPORT_ONTOLOGY_SMOKE_RUN_LLM=true to call the "
-                    "configured LLM runtime."
+                    "Set [ontology_smoke].run_llm_connection_smoke=true in "
+                    ".appconfig to call the configured LLM runtime."
                 ),
             }
 
@@ -1633,9 +1703,9 @@ class OntologySmokeRunner:
             )
             packagedContext = contextBuilder.BuildContext(
                 query=ontologyQuery,
-                phaseId=DEFAULT_PHASE_ID,
-                topK=DEFAULT_TOP_K,
-                maxResultCount=DEFAULT_MAX_RESULT_COUNT,
+                phaseId=self._phaseId,
+                topK=self._topK,
+                maxResultCount=self._maxResultCount,
             )
             llmRequest = requestBuilder.BuildRequest(
                 productInput=productInput,
@@ -1972,22 +2042,22 @@ class OntologySmokeRunner:
         )
 
     def _WriteSummaryArtifact(self, summary: Dict[str, Any]) -> None:
-        DEFAULT_SUMMARY_ARTIFACT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        DEFAULT_SUMMARY_ARTIFACT_PATH.write_text(
+        self._summaryArtifactPath.parent.mkdir(parents=True, exist_ok=True)
+        self._summaryArtifactPath.write_text(
             json.dumps(summary, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         self._Logger("_WriteSummaryArtifact").info(
             "summary_artifact_path={}",
-            DEFAULT_SUMMARY_ARTIFACT_PATH,
+            self._summaryArtifactPath,
         )
 
     def _LoadProductSmokeRecords(self) -> List[Dict[str, Any]]:
-        if not DEFAULT_PRODUCT_SMOKE_SUMMARY_ARTIFACT_PATH.exists():
+        if not self._productSmokeSummaryArtifactPath.exists():
             return []
         try:
             rawData = json.loads(
-                DEFAULT_PRODUCT_SMOKE_SUMMARY_ARTIFACT_PATH.read_text(
+                self._productSmokeSummaryArtifactPath.read_text(
                     encoding="utf-8",
                 )
             )
@@ -2004,9 +2074,9 @@ class OntologySmokeRunner:
         return []
 
     def _BuildTextPreview(self, text: str) -> str:
-        if len(text) <= DEFAULT_TEXT_PREVIEW_CHARACTERS:
+        if len(text) <= self._textPreviewCharacters:
             return text
-        return f"{text[:DEFAULT_TEXT_PREVIEW_CHARACTERS]}..."
+        return f"{text[:self._textPreviewCharacters]}..."
 
     def _ConfigureLogger(self) -> None:
         logger.remove()

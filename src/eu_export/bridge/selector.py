@@ -5,10 +5,7 @@ import platform
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
-from eu_export.app_config import (
-    LoadAppConfig,
-    ReadConfigSection,
-)
+from eu_export.app_config import LoadAppConfig
 from eu_export.bridge.schema import (
     LlmRuntimeConfig,
     LlmRuntimeKind,
@@ -297,8 +294,8 @@ def _ReadAppConfigRuntimeValues(
         projectRootPath,
     )
     appConfig = LoadAppConfig(resolvedProjectRootPath, appConfigPath)
-    llmConfig = ReadConfigSection(appConfig, "llm")
-    if len(llmConfig) == 0:
+    llmConfig = appConfig.get("llm")
+    if not isinstance(llmConfig, Mapping) or len(llmConfig) == 0:
         return {}
 
     runtimeValues: Dict[str, str] = {}
