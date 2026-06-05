@@ -13,13 +13,15 @@ from eu_export.bridge.schema import (
 DEFAULT_OMLX_ENDPOINT_URL = "http://127.0.0.1:8000"
 DEFAULT_OLLAMA_ENDPOINT_URL = "http://localhost:11434"
 DEFAULT_OPENAI_ENDPOINT_URL = "https://api.openai.com"
-DEFAULT_OPENAI_API_KEY_ENV_NAMES = [
-    "EU_EXPORT_LLM_API_KEY",
+PRIMARY_LLM_API_KEY_ENV_NAME = "EU_EXPORT_LLM_API_KEY"
+HOSTED_LLM_API_KEY_ENV_NAMES = [
+    PRIMARY_LLM_API_KEY_ENV_NAME,
     "EU_EXPORT_OPENAI_API_KEY",
     "EU_EXPORT_GOOGLE_AI_STUDIO_API_KEY",
     "OPENAI_API_KEY",
     "GEMINI_API_KEY",
 ]
+DEFAULT_OPENAI_API_KEY_ENV_NAMES = HOSTED_LLM_API_KEY_ENV_NAMES
 
 
 class UnsupportedRuntimeProbeError(RuntimeError):
@@ -50,8 +52,8 @@ def ProbeRuntimeDependency(
             runtimeConfig,
             DEFAULT_OPENAI_ENDPOINT_URL,
             DEFAULT_OPENAI_API_KEY_ENV_NAMES,
-            "OpenAI API key setting is available.",
-            "OpenAI API key setting is missing.",
+            "LLM API key setting is available.",
+            "LLM API key setting is missing.",
         )
 
     raise UnsupportedRuntimeProbeError(
@@ -89,7 +91,9 @@ def _ProbeApiKeyRuntime(
         message=missingMessage,
         endpointUrl=endpointUrl,
         limitations=[
-            "Set one of: {0}.".format(", ".join(apiKeyEnvNames)),
+            "Set {0} in .env for hosted LLM APIs.".format(
+                PRIMARY_LLM_API_KEY_ENV_NAME,
+            ),
             "Alternatively pass extraOptions['api_key'] in LlmRuntimeConfig.",
         ],
     )

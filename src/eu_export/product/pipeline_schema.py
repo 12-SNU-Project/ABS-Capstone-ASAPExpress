@@ -1,8 +1,9 @@
 """Product source pipeline schema."""
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from eu_export.product.kurly_market_schema import (
     KurlyCollectionResult,
@@ -15,9 +16,10 @@ from eu_export.product.ocr_fallback import (
 )
 
 
-@dataclass(frozen=True)
-class KurlyPipelineInput:
+class KurlyPipelineInput(BaseModel):
     """KurlyMarket 수집 wrapper 입력."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
     productPageUrl: str
     runOcrFallback: bool = False
@@ -26,73 +28,75 @@ class KurlyPipelineInput:
     downloadTimeoutSeconds: int = DEFAULT_PRODUCT_OCR_IMAGE_DOWNLOAD_TIMEOUT_SECONDS
 
 
-@dataclass(frozen=True)
-class PipelineStep:
+class PipelineStep(BaseModel):
     """wrapper가 실행한 단계 하나의 상태."""
 
-    stepName: str
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    stepName: str = Field(alias="step_name")
     succeeded: bool = True
     message: str = ""
 
-    def ToDict(self) -> Dict[str, object]:
-        return {
-            "step_name": self.stepName,
-            "succeeded": self.succeeded,
-            "message": self.message,
-        }
 
-
-@dataclass(frozen=True)
-class KurlyPipelineResult:
+class KurlyPipelineResult(BaseModel):
     """KurlyMarket parsing과 선택적 OCR fallback을 묶은 결과."""
 
-    collectionResult: KurlyCollectionResult
-    renderedPageEvidence: Optional[RenderedPageEvidence] = None
-    ocrImageResults: List[ProductOcrImageResult] = field(default_factory=list)
-    combinedOcrText: str = ""
-    steps: List[PipelineStep] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    def ToDict(self) -> Dict[str, object]:
+    collectionResult: KurlyCollectionResult = Field(exclude=True)
+    renderedPageEvidence: Optional[RenderedPageEvidence] = Field(
+        default=None,
+        exclude=True,
+    )
+    ocrImageResults: List[ProductOcrImageResult] = Field(
+        default_factory=list,
+        exclude=True,
+    )
+    combinedOcrText: str = Field(default="", alias="combined_ocr_text")
+    steps: List[PipelineStep] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
+
+    @computed_field(alias="product_page_url")
+    @property
+    def productPageUrl(self) -> str:
+        return self.collectionResult.productPageUrl
+
+    @computed_field(alias="parsed_product_page")
+    @property
+    def parsedProductPage(self) -> Dict[str, object]:
+        return self.collectionResult.parsedProductPage.model_dump(
+            mode="json",
+            by_alias=True,
+        )
+
+    @computed_field(alias="collection_summary")
+    @property
+    def collectionSummary(self) -> Dict[str, object]:
         return {
             "product_page_url": self.collectionResult.productPageUrl,
-            "parsed_product_page": self.collectionResult.parsedProductPage.ToDict(),
-            "collection_summary": {
-                "product_page_url": self.collectionResult.productPageUrl,
-                "visible_text_line_count": self.collectionResult.visibleTextLineCount,
-                "product_notice_text_line_count": (
-                    self.collectionResult.productNoticeTextLineCount
-                ),
-                "product_detail_image_url_count": len(
-                    self.collectionResult.productDetailImageUrls,
-                ),
-                "ocr_candidate_image_url_count": len(
-                    self.collectionResult.ocrCandidateImageUrls,
-                ),
-                "warnings": list(self.collectionResult.warnings),
-            },
-            "rendered_page_evidence_summary": self._BuildRenderedPageEvidenceSummary(),
-            "ocr_summary": self._BuildOcrSummary(),
-            "combined_ocr_text": self.combinedOcrText,
-            "steps": [step.ToDict() for step in self.steps],
-            "errors": list(self.errors),
-        }
-
-    def _BuildRenderedPageEvidenceSummary(self) -> Optional[Dict[str, object]]:
-        if self.renderedPageEvidence is None:
-            return None
-        return {
-            "product_page_url": self.renderedPageEvidence.productPageUrl,
-            "visible_text_length": len(self.renderedPageEvidence.visibleText),
-            "product_notice_text_length": len(
-                self.renderedPageEvidence.productNoticeText
+            "visible_text_line_count": self.collectionResult.visibleTextLineCount,
+            "product_notice_text_line_count": (
+                self.collectionResult.productNoticeTextLineCount
             ),
             "product_detail_image_url_count": len(
-                self.renderedPageEvidence.productDetailImageUrls
+                self.collectionResult.productDetailImageUrls,
             ),
+            "ocr_candidate_image_url_count": len(
+                self.collectionResult.ocrCandidateImageUrls,
+            ),
+            "warnings": list(self.collectionResult.warnings),
         }
 
-    def _BuildOcrSummary(self) -> Dict[str, object]:
+    @computed_field(alias="rendered_page_evidence_summary")
+    @property
+    def renderedPageEvidenceSummary(self) -> Optional[Dict[str, object]]:
+        if self.renderedPageEvidence is None:
+            return None
+        return self.renderedPageEvidence.model_dump(mode="json", by_alias=True)
+
+    @computed_field(alias="ocr_summary")
+    @property
+    def ocrSummary(self) -> Dict[str, object]:
         successfulImageResults = [
             imageResult
             for imageResult in self.ocrImageResults

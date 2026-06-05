@@ -20,10 +20,10 @@ supports_response_format = false
 # Google AI Studio OpenAI-compatible API 예시:
 # runtime = "openai"
 # provider = "google_ai_studio"
-# model = "gemini-2.0-flash"
+# model = "gemini-3.5-flash"
 # endpoint_url = "https://generativelanguage.googleapis.com/v1beta/openai"
 # chat_completions_path = "/chat/completions"
-# supports_response_format = false
+# supports_response_format = true
 
 # Ollama 예시:
 # runtime = "ollama"

@@ -1,8 +1,9 @@
 """KurlyMarket product page collection schema."""
 
-from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class KurlyProductDomain(str, Enum):
@@ -14,122 +15,139 @@ class KurlyProductDomain(str, Enum):
     UNKNOWN = "unknown"
 
 
-@dataclass(frozen=True)
-class ProductNoticeField:
+class ProductNoticeField(BaseModel):
     """상품고시정보 label-value record."""
 
-    fieldName: str
-    fieldValue: Optional[str] = None
-    requiresOcrFallback: bool = False
-    rawText: str = ""
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    def ToDict(self) -> Dict[str, object]:
-        return {
-            "field_name": self.fieldName,
-            "field_value": self.fieldValue,
-            "requires_ocr_fallback": self.requiresOcrFallback,
-        }
+    fieldName: str = Field(alias="field_name")
+    fieldValue: Optional[str] = Field(default=None, alias="field_value")
+    requiresOcrFallback: bool = Field(default=False, alias="requires_ocr_fallback")
+    rawText: str = Field(default="", alias="raw_text", exclude=True)
 
 
-@dataclass(frozen=True)
-class ProductNoticeOption:
+class ProductNoticeOption(BaseModel):
     """상품 옵션 하나에 정규화된 상품고시정보 field set."""
 
-    optionName: Optional[str] = None
-    fields: List[ProductNoticeField] = field(default_factory=list)
-    rawText: str = ""
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    def ToDict(self) -> Dict[str, object]:
-        return {
-            "option_name": self.optionName,
-            "fields": [fieldRecord.ToDict() for fieldRecord in self.fields],
-        }
+    optionName: Optional[str] = Field(default=None, alias="option_name")
+    fields: List[ProductNoticeField] = Field(default_factory=list)
+    rawText: str = Field(default="", alias="raw_text", exclude=True)
 
 
-@dataclass(frozen=True)
-class KurlyProductPage:
+class KurlyProductPage(BaseModel):
     """KurlyMarket 상품 상세 parser 결과."""
 
-    productPageUrl: Optional[str] = None
-    productDomain: KurlyProductDomain = KurlyProductDomain.UNKNOWN
-    productName: Optional[str] = None
-    shortDescription: Optional[str] = None
-    brandName: Optional[str] = None
-    packageType: Optional[str] = None
-    saleUnit: Optional[str] = None
-    productNoticeOptionNames: List[str] = field(default_factory=list)
-    productNoticeFields: List[ProductNoticeField] = field(
-        default_factory=list,
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    productPageUrl: Optional[str] = Field(default=None, alias="product_page_url")
+    productDomain: KurlyProductDomain = Field(
+        default=KurlyProductDomain.UNKNOWN,
+        alias="product_domain",
     )
-    productNoticeOptions: List[ProductNoticeOption] = field(
+    productName: Optional[str] = Field(default=None, alias="product_name")
+    shortDescription: Optional[str] = Field(default=None, alias="short_description")
+    brandName: Optional[str] = Field(default=None, alias="brand_name")
+    packageType: Optional[str] = Field(default=None, alias="package_type")
+    saleUnit: Optional[str] = Field(default=None, alias="sale_unit")
+    productNoticeOptionNames: List[str] = Field(
         default_factory=list,
+        alias="product_notice_option_names",
     )
-    rawProductNoticeText: str = ""
-    imageReferenceDetected: bool = False
-    requiresOcrFallback: bool = False
-    warnings: List[str] = field(default_factory=list)
+    productNoticeFields: List[ProductNoticeField] = Field(
+        default_factory=list,
+        alias="product_notice_fields",
+    )
+    productNoticeOptions: List[ProductNoticeOption] = Field(
+        default_factory=list,
+        alias="product_notice_options",
+    )
+    rawProductNoticeText: str = Field(
+        default="",
+        alias="raw_product_notice_text",
+        exclude=True,
+    )
+    imageReferenceDetected: bool = Field(
+        default=False,
+        alias="image_reference_detected",
+    )
+    requiresOcrFallback: bool = Field(
+        default=False,
+        alias="requires_ocr_fallback",
+    )
+    warnings: List[str] = Field(default_factory=list)
 
-    def ToDict(self) -> Dict[str, object]:
-        return {
-            "product_page_url": self.productPageUrl,
-            "product_domain": self.productDomain.value,
-            "product_name": self.productName,
-            "short_description": self.shortDescription,
-            "brand_name": self.brandName,
-            "package_type": self.packageType,
-            "sale_unit": self.saleUnit,
-            "product_notice_option_names": list(self.productNoticeOptionNames),
-            "product_notice_fields": [
-                fieldRecord.ToDict() for fieldRecord in self.productNoticeFields
-            ],
-            "product_notice_options": [
-                noticeOption.ToDict()
-                for noticeOption in self.productNoticeOptions
-            ],
-            "raw_product_notice_text_length": len(self.rawProductNoticeText),
-            "image_reference_detected": self.imageReferenceDetected,
-            "requires_ocr_fallback": self.requiresOcrFallback,
-            "warnings": list(self.warnings),
-        }
+    @computed_field(alias="raw_product_notice_text_length")
+    @property
+    def rawProductNoticeTextLength(self) -> int:
+        return len(self.rawProductNoticeText)
 
 
-@dataclass(frozen=True)
-class KurlyCollectionResult:
+class KurlyCollectionResult(BaseModel):
     """렌더링된 KurlyMarket 상품 페이지 수집 결과."""
 
-    productPageUrl: str
-    parsedProductPage: KurlyProductPage
-    visibleTextLineCount: int
-    productNoticeTextLineCount: int
-    productDetailImageUrls: List[str] = field(default_factory=list)
-    ocrCandidateImageUrls: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    def ToDict(self) -> Dict[str, object]:
-        return {
-            "product_page_url": self.productPageUrl,
-            "parsed_product_page": self.parsedProductPage.ToDict(),
-            "visible_text_line_count": self.visibleTextLineCount,
-            "product_notice_text_line_count": self.productNoticeTextLineCount,
-            "product_detail_image_url_count": len(self.productDetailImageUrls),
-            "ocr_candidate_image_url_count": len(self.ocrCandidateImageUrls),
-            "warnings": list(self.warnings),
-        }
+    productPageUrl: str = Field(alias="product_page_url")
+    parsedProductPage: KurlyProductPage = Field(alias="parsed_product_page")
+    visibleTextLineCount: int = Field(default=0, alias="visible_text_line_count")
+    productNoticeTextLineCount: int = Field(
+        default=0,
+        alias="product_notice_text_line_count",
+    )
+    productDetailImageUrls: List[str] = Field(
+        default_factory=list,
+        alias="product_detail_image_urls",
+        exclude=True,
+    )
+    ocrCandidateImageUrls: List[str] = Field(
+        default_factory=list,
+        alias="ocr_candidate_image_urls",
+        exclude=True,
+    )
+    warnings: List[str] = Field(default_factory=list)
+
+    @computed_field(alias="product_detail_image_url_count")
+    @property
+    def productDetailImageUrlCount(self) -> int:
+        return len(self.productDetailImageUrls)
+
+    @computed_field(alias="ocr_candidate_image_url_count")
+    @property
+    def ocrCandidateImageUrlCount(self) -> int:
+        return len(self.ocrCandidateImageUrls)
 
 
-@dataclass(frozen=True)
-class RenderedPageEvidence:
+class RenderedPageEvidence(BaseModel):
     """Playwright 렌더링 이후 parser에 넘길 원천 증거."""
 
-    productPageUrl: str
-    visibleText: str = ""
-    productNoticeText: str = ""
-    productDetailImageUrls: List[str] = field(default_factory=list)
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    def ToDict(self) -> Dict[str, object]:
-        return {
-            "product_page_url": self.productPageUrl,
-            "visible_text_length": len(self.visibleText),
-            "product_notice_text_length": len(self.productNoticeText),
-            "product_detail_image_url_count": len(self.productDetailImageUrls),
-        }
+    productPageUrl: str = Field(alias="product_page_url")
+    visibleText: str = Field(default="", alias="visible_text", exclude=True)
+    productNoticeText: str = Field(
+        default="",
+        alias="product_notice_text",
+        exclude=True,
+    )
+    productDetailImageUrls: List[str] = Field(
+        default_factory=list,
+        alias="product_detail_image_urls",
+        exclude=True,
+    )
+
+    @computed_field(alias="visible_text_length")
+    @property
+    def visibleTextLength(self) -> int:
+        return len(self.visibleText)
+
+    @computed_field(alias="product_notice_text_length")
+    @property
+    def productNoticeTextLength(self) -> int:
+        return len(self.productNoticeText)
+
+    @computed_field(alias="product_detail_image_url_count")
+    @property
+    def productDetailImageUrlCount(self) -> int:
+        return len(self.productDetailImageUrls)

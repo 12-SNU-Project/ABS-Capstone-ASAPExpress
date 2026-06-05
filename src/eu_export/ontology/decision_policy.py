@@ -1,7 +1,8 @@
 """Stage 1 classification decision policy."""
 
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from eu_export.ontology.classification import (
     CnCandidate,
@@ -10,44 +11,58 @@ from eu_export.ontology.classification import (
 from eu_export.utils import NormalizeWhitespace
 
 
-@dataclass(frozen=True)
-class Stage1DecisionReport:
+class Stage1DecisionReport(BaseModel):
     """검증된 Stage 1 후보 검토 응답을 다음 처리 단계용 결정 요약으로 정리한다."""
 
-    decisionStatus: str
-    recommendedCandidateHs8: Optional[str] = None
-    strongCandidateHs8Codes: List[str] = field(default_factory=list)
-    possibleCandidateHs8Codes: List[str] = field(default_factory=list)
-    unlikelyCandidateHs8Codes: List[str] = field(default_factory=list)
-    insufficientInformationHs8Codes: List[str] = field(default_factory=list)
-    candidateStatusByHs8: Dict[str, str] = field(default_factory=dict)
-    backtrackingRecommended: bool = False
-    backtrackingTargetLevel: Optional[str] = None
-    backtrackingReason: Optional[str] = None
-    missingInformation: List[str] = field(default_factory=list)
-    evidenceRefs: List[str] = field(default_factory=list)
-    humanReviewRequired: bool = True
-    limitations: List[str] = field(default_factory=list)
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    def ToDict(self) -> Dict[str, Any]:
-        return {
-            "decision_status": self.decisionStatus,
-            "recommended_candidate_hs8": self.recommendedCandidateHs8,
-            "strong_candidate_hs8_codes": list(self.strongCandidateHs8Codes),
-            "possible_candidate_hs8_codes": list(self.possibleCandidateHs8Codes),
-            "unlikely_candidate_hs8_codes": list(self.unlikelyCandidateHs8Codes),
-            "insufficient_information_hs8_codes": list(
-                self.insufficientInformationHs8Codes,
-            ),
-            "candidate_status_by_hs8": dict(self.candidateStatusByHs8),
-            "backtracking_recommended": self.backtrackingRecommended,
-            "backtracking_target_level": self.backtrackingTargetLevel,
-            "backtracking_reason": self.backtrackingReason,
-            "missing_information": list(self.missingInformation),
-            "evidence_refs": list(self.evidenceRefs),
-            "human_review_required": self.humanReviewRequired,
-            "limitations": list(self.limitations),
-        }
+    decisionStatus: str = Field(alias="decision_status")
+    recommendedCandidateHs8: Optional[str] = Field(
+        default=None,
+        alias="recommended_candidate_hs8",
+    )
+    strongCandidateHs8Codes: List[str] = Field(
+        default_factory=list,
+        alias="strong_candidate_hs8_codes",
+    )
+    possibleCandidateHs8Codes: List[str] = Field(
+        default_factory=list,
+        alias="possible_candidate_hs8_codes",
+    )
+    unlikelyCandidateHs8Codes: List[str] = Field(
+        default_factory=list,
+        alias="unlikely_candidate_hs8_codes",
+    )
+    insufficientInformationHs8Codes: List[str] = Field(
+        default_factory=list,
+        alias="insufficient_information_hs8_codes",
+    )
+    candidateStatusByHs8: Dict[str, str] = Field(
+        default_factory=dict,
+        alias="candidate_status_by_hs8",
+    )
+    backtrackingRecommended: bool = Field(
+        default=False,
+        alias="backtracking_recommended",
+    )
+    backtrackingTargetLevel: Optional[str] = Field(
+        default=None,
+        alias="backtracking_target_level",
+    )
+    backtrackingReason: Optional[str] = Field(
+        default=None,
+        alias="backtracking_reason",
+    )
+    missingInformation: List[str] = Field(
+        default_factory=list,
+        alias="missing_information",
+    )
+    evidenceRefs: List[str] = Field(default_factory=list, alias="evidence_refs")
+    humanReviewRequired: bool = Field(
+        default=True,
+        alias="human_review_required",
+    )
+    limitations: List[str] = Field(default_factory=list)
 
 
 class Stage1DecisionPolicy:

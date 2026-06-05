@@ -1,10 +1,11 @@
 """Product detail image OCR fallback runner."""
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from eu_export.product.paddle_ocr import ProductOcrEngine
 
@@ -20,22 +21,15 @@ DEFAULT_PRODUCT_OCR_IMAGE_DOWNLOAD_USER_AGENT = (
 )
 
 
-@dataclass(frozen=True)
-class ProductOcrImageResult:
+class ProductOcrImageResult(BaseModel):
     """OCR fallback 대상 이미지 하나의 처리 결과."""
 
-    imageUrl: str
-    imagePath: Optional[str] = None
-    ocrText: str = ""
-    error: Optional[str] = None
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    def ToDict(self) -> Dict[str, object]:
-        return {
-            "image_url": self.imageUrl,
-            "image_path": self.imagePath,
-            "ocr_text": self.ocrText,
-            "error": self.error,
-        }
+    imageUrl: str = Field(alias="image_url")
+    imagePath: Optional[str] = Field(default=None, alias="image_path")
+    ocrText: str = Field(default="", alias="ocr_text")
+    error: Optional[str] = None
 
 
 class ProductOcrFallbackRunner:

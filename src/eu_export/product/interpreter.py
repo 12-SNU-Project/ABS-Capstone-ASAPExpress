@@ -3,7 +3,12 @@
 import json
 from typing import Any, Dict
 
-from eu_export.bridge import LocalLlmGenerationOptions, LocalLlmRequest, RuntimeAdapter
+from eu_export.bridge import (
+    LlmGenerationOptions,
+    LlmRequest,
+    LlmResponseFormat,
+    RuntimeAdapter,
+)
 from eu_export.product.prompt import BuildSearchPlanSystemPrompt
 from eu_export.product.query import QueryAnalysisResult
 from eu_export.utils import ExtractJsonObject
@@ -20,10 +25,11 @@ class LlmQueryInterpreter:
         rawQuery: str,
         analysisResult: QueryAnalysisResult,
     ) -> Dict[str, Any]:
-        request = LocalLlmRequest(
+        request = LlmRequest(
             systemPrompt=self.BuildSystemPrompt(),
             userPrompt=self.BuildUserPrompt(rawQuery, analysisResult),
-            generationOptions=LocalLlmGenerationOptions(
+            responseFormat=LlmResponseFormat.JSON_OBJECT,
+            generationOptions=LlmGenerationOptions(
                 temperature=0.0,
                 maxTokens=800,
             ),

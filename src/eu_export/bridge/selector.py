@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
 from eu_export.app_config import LoadAppConfig
+from eu_export.bridge.probe import HOSTED_LLM_API_KEY_ENV_NAMES
 from eu_export.bridge.schema import (
     LlmRuntimeConfig,
     LlmRuntimeKind,
@@ -132,14 +133,7 @@ def _BuildOpenAiRuntimeConfigFromEnv(
     extraOptions["provider"] = normalizedProviderName
 
     if normalizedProviderName in {"google_ai_studio", "google", "gemini"}:
-        apiKey = _ReadFirstEnvValue(
-            envValues,
-            [
-                "EU_EXPORT_LLM_API_KEY",
-                "EU_EXPORT_GOOGLE_AI_STUDIO_API_KEY",
-                "GEMINI_API_KEY",
-            ],
-        )
+        apiKey = _ReadFirstEnvValue(envValues, HOSTED_LLM_API_KEY_ENV_NAMES)
         if apiKey is not None:
             extraOptions["api_key"] = apiKey
         extraOptions["chat_completions_path"] = _ReadFirstEnvValue(
@@ -174,14 +168,7 @@ def _BuildOpenAiRuntimeConfigFromEnv(
         ["EU_EXPORT_LLM_CHAT_COMPLETIONS_PATH"],
     ) or DEFAULT_OPENAI_CHAT_COMPLETIONS_PATH
 
-    apiKey = _ReadFirstEnvValue(
-        envValues,
-        [
-            "EU_EXPORT_LLM_API_KEY",
-            "EU_EXPORT_OPENAI_API_KEY",
-            "OPENAI_API_KEY",
-        ],
-    )
+    apiKey = _ReadFirstEnvValue(envValues, HOSTED_LLM_API_KEY_ENV_NAMES)
     if apiKey is not None:
         extraOptions["api_key"] = apiKey
 

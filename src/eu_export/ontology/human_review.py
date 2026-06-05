@@ -1,7 +1,8 @@
 """Stage 1 human review package."""
 
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from eu_export.ontology.classification import (
     ProductClassificationInput,
@@ -18,37 +19,39 @@ from eu_export.utils import NormalizeWhitespace
 DEFAULT_HUMAN_REVIEW_TEXT_PREVIEW_CHARACTERS = 500
 
 
-@dataclass(frozen=True)
-class Stage1HumanReviewPackage:
+class Stage1HumanReviewPackage(BaseModel):
     """Stage 1 결과를 사람이 검토할 수 있는 단일 패키지로 묶는다."""
 
-    packageId: str
-    selectedSource: str
-    productFacts: Dict[str, Any]
-    recommendationReport: Dict[str, Any]
-    evidenceCitations: List[Dict[str, Any]] = field(default_factory=list)
-    sourceEvidenceRecords: List[Dict[str, Any]] = field(default_factory=list)
-    validationIssues: List[Dict[str, Any]] = field(default_factory=list)
-    reviewChecklist: List[str] = field(default_factory=list)
-    humanReviewWarning: str = (
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    packageId: str = Field(alias="package_id")
+    selectedSource: str = Field(alias="selected_source")
+    productFacts: Dict[str, Any] = Field(alias="product_facts")
+    recommendationReport: Dict[str, Any] = Field(alias="recommendation_report")
+    evidenceCitations: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        alias="evidence_citations",
+    )
+    sourceEvidenceRecords: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        alias="source_evidence_records",
+    )
+    validationIssues: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        alias="validation_issues",
+    )
+    reviewChecklist: List[str] = Field(
+        default_factory=list,
+        alias="review_checklist",
+    )
+    humanReviewWarning: str = Field(
+        default=(
         "This package is for human review and is not a final legal/customs "
         "determination."
+        ),
+        alias="human_review_warning",
     )
-    limitations: List[str] = field(default_factory=list)
-
-    def ToDict(self) -> Dict[str, Any]:
-        return {
-            "package_id": self.packageId,
-            "selected_source": self.selectedSource,
-            "product_facts": dict(self.productFacts),
-            "recommendation_report": dict(self.recommendationReport),
-            "evidence_citations": list(self.evidenceCitations),
-            "source_evidence_records": list(self.sourceEvidenceRecords),
-            "validation_issues": list(self.validationIssues),
-            "review_checklist": list(self.reviewChecklist),
-            "human_review_warning": self.humanReviewWarning,
-            "limitations": list(self.limitations),
-        }
+    limitations: List[str] = Field(default_factory=list)
 
 
 class Stage1HumanReviewPackageBuilder:
@@ -62,7 +65,10 @@ class Stage1HumanReviewPackageBuilder:
         evidencePackage: Stage1EvidencePackage,
         selectedSource: str,
     ) -> Stage1HumanReviewPackage:
-        recommendationData = recommendationReport.ToDict()
+        recommendationData = recommendationReport.model_dump(
+            mode="json",
+            by_alias=True,
+        )
         evidenceRecordsById = {
             evidenceRecord.evidenceId: evidenceRecord
             for evidenceRecord in evidencePackage.evidenceRecords
@@ -122,11 +128,12 @@ class Stage1HumanReviewPackageBuilder:
                 if evidenceId in evidenceRecordsById
             ],
             sourceEvidenceRecords=[
-                evidenceRecord.ToDict()
+                evidenceRecord.model_dump(mode="json", by_alias=True)
                 for evidenceRecord in evidencePackage.evidenceRecords
             ],
             validationIssues=[
-                issue.ToDict() for issue in validationReport.issues
+                issue.model_dump(mode="json", by_alias=True)
+                for issue in validationReport.issues
             ],
             reviewChecklist=self.BuildReviewChecklist(recommendationData),
             limitations=self.BuildLimitations(recommendationData),
@@ -159,7 +166,7 @@ class Stage1HumanReviewPackageBuilder:
         productInput: ProductClassificationInput,
     ) -> Dict[str, Any]:
         return {
-            **productInput.ToDict(),
+            **productInput.model_dump(mode="json", by_alias=True),
             "product_notice_text_preview": self.BuildTextPreview(
                 productInput.productNoticeText,
             ),

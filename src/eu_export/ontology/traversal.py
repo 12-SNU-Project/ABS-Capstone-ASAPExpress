@@ -1,7 +1,8 @@
 """Stage 1 classification traversal controller."""
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import List, Optional, Sequence
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from eu_export.ontology.classification import (
     CnCandidate,
@@ -19,32 +20,38 @@ from eu_export.ontology.decision_policy import (
 DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT = 1
 
 
-@dataclass(frozen=True)
-class Stage1TraversalReport:
+class Stage1TraversalReport(BaseModel):
     """Stage 1 decision 결과를 다음 pipeline action으로 변환한 report."""
 
-    traversalStatus: str
-    nextAction: str
-    decisionStatus: str
-    currentCandidateHs8Codes: List[str] = field(default_factory=list)
-    retainedCandidateHs8Codes: List[str] = field(default_factory=list)
-    rejectedCandidateHs8Codes: List[str] = field(default_factory=list)
-    backtrackingRecommended: bool = False
-    backtrackingTargetLevel: Optional[str] = None
-    backtrackingReason: Optional[str] = None
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    def ToDict(self) -> Dict[str, Any]:
-        return {
-            "traversal_status": self.traversalStatus,
-            "next_action": self.nextAction,
-            "decision_status": self.decisionStatus,
-            "current_candidate_hs8_codes": list(self.currentCandidateHs8Codes),
-            "retained_candidate_hs8_codes": list(self.retainedCandidateHs8Codes),
-            "rejected_candidate_hs8_codes": list(self.rejectedCandidateHs8Codes),
-            "backtracking_recommended": self.backtrackingRecommended,
-            "backtracking_target_level": self.backtrackingTargetLevel,
-            "backtracking_reason": self.backtrackingReason,
-        }
+    traversalStatus: str = Field(alias="traversal_status")
+    nextAction: str = Field(alias="next_action")
+    decisionStatus: str = Field(alias="decision_status")
+    currentCandidateHs8Codes: List[str] = Field(
+        default_factory=list,
+        alias="current_candidate_hs8_codes",
+    )
+    retainedCandidateHs8Codes: List[str] = Field(
+        default_factory=list,
+        alias="retained_candidate_hs8_codes",
+    )
+    rejectedCandidateHs8Codes: List[str] = Field(
+        default_factory=list,
+        alias="rejected_candidate_hs8_codes",
+    )
+    backtrackingRecommended: bool = Field(
+        default=False,
+        alias="backtracking_recommended",
+    )
+    backtrackingTargetLevel: Optional[str] = Field(
+        default=None,
+        alias="backtracking_target_level",
+    )
+    backtrackingReason: Optional[str] = Field(
+        default=None,
+        alias="backtracking_reason",
+    )
 
 
 class Stage1TraversalController:

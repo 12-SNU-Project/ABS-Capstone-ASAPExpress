@@ -13,6 +13,7 @@ from eu_export.bridge.probe import (
     DEFAULT_OPENAI_ENDPOINT_URL,
     DEFAULT_OLLAMA_ENDPOINT_URL,
     DEFAULT_OMLX_ENDPOINT_URL,
+    PRIMARY_LLM_API_KEY_ENV_NAME,
 )
 from eu_export.bridge.schema import (
     LlmFinishReason,
@@ -607,8 +608,8 @@ def _ReadOpenAiHeaders(runtimeConfig: LlmRuntimeConfig) -> Dict[str, str]:
     apiKey = _ReadApiKey(runtimeConfig, DEFAULT_OPENAI_API_KEY_ENV_NAMES)
     if apiKey is None:
         raise RuntimeGenerationError(
-            "OpenAI runtime generation requires EU_EXPORT_OPENAI_API_KEY, "
-            "OPENAI_API_KEY, or extraOptions['api_key']."
+            "Hosted LLM runtime generation requires {0} or "
+            "extraOptions['api_key'].".format(PRIMARY_LLM_API_KEY_ENV_NAME)
         )
 
     return {

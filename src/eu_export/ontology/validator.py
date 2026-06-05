@@ -1,9 +1,10 @@
 """Ontology frontmatter와 참조 관계 검증기."""
 
-from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set
+
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from eu_export.ontology.schema import OntologyDocument
 from eu_export.utils import NormalizeWhitespace
@@ -16,34 +17,27 @@ class OntologyValidationSeverity(str, Enum):
     WARNING = "warning"
 
 
-@dataclass(frozen=True)
-class OntologyValidationIssue:
+class OntologyValidationIssue(BaseModel):
     """ontology 문서 검증 중 발견된 문제."""
 
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
     severity: OntologyValidationSeverity
-    issueCode: str
+    issueCode: str = Field(alias="issue_code")
     message: str
-    relativePath: Optional[str] = None
-    documentId: Optional[str] = None
-    fieldName: Optional[str] = None
-
-    def ToDict(self) -> Dict[str, Any]:
-        return {
-            "severity": self.severity.value,
-            "issue_code": self.issueCode,
-            "message": self.message,
-            "relative_path": self.relativePath,
-            "document_id": self.documentId,
-            "field_name": self.fieldName,
-        }
+    relativePath: Optional[str] = Field(default=None, alias="relative_path")
+    documentId: Optional[str] = Field(default=None, alias="document_id")
+    fieldName: Optional[str] = Field(default=None, alias="field_name")
 
 
-@dataclass(frozen=True)
-class OntologyValidationReport:
+class OntologyValidationReport(BaseModel):
     """ontology validation 결과."""
 
-    issues: List[OntologyValidationIssue] = field(default_factory=list)
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
+    issues: List[OntologyValidationIssue] = Field(default_factory=list)
+
+    @computed_field(alias="error_count")
     @property
     def errorCount(self) -> int:
         return sum(
@@ -52,6 +46,7 @@ class OntologyValidationReport:
             if issue.severity == OntologyValidationSeverity.ERROR
         )
 
+    @computed_field(alias="warning_count")
     @property
     def warningCount(self) -> int:
         return sum(
@@ -60,17 +55,10 @@ class OntologyValidationReport:
             if issue.severity == OntologyValidationSeverity.WARNING
         )
 
+    @computed_field(alias="is_valid")
     @property
     def isValid(self) -> bool:
         return self.errorCount == 0
-
-    def ToDict(self) -> Dict[str, Any]:
-        return {
-            "is_valid": self.isValid,
-            "error_count": self.errorCount,
-            "warning_count": self.warningCount,
-            "issues": [issue.ToDict() for issue in self.issues],
-        }
 
 
 class OntologyGraphValidator:
