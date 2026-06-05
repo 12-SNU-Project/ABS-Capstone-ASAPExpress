@@ -5,7 +5,6 @@ from __future__ import annotations
 import csv
 import json
 import re
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set
 
@@ -16,6 +15,7 @@ from pydantic import (
     StrictBool,
     StrictStr,
     ValidationError,
+    computed_field,
 )
 
 from eu_export.bridge import (
@@ -205,22 +205,33 @@ STAGE1_CLASSIFICATION_JSON_INSTRUCTIONS = {
 }
 
 
-@dataclass(frozen=True)
-class ProductClassificationInput:
+class ProductClassificationInput(BaseModel):
     """상품 수집 결과를 HS6/CN8 후보 조회에 맞게 정규화한 입력."""
 
-    productPageUrl: Optional[str] = None
-    productName: Optional[str] = None
-    productDomain: str = "unknown"
-    domainScopes: List[str] = field(default_factory=list)
-    shortDescription: Optional[str] = None
-    brandName: Optional[str] = None
-    packageType: Optional[str] = None
-    saleUnit: Optional[str] = None
-    noticeFieldTexts: List[str] = field(default_factory=list)
-    noticeOptionNames: List[str] = field(default_factory=list)
-    productNoticeText: str = ""
-    ocrText: str = ""
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    productPageUrl: Optional[str] = Field(default=None, alias="product_page_url")
+    productName: Optional[str] = Field(default=None, alias="product_name")
+    productDomain: str = Field(default="unknown", alias="product_domain")
+    domainScopes: List[str] = Field(default_factory=list, alias="domain_scopes")
+    shortDescription: Optional[str] = Field(default=None, alias="short_description")
+    brandName: Optional[str] = Field(default=None, alias="brand_name")
+    packageType: Optional[str] = Field(default=None, alias="package_type")
+    saleUnit: Optional[str] = Field(default=None, alias="sale_unit")
+    noticeFieldTexts: List[str] = Field(
+        default_factory=list,
+        alias="notice_field_texts",
+    )
+    noticeOptionNames: List[str] = Field(
+        default_factory=list,
+        alias="notice_option_names",
+    )
+    productNoticeText: str = Field(
+        default="",
+        alias="product_notice_text",
+        exclude=True,
+    )
+    ocrText: str = Field(default="", alias="ocr_text", exclude=True)
 
     def BuildSearchText(self) -> str:
         rawParts = [
@@ -241,103 +252,134 @@ class ProductClassificationInput:
         ]
         return NormalizeWhitespacePreservingLines("\n".join(parts))
 
-    def ToDict(self) -> Dict[str, Any]:
-        return {
-            "product_page_url": self.productPageUrl,
-            "product_name": self.productName,
-            "product_domain": self.productDomain,
-            "domain_scopes": list(self.domainScopes),
-            "short_description": self.shortDescription,
-            "brand_name": self.brandName,
-            "package_type": self.packageType,
-            "sale_unit": self.saleUnit,
-            "notice_field_texts": list(self.noticeFieldTexts),
-            "notice_option_names": list(self.noticeOptionNames),
-            "product_notice_text_length": len(self.productNoticeText),
-            "ocr_text_length": len(self.ocrText),
-            "search_text_length": len(self.BuildSearchText()),
-        }
+    @computed_field(alias="product_notice_text_length")
+    @property
+    def productNoticeTextLength(self) -> int:
+        return len(self.productNoticeText)
+
+    @computed_field(alias="ocr_text_length")
+    @property
+    def ocrTextLength(self) -> int:
+        return len(self.ocrText)
+
+    @computed_field(alias="search_text_length")
+    @property
+    def searchTextLength(self) -> int:
+        return len(self.BuildSearchText())
 
 
-@dataclass(frozen=True)
-class CnCandidate:
+class CnCandidate(BaseModel):
     """Stage 1에서 LLM/human review로 넘길 CN8 후보 카드."""
 
-    hs8: str
-    domainScope: str
-    score: float
-    matchedTerms: List[str] = field(default_factory=list)
-    excludedTerms: List[str] = field(default_factory=list)
-    includeRuleMatches: List[str] = field(default_factory=list)
-    searchKeywordMatches: List[str] = field(default_factory=list)
-    descriptionMatches: List[str] = field(default_factory=list)
-    excludeRuleMatches: List[str] = field(default_factory=list)
-    hs2Code: Optional[str] = None
-    hs2Description: Optional[str] = None
-    hs4Code: Optional[str] = None
-    hs4Description: Optional[str] = None
-    hs6Code: Optional[str] = None
-    hs6Description: Optional[str] = None
-    hs8Code: Optional[str] = None
-    hs8Description: Optional[str] = None
-    combinedDescription: str = ""
-    includeRuleKeywords: str = ""
-    excludeRuleKeywords: str = ""
-    hardConditions: str = ""
-    cnExplanatoryNote: str = ""
-    needsHumanReview: bool = True
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    def ToDict(self) -> Dict[str, Any]:
+    hs8: str
+    domainScope: str = Field(alias="domain_scope")
+    score: float
+    matchedTerms: List[str] = Field(default_factory=list, alias="matched_terms")
+    excludedTerms: List[str] = Field(default_factory=list, alias="excluded_terms")
+    includeRuleMatches: List[str] = Field(
+        default_factory=list,
+        alias="include_rule_matches",
+    )
+    searchKeywordMatches: List[str] = Field(
+        default_factory=list,
+        alias="search_keyword_matches",
+    )
+    descriptionMatches: List[str] = Field(
+        default_factory=list,
+        alias="description_matches",
+    )
+    excludeRuleMatches: List[str] = Field(
+        default_factory=list,
+        alias="exclude_rule_matches",
+    )
+    hs2Code: Optional[str] = Field(default=None, alias="hs2_code", exclude=True)
+    hs2Description: Optional[str] = Field(
+        default=None,
+        alias="hs2_description",
+        exclude=True,
+    )
+    hs4Code: Optional[str] = Field(default=None, alias="hs4_code", exclude=True)
+    hs4Description: Optional[str] = Field(
+        default=None,
+        alias="hs4_description",
+        exclude=True,
+    )
+    hs6Code: Optional[str] = Field(default=None, alias="hs6_code", exclude=True)
+    hs6Description: Optional[str] = Field(
+        default=None,
+        alias="hs6_description",
+        exclude=True,
+    )
+    hs8Code: Optional[str] = Field(default=None, alias="hs8_code", exclude=True)
+    hs8Description: Optional[str] = Field(
+        default=None,
+        alias="hs8_description",
+        exclude=True,
+    )
+    combinedDescription: str = Field(default="", alias="combined_description")
+    includeRuleKeywords: str = Field(
+        default="",
+        alias="include_rule_keywords",
+        exclude=True,
+    )
+    excludeRuleKeywords: str = Field(
+        default="",
+        alias="exclude_rule_keywords",
+        exclude=True,
+    )
+    hardConditions: str = Field(default="", alias="hard_conditions", exclude=True)
+    cnExplanatoryNote: str = Field(default="", alias="cn_explanatory_note")
+    needsHumanReview: bool = Field(default=True, alias="needs_human_review")
+
+    @computed_field(alias="code_hierarchy")
+    @property
+    def codeHierarchy(self) -> Dict[str, Dict[str, Optional[str]]]:
         return {
-            "hs8": self.hs8,
-            "domain_scope": self.domainScope,
-            "score": self.score,
-            "matched_terms": list(self.matchedTerms),
-            "excluded_terms": list(self.excludedTerms),
-            "include_rule_matches": list(self.includeRuleMatches),
-            "search_keyword_matches": list(self.searchKeywordMatches),
-            "description_matches": list(self.descriptionMatches),
-            "exclude_rule_matches": list(self.excludeRuleMatches),
-            "code_hierarchy": {
-                "hs2": {
-                    "code": self.hs2Code,
-                    "description": self.hs2Description,
-                },
-                "hs4": {
-                    "code": self.hs4Code,
-                    "description": self.hs4Description,
-                },
-                "hs6": {
-                    "code": self.hs6Code,
-                    "description": self.hs6Description,
-                },
-                "cn8": {
-                    "code": self.hs8Code or self.hs8,
-                    "description": self.hs8Description,
-                },
+            "hs2": {
+                "code": self.hs2Code,
+                "description": self.hs2Description,
             },
-            "score_breakdown": {
-                "include_rule_points": 4.0 * len(self.includeRuleMatches),
-                "search_keyword_points": 2.0 * len(self.searchKeywordMatches),
-                "description_points": 1.0 * len(self.descriptionMatches),
-                "exclude_rule_triggered": len(self.excludeRuleMatches) > 0,
-                "formula": (
-                    "include_rule_keywords*4 + search_keywords*2 + "
-                    "description_matches*1; exclude_rule match forces score 0"
-                ),
+            "hs4": {
+                "code": self.hs4Code,
+                "description": self.hs4Description,
             },
-            "combined_description": self.combinedDescription,
-            "classification_rule_texts": {
-                "include_rule_keywords": self.includeRuleKeywords,
-                "exclude_rule_keywords": self.excludeRuleKeywords,
-                "hard_conditions": self.hardConditions,
+            "hs6": {
+                "code": self.hs6Code,
+                "description": self.hs6Description,
             },
-            "cn_explanatory_note": self.cnExplanatoryNote,
-            "needs_human_review": self.needsHumanReview,
+            "cn8": {
+                "code": self.hs8Code or self.hs8,
+                "description": self.hs8Description,
+            },
+        }
+
+    @computed_field(alias="score_breakdown")
+    @property
+    def scoreBreakdown(self) -> Dict[str, Any]:
+        return {
+            "include_rule_points": 4.0 * len(self.includeRuleMatches),
+            "search_keyword_points": 2.0 * len(self.searchKeywordMatches),
+            "description_points": 1.0 * len(self.descriptionMatches),
+            "exclude_rule_triggered": len(self.excludeRuleMatches) > 0,
+            "formula": (
+                "include_rule_keywords*4 + search_keywords*2 + "
+                "description_matches*1; exclude_rule match forces score 0"
+            ),
+        }
+
+    @computed_field(alias="classification_rule_texts")
+    @property
+    def classificationRuleTexts(self) -> Dict[str, str]:
+        return {
+            "include_rule_keywords": self.includeRuleKeywords,
+            "exclude_rule_keywords": self.excludeRuleKeywords,
+            "hard_conditions": self.hardConditions,
         }
 
     def ToPromptDict(self) -> Dict[str, Any]:
-        candidateData = self.ToDict()
+        candidateData = self.model_dump(mode="json", by_alias=True)
         codeHierarchy = candidateData["code_hierarchy"]
         hierarchyPathParts: List[str] = []
         for level in ["hs2", "hs4", "hs6", "cn8"]:
@@ -370,60 +412,45 @@ class CnCandidate:
         }
 
 
-@dataclass(frozen=True)
-class Stage1EvidenceRecord:
+class Stage1EvidenceRecord(BaseModel):
     """Stage 1 후보 검토에서 LLM이 인용할 수 있는 단일 근거."""
 
-    evidenceId: str
-    evidenceType: str
-    sourceName: str
-    sourceRef: str
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    evidenceId: str = Field(alias="evidence_id")
+    evidenceType: str = Field(alias="evidence_type")
+    sourceName: str = Field(alias="source_name")
+    sourceRef: str = Field(alias="source_ref")
     text: str
-    candidateHs8: Optional[str] = None
-    candidateHs6: Optional[str] = None
-    legalStatus: str = "internal_reference"
-    limitations: List[str] = field(default_factory=list)
-
-    def ToDict(self) -> Dict[str, Any]:
-        return {
-            "evidence_id": self.evidenceId,
-            "evidence_type": self.evidenceType,
-            "source_name": self.sourceName,
-            "source_ref": self.sourceRef,
-            "text": self.text,
-            "candidate_hs8": self.candidateHs8,
-            "candidate_hs6": self.candidateHs6,
-            "legal_status": self.legalStatus,
-            "limitations": list(self.limitations),
-        }
+    candidateHs8: Optional[str] = Field(default=None, alias="candidate_hs8")
+    candidateHs6: Optional[str] = Field(default=None, alias="candidate_hs6")
+    legalStatus: str = Field(default="internal_reference", alias="legal_status")
+    limitations: List[str] = Field(default_factory=list)
 
 
-@dataclass(frozen=True)
-class Stage1EvidencePackage:
+class Stage1EvidencePackage(BaseModel):
     """Stage 1 LLM request와 validator가 공유할 근거 묶음."""
 
-    evidenceRecords: List[Stage1EvidenceRecord] = field(default_factory=list)
-    commonEvidenceIds: List[str] = field(default_factory=list)
-    candidateEvidenceIds: Dict[str, List[str]] = field(default_factory=dict)
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    evidenceRecords: List[Stage1EvidenceRecord] = Field(
+        default_factory=list,
+        alias="evidence_records",
+    )
+    commonEvidenceIds: List[str] = Field(
+        default_factory=list,
+        alias="common_evidence_ids",
+    )
+    candidateEvidenceIds: Dict[str, List[str]] = Field(
+        default_factory=dict,
+        alias="candidate_evidence_ids",
+    )
 
     @property
     def validEvidenceIds(self) -> Set[str]:
         return {
             evidenceRecord.evidenceId
             for evidenceRecord in self.evidenceRecords
-        }
-
-    def ToDict(self) -> Dict[str, Any]:
-        return {
-            "evidence_records": [
-                evidenceRecord.ToDict()
-                for evidenceRecord in self.evidenceRecords
-            ],
-            "common_evidence_ids": list(self.commonEvidenceIds),
-            "candidate_evidence_ids": {
-                candidateCode: list(evidenceIds)
-                for candidateCode, evidenceIds in self.candidateEvidenceIds.items()
-            },
         }
 
     def ToPromptDict(
@@ -512,7 +539,7 @@ class Stage1EvidencePackage:
         def BuildPromptEvidenceRecord(
             evidenceRecord: Stage1EvidenceRecord,
         ) -> Dict[str, Any]:
-            evidenceData = evidenceRecord.ToDict()
+            evidenceData = evidenceRecord.model_dump(mode="json", by_alias=True)
             evidenceText = evidenceRecord.text
             if evidenceRecord.evidenceType == "cn_candidate_card":
                 evidenceText = (
@@ -1571,7 +1598,7 @@ class Stage1RequestBuilder:
         self,
         productInput: ProductClassificationInput,
     ) -> str:
-        productData = productInput.ToDict()
+        productData = productInput.model_dump(mode="json", by_alias=True)
         productData["product_notice_text"] = productInput.productNoticeText
         productData["ocr_text"] = productInput.ocrText
         return "\n".join(
@@ -1665,48 +1692,42 @@ class Stage1RequestBuilder:
         )
 
 
-@dataclass(frozen=True)
-class Stage1ResponseValidationIssue:
+class Stage1ResponseValidationIssue(BaseModel):
     """Stage 1 LLM 응답 구조 검증 결과의 단일 이슈."""
 
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
     severity: str
-    issueCode: str
-    fieldPath: str
+    issueCode: str = Field(alias="issue_code")
+    fieldPath: str = Field(alias="field_path")
     message: str
 
-    def ToDict(self) -> Dict[str, Any]:
-        return {
-            "severity": self.severity,
-            "issue_code": self.issueCode,
-            "field_path": self.fieldPath,
-            "message": self.message,
-        }
 
-
-@dataclass(frozen=True)
-class Stage1ResponseValidationReport:
+class Stage1ResponseValidationReport(BaseModel):
     """Stage 1 LLM 응답이 후보 검토 JSON 계약을 만족하는지 나타낸다."""
 
-    isValid: bool
-    parsedResponse: Dict[str, Any] = field(default_factory=dict)
-    issues: List[Stage1ResponseValidationIssue] = field(
-        default_factory=list,
-    )
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    def ToDict(self) -> Dict[str, Any]:
-        errorCount = sum(1 for issue in self.issues if issue.severity == "error")
-        warningCount = sum(
+    isValid: bool = Field(alias="is_valid")
+    parsedResponse: Dict[str, Any] = Field(
+        default_factory=dict,
+        alias="parsed_response",
+    )
+    issues: List[Stage1ResponseValidationIssue] = Field(default_factory=list)
+
+    @computed_field(alias="error_count")
+    @property
+    def errorCount(self) -> int:
+        return sum(1 for issue in self.issues if issue.severity == "error")
+
+    @computed_field(alias="warning_count")
+    @property
+    def warningCount(self) -> int:
+        return sum(
             1
             for issue in self.issues
             if issue.severity == "warning"
         )
-        return {
-            "is_valid": self.isValid,
-            "error_count": errorCount,
-            "warning_count": warningCount,
-            "issues": [issue.ToDict() for issue in self.issues],
-            "parsed_response": dict(self.parsedResponse),
-        }
 
 
 class Stage1PathLevelReviewPayload(BaseModel):

@@ -116,7 +116,7 @@ class KurlyMarketSmokeRunner:
                     maxOcrImageCount=self._maxOcrImageCount,
                 )
             )
-            return self._BuildResult(productUrl, pipelineResult.ToDict())
+            return self._BuildResult(productUrl, pipelineResult.model_dump(mode="json", by_alias=True))
         except Exception as error:
             return {
                 "product_page_url": productUrl,

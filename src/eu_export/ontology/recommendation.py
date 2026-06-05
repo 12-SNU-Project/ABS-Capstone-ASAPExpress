@@ -1,7 +1,8 @@
 """Stage 1 classification candidate report."""
 
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from eu_export.ontology.classification import (
     CnCandidate,
@@ -14,42 +15,55 @@ from eu_export.ontology.traversal import Stage1TraversalReport
 from eu_export.utils import NormalizeWhitespace
 
 
-@dataclass(frozen=True)
-class Stage1RecommendationReport:
+class Stage1RecommendationReport(BaseModel):
     """LLM 후보 리뷰와 traversal 결과를 제품 단위 후보 검토 의견으로 요약한다."""
 
-    productName: Optional[str]
-    productDomain: str
-    recommendationLevel: str
-    candidateOutputMode: str = "candidate_generation_for_human_review"
-    candidateGenerationProcess: Dict[str, Any] = field(default_factory=dict)
-    recommendedCandidate: Optional[Dict[str, Any]] = None
-    retainedCandidates: List[Dict[str, Any]] = field(default_factory=list)
-    rejectedCandidatesSummary: List[Dict[str, Any]] = field(default_factory=list)
-    backtrackingSummary: Dict[str, Any] = field(default_factory=dict)
-    keyEvidenceRefs: List[str] = field(default_factory=list)
-    evidenceSummary: List[Dict[str, Any]] = field(default_factory=list)
-    remainingRisks: List[str] = field(default_factory=list)
-    humanReviewRequired: bool = True
-    limitations: List[str] = field(default_factory=list)
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    def ToDict(self) -> Dict[str, Any]:
-        return {
-            "product_name": self.productName,
-            "product_domain": self.productDomain,
-            "candidate_output_mode": self.candidateOutputMode,
-            "recommendation_level": self.recommendationLevel,
-            "candidate_generation_process": dict(self.candidateGenerationProcess),
-            "recommended_candidate": self.recommendedCandidate,
-            "retained_candidates": list(self.retainedCandidates),
-            "rejected_candidates_summary": list(self.rejectedCandidatesSummary),
-            "backtracking_summary": dict(self.backtrackingSummary),
-            "key_evidence_refs": list(self.keyEvidenceRefs),
-            "evidence_summary": list(self.evidenceSummary),
-            "remaining_risks": list(self.remainingRisks),
-            "human_review_required": self.humanReviewRequired,
-            "limitations": list(self.limitations),
-        }
+    productName: Optional[str] = Field(alias="product_name")
+    productDomain: str = Field(alias="product_domain")
+    recommendationLevel: str = Field(alias="recommendation_level")
+    candidateOutputMode: str = Field(
+        default="candidate_generation_for_human_review",
+        alias="candidate_output_mode",
+    )
+    candidateGenerationProcess: Dict[str, Any] = Field(
+        default_factory=dict,
+        alias="candidate_generation_process",
+    )
+    recommendedCandidate: Optional[Dict[str, Any]] = Field(
+        default=None,
+        alias="recommended_candidate",
+    )
+    retainedCandidates: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        alias="retained_candidates",
+    )
+    rejectedCandidatesSummary: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        alias="rejected_candidates_summary",
+    )
+    backtrackingSummary: Dict[str, Any] = Field(
+        default_factory=dict,
+        alias="backtracking_summary",
+    )
+    keyEvidenceRefs: List[str] = Field(
+        default_factory=list,
+        alias="key_evidence_refs",
+    )
+    evidenceSummary: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        alias="evidence_summary",
+    )
+    remainingRisks: List[str] = Field(
+        default_factory=list,
+        alias="remaining_risks",
+    )
+    humanReviewRequired: bool = Field(
+        default=True,
+        alias="human_review_required",
+    )
+    limitations: List[str] = Field(default_factory=list)
 
 
 class Stage1RecommendationReportBuilder:

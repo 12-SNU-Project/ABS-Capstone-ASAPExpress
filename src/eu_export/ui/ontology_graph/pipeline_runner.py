@@ -52,7 +52,10 @@ class CandidateGraphPipelineRunner:
                 maxOcrImageCount=DEFAULT_UI_MAX_OCR_IMAGE_COUNT,
             )
         )
-        pipelineResultData = pipelineResult.ToDict()
+        pipelineResultData = pipelineResult.model_dump(
+            mode="json",
+            by_alias=True,
+        )
         productInput = (
             ProductClassificationInputNormalizer().BuildFromKurlyPipelineResult(
                 pipelineResult,
@@ -62,19 +65,22 @@ class CandidateGraphPipelineRunner:
             ontologyRootPath=DEFAULT_ONTOLOGY_ROOT_PATH,
             projectRootPath=PROJECT_ROOT_PATH,
         ).FindCandidates(productInput, topK=DEFAULT_UI_TOP_K)
-        candidatesData = [candidate.ToDict() for candidate in candidates]
+        candidatesData = [
+            candidate.model_dump(mode="json", by_alias=True)
+            for candidate in candidates
+        ]
+        productInputData = productInput.model_dump(mode="json", by_alias=True)
         graphProduct = CandidateGraphLoader().BuildProductGraph(
             {
-                "product_input": productInput.ToDict(),
+                "product_input": productInputData,
                 "candidates": candidatesData,
             }
         )
         return CandidateGraphRunResult(
             productPageUrl=normalizedUrl,
-            productInputData=productInput.ToDict(),
+            productInputData=productInputData,
             pipelineResultData=pipelineResultData,
             candidatesData=candidatesData,
             graphProduct=graphProduct,
             errors=list(pipelineResultData.get("errors", [])),
         )
-

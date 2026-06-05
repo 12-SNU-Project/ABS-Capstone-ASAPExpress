@@ -1,77 +1,80 @@
 """Ontology frontmatter data_sources를 실제 파일 리소스로 검증하는 resolver."""
 
 import csv
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
+
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from eu_export.ontology.schema import OntologyDocument
 from eu_export.utils import NormalizeWhitespace
 
 
-@dataclass(frozen=True)
-class OntologyDataSourceCheck:
+class OntologyDataSourceCheck(BaseModel):
     """frontmatter data_sources 항목 하나에 대한 파일/컬럼 검증 결과."""
 
-    resourceId: str
-    documentId: str
-    relativeDocumentPath: str
-    declaredPath: str
-    resolvedPath: Optional[str] = None
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    resourceId: str = Field(alias="resource_id")
+    documentId: str = Field(alias="document_id")
+    relativeDocumentPath: str = Field(alias="relative_document_path")
+    declaredPath: str = Field(alias="declared_path")
+    resolvedPath: Optional[str] = Field(default=None, alias="resolved_path")
     exists: bool = False
     format: Optional[str] = None
-    tableName: Optional[str] = None
-    primaryKey: Optional[str] = None
-    requiredColumns: List[str] = field(default_factory=list)
-    availableColumns: List[str] = field(default_factory=list)
-    missingColumns: List[str] = field(default_factory=list)
-    rowCount: Optional[int] = None
-    primaryKeyPreview: List[str] = field(default_factory=list)
+    tableName: Optional[str] = Field(default=None, alias="table_name")
+    primaryKey: Optional[str] = Field(default=None, alias="primary_key")
+    requiredColumns: List[str] = Field(
+        default_factory=list,
+        alias="required_columns",
+    )
+    availableColumns: List[str] = Field(
+        default_factory=list,
+        alias="available_columns",
+    )
+    missingColumns: List[str] = Field(
+        default_factory=list,
+        alias="missing_columns",
+    )
+    rowCount: Optional[int] = Field(default=None, alias="row_count")
+    primaryKeyPreview: List[str] = Field(
+        default_factory=list,
+        alias="primary_key_preview",
+    )
     error: Optional[str] = None
 
+    @computed_field(alias="is_loadable")
     @property
     def isLoadable(self) -> bool:
         return self.exists and self.error is None and len(self.missingColumns) == 0
 
-    def ToDict(self) -> Dict[str, Any]:
-        return {
-            "resource_id": self.resourceId,
-            "document_id": self.documentId,
-            "relative_document_path": self.relativeDocumentPath,
-            "declared_path": self.declaredPath,
-            "resolved_path": self.resolvedPath,
-            "exists": self.exists,
-            "format": self.format,
-            "table_name": self.tableName,
-            "primary_key": self.primaryKey,
-            "required_columns": list(self.requiredColumns),
-            "available_columns": list(self.availableColumns),
-            "missing_columns": list(self.missingColumns),
-            "row_count": self.rowCount,
-            "primary_key_preview": list(self.primaryKeyPreview),
-            "is_loadable": self.isLoadable,
-            "error": self.error,
-        }
 
-
-@dataclass(frozen=True)
-class OntologyResourceResolutionReport:
+class OntologyResourceResolutionReport(BaseModel):
     """ontology data_sources 전체 확인 결과."""
 
-    dataSourceChecks: List[OntologyDataSourceCheck] = field(default_factory=list)
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
+    dataSourceChecks: List[OntologyDataSourceCheck] = Field(
+        default_factory=list,
+        alias="data_source_checks",
+    )
+
+    @computed_field(alias="total_count")
     @property
     def totalCount(self) -> int:
         return len(self.dataSourceChecks)
 
+    @computed_field(alias="loadable_count")
     @property
     def loadableCount(self) -> int:
         return sum(1 for check in self.dataSourceChecks if check.isLoadable)
 
+    @computed_field(alias="missing_count")
     @property
     def missingCount(self) -> int:
         return sum(1 for check in self.dataSourceChecks if not check.exists)
 
+    @computed_field(alias="invalid_count")
     @property
     def invalidCount(self) -> int:
         return sum(
@@ -80,22 +83,10 @@ class OntologyResourceResolutionReport:
             if check.exists and not check.isLoadable
         )
 
+    @computed_field(alias="is_valid")
     @property
     def isValid(self) -> bool:
         return self.missingCount == 0 and self.invalidCount == 0
-
-    def ToDict(self) -> Dict[str, Any]:
-        return {
-            "is_valid": self.isValid,
-            "total_count": self.totalCount,
-            "loadable_count": self.loadableCount,
-            "missing_count": self.missingCount,
-            "invalid_count": self.invalidCount,
-            "data_source_checks": [
-                dataSourceCheck.ToDict()
-                for dataSourceCheck in self.dataSourceChecks
-            ],
-        }
 
 
 class OntologyResourceResolver:
