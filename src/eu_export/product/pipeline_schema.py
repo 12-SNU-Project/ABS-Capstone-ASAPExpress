@@ -14,6 +14,7 @@ from eu_export.product.ocr_fallback import (
     DEFAULT_PRODUCT_OCR_IMAGE_DOWNLOAD_TIMEOUT_SECONDS,
     ProductOcrImageResult,
 )
+from eu_export.product.ocr_normalization import ProductOcrFactNormalizationResult
 
 
 class KurlyPipelineInput(BaseModel):
@@ -53,6 +54,10 @@ class KurlyPipelineResult(BaseModel):
         exclude=True,
     )
     combinedOcrText: str = Field(default="", alias="combined_ocr_text")
+    ocrNormalizationResult: ProductOcrFactNormalizationResult = Field(
+        default_factory=ProductOcrFactNormalizationResult,
+        alias="ocr_normalization",
+    )
     steps: List[PipelineStep] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
 
@@ -109,6 +114,12 @@ class KurlyPipelineResult(BaseModel):
                 len(self.ocrImageResults) - len(successfulImageResults)
             ),
             "combined_text_length": len(self.combinedOcrText),
+            "normalized_fact_count": self.ocrNormalizationResult.factLineCount,
+            "raw_line_count": self.ocrNormalizationResult.rawLineCount,
+            "normalization": self.ocrNormalizationResult.model_dump(
+                mode="json",
+                by_alias=True,
+            ),
             "image_artifacts": [
                 {
                     "index": imageIndex,

@@ -304,7 +304,7 @@ class OntologySmokeRunner:
             userPrompt=queryCase["user_prompt"],
             packagedContext=context,
         )
-        contextData = context.ToDict()
+        contextData = context.model_dump(mode="json", by_alias=True)
         result = {
             "name": queryCase["name"],
             "phase_id": queryCase["phase_id"],
@@ -356,7 +356,7 @@ class OntologySmokeRunner:
         validationReport = OntologyGraphValidator(
             self._ontologyRootPath,
         ).Validate(documents)
-        validationData = validationReport.ToDict()
+        validationData = validationReport.model_dump(mode="json", by_alias=True)
         issues = list(validationData["issues"])
         result = {
             "is_valid": validationData["is_valid"],
@@ -392,7 +392,7 @@ class OntologySmokeRunner:
             self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         ).Resolve(documents)
-        resourceData = resourceReport.ToDict()
+        resourceData = resourceReport.model_dump(mode="json", by_alias=True)
         checks = list(resourceData["data_source_checks"])
         result = {
             "is_valid": resourceData["is_valid"],
@@ -692,7 +692,7 @@ class OntologySmokeRunner:
                 evidencePackage=evidencePackage,
                 maxCandidateCount=self._cnCandidateTopK,
             )
-            evidenceData = evidencePackage.ToDict()
+            evidenceData = evidencePackage.model_dump(mode="json", by_alias=True)
             promptEvidenceData = evidencePackage.ToPromptDict(
                 candidateCodes=[
                     candidate.hs8
@@ -738,7 +738,10 @@ class OntologySmokeRunner:
                         "system_prompt_length": len(llmRequest.systemPrompt or ""),
                         "user_prompt_length": len(llmRequest.userPrompt),
                         "generation_options": (
-                            llmRequest.generationOptions.ToDict()
+                            llmRequest.generationOptions.model_dump(
+                                mode="json",
+                                by_alias=True,
+                            )
                         ),
                         "context_chunk_lengths": [
                             len(contextChunk)
@@ -815,7 +818,7 @@ class OntologySmokeRunner:
                 candidates,
             )
             evidencePackage = contextEvidenceData["evidence_package"]
-            evidenceData = evidencePackage.ToDict()
+            evidenceData = evidencePackage.model_dump(mode="json", by_alias=True)
             evidenceRecords = evidenceData["evidence_records"]
             productResults.append(
                 {
@@ -949,7 +952,7 @@ class OntologySmokeRunner:
             "status": "completed",
             "product_name": productInput.productName,
             "candidate_count": len(candidates),
-            "fixture_validation": fixtureReport.ToDict(),
+            "fixture_validation": fixtureReport.model_dump(mode="json", by_alias=True),
             "llm_connection": llmConnectionResult,
         }
         validationLogger = self._Logger("Stage7ResponseValidation")
@@ -1075,8 +1078,16 @@ class OntologySmokeRunner:
             "is_main_flow": False,
             "product_name": productInput.productName,
             "candidate_count": len(candidates),
-            "possible_fixture_decision": possibleDecisionReport.ToDict(),
-            "backtracking_fixture_decision": backtrackingDecisionReport.ToDict(),
+            "possible_fixture_decision": possibleDecisionReport.model_dump(
+                mode="json",
+                by_alias=True,
+            ),
+            "backtracking_fixture_decision": (
+                backtrackingDecisionReport.model_dump(
+                    mode="json",
+                    by_alias=True,
+                )
+            ),
         }
         self._Logger("Stage9DecisionPolicy").info(
             (
@@ -1153,14 +1164,22 @@ class OntologySmokeRunner:
             "status": "completed",
             "scenario_kind": "policy_fixture_traversal",
             "is_main_flow": False,
-            "possible_fixture_traversal": possibleTraversalReport.ToDict(),
-            "backtracking_fixture_traversal": backtrackingTraversalReport.ToDict(),
+            "possible_fixture_traversal": possibleTraversalReport.model_dump(
+                mode="json",
+                by_alias=True,
+            ),
+            "backtracking_fixture_traversal": (
+                backtrackingTraversalReport.model_dump(
+                    mode="json",
+                    by_alias=True,
+                )
+            ),
             "backtracking_candidate_count": len(backtrackingCandidates),
             "backtracking_candidate_codes": [
                 candidate.hs8 for candidate in backtrackingCandidates
             ],
             "backtracking_candidate_preview": [
-                candidate.ToDict() for candidate in backtrackingCandidates[:3]
+                candidate.model_dump(mode="json", by_alias=True) for candidate in backtrackingCandidates[:3]
             ],
         }
         traversalLogger = self._Logger("Stage10TraversalController")
@@ -1745,9 +1764,15 @@ class OntologySmokeRunner:
             naturalLanguageAnswer = self._BuildNaturalLlmAnswer(
                 productInput=productInput,
                 candidates=candidates,
-                validationReportData=validationReport.ToDict(),
-                decisionReportData=decisionReport.ToDict(),
-                traversalReportData=traversalReport.ToDict(),
+                validationReportData=validationReport.model_dump(mode="json", by_alias=True),
+                decisionReportData=decisionReport.model_dump(
+                    mode="json",
+                    by_alias=True,
+                ),
+                traversalReportData=traversalReport.model_dump(
+                    mode="json",
+                    by_alias=True,
+                ),
             )
         except (RuntimeAdapterBuildError, RuntimeGenerationError) as error:
             return {
@@ -1769,14 +1794,20 @@ class OntologySmokeRunner:
                 "response_format": llmResponse.responseFormat.value,
                 "finish_reason": llmResponse.finishReason.value,
                 "provider_finish_reason": llmResponse.providerFinishReason,
-                "token_usage": llmResponse.tokenUsage.ToDict(),
+                "token_usage": llmResponse.tokenUsage.model_dump(
+                    mode="json",
+                    by_alias=True,
+                ),
                 "limitations": list(llmResponse.limitations),
             },
-            "validation": validationReport.ToDict(),
-            "decision": decisionReport.ToDict(),
-            "traversal": traversalReport.ToDict(),
-            "recommendation": recommendationReport.ToDict(),
-            "human_review_package": humanReviewPackage.ToDict(),
+            "validation": validationReport.model_dump(mode="json", by_alias=True),
+            "decision": decisionReport.model_dump(mode="json", by_alias=True),
+            "traversal": traversalReport.model_dump(mode="json", by_alias=True),
+            "recommendation": recommendationReport.model_dump(mode="json", by_alias=True),
+            "human_review_package": humanReviewPackage.model_dump(
+                mode="json",
+                by_alias=True,
+            ),
             "natural_language_answer": naturalLanguageAnswer,
         }
 
@@ -1870,7 +1901,7 @@ class OntologySmokeRunner:
     ) -> str:
         candidateReviews: List[Dict[str, Any]] = []
         for candidate in candidates:
-            candidateData = candidate.ToDict()
+            candidateData = candidate.model_dump(mode="json", by_alias=True)
             codeHierarchy = candidateData.get("code_hierarchy", {})
             classificationPathReview = {}
             if isinstance(codeHierarchy, dict):

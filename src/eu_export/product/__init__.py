@@ -31,6 +31,10 @@ from eu_export.product.ocr_fallback import (
     ProductOcrFallbackRunner,
     ProductOcrImageResult,
 )
+from eu_export.product.ocr_normalization import (
+    ProductOcrFactNormalizer,
+    ProductOcrFactNormalizationResult,
+)
 
 from eu_export.product.paddle_ocr import (
     PaddleOcrEngine,
@@ -61,5 +65,7 @@ __all__ = [
     "ProductOcrFallbackRunner",
     "ProductOcrEngine",
     "ProductOcrError",
+    "ProductOcrFactNormalizer",
+    "ProductOcrFactNormalizationResult",
     "ProductOcrImageResult",
 ]

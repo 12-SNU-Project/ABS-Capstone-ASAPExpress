@@ -8,6 +8,7 @@ from eu_export.product.ocr_fallback import (
     ProductOcrFallbackRunner,
     ProductOcrImageResult,
 )
+from eu_export.product.ocr_normalization import ProductOcrFactNormalizer
 from eu_export.product.paddle_ocr import ProductOcrEngine
 from eu_export.product.pipeline_schema import (
     KurlyPipelineInput,
@@ -23,9 +24,11 @@ class KurlyProductPipeline:
         self,
         collector: KurlyPageCollector,
         ocrEngine: Optional[ProductOcrEngine] = None,
+        ocrFactNormalizer: Optional[ProductOcrFactNormalizer] = None,
     ) -> None:
         self._collector = collector
         self._ocrEngine = ocrEngine
+        self._ocrFactNormalizer = ocrFactNormalizer or ProductOcrFactNormalizer()
 
     def Run(
         self,
@@ -97,13 +100,29 @@ class KurlyProductPipeline:
                 )
             )
 
+        combinedOcrText = ProductOcrFallbackRunner.BuildCombinedOcrText(
+            ocrImageResults
+        )
+        ocrNormalizationResult = self._ocrFactNormalizer.Normalize(
+            combinedOcrText,
+            productDomain=collectionResult.parsedProductPage.productDomain.value,
+        )
+        steps.append(
+            PipelineStep(
+                stepName="normalize_ocr_text",
+                message="raw_line_count={0}, fact_line_count={1}".format(
+                    ocrNormalizationResult.rawLineCount,
+                    ocrNormalizationResult.factLineCount,
+                ),
+            )
+        )
+
         return KurlyPipelineResult(
             collectionResult=collectionResult,
             renderedPageEvidence=renderedPageEvidence,
             ocrImageResults=ocrImageResults,
-            combinedOcrText=ProductOcrFallbackRunner.BuildCombinedOcrText(
-                ocrImageResults
-            ),
+            combinedOcrText=combinedOcrText,
+            ocrNormalizationResult=ocrNormalizationResult,
             steps=steps,
             errors=errors,
         )

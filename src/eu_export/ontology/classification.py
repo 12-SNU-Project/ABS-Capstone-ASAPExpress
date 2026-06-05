@@ -24,6 +24,11 @@ from eu_export.bridge import (
     LlmResponse,
     LlmResponseFormat,
 )
+from eu_export.product.ocr_normalization import (
+    PRODUCT_REFERENCE_PLACEHOLDER_KEYWORDS,
+    ProductOcrFactNormalizer,
+    ProductOcrFactNormalizationResult,
+)
 from eu_export.ontology.loader import OntologyDocumentLoader
 from eu_export.ontology.schema import PackagedOntologyContext
 from eu_export.utils import NormalizeWhitespace, NormalizeWhitespacePreservingLines
@@ -40,18 +45,23 @@ DEFAULT_STAGE1_PROMPT_EVIDENCE_TEXT_MAX_CHARACTERS = 600
 DEFAULT_STAGE1_PROMPT_COMMON_EVIDENCE_LIMIT = 6
 DEFAULT_STAGE1_PROMPT_CANDIDATE_EVIDENCE_LIMIT = 3
 DEFAULT_STAGE1_CLASSIFICATION_MAX_TOKENS = 4096
+DEFAULT_STAGE1_LLM_CANDIDATES_PER_REQUEST = 1
 TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣]+")
 STAGE1_PROMPT_COMMON_EVIDENCE_TYPE_PRIORITY = [
     "product_fact",
     "product_notice_field",
     "product_notice_text",
-    "ocr_text",
-    "ontology_chunk",
+    "ocr_fact",
 ]
 STAGE1_PROMPT_CANDIDATE_EVIDENCE_TYPE_PRIORITY = [
     "bti_case_chunk",
     "cn_candidate_card",
 ]
+STAGE1_PROMPT_EXCLUDED_FALLBACK_EVIDENCE_TYPES = {
+    "ocr_raw_reference",
+    "ocr_text",
+    "ontology_chunk",
+}
 STAGE1_CLASSIFICATION_ALLOWED_STATUSES = {
     "strong_candidate",
     "possible_candidate",
@@ -231,9 +241,23 @@ class ProductClassificationInput(BaseModel):
         alias="product_notice_text",
         exclude=True,
     )
+    normalizedOcrFactTexts: List[str] = Field(
+        default_factory=list,
+        alias="normalized_ocr_fact_texts",
+    )
+    excludedOcrTextPreview: str = Field(
+        default="",
+        alias="excluded_ocr_text_preview",
+        exclude=True,
+    )
     ocrText: str = Field(default="", alias="ocr_text", exclude=True)
 
     def BuildSearchText(self) -> str:
+        ocrSearchText = (
+            "\n".join(self.normalizedOcrFactTexts)
+            if self.normalizedOcrFactTexts
+            else self.ocrText
+        )
         rawParts = [
             self.productName or "",
             self.shortDescription or "",
@@ -243,7 +267,7 @@ class ProductClassificationInput(BaseModel):
             *self.noticeOptionNames,
             *self.noticeFieldTexts,
             self.productNoticeText,
-            self.ocrText,
+            ocrSearchText,
         ]
         parts = [
             part
@@ -261,6 +285,11 @@ class ProductClassificationInput(BaseModel):
     @property
     def ocrTextLength(self) -> int:
         return len(self.ocrText)
+
+    @computed_field(alias="normalized_ocr_fact_count")
+    @property
+    def normalizedOcrFactCount(self) -> int:
+        return len(self.normalizedOcrFactTexts)
 
     @computed_field(alias="search_text_length")
     @property
@@ -445,6 +474,10 @@ class Stage1EvidencePackage(BaseModel):
         default_factory=dict,
         alias="candidate_evidence_ids",
     )
+    ontologyContextSummary: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        alias="ontology_context_summary",
+    )
 
     @property
     def validEvidenceIds(self) -> Set[str]:
@@ -486,6 +519,8 @@ class Stage1EvidencePackage(BaseModel):
             for record in records:
                 if len(selectedIds) >= limit:
                     return selectedIds
+                if record.evidenceType in STAGE1_PROMPT_EXCLUDED_FALLBACK_EVIDENCE_TYPES:
+                    continue
                 AppendSelectedId(selectedIds, record.evidenceId)
             return selectedIds
 
@@ -575,6 +610,7 @@ class Stage1EvidencePackage(BaseModel):
                 )
             },
             "valid_evidence_ids": sorted(selectedEvidenceIdSet),
+            "ontology_context_summary": list(self.ontologyContextSummary),
             "omitted_evidence_record_count": (
                 len(self.evidenceRecords) - len(selectedEvidenceRecords)
             ),
@@ -605,6 +641,7 @@ class Stage1EvidencePackageBuilder:
         productInput: ProductClassificationInput,
         candidates: Sequence[CnCandidate],
         packagedContext: Optional[PackagedOntologyContext] = None,
+        includeOntologyEvidence: bool = False,
     ) -> Stage1EvidencePackage:
         evidenceRecords: List[Stage1EvidenceRecord] = []
         commonEvidenceIds: List[str] = []
@@ -612,6 +649,11 @@ class Stage1EvidencePackageBuilder:
             candidate.hs8: []
             for candidate in candidates
         }
+        ontologyContextSummary = (
+            self._BuildOntologyContextSummary(packagedContext)
+            if packagedContext is not None
+            else []
+        )
 
         productEvidenceRecords = self._BuildProductEvidenceRecords(productInput)
         evidenceRecords.extend(productEvidenceRecords)
@@ -620,7 +662,7 @@ class Stage1EvidencePackageBuilder:
             for evidenceRecord in productEvidenceRecords
         )
 
-        if packagedContext is not None:
+        if packagedContext is not None and includeOntologyEvidence:
             ontologyEvidenceRecords = self._BuildOntologyEvidenceRecords(
                 packagedContext,
             )
@@ -649,6 +691,7 @@ class Stage1EvidencePackageBuilder:
             evidenceRecords=evidenceRecords,
             commonEvidenceIds=commonEvidenceIds,
             candidateEvidenceIds=candidateEvidenceIds,
+            ontologyContextSummary=ontologyContextSummary,
         )
 
     def _BuildProductEvidenceRecords(
@@ -709,11 +752,30 @@ class Stage1EvidencePackageBuilder:
                 )
             )
 
+        if productInput.normalizedOcrFactTexts:
+            records.append(
+                Stage1EvidenceRecord(
+                    evidenceId="product_fact:ocr_normalized_facts",
+                    evidenceType="ocr_fact",
+                    sourceName="product_ocr_normalized_facts",
+                    sourceRef=productInput.productPageUrl or "product_input",
+                    text=self._TrimEvidenceText(
+                        NormalizeWhitespacePreservingLines(
+                            "\n".join(productInput.normalizedOcrFactTexts),
+                        ),
+                    ),
+                    legalStatus="discovery",
+                    limitations=[
+                        "OCR facts are normalized from image text and may contain recognition errors.",
+                    ],
+                )
+            )
+
         if productInput.ocrText.strip():
             records.append(
                 Stage1EvidenceRecord(
-                    evidenceId="product_fact:ocr_text",
-                    evidenceType="ocr_text",
+                    evidenceId="product_fact:ocr_raw_reference",
+                    evidenceType="ocr_raw_reference",
                     sourceName="product_ocr_fallback",
                     sourceRef=productInput.productPageUrl or "product_input",
                     text=self._TrimEvidenceText(productInput.ocrText),
@@ -725,6 +787,26 @@ class Stage1EvidencePackageBuilder:
             )
 
         return records
+
+    def _BuildOntologyContextSummary(
+        self,
+        packagedContext: PackagedOntologyContext,
+    ) -> List[Dict[str, Any]]:
+        summaries: List[Dict[str, Any]] = []
+        for selectedResult in packagedContext.selectedResults:
+            chunk = selectedResult.chunk
+            summaries.append(
+                {
+                    "chunk_id": chunk.chunkId,
+                    "document_id": chunk.documentId,
+                    "relative_path": chunk.relativePath,
+                    "heading_path": list(chunk.headingPath),
+                    "score": selectedResult.score,
+                    "matched_terms": list(selectedResult.matchedTerms),
+                    "chunk_kind": chunk.metadata.get("chunk_kind"),
+                }
+            )
+        return summaries
 
     def _BuildOntologyEvidenceRecords(
         self,
@@ -929,13 +1011,25 @@ class Stage1EvidencePackageBuilder:
 class ProductClassificationInputNormalizer:
     """product pipeline 결과를 Stage 1 후보 조회 입력으로 변환한다."""
 
+    def __init__(
+        self,
+        ocrFactNormalizer: Optional[ProductOcrFactNormalizer] = None,
+    ) -> None:
+        self.ocrFactNormalizer = ocrFactNormalizer or ProductOcrFactNormalizer()
+
     def BuildFromKurlyPipelineResultData(
         self,
         pipelineResultData: Mapping[str, Any],
     ) -> ProductClassificationInput:
-        if "parsed_product_page" in pipelineResultData:
+        if (
+            "parsed_product_page" in pipelineResultData
+            or "parsedProductPage" in pipelineResultData
+        ):
             return self._BuildFromSlimKurlyPipelineResultData(pipelineResultData)
-        if "collection_result" in pipelineResultData:
+        if (
+            "collection_result" in pipelineResultData
+            or "collectionResult" in pipelineResultData
+        ):
             return self._BuildFromCurrentKurlyPipelineResultData(pipelineResultData)
         if "product" in pipelineResultData and "notice" in pipelineResultData:
             return self._BuildFromCurrentKurlySmokeSummaryData(pipelineResultData)
@@ -945,25 +1039,58 @@ class ProductClassificationInputNormalizer:
         self,
         pipelineResult: Any,
     ) -> ProductClassificationInput:
+        if isinstance(pipelineResult, Mapping):
+            return self.BuildFromKurlyPipelineResultData(pipelineResult)
+
+        modelDump = getattr(pipelineResult, "model_dump", None)
+        if callable(modelDump):
+            return self.BuildFromKurlyPipelineResultData(
+                modelDump(mode="json", by_alias=True),
+            )
+
         toDict = getattr(pipelineResult, "ToDict", None)
-        if not callable(toDict):
-            raise TypeError("pipelineResult must provide ToDict().")
-        return self.BuildFromKurlyPipelineResultData(toDict())
+        if callable(toDict):
+            return self.BuildFromKurlyPipelineResultData(toDict())
+
+        raise TypeError(
+            "pipelineResult must be a mapping or provide model_dump()/ToDict().",
+        )
 
     def _BuildFromSlimKurlyPipelineResultData(
         self,
         pipelineResultData: Mapping[str, Any],
     ) -> ProductClassificationInput:
         parsedProductPage = self._ReadMapping(
-            pipelineResultData.get("parsed_product_page"),
+            self._ReadMappedValue(
+                pipelineResultData,
+                "parsed_product_page",
+                "parsedProductPage",
+            ),
         )
         return self._BuildInput(
-            productPageUrl=self._ReadString(pipelineResultData.get("product_page_url")),
+            productPageUrl=self._ReadString(
+                self._ReadMappedValue(
+                    pipelineResultData,
+                    "product_page_url",
+                    "productPageUrl",
+                ),
+            ),
             parsedProductPage=parsedProductPage,
             combinedOcrText=self._ReadString(
-                pipelineResultData.get("combined_ocr_text"),
+                self._ReadMappedValue(
+                    pipelineResultData,
+                    "combined_ocr_text",
+                    "combinedOcrText",
+                ),
             )
             or "",
+            ocrNormalizationData=self._ReadMapping(
+                self._ReadMappedValue(
+                    pipelineResultData,
+                    "ocr_normalization",
+                    "ocrNormalizationResult",
+                ),
+            ),
         )
 
     def _BuildFromCurrentKurlyPipelineResultData(
@@ -971,18 +1098,43 @@ class ProductClassificationInputNormalizer:
         pipelineResultData: Mapping[str, Any],
     ) -> ProductClassificationInput:
         collectionResult = self._ReadMapping(
-            pipelineResultData.get("collection_result"),
+            self._ReadMappedValue(
+                pipelineResultData,
+                "collection_result",
+                "collectionResult",
+            ),
         )
         parsedProductPage = self._ReadMapping(
-            collectionResult.get("parsed_product_page"),
+            self._ReadMappedValue(
+                collectionResult,
+                "parsed_product_page",
+                "parsedProductPage",
+            ),
         )
         return self._BuildInput(
-            productPageUrl=self._ReadString(collectionResult.get("product_page_url")),
+            productPageUrl=self._ReadString(
+                self._ReadMappedValue(
+                    collectionResult,
+                    "product_page_url",
+                    "productPageUrl",
+                ),
+            ),
             parsedProductPage=parsedProductPage,
             combinedOcrText=self._ReadString(
-                pipelineResultData.get("combined_ocr_text"),
+                self._ReadMappedValue(
+                    pipelineResultData,
+                    "combined_ocr_text",
+                    "combinedOcrText",
+                ),
             )
             or "",
+            ocrNormalizationData=self._ReadMapping(
+                self._ReadMappedValue(
+                    pipelineResultData,
+                    "ocr_normalization",
+                    "ocrNormalizationResult",
+                ),
+            ),
         )
 
     def _BuildFromLegacyKurlySmokeResultData(
@@ -1002,6 +1154,7 @@ class ProductClassificationInputNormalizer:
         productData = self._ReadMapping(smokeResultData.get("product"))
         noticeData = self._ReadMapping(smokeResultData.get("notice"))
         ocrData = self._ReadMapping(smokeResultData.get("ocr"))
+        ocrSummaryData = self._ReadMapping(smokeResultData.get("ocr_summary"))
         parsedProductPage = {
             "product_name": productData.get("product_name"),
             "product_domain": productData.get("product_domain"),
@@ -1017,9 +1170,15 @@ class ProductClassificationInputNormalizer:
             productPageUrl=self._ReadString(smokeResultData.get("product_page_url")),
             parsedProductPage=parsedProductPage,
             combinedOcrText=self._ReadString(
+                smokeResultData.get("combined_ocr_text"),
+            )
+            or self._ReadString(
                 ocrData.get("combined_text_preview"),
             )
             or "",
+            ocrNormalizationData=self._ReadMapping(
+                ocrSummaryData.get("normalization"),
+            ),
         )
 
     def _BuildInput(
@@ -1027,6 +1186,7 @@ class ProductClassificationInputNormalizer:
         productPageUrl: Optional[str],
         parsedProductPage: Mapping[str, Any],
         combinedOcrText: str,
+        ocrNormalizationData: Optional[Mapping[str, Any]] = None,
     ) -> ProductClassificationInput:
         productDomain = self._ReadString(
             parsedProductPage.get("product_domain"),
@@ -1037,14 +1197,39 @@ class ProductClassificationInputNormalizer:
         noticeOptions = self._ReadMappingList(
             parsedProductPage.get("product_notice_options"),
         )
-        productNoticeText = self._ReadString(
+        rawProductNoticeText = self._ReadString(
             parsedProductPage.get("raw_product_notice_text"),
-        ) or self._BuildRawNoticeText(noticeFields, noticeOptions)
+        )
+        productNoticeText = (
+            rawProductNoticeText
+            if rawProductNoticeText is not None
+            and not self._ContainsPlaceholderReference(rawProductNoticeText)
+            else self._BuildRawNoticeText(noticeFields, noticeOptions)
+        )
         noticeOptionNames = self._ReadStringList(
             parsedProductPage.get("product_notice_option_names"),
         )
         if not noticeOptionNames:
             noticeOptionNames = self._ExtractNoticeOptionNames(noticeOptions)
+        normalizedOcrFactTexts: List[str] = []
+        excludedOcrTextPreview = ""
+        if ocrNormalizationData is not None:
+            normalizedOcrFactTexts = self._ReadStringList(
+                ocrNormalizationData.get("fact_texts"),
+            )
+            excludedOcrTextPreview = (
+                self._ReadString(
+                    ocrNormalizationData.get("excluded_text_preview"),
+                )
+                or ""
+            )
+        if not normalizedOcrFactTexts and combinedOcrText.strip() != "":
+            ocrNormalizationResult = self.ocrFactNormalizer.Normalize(
+                combinedOcrText,
+                productDomain=productDomain,
+            )
+            normalizedOcrFactTexts = ocrNormalizationResult.factTexts
+            excludedOcrTextPreview = ocrNormalizationResult.excludedTextPreview
 
         return ProductClassificationInput(
             productPageUrl=productPageUrl,
@@ -1060,6 +1245,8 @@ class ProductClassificationInputNormalizer:
             noticeFieldTexts=self._BuildNoticeFieldTexts(noticeFields),
             noticeOptionNames=noticeOptionNames,
             productNoticeText=productNoticeText,
+            normalizedOcrFactTexts=normalizedOcrFactTexts,
+            excludedOcrTextPreview=excludedOcrTextPreview,
             ocrText=combinedOcrText,
         )
 
@@ -1071,6 +1258,11 @@ class ProductClassificationInputNormalizer:
         for noticeField in noticeFields:
             fieldName = self._ReadString(noticeField.get("field_name"))
             fieldValue = self._ReadString(noticeField.get("field_value"))
+            rawText = self._ReadString(noticeField.get("raw_text"))
+            if rawText is not None and self._ContainsPlaceholderReference(rawText):
+                continue
+            if fieldValue is not None and self._ContainsPlaceholderReference(fieldValue):
+                continue
             if fieldName is None and fieldValue is None:
                 continue
             if fieldName is None:
@@ -1090,7 +1282,7 @@ class ProductClassificationInputNormalizer:
         rawTexts: List[str] = []
         for noticeOption in noticeOptions:
             rawText = self._ReadString(noticeOption.get("raw_text"))
-            if rawText is not None:
+            if rawText is not None and not self._ContainsPlaceholderReference(rawText):
                 rawTexts.append(rawText)
                 continue
             optionName = self._ReadString(noticeOption.get("option_name"))
@@ -1106,10 +1298,18 @@ class ProductClassificationInputNormalizer:
                     for noticeField in noticeFields
                 )
                 if rawText is not None
+                and not self._ContainsPlaceholderReference(rawText)
             ]
         if not rawTexts:
             rawTexts = self._BuildNoticeFieldTexts(noticeFields)
         return NormalizeWhitespacePreservingLines("\n".join(rawTexts))
+
+    def _ContainsPlaceholderReference(self, text: str) -> bool:
+        normalizedText = NormalizeWhitespace(text).lower()
+        return any(
+            keyword.lower() in normalizedText
+            for keyword in PRODUCT_REFERENCE_PLACEHOLDER_KEYWORDS
+        )
 
     def _ExtractNoticeOptionNames(
         self,
@@ -1174,6 +1374,16 @@ class ProductClassificationInputNormalizer:
         if isinstance(value, Mapping):
             return value
         return {}
+
+    def _ReadMappedValue(
+        self,
+        mapping: Mapping[str, Any],
+        *keys: str,
+    ) -> Any:
+        for key in keys:
+            if key in mapping:
+                return mapping[key]
+        return None
 
     def _ReadMappingList(self, value: Any) -> List[Mapping[str, Any]]:
         if not isinstance(value, list):
@@ -1520,8 +1730,10 @@ class Stage1RequestBuilder:
     def __init__(
         self,
         systemPrompt: str = STAGE1_CLASSIFICATION_SYSTEM_PROMPT,
+        maxCandidatesPerRequest: int = DEFAULT_STAGE1_LLM_CANDIDATES_PER_REQUEST,
     ) -> None:
         self.systemPrompt = systemPrompt.strip()
+        self.maxCandidatesPerRequest = max(1, maxCandidatesPerRequest)
 
     def BuildRequest(
         self,
@@ -1532,7 +1744,9 @@ class Stage1RequestBuilder:
         userPrompt: Optional[str] = None,
         maxCandidateCount: int = DEFAULT_CN_CANDIDATE_TOP_K,
     ) -> LlmRequest:
-        promptCandidates = candidates[:maxCandidateCount]
+        promptCandidates = candidates[
+            : min(maxCandidateCount, self.maxCandidatesPerRequest)
+        ]
         if not promptCandidates:
             raise ValueError(
                 (
@@ -1569,6 +1783,28 @@ class Stage1RequestBuilder:
             ),
         )
 
+    def BuildCandidateReviewRequests(
+        self,
+        productInput: ProductClassificationInput,
+        candidates: Sequence[CnCandidate],
+        packagedContext: PackagedOntologyContext,
+        evidencePackage: Optional[Stage1EvidencePackage] = None,
+        userPrompt: Optional[str] = None,
+        maxCandidateCount: int = DEFAULT_CN_CANDIDATE_TOP_K,
+    ) -> List[LlmRequest]:
+        promptCandidates = candidates[:maxCandidateCount]
+        return [
+            self.BuildRequest(
+                productInput=productInput,
+                candidates=[candidate],
+                packagedContext=packagedContext,
+                evidencePackage=evidencePackage,
+                userPrompt=userPrompt,
+                maxCandidateCount=1,
+            )
+            for candidate in promptCandidates
+        ]
+
     def BuildOntologyQuery(
         self,
         productInput: ProductClassificationInput,
@@ -1600,7 +1836,10 @@ class Stage1RequestBuilder:
     ) -> str:
         productData = productInput.model_dump(mode="json", by_alias=True)
         productData["product_notice_text"] = productInput.productNoticeText
-        productData["ocr_text"] = productInput.ocrText
+        productData["ocr_raw_text_policy"] = (
+            "Raw OCR text is excluded from the default LLM request. "
+            "Use normalized_ocr_fact_texts for OCR-derived product facts."
+        )
         return "\n".join(
             [
                 "[stage1_product_classification_input]",
