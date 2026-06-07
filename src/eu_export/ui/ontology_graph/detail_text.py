@@ -54,13 +54,18 @@ class CandidateGraphDetailTextBuilder:
         parsedPage = graphLoader.ReadMapping(
             collectionResult.get("parsed_product_page"),
         )
+        productNoticeFieldCount = parsedPage.get("product_notice_field_count")
+        if not isinstance(productNoticeFieldCount, int):
+            productNoticeFieldCount = len(
+                parsedPage.get("product_notice_fields", []) or [],
+            )
         steps = pipelineData.get("steps", [])
         lines = [
             "",
             "실행 대시보드",
             "URL: {0}".format(runResult.productPageUrl),
             "상품고시 필드 수: {0}".format(
-                len(parsedPage.get("product_notice_fields", []) or []),
+                productNoticeFieldCount,
             ),
             "OCR fallback 필요: {0}".format(
                 parsedPage.get("requires_ocr_fallback"),
@@ -154,4 +159,3 @@ class CandidateGraphDetailTextBuilder:
             "- {0}".format(item)
             for item in value
         )
-

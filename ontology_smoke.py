@@ -46,6 +46,7 @@ from eu_export.ontology import (  # noqa: E402
     ProductClassificationInputNormalizer,
     Stage1RecommendationReportBuilder,
     Stage1ResponseValidator,
+    Stage1ResponseValidationReport,
     Stage1RequestBuilder,
     Stage1DecisionPolicy,
     Stage1DecisionReport,
@@ -685,18 +686,20 @@ class OntologySmokeRunner:
             ontologyQuery = contextEvidenceData["ontology_query"]
             packagedContext = contextEvidenceData["packaged_context"]
             evidencePackage = contextEvidenceData["evidence_package"]
+            reviewCandidateLimit = max(1, self._maxValidationFixtureCandidates)
+            reviewCandidates = candidates[:reviewCandidateLimit]
+            sampleRequestCandidates = reviewCandidates[:1]
             llmRequest = requestBuilder.BuildRequest(
                 productInput=productInput,
-                candidates=candidates,
+                candidates=sampleRequestCandidates,
                 packagedContext=packagedContext,
                 evidencePackage=evidencePackage,
-                maxCandidateCount=self._cnCandidateTopK,
             )
             evidenceData = evidencePackage.model_dump(mode="json", by_alias=True)
             promptEvidenceData = evidencePackage.ToPromptDict(
                 candidateCodes=[
                     candidate.hs8
-                    for candidate in candidates[:self._cnCandidateTopK]
+                    for candidate in sampleRequestCandidates
                 ],
             )
             requestResults.append(
@@ -705,6 +708,10 @@ class OntologySmokeRunner:
                     "product_name": productInput.productName,
                     "product_domain": productInput.productDomain,
                     "candidate_count": len(candidates),
+                    "llm_review_candidate_count": len(reviewCandidates),
+                    "sample_request_candidate_count": len(
+                        sampleRequestCandidates,
+                    ),
                     "ontology_query": ontologyQuery,
                     "ontology_context_chunk_count": len(
                         packagedContext.contextChunks,
@@ -779,13 +786,14 @@ class OntologySmokeRunner:
             evidencePackageData = requestResult["evidence_package"]
             requestLogger.info(
                 (
-                    "product={} domain={} candidates={} "
+                    "product={} domain={} candidates={} llm_review_candidates={} "
                     "response_format={} context_chunks={} ontology_chunks={} "
                     "evidence_records={}"
                 ),
                 requestResult["product_name"],
                 requestResult["product_domain"],
                 requestResult["candidate_count"],
+                requestResult["llm_review_candidate_count"],
                 requestData["response_format"],
                 requestData["context_chunk_count"],
                 requestResult["ontology_context_chunk_count"],
@@ -1706,29 +1714,117 @@ class OntologySmokeRunner:
                 runtimeConfig,
                 dependencyStatus=dependencyStatus,
             )
-            ontologyQuery = requestBuilder.BuildOntologyQuery(
+            candidateReviews: List[Dict[str, Any]] = []
+            notEnoughInformation: List[str] = []
+            responseSummaries: List[Dict[str, Any]] = []
+            validationIssues = []
+
+            for candidate in candidates:
+                reviewCandidates = [candidate]
+                ontologyQuery = requestBuilder.BuildOntologyQuery(
+                    productInput,
+                    reviewCandidates,
+                )
+                packagedContext = contextBuilder.BuildContext(
+                    query=ontologyQuery,
+                    phaseId=self._phaseId,
+                    topK=self._topK,
+                    maxResultCount=self._maxResultCount,
+                )
+                llmRequest = requestBuilder.BuildRequest(
+                    productInput=productInput,
+                    candidates=reviewCandidates,
+                    packagedContext=packagedContext,
+                    evidencePackage=evidencePackage,
+                )
+                llmResponse = adapter.Generate(llmRequest)
+                candidateValidationReport = validator.ValidateResponse(
+                    llmResponse,
+                    productInput,
+                    reviewCandidates,
+                    evidencePackage=evidencePackage,
+                )
+                if not candidateValidationReport.isValid:
+                    validationIssues.extend(candidateValidationReport.issues)
+
+                parsedResponse = candidateValidationReport.parsedResponse
+                classificationResult = (
+                    parsedResponse.get("classification_result")
+                    if isinstance(parsedResponse, dict)
+                    else {}
+                )
+                if not isinstance(classificationResult, dict):
+                    classificationResult = {}
+
+                candidateReviewData = classificationResult.get("candidate_reviews")
+                if isinstance(candidateReviewData, list):
+                    candidateReviews.extend(
+                        review
+                        for review in candidateReviewData
+                        if (
+                            isinstance(review, dict)
+                            and review.get("hs8") == candidate.hs8
+                        )
+                    )
+
+                missingData = classificationResult.get("not_enough_information")
+                if isinstance(missingData, list):
+                    notEnoughInformation.extend(
+                        item for item in missingData if isinstance(item, str)
+                    )
+
+                responseSummaries.append(
+                    {
+                        "candidate_hs8": candidate.hs8,
+                        "generated_text_length": len(llmResponse.generatedText),
+                        "generated_text_preview": self._BuildTextPreview(
+                            llmResponse.generatedText,
+                        ),
+                        "runtime_kind": llmResponse.runtimeKind.value,
+                        "model_name": llmResponse.modelName,
+                        "response_format": llmResponse.responseFormat.value,
+                        "finish_reason": llmResponse.finishReason.value,
+                        "provider_finish_reason": llmResponse.providerFinishReason,
+                        "token_usage": llmResponse.tokenUsage.model_dump(
+                            mode="json",
+                            by_alias=True,
+                        ),
+                        "limitations": list(llmResponse.limitations),
+                        "validation": candidateValidationReport.model_dump(
+                            mode="json",
+                            by_alias=True,
+                        ),
+                    }
+                )
+
+            combinedResponse = {
+                "classification_result": {
+                    "product_name": productInput.productName,
+                    "product_domain": productInput.productDomain,
+                    "domain_scopes": list(productInput.domainScopes),
+                    "candidate_reviews": candidateReviews,
+                    "not_enough_information": notEnoughInformation,
+                    "recommended_next_action": "prepare_human_review_package",
+                    "human_review_warning": (
+                        "This is a candidate review package for human review, "
+                        "not a final legal or customs determination."
+                    ),
+                }
+            }
+            combinedValidationReport = validator.ValidateText(
+                json.dumps(combinedResponse, ensure_ascii=False),
                 productInput,
                 candidates,
-            )
-            packagedContext = contextBuilder.BuildContext(
-                query=ontologyQuery,
-                phaseId=self._phaseId,
-                topK=self._topK,
-                maxResultCount=self._maxResultCount,
-            )
-            llmRequest = requestBuilder.BuildRequest(
-                productInput=productInput,
-                candidates=candidates,
-                packagedContext=packagedContext,
                 evidencePackage=evidencePackage,
-                maxCandidateCount=len(candidates),
             )
-            llmResponse = adapter.Generate(llmRequest)
-            validationReport = validator.ValidateResponse(
-                llmResponse,
-                productInput,
-                candidates,
-                evidencePackage=evidencePackage,
+            validationIssues.extend(combinedValidationReport.issues)
+            validationReport = Stage1ResponseValidationReport(
+                isValid=not any(
+                    issue.severity == "error"
+                    for issue in validationIssues
+                ),
+                parsedResponse=combinedValidationReport.parsedResponse,
+                issues=validationIssues,
             )
             decisionReport = Stage1DecisionPolicy().BuildDecision(
                 validationReport,
@@ -1781,24 +1877,59 @@ class OntologySmokeRunner:
                 "error": str(error),
             }
 
+        finishReasonSet = {
+            responseSummary["finish_reason"]
+            for responseSummary in responseSummaries
+        }
+        providerFinishReasonSet = {
+            responseSummary["provider_finish_reason"]
+            for responseSummary in responseSummaries
+        }
+        tokenUsage = {}
+        for tokenKey in ["input_tokens", "output_tokens", "total_tokens"]:
+            tokenValues = [
+                responseSummary["token_usage"].get(tokenKey)
+                for responseSummary in responseSummaries
+                if isinstance(responseSummary["token_usage"].get(tokenKey), int)
+            ]
+            tokenUsage[tokenKey] = sum(tokenValues) if tokenValues else None
+
         return {
             **baseResult,
             "status": "completed",
             "response": {
-                "generated_text_length": len(llmResponse.generatedText),
-                "generated_text_preview": self._BuildTextPreview(
-                    llmResponse.generatedText,
+                "reviewed_candidate_count": len(candidates),
+                "reviewed_candidate_hs8_codes": [
+                    candidate.hs8 for candidate in candidates
+                ],
+                "generated_response_count": len(responseSummaries),
+                "generated_text_length": sum(
+                    responseSummary["generated_text_length"]
+                    for responseSummary in responseSummaries
                 ),
-                "runtime_kind": llmResponse.runtimeKind.value,
-                "model_name": llmResponse.modelName,
-                "response_format": llmResponse.responseFormat.value,
-                "finish_reason": llmResponse.finishReason.value,
-                "provider_finish_reason": llmResponse.providerFinishReason,
-                "token_usage": llmResponse.tokenUsage.model_dump(
-                    mode="json",
-                    by_alias=True,
+                "runtime_kind": responseSummaries[0]["runtime_kind"],
+                "model_name": responseSummaries[0]["model_name"],
+                "response_format": responseSummaries[0]["response_format"],
+                "finish_reason": (
+                    next(iter(finishReasonSet))
+                    if len(finishReasonSet) == 1
+                    else "mixed"
                 ),
-                "limitations": list(llmResponse.limitations),
+                "provider_finish_reason": (
+                    next(iter(providerFinishReasonSet))
+                    if len(providerFinishReasonSet) == 1
+                    else "mixed"
+                ),
+                "finish_reasons": [
+                    responseSummary["finish_reason"]
+                    for responseSummary in responseSummaries
+                ],
+                "provider_finish_reasons": [
+                    responseSummary["provider_finish_reason"]
+                    for responseSummary in responseSummaries
+                ],
+                "token_usage": tokenUsage,
+                "candidate_responses": responseSummaries,
             },
             "validation": validationReport.model_dump(mode="json", by_alias=True),
             "decision": decisionReport.model_dump(mode="json", by_alias=True),

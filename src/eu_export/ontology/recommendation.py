@@ -212,6 +212,9 @@ class Stage1RecommendationReportBuilder:
                     "hard_conditions": candidate.hardConditions,
                 },
                 "combined_description": candidate.combinedDescription,
+                "candidate_context_text": candidate.candidateContextText,
+                "intermediate_branch_context": candidate.branchContext,
+                "cn_explanatory_note": candidate.cnExplanatoryNote,
             }
             record["candidate_scoring_detail"] = self._BuildCandidateScoringDetail(
                 candidate,

@@ -12,13 +12,6 @@ if str(SOURCE_ROOT_PATH) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT_PATH))
 
 from eu_export.ui.ontology_graph import (  # noqa: E402
-    DEFAULT_SUMMARY_PATH,
-    CandidateGraphEdge,
-    CandidateGraphLoader,
-    CandidateGraphNode,
-    CandidateGraphPipelineRunner,
-    CandidateGraphProduct,
-    CandidateGraphRunResult,
     RunOntologyGraphUi,
 )
 

@@ -25,7 +25,7 @@ from eu_export.bridge import (
     LlmResponseFormat,
 )
 from eu_export.product.ocr_normalization import (
-    PRODUCT_REFERENCE_PLACEHOLDER_KEYWORDS,
+    PRODUCT_REFERENCE_PLACEHOLDER_PATTERN,
     ProductOcrFactNormalizer,
     ProductOcrFactNormalizationResult,
 )
@@ -45,7 +45,9 @@ DEFAULT_STAGE1_PROMPT_EVIDENCE_TEXT_MAX_CHARACTERS = 600
 DEFAULT_STAGE1_PROMPT_COMMON_EVIDENCE_LIMIT = 6
 DEFAULT_STAGE1_PROMPT_CANDIDATE_EVIDENCE_LIMIT = 3
 DEFAULT_STAGE1_CLASSIFICATION_MAX_TOKENS = 4096
-DEFAULT_STAGE1_LLM_CANDIDATES_PER_REQUEST = 1
+CN_TABLE_RELATIVE_PATH = Path("data/processed/cn_table.csv")
+FOOD_DOMAIN_SCOPE_CHAPTERS = {"16", "17", "18", "19", "20", "21"}
+COSMETICS_DOMAIN_SCOPE_CHAPTERS = {"33"}
 TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣]+")
 STAGE1_PROMPT_COMMON_EVIDENCE_TYPE_PRIORITY = [
     "product_fact",
@@ -258,13 +260,18 @@ class ProductClassificationInput(BaseModel):
             if self.normalizedOcrFactTexts
             else self.ocrText
         )
+        noticeOptionNameParts = (
+            []
+            if self.productNoticeText.strip()
+            else self.noticeOptionNames
+        )
         rawParts = [
             self.productName or "",
             self.shortDescription or "",
             self.brandName or "",
             self.packageType or "",
             self.saleUnit or "",
-            *self.noticeOptionNames,
+            *noticeOptionNameParts,
             *self.noticeFieldTexts,
             self.productNoticeText,
             ocrSearchText,
@@ -295,6 +302,37 @@ class ProductClassificationInput(BaseModel):
     @property
     def searchTextLength(self) -> int:
         return len(self.BuildSearchText())
+
+
+class CnCandidatePromptPayload(BaseModel):
+    """LLM 후보 검토 요청에 포함할 CN 후보 카드 payload."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    hs8: str
+    hs6Code: Optional[str] = Field(default=None, alias="hs6_code")
+    domainScope: str = Field(alias="domain_scope")
+    score: float
+    codeHierarchy: Dict[str, Dict[str, Optional[str]]] = Field(
+        alias="code_hierarchy",
+    )
+    hierarchyPathText: str = Field(alias="hierarchy_path_text")
+    combinedDescription: str = Field(alias="combined_description")
+    intermediateBranchContext: str = Field(
+        default="",
+        alias="intermediate_branch_context",
+    )
+    candidateContextText: str = Field(default="", alias="candidate_context_text")
+    cn8LeafDescription: Optional[str] = Field(
+        default=None,
+        alias="cn8_leaf_description",
+    )
+    contextWarning: str = Field(alias="context_warning")
+    classificationRuleTexts: Dict[str, str] = Field(
+        alias="classification_rule_texts",
+    )
+    rankingEvidence: Dict[str, List[str]] = Field(alias="ranking_evidence")
+    cnExplanatoryNote: str = Field(default="", alias="cn_explanatory_note")
 
 
 class CnCandidate(BaseModel):
@@ -346,6 +384,15 @@ class CnCandidate(BaseModel):
         default=None,
         alias="hs8_description",
         exclude=True,
+    )
+    branchContext: str = Field(
+        default="",
+        alias="intermediate_branch_context",
+        exclude=True,
+    )
+    candidateContextText: str = Field(
+        default="",
+        alias="candidate_context_text",
     )
     combinedDescription: str = Field(default="", alias="combined_description")
     includeRuleKeywords: str = Field(
@@ -408,8 +455,10 @@ class CnCandidate(BaseModel):
         }
 
     def ToPromptDict(self) -> Dict[str, Any]:
-        candidateData = self.model_dump(mode="json", by_alias=True)
-        codeHierarchy = candidateData["code_hierarchy"]
+        return self.ToPromptPayload().model_dump(mode="json", by_alias=True)
+
+    def ToPromptPayload(self) -> CnCandidatePromptPayload:
+        codeHierarchy = self.codeHierarchy
         hierarchyPathParts: List[str] = []
         for level in ["hs2", "hs4", "hs6", "cn8"]:
             levelData = codeHierarchy.get(level)
@@ -421,24 +470,30 @@ class CnCandidate(BaseModel):
                 hierarchyPathParts.append("{0}: {1}".format(code, description))
             elif isinstance(code, str) and code.strip():
                 hierarchyPathParts.append(code)
-        return {
-            "hs8": self.hs8,
-            "hs6_code": self.hs6Code,
-            "domain_scope": self.domainScope,
-            "score": self.score,
-            "code_hierarchy": codeHierarchy,
-            "hierarchy_path_text": " > ".join(hierarchyPathParts),
-            "classification_rule_texts": candidateData[
-                "classification_rule_texts"
-            ],
-            "ranking_evidence": {
+        return CnCandidatePromptPayload(
+            hs8=self.hs8,
+            hs6Code=self.hs6Code,
+            domainScope=self.domainScope,
+            score=self.score,
+            codeHierarchy=codeHierarchy,
+            hierarchyPathText=" > ".join(hierarchyPathParts),
+            combinedDescription=self.combinedDescription,
+            intermediateBranchContext=self.branchContext,
+            candidateContextText=self.candidateContextText,
+            cn8LeafDescription=self.hs8Description,
+            contextWarning=(
+                "intermediate_branch_context is a variable-depth branch context "
+                "and is intentionally separated from hierarchy_path_text."
+            ),
+            classificationRuleTexts=self.classificationRuleTexts,
+            rankingEvidence={
                 "include_rule_matches": list(self.includeRuleMatches[:8]),
                 "search_keyword_matches": list(self.searchKeywordMatches[:8]),
                 "description_matches": list(self.descriptionMatches[:8]),
                 "exclude_rule_matches": list(self.excludeRuleMatches[:8]),
             },
-            "cn_explanatory_note": self.cnExplanatoryNote,
-        }
+            cnExplanatoryNote=self.cnExplanatoryNote,
+        )
 
 
 class Stage1EvidenceRecord(BaseModel):
@@ -1197,6 +1252,7 @@ class ProductClassificationInputNormalizer:
         noticeOptions = self._ReadMappingList(
             parsedProductPage.get("product_notice_options"),
         )
+        fallbackNoticeFields = [] if noticeOptions else noticeFields
         rawProductNoticeText = self._ReadString(
             parsedProductPage.get("raw_product_notice_text"),
         )
@@ -1204,7 +1260,7 @@ class ProductClassificationInputNormalizer:
             rawProductNoticeText
             if rawProductNoticeText is not None
             and not self._ContainsPlaceholderReference(rawProductNoticeText)
-            else self._BuildRawNoticeText(noticeFields, noticeOptions)
+            else self._BuildRawNoticeText(fallbackNoticeFields, noticeOptions)
         )
         noticeOptionNames = self._ReadStringList(
             parsedProductPage.get("product_notice_option_names"),
@@ -1242,7 +1298,7 @@ class ProductClassificationInputNormalizer:
             brandName=self._ReadString(parsedProductPage.get("brand_name")),
             packageType=self._ReadString(parsedProductPage.get("package_type")),
             saleUnit=self._ReadString(parsedProductPage.get("sale_unit")),
-            noticeFieldTexts=self._BuildNoticeFieldTexts(noticeFields),
+            noticeFieldTexts=self._BuildNoticeFieldTexts(fallbackNoticeFields),
             noticeOptionNames=noticeOptionNames,
             productNoticeText=productNoticeText,
             normalizedOcrFactTexts=normalizedOcrFactTexts,
@@ -1280,16 +1336,23 @@ class ProductClassificationInputNormalizer:
         noticeOptions: Sequence[Mapping[str, Any]],
     ) -> str:
         rawTexts: List[str] = []
+        seenRawTexts: Set[str] = set()
         for noticeOption in noticeOptions:
             rawText = self._ReadString(noticeOption.get("raw_text"))
             if rawText is not None and not self._ContainsPlaceholderReference(rawText):
-                rawTexts.append(rawText)
+                if rawText not in seenRawTexts:
+                    seenRawTexts.add(rawText)
+                    rawTexts.append(rawText)
                 continue
             optionName = self._ReadString(noticeOption.get("option_name"))
             optionFields = self._ReadMappingList(noticeOption.get("fields"))
             if optionName is not None:
                 rawTexts.append(optionName)
-            rawTexts.extend(self._BuildNoticeFieldTexts(optionFields))
+            for fieldText in self._BuildNoticeFieldTexts(optionFields):
+                if fieldText in seenRawTexts:
+                    continue
+                seenRawTexts.add(fieldText)
+                rawTexts.append(fieldText)
         if not rawTexts:
             rawTexts = [
                 rawText
@@ -1306,10 +1369,7 @@ class ProductClassificationInputNormalizer:
 
     def _ContainsPlaceholderReference(self, text: str) -> bool:
         normalizedText = NormalizeWhitespace(text).lower()
-        return any(
-            keyword.lower() in normalizedText
-            for keyword in PRODUCT_REFERENCE_PLACEHOLDER_KEYWORDS
-        )
+        return PRODUCT_REFERENCE_PLACEHOLDER_PATTERN.search(normalizedText) is not None
 
     def _ExtractNoticeOptionNames(
         self,
@@ -1462,8 +1522,8 @@ class CnCandidateRetriever:
         for domainScope in productInput.domainScopes:
             parentHs6Codes = parentHs6CodesByDomainScope.get(domainScope, set())
             for row in rowsByDomainScope.get(domainScope, []):
-                hs8 = row.get("hs8", "")
-                hs6 = row.get("hs6_code", "")
+                hs8 = row.get("cn", "") or row.get("hs8", "")
+                hs6 = row.get("subheading", "") or row.get("hs6_code", "")
                 if hs8 in excludedHs8CodeSet:
                     continue
                 if parentHs6Codes and hs6 not in parentHs6Codes:
@@ -1508,11 +1568,15 @@ class CnCandidateRetriever:
             searchText,
             searchTerms,
         )
+        candidateContextText = self._BuildCandidateContextText(row)
         descriptionMatches = self._FindTokenMatches(
             " ".join(
                 [
+                    candidateContextText,
                     row.get("combined_description", ""),
                     row.get("cn_explanatory_note", ""),
+                    row.get("cn_description", ""),
+                    row.get("branch_context", ""),
                     row.get("hs8_description", ""),
                 ]
             ),
@@ -1573,8 +1637,23 @@ class CnCandidateRetriever:
         descriptionMatches: Sequence[str],
         excludeRuleMatches: Sequence[str],
     ) -> CnCandidate:
+        cnCode = row.get("cn", "") or row.get("hs8", "")
+        chapterCode = row.get("chapter", "") or row.get("hs2_code") or None
+        headingCode = row.get("heading", "") or row.get("hs4_code") or None
+        subheadingCode = row.get("subheading", "") or row.get("hs6_code") or None
+        cnPart = row.get("cn_part", "")
+        subheadingDescription = row.get("subheading_description") or row.get(
+            "hs6_description",
+            "",
+        )
+        cnDescription = row.get("cn_description") or row.get("hs8_description", "")
+        if not subheadingDescription and cnPart == "00":
+            subheadingDescription = cnDescription
+        candidateContextText = self._BuildCandidateContextText(row)
+        combinedDescription = row.get("combined_description", "") or candidateContextText
+
         return CnCandidate(
-            hs8=row.get("hs8", ""),
+            hs8=cnCode,
             domainScope=domainScope,
             score=round(score, 3),
             matchedTerms=list(matchedTerms),
@@ -1583,15 +1662,21 @@ class CnCandidateRetriever:
             searchKeywordMatches=list(searchKeywordMatches),
             descriptionMatches=list(descriptionMatches),
             excludeRuleMatches=list(excludeRuleMatches),
-            hs2Code=row.get("hs2_code") or None,
-            hs2Description=row.get("hs2_description") or None,
-            hs4Code=row.get("hs4_code") or None,
-            hs4Description=row.get("hs4_description") or None,
-            hs6Code=row.get("hs6_code") or None,
-            hs6Description=row.get("hs6_description") or None,
-            hs8Code=row.get("hs8_code") or row.get("hs8") or None,
-            hs8Description=row.get("hs8_description") or None,
-            combinedDescription=row.get("combined_description", ""),
+            hs2Code=chapterCode,
+            hs2Description=row.get("chapter_description")
+            or row.get("hs2_description")
+            or None,
+            hs4Code=headingCode,
+            hs4Description=row.get("heading_description")
+            or row.get("hs4_description")
+            or None,
+            hs6Code=subheadingCode,
+            hs6Description=subheadingDescription or None,
+            hs8Code=cnCode or None,
+            hs8Description=cnDescription or None,
+            branchContext=row.get("branch_context", ""),
+            candidateContextText=candidateContextText,
+            combinedDescription=combinedDescription,
             includeRuleKeywords=row.get("include_rule_keywords", ""),
             excludeRuleKeywords=row.get("exclude_rule_keywords", ""),
             hardConditions=row.get("hard_conditions", ""),
@@ -1604,6 +1689,11 @@ class CnCandidateRetriever:
             return self._rowsByDomainScope
 
         rowsByDomainScope: Dict[str, List[Dict[str, str]]] = {}
+        cnTablePath = self._ResolvePath(str(CN_TABLE_RELATIVE_PATH))
+        if cnTablePath is not None:
+            self._rowsByDomainScope = self._ReadCnTableRowsByDomainScope(cnTablePath)
+            return self._rowsByDomainScope
+
         leafCardDocument = self._FindLeafCardDocument()
         if leafCardDocument is None:
             self._rowsByDomainScope = rowsByDomainScope
@@ -1663,6 +1753,70 @@ class CnCandidateRetriever:
                 dict(row)
                 for row in csv.DictReader(csvFile)
             ]
+
+    def _ReadCnTableRowsByDomainScope(
+        self,
+        csvPath: Path,
+    ) -> Dict[str, List[Dict[str, str]]]:
+        rowsByDomainScope = {
+            FOOD_DOMAIN_SCOPE: [],
+            COSMETICS_DOMAIN_SCOPE: [],
+        }
+        for row in self._ReadCsvRows(csvPath):
+            chapter = row.get("chapter", "").zfill(2)
+            if chapter in FOOD_DOMAIN_SCOPE_CHAPTERS:
+                rowsByDomainScope[FOOD_DOMAIN_SCOPE].append(row)
+            if chapter in COSMETICS_DOMAIN_SCOPE_CHAPTERS:
+                rowsByDomainScope[COSMETICS_DOMAIN_SCOPE].append(row)
+        return rowsByDomainScope
+
+    def _BuildCandidateContextText(self, row: Mapping[str, str]) -> str:
+        subheadingDescription = row.get("subheading_description") or row.get(
+            "hs6_description",
+            "",
+        )
+        if not subheadingDescription and row.get("cn_part", "") == "00":
+            subheadingDescription = row.get("cn_description", "")
+        parts = [
+            (
+                "chapter",
+                row.get("chapter", "") or row.get("hs2_code", ""),
+                row.get("chapter_description", "") or row.get("hs2_description", ""),
+            ),
+            (
+                "heading",
+                row.get("heading", "") or row.get("hs4_code", ""),
+                row.get("heading_description", "") or row.get("hs4_description", ""),
+            ),
+            (
+                "subheading",
+                row.get("subheading", "") or row.get("hs6_code", ""),
+                subheadingDescription,
+            ),
+            ("branch_context", "", row.get("branch_context", "")),
+            (
+                "cn_description",
+                row.get("cn", "") or row.get("hs8", ""),
+                row.get("cn_description", "") or row.get("hs8_description", ""),
+            ),
+        ]
+        contextLines = []
+        for label, code, description in parts:
+            normalizedCode = NormalizeWhitespace(code)
+            normalizedDescription = NormalizeWhitespace(description)
+            if not normalizedCode and not normalizedDescription:
+                continue
+            if normalizedCode and normalizedDescription:
+                contextLines.append(
+                    "{0}: {1} - {2}".format(
+                        label,
+                        normalizedCode,
+                        normalizedDescription,
+                    )
+                )
+                continue
+            contextLines.append("{0}: {1}".format(label, normalizedDescription))
+        return NormalizeWhitespacePreservingLines("\n".join(contextLines))
 
     def _BuildExpandedSearchTerms(self, searchText: str) -> Set[str]:
         terms = set(self._ExtractTerms(searchText))
@@ -1730,10 +1884,8 @@ class Stage1RequestBuilder:
     def __init__(
         self,
         systemPrompt: str = STAGE1_CLASSIFICATION_SYSTEM_PROMPT,
-        maxCandidatesPerRequest: int = DEFAULT_STAGE1_LLM_CANDIDATES_PER_REQUEST,
     ) -> None:
         self.systemPrompt = systemPrompt.strip()
-        self.maxCandidatesPerRequest = max(1, maxCandidatesPerRequest)
 
     def BuildRequest(
         self,
@@ -1742,11 +1894,8 @@ class Stage1RequestBuilder:
         packagedContext: PackagedOntologyContext,
         evidencePackage: Optional[Stage1EvidencePackage] = None,
         userPrompt: Optional[str] = None,
-        maxCandidateCount: int = DEFAULT_CN_CANDIDATE_TOP_K,
     ) -> LlmRequest:
-        promptCandidates = candidates[
-            : min(maxCandidateCount, self.maxCandidatesPerRequest)
-        ]
+        promptCandidates = list(candidates)
         if not promptCandidates:
             raise ValueError(
                 (
@@ -1782,28 +1931,6 @@ class Stage1RequestBuilder:
                 maxTokens=DEFAULT_STAGE1_CLASSIFICATION_MAX_TOKENS,
             ),
         )
-
-    def BuildCandidateReviewRequests(
-        self,
-        productInput: ProductClassificationInput,
-        candidates: Sequence[CnCandidate],
-        packagedContext: PackagedOntologyContext,
-        evidencePackage: Optional[Stage1EvidencePackage] = None,
-        userPrompt: Optional[str] = None,
-        maxCandidateCount: int = DEFAULT_CN_CANDIDATE_TOP_K,
-    ) -> List[LlmRequest]:
-        promptCandidates = candidates[:maxCandidateCount]
-        return [
-            self.BuildRequest(
-                productInput=productInput,
-                candidates=[candidate],
-                packagedContext=packagedContext,
-                evidencePackage=evidencePackage,
-                userPrompt=userPrompt,
-                maxCandidateCount=1,
-            )
-            for candidate in promptCandidates
-        ]
 
     def BuildOntologyQuery(
         self,

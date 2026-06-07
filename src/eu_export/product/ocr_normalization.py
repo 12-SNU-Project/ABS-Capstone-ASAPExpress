@@ -113,6 +113,47 @@ PRODUCT_REFERENCE_PLACEHOLDER_KEYWORDS = [
     "상세이미지 참조",
     "상세 이미지 참조",
 ]
+OCR_FACT_LABEL_MATCHERS = tuple(
+    (
+        fieldLabel,
+        NormalizeWhitespace(fieldLabel).lower(),
+        NormalizeWhitespace(fieldLabel).lower().replace(" ", ""),
+    )
+    for fieldLabel in sorted(
+        OCR_FACT_LABEL_KEYWORDS,
+        key=lambda label: len(NormalizeWhitespace(label)),
+        reverse=True,
+    )
+)
+OCR_MARKETING_KEYWORD_PATTERN = re.compile(
+    "|".join(re.escape(keyword.lower()) for keyword in OCR_MARKETING_KEYWORDS),
+)
+OCR_FIELD_VALUE_NOISE_PATTERN = re.compile(
+    "|".join(re.escape(keyword.lower()) for keyword in OCR_FIELD_VALUE_NOISE_KEYWORDS),
+)
+OCR_OBSERVED_QUANTITY_NOISE_PATTERN = re.compile(
+    "|".join(
+        re.escape(keyword.lower())
+        for keyword in [
+            *OCR_MARKETING_KEYWORDS,
+            *OCR_FIELD_VALUE_NOISE_KEYWORDS,
+            *OCR_OBSERVED_QUANTITY_EXCLUDED_KEYWORDS,
+        ]
+    ),
+)
+OCR_FIELD_TEXT_CUT_PATTERN = re.compile(
+    "|".join(re.escape(keyword.lower()) for keyword in OCR_FIELD_TEXT_CUT_KEYWORDS),
+)
+PRODUCT_REFERENCE_PLACEHOLDER_PATTERN = re.compile(
+    "|".join(
+        re.escape(keyword.lower())
+        for keyword in PRODUCT_REFERENCE_PLACEHOLDER_KEYWORDS
+    ),
+)
+OCR_PERCENT_VALUE_PATTERN = re.compile(r"\d+(?:[.,]\d+)?\s*%")
+OCR_KOREAN_TEXT_PATTERN = re.compile(r"[가-힣]")
+OCR_MEANINGFUL_LATIN_TEXT_PATTERN = re.compile(r"[A-Za-z]{4,}")
+OCR_NUMBER_SYMBOL_ONLY_PATTERN = re.compile(r"[0-9\s.,:/|()%-]+")
 
 
 class ProductOcrFactNormalizationResult(BaseModel):
@@ -205,29 +246,30 @@ class ProductOcrFactNormalizer:
 
     def _FindFieldLabel(self, normalizedLine: str) -> Optional[str]:
         normalizedLine = normalizedLine.strip(" :：·-*[]()")
-        for fieldLabel in OCR_FACT_LABEL_KEYWORDS:
-            normalizedFieldLabel = NormalizeWhitespace(fieldLabel).lower()
+        compactLine = normalizedLine.replace(" ", "")
+        for (
+            fieldLabel,
+            normalizedFieldLabel,
+            compactFieldLabel,
+        ) in OCR_FACT_LABEL_MATCHERS:
             if normalizedLine.startswith(normalizedFieldLabel):
                 return fieldLabel
-            if normalizedLine.startswith(normalizedFieldLabel.replace(" ", "")):
+            if compactLine.startswith(compactFieldLabel):
                 return fieldLabel
         return None
 
     def _ShouldCaptureFieldValueLine(self, normalizedLine: str) -> bool:
         if normalizedLine == "":
             return False
-        if any(keyword.lower() in normalizedLine for keyword in OCR_MARKETING_KEYWORDS):
+        if OCR_MARKETING_KEYWORD_PATTERN.search(normalizedLine) is not None:
             return False
-        if any(
-            keyword.lower() in normalizedLine
-            for keyword in OCR_FIELD_VALUE_NOISE_KEYWORDS
-        ):
+        if OCR_FIELD_VALUE_NOISE_PATTERN.search(normalizedLine) is not None:
             return False
         if self._FindFieldLabel(normalizedLine) is not None:
             return False
         if normalizedLine in {"other", "haccp"}:
             return False
-        if re.fullmatch(r"[0-9\s.,:/|()%-]+", normalizedLine) is not None:
+        if OCR_NUMBER_SYMBOL_ONLY_PATTERN.fullmatch(normalizedLine) is not None:
             return False
         if len(normalizedLine) <= 2:
             return False
@@ -258,23 +300,21 @@ class ProductOcrFactNormalizer:
     def _BuildObservedQuantityFact(self, line: str) -> Optional[str]:
         normalizedLine = NormalizeWhitespace(line)
         normalizedLowerLine = normalizedLine.lower()
-        if any(
-            keyword.lower() in normalizedLowerLine
-            for keyword in [
-                *OCR_MARKETING_KEYWORDS,
-                *OCR_FIELD_VALUE_NOISE_KEYWORDS,
-                *OCR_OBSERVED_QUANTITY_EXCLUDED_KEYWORDS,
-            ]
+        if (
+            OCR_OBSERVED_QUANTITY_NOISE_PATTERN.search(normalizedLowerLine)
+            is not None
         ):
             return None
         if "%" not in normalizedLine:
             return None
         if len(normalizedLine) > 140:
             return None
-        if re.search(r"\d+(?:[.,]\d+)?\s*%", normalizedLine) is None:
+        if OCR_PERCENT_VALUE_PATTERN.search(normalizedLine) is None:
             return None
-        hasKoreanText = re.search(r"[가-힣]", normalizedLine) is not None
-        hasMeaningfulLatinText = re.search(r"[A-Za-z]{4,}", normalizedLine) is not None
+        hasKoreanText = OCR_KOREAN_TEXT_PATTERN.search(normalizedLine) is not None
+        hasMeaningfulLatinText = (
+            OCR_MEANINGFUL_LATIN_TEXT_PATTERN.search(normalizedLine) is not None
+        )
         if not hasKoreanText and not hasMeaningfulLatinText:
             return None
         return "OCR 관찰 함량/용량 후보: {0}".format(normalizedLine)
@@ -282,22 +322,14 @@ class ProductOcrFactNormalizer:
     def _TrimFieldNoiseFromLine(self, line: str) -> str:
         trimmedLine = NormalizeWhitespace(line)
         normalizedLine = trimmedLine.lower()
-        cutPositions = [
-            normalizedLine.find(keyword.lower())
-            for keyword in OCR_FIELD_TEXT_CUT_KEYWORDS
-            if keyword.lower() in normalizedLine
-        ]
         positiveCutPositions = [
-            cutPosition
-            for cutPosition in cutPositions
-            if cutPosition > 0
+            match.start()
+            for match in OCR_FIELD_TEXT_CUT_PATTERN.finditer(normalizedLine)
+            if match.start() > 0
         ]
         if not positiveCutPositions:
             return trimmedLine
         return trimmedLine[: min(positiveCutPositions)].rstrip(" ,.;:/|·-")
 
     def _ContainsPlaceholderReference(self, normalizedText: str) -> bool:
-        return any(
-            keyword.lower() in normalizedText
-            for keyword in PRODUCT_REFERENCE_PLACEHOLDER_KEYWORDS
-        )
+        return PRODUCT_REFERENCE_PLACEHOLDER_PATTERN.search(normalizedText) is not None

@@ -144,6 +144,13 @@ class KurlyMarketSmokeRunner:
         ocrImageResults = pipelineResultData.get("ocr_image_results", [])
         combinedOcrText = pipelineResultData["combined_ocr_text"]
         requiresOcrFallback = parsedProductPage["requires_ocr_fallback"]
+        productNoticeFieldCount = parsedProductPage.get(
+            "product_notice_field_count",
+        )
+        if not isinstance(productNoticeFieldCount, int):
+            productNoticeFieldCount = self._CountNoticeOptionFields(
+                parsedProductPage.get("product_notice_options", []),
+            )
 
         successfulOcrResults = [
             imageResult
@@ -185,12 +192,9 @@ class KurlyMarketSmokeRunner:
             },
             "notice": {
                 "line_count": collectionResult["product_notice_text_line_count"],
-                "field_count": len(parsedProductPage["product_notice_fields"]),
                 "option_count": len(parsedProductPage["product_notice_options"]),
+                "field_count": productNoticeFieldCount,
                 "option_names": parsedProductPage["product_notice_option_names"],
-                "fields_preview": self._BuildFieldPreview(
-                    parsedProductPage["product_notice_fields"],
-                ),
                 "options_preview": self._BuildOptionPreview(
                     parsedProductPage["product_notice_options"],
                 ),
@@ -235,15 +239,14 @@ class KurlyMarketSmokeRunner:
             "errors": pipelineResultData["errors"],
         }
 
+    @staticmethod
     def _IsParseOk(
-        self,
-        collectionResult: Dict[str, Any],
+            collectionResult: Dict[str, Any],
         parsedProductPage: Dict[str, Any],
     ) -> bool:
         return (
             parsedProductPage["product_name"] is not None
             and collectionResult["product_notice_text_line_count"] > 0
-            and len(parsedProductPage["product_notice_fields"]) > 0
         )
 
     def _LogOne(self, resultData: Dict[str, Any]) -> None:
@@ -329,7 +332,7 @@ class KurlyMarketSmokeRunner:
 
     def _LogNoticeFields(self, resultData: Dict[str, Any]) -> None:
         noticeLogger = self._Logger("_LogNoticeFields")
-        for fieldRecord in resultData["notice"]["fields_preview"]:
+        for fieldRecord in resultData["notice"].get("fields_preview", []):
             noticeLogger.info(
                 "notice_field name={} value={} requires_ocr_fallback={}",
                 fieldRecord["field_name"],
@@ -410,7 +413,8 @@ class KurlyMarketSmokeRunner:
             self._summaryArtifactPath,
         )
 
-    def _BuildTextPreview(self, text: Any, maxCharacters: int) -> Any:
+    @staticmethod
+    def _BuildTextPreview(text: Any, maxCharacters: int) -> Any:
         if not isinstance(text, str):
             return text
         if len(text) <= maxCharacters:
@@ -450,6 +454,26 @@ class KurlyMarketSmokeRunner:
             )
         return optionPreview
 
+    @staticmethod
+    def _CountNoticeOptionFields(
+        noticeOptions: List[Dict[str, Any]],
+    ) -> int:
+        seenFieldKeys = set()
+        for noticeOption in noticeOptions:
+            fields = noticeOption.get("fields", [])
+            if not isinstance(fields, list):
+                continue
+            for fieldRecord in fields:
+                if not isinstance(fieldRecord, dict):
+                    continue
+                seenFieldKeys.add(
+                    (
+                        fieldRecord.get("field_name"),
+                        fieldRecord.get("field_value"),
+                    )
+                )
+        return len(seenFieldKeys)
+
     def _BuildFieldRecordPreview(
         self,
         fieldRecord: Dict[str, Any],
@@ -463,9 +487,9 @@ class KurlyMarketSmokeRunner:
             "requires_ocr_fallback": fieldRecord["requires_ocr_fallback"],
         }
 
+    @staticmethod
     def _BuildOcrImageArtifacts(
-        self,
-        ocrImageResults: List[Dict[str, Any]],
+            ocrImageResults: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         return [
             {
@@ -477,7 +501,8 @@ class KurlyMarketSmokeRunner:
             for imageIndex, imageResult in enumerate(ocrImageResults, start=1)
         ]
 
-    def _ConfigureLogger(self) -> None:
+    @staticmethod
+    def _ConfigureLogger() -> None:
         logger.remove()
         logger.level("INFO", color="<green>")
         logger.level("WARNING", color="<yellow>")

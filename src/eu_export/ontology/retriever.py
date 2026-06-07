@@ -150,9 +150,9 @@ class OntologyRetriever:
             )
         return chunks
 
+    @staticmethod
     def _BuildChunk(
-        self,
-        document: OntologyDocument,
+            document: OntologyDocument,
         headingPath: Sequence[str],
         text: str,
         chunkKind: str,
@@ -170,7 +170,7 @@ class OntologyRetriever:
             relativePath=document.relativePath,
             text=text,
             headingPath=list(headingPath),
-            tokenEstimate=self._EstimateTokenCount(text),
+            tokenEstimate=max(1, len(text) // 4),
             metadata={
                 "document_title": document.title,
                 "doc_type": document.frontmatter.get("doc_type"),
@@ -181,11 +181,12 @@ class OntologyRetriever:
             },
         )
 
+    @staticmethod
     def _BuildFrontmatterSummaryText(
-        self,
-        document: OntologyDocument,
-        pathBucket: str,
+            document: OntologyDocument,
+            pathBucket: str,
     ) -> str:
+
         if not document.frontmatter:
             return ""
 
@@ -202,7 +203,8 @@ class OntologyRetriever:
             ],
         )
 
-    def _ReadPathBucket(self, relativePath: str) -> str:
+    @staticmethod
+    def _ReadPathBucket(relativePath: str) -> str:
         normalizedPath = relativePath.replace("\\", "/")
         if normalizedPath == "README.md":
             return "root_index"
@@ -216,10 +218,9 @@ class OntologyRetriever:
             return "schema"
         return "supporting_document"
 
-    def _SplitMarkdownSections(
-        self,
-        document: OntologyDocument,
-    ) -> List[Tuple[List[str], str]]:
+    @staticmethod
+    def _SplitMarkdownSections(document: OntologyDocument) -> List[Tuple[List[str], str]]:
+
         if not document.content:
             return [([document.title or document.documentId], "")]
 
@@ -327,7 +328,8 @@ class OntologyRetriever:
 
         return score, matchedTerms
 
-    def _ExtractTerms(self, query: str) -> List[str]:
+    @staticmethod
+    def _ExtractTerms(query: str) -> List[str]:
         terms: List[str] = []
         for match in TOKEN_PATTERN.finditer(query.lower()):
             term = match.group(0).strip()
@@ -338,10 +340,9 @@ class OntologyRetriever:
             terms.append(term)
         return sorted(set(terms))
 
-    def _EstimateTokenCount(self, text: str) -> int:
-        return max(1, len(text) // 4)
 
-    def _ReadAuthorityRank(self, value: Any) -> float | None:
+    @staticmethod
+    def _ReadAuthorityRank(value: Any) -> float | None:
         if isinstance(value, bool):
             return None
         if isinstance(value, (float, int)):

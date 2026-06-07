@@ -58,6 +58,7 @@ class KurlyProductPage(BaseModel):
     productNoticeFields: List[ProductNoticeField] = Field(
         default_factory=list,
         alias="product_notice_fields",
+        exclude=True,
     )
     productNoticeOptions: List[ProductNoticeOption] = Field(
         default_factory=list,
@@ -82,6 +83,16 @@ class KurlyProductPage(BaseModel):
     @property
     def rawProductNoticeTextLength(self) -> int:
         return len(self.rawProductNoticeText)
+
+    @computed_field(alias="product_notice_field_count")
+    @property
+    def productNoticeFieldCount(self) -> int:
+        return len(self.productNoticeFields)
+
+    @computed_field(alias="product_notice_option_count")
+    @property
+    def productNoticeOptionCount(self) -> int:
+        return len(self.productNoticeOptions)
 
 
 class KurlyCollectionResult(BaseModel):
