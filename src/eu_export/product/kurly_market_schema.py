@@ -130,6 +130,16 @@ class KurlyCollectionResult(BaseModel):
         return len(self.ocrCandidateImageUrls)
 
 
+class ProductSummaryEvidence(BaseModel):
+    """상품 상단 영역에서 직접 읽은 요약 정보."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    productName: Optional[str] = Field(default=None, alias="product_name")
+    shortDescription: Optional[str] = Field(default=None, alias="short_description")
+    brandName: Optional[str] = Field(default=None, alias="brand_name")
+
+
 class RenderedPageEvidence(BaseModel):
     """Playwright 렌더링 이후 parser에 넘길 원천 증거."""
 
@@ -140,6 +150,11 @@ class RenderedPageEvidence(BaseModel):
     productNoticeText: str = Field(
         default="",
         alias="product_notice_text",
+        exclude=True,
+    )
+    productSummaryEvidence: ProductSummaryEvidence = Field(
+        default_factory=ProductSummaryEvidence,
+        alias="product_summary_evidence",
         exclude=True,
     )
     productDetailImageUrls: List[str] = Field(

@@ -9,13 +9,15 @@ from eu_export.utils import NormalizeWhitespace, NormalizeWhitespacePreservingLi
 
 
 OCR_FACT_LABEL_KEYWORDS = [
+    "원료명",
+    "원재료명",
     "원재료",
     "성분",
     "전성분",
     "ingredients",
-    "함유",
     "함량",
     "영양성분",
+    "영양정보",
     "식품의 유형",
     "식품유형",
     "제품명",
@@ -32,6 +34,9 @@ OCR_FACT_LABEL_KEYWORDS = [
     "소비기한",
     "유통기한",
     "품질유지기한",
+    "포장재질",
+    "품목보고번호",
+    "유통전문판매원",
     "주의사항",
     "사용방법",
     "기능성",
@@ -39,6 +44,25 @@ OCR_FACT_LABEL_KEYWORDS = [
     "inci",
 ]
 OCR_FIELD_CAPTURE_FOLLOWING_LINE_LIMIT = 4
+OCR_INGREDIENT_FIELD_LABELS = {
+    "원료명",
+    "원재료명",
+    "원재료",
+    "성분",
+    "전성분",
+    "ingredients",
+    "inci",
+}
+OCR_NUTRITION_FIELD_LABELS = {
+    "영양성분",
+    "영양정보",
+}
+OCR_INGREDIENT_CAPTURE_WEAK_INTERRUPT_LABELS = {
+    "보관",
+    "주의사항",
+}
+OCR_LONG_FIELD_CAPTURE_FOLLOWING_LINE_LIMIT = 36
+OCR_NUTRITION_FIELD_CAPTURE_FOLLOWING_LINE_LIMIT = 12
 OCR_MARKETING_KEYWORDS = [
     "멤버십",
     "적립",
@@ -72,6 +96,18 @@ OCR_FIELD_VALUE_NOISE_KEYWORDS = [
     "인스타그램",
     "qr",
     "바코드",
+    "피해 보상",
+    "불량식품 신고",
+    "국번없이",
+    "고객상담실",
+    "혼입가능",
+    "혼입 가능",
+    "조리시 안전사고",
+    "안전관리인증",
+    "나트륨항량",
+    "평균함량",
+    "1일섭취",
+    "수신자요금부담",
 ]
 OCR_OBSERVED_QUANTITY_EXCLUDED_KEYWORDS = [
     "영양정보",
@@ -154,6 +190,9 @@ OCR_PERCENT_VALUE_PATTERN = re.compile(r"\d+(?:[.,]\d+)?\s*%")
 OCR_KOREAN_TEXT_PATTERN = re.compile(r"[가-힣]")
 OCR_MEANINGFUL_LATIN_TEXT_PATTERN = re.compile(r"[A-Za-z]{4,}")
 OCR_NUMBER_SYMBOL_ONLY_PATTERN = re.compile(r"[0-9\s.,:/|()%-]+")
+OCR_NUMBER_UNIT_ONLY_PATTERN = re.compile(
+    r"[0-9\s.,:/|()%-]+(?:mg|g|kg|ml|l|kcal|mc)+[0-9\s.,:/|()%-]*",
+)
 
 
 class ProductOcrFactNormalizationResult(BaseModel):
@@ -210,9 +249,12 @@ class ProductOcrFactNormalizer:
             fieldLines = [line]
             index += 1
             capturedFollowingLineCount = 0
+            captureFollowingLineLimit = self._ReadFieldCaptureFollowingLineLimit(
+                fieldLabel,
+            )
             while (
                 index < len(lines)
-                and capturedFollowingLineCount < OCR_FIELD_CAPTURE_FOLLOWING_LINE_LIMIT
+                and capturedFollowingLineCount < captureFollowingLineLimit
             ):
                 nextLine = lines[index]
                 normalizedNextLine = nextLine.lower()
@@ -220,7 +262,32 @@ class ProductOcrFactNormalizer:
                     excludedTexts.append(nextLine)
                     index += 1
                     continue
-                if self._FindFieldLabel(normalizedNextLine) is not None:
+                nextFieldLabel = self._FindFieldLabel(normalizedNextLine)
+                if nextFieldLabel is not None:
+                    if (
+                        fieldLabel in OCR_INGREDIENT_FIELD_LABELS
+                        and nextFieldLabel in OCR_INGREDIENT_CAPTURE_WEAK_INTERRUPT_LABELS
+                    ):
+                        normalizedNextFieldLabel = NormalizeWhitespace(
+                            nextFieldLabel,
+                        ).lower()
+                        hasMergedValueText = (
+                            len(normalizedNextLine.strip(" :：·-*[]()"))
+                            > len(normalizedNextFieldLabel) + 4
+                        )
+                        if (
+                            hasMergedValueText
+                            and OCR_FIELD_VALUE_NOISE_PATTERN.search(
+                                normalizedNextLine,
+                            )
+                            is None
+                        ):
+                            fieldLines.append(nextLine)
+                            capturedFollowingLineCount += 1
+                        else:
+                            excludedTexts.append(nextLine)
+                        index += 1
+                        continue
                     break
                 if self._ShouldCaptureFieldValueLine(normalizedNextLine):
                     fieldLines.append(nextLine)
@@ -271,9 +338,18 @@ class ProductOcrFactNormalizer:
             return False
         if OCR_NUMBER_SYMBOL_ONLY_PATTERN.fullmatch(normalizedLine) is not None:
             return False
+        if OCR_NUMBER_UNIT_ONLY_PATTERN.fullmatch(normalizedLine) is not None:
+            return False
         if len(normalizedLine) <= 2:
             return False
         return True
+
+    def _ReadFieldCaptureFollowingLineLimit(self, fieldLabel: str) -> int:
+        if fieldLabel in OCR_INGREDIENT_FIELD_LABELS:
+            return OCR_LONG_FIELD_CAPTURE_FOLLOWING_LINE_LIMIT
+        if fieldLabel in OCR_NUTRITION_FIELD_LABELS:
+            return OCR_NUTRITION_FIELD_CAPTURE_FOLLOWING_LINE_LIMIT
+        return OCR_FIELD_CAPTURE_FOLLOWING_LINE_LIMIT
 
     def _BuildFieldFactText(
         self,

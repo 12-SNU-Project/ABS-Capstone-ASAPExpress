@@ -6,6 +6,7 @@ from urllib.parse import urljoin, urlparse
 from eu_export.product.kurly_market_schema import (
     KurlyCollectionResult,
     KurlyProductPage,
+    ProductSummaryEvidence,
     RenderedPageEvidence,
 )
 
@@ -121,6 +122,9 @@ class KurlyPageCollector:
                         )
                         self._ScrollUntilProductNoticeLoaded(page)
                         visibleText = self._ReadVisibleText(page)
+                        productSummaryEvidence = self._ReadProductSummaryEvidence(
+                            page,
+                        )
                         productNoticeText = self._ReadProductNoticeText(page)
                         productDetailImageUrls = self._ReadProductDetailImageUrls(
                             page,
@@ -137,6 +141,7 @@ class KurlyPageCollector:
         return RenderedPageEvidence(
             productPageUrl=productPageUrl,
             visibleText=visibleText,
+            productSummaryEvidence=productSummaryEvidence,
             productNoticeText=productNoticeText,
             productDetailImageUrls=productDetailImageUrls,
         )
@@ -155,6 +160,10 @@ class KurlyPageCollector:
             textLines=textLines,
             productNoticeLines=productNoticeLines,
             productPageUrl=renderedPageEvidence.productPageUrl,
+        )
+        parsedProductPage = self._ApplyProductSummaryEvidence(
+            parsedProductPage,
+            renderedPageEvidence.productSummaryEvidence,
         )
         ocrCandidateImageUrls = self._BuildOcrCandidateImageUrls(
             parsedProductPage,
@@ -217,6 +226,125 @@ class KurlyPageCollector:
         if not isinstance(value, str):
             return ""
         return value
+
+    def _ReadProductSummaryEvidence(self, page: Any) -> ProductSummaryEvidence:
+        try:
+            value = page.evaluate(
+                """
+                () => {
+                    const normalize = (text) => (
+                        text || ""
+                    ).replace(/\\s+/g, " ").trim();
+                    const lines = (
+                        document.body.innerText || ""
+                    ).split("\\n").map(normalize).filter(Boolean);
+                    const isPriceLike = (text) => (
+                        /^\\d[\\d,]*\\s*원~?$/.test(text)
+                        || /^\\d+%$/.test(text)
+                    );
+                    const isSectionHeading = (text) => (
+                        text === "상품고시정보"
+                        || text === "WHY KURLY"
+                        || text.startsWith("상품 후기")
+                        || text.startsWith("상품 문의")
+                    );
+                    const headings = Array.from(
+                        document.querySelectorAll("h1,h2,h3,[role='heading']")
+                    ).map((element) => normalize(
+                        element.innerText || element.textContent || ""
+                    )).filter(Boolean);
+                    const productName = headings.find((text) => (
+                        !isPriceLike(text) && !isSectionHeading(text)
+                    )) || "";
+                    const productLineIndex = lines.findIndex(
+                        (line) => line === productName
+                    );
+                    const summaryFieldLabels = new Set([
+                        "원산지",
+                        "배송",
+                        "판매자",
+                        "포장타입",
+                        "판매단위",
+                        "중량/용량",
+                        "알레르기정보",
+                        "상품선택"
+                    ]);
+                    const readShortDescription = () => {
+                        if (productLineIndex < 0) {
+                            return "";
+                        }
+                        const candidate = lines[productLineIndex + 1] || "";
+                        if (!candidate || isPriceLike(candidate)) {
+                            return "";
+                        }
+                        if (candidate.includes(":")) {
+                            return "";
+                        }
+                        if (summaryFieldLabels.has(candidate)) {
+                            return "";
+                        }
+                        return candidate;
+                    };
+                    const readBrandName = () => {
+                        const brandMatch = productName.match(/^\\[([^\\]]+)\\]/);
+                        if (brandMatch) {
+                            return brandMatch[1].trim();
+                        }
+                        if (productLineIndex < 0) {
+                            return "";
+                        }
+                        for (let index = productLineIndex - 1; index >= 0; index -= 1) {
+                            const line = lines[index];
+                            if (!line || isPriceLike(line)) {
+                                continue;
+                            }
+                            if (
+                                /^\\d+$/.test(line)
+                                || line.includes("후기")
+                                || line.includes("재구매")
+                                || line.includes("샛별배송")
+                                || line.includes("Kurly")
+                                || line === "단독"
+                                || line === "카테고리"
+                            ) {
+                                continue;
+                            }
+                            if (line.length > 30) {
+                                continue;
+                            }
+                            return line;
+                        }
+                        return "";
+                    };
+                    return {
+                        product_name: productName,
+                        short_description: readShortDescription(),
+                        brand_name: readBrandName()
+                    };
+                }
+                """
+            )
+        except Exception:
+            return ProductSummaryEvidence()
+        if not isinstance(value, dict):
+            return ProductSummaryEvidence()
+        return ProductSummaryEvidence.model_validate(value)
+
+    def _ApplyProductSummaryEvidence(
+        self,
+        parsedProductPage: KurlyProductPage,
+        productSummaryEvidence: ProductSummaryEvidence,
+    ) -> KurlyProductPage:
+        updates = {}
+        if productSummaryEvidence.productName:
+            updates["productName"] = productSummaryEvidence.productName
+        if productSummaryEvidence.shortDescription:
+            updates["shortDescription"] = productSummaryEvidence.shortDescription
+        if productSummaryEvidence.brandName:
+            updates["brandName"] = productSummaryEvidence.brandName
+        if not updates:
+            return parsedProductPage
+        return parsedProductPage.model_copy(update=updates)
 
     def _ReadProductNoticeText(self, page: Any) -> str:
         try:
