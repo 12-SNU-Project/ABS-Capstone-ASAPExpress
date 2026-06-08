@@ -153,6 +153,14 @@ class Stage1TraversalController:
             traversalReport.rejectedCandidateHs8Codes
             or traversalReport.currentCandidateHs8Codes
         )
+        alternativeCandidates = candidateRetriever.FindAlternativeCandidates(
+            productInput=productInput,
+            currentCandidates=currentCandidates,
+            excludedHs8Codes=sorted(excludedHs8Codes),
+            topK=topK,
+        )
+        if alternativeCandidates:
+            return alternativeCandidates
         return candidateRetriever.FindSiblingCandidates(
             productInput=productInput,
             currentCandidates=currentCandidates,

@@ -34,6 +34,9 @@ from eu_export.ontology.schema import PackagedOntologyContext
 from eu_export.utils import NormalizeWhitespace, NormalizeWhitespacePreservingLines
 
 
+EVIDENCE_TIER_PRIMARY = "primary"
+EVIDENCE_TIER_SECONDARY = "secondary"
+EVIDENCE_TIER_WEAK = "weak"
 CN_LEAF_CODE_CARDS_DOCUMENT_ID = "table.cn_leaf_code_cards"
 BTI_CASE_CHUNKS_DOCUMENT_ID = "table.bti_case_chunks"
 FOOD_DOMAIN_SCOPE = "food_16_21"
@@ -86,6 +89,25 @@ FINAL_DETERMINATION_WARNING_TERMS = [
     "최종 분류",
     "법적 판단",
 ]
+CANDIDATE_COVERAGE_REFERENCE_PATTERN = re.compile(r"\d[\d.\s]{1,14}\d")
+CANDIDATE_COVERAGE_TERMS = [
+    "후보 카드",
+    "후보 정보",
+    "후보가",
+    "candidate card",
+    "candidate information",
+]
+CANDIDATE_COVERAGE_MISSING_TERMS = [
+    "제공되지",
+    "누락",
+    "부재",
+    "정보 없음",
+    "정보가 없음",
+    "카드 없음",
+    "missing",
+    "not provided",
+    "unavailable",
+]
 LOW_VALUE_MATCH_TERMS = {
     "animal",
     "blood",
@@ -107,6 +129,32 @@ LOW_VALUE_MATCH_TERMS = {
     "toilet",
     "weight",
 }
+WEAK_OCR_FACT_MARKERS = {
+    "풍미",
+    "향분말",
+    "향료",
+    "함유",
+    "혼입",
+    "혼입가능",
+    "혼입 가능",
+    "주의사항",
+    "같은 제조시설",
+    "알레르기",
+}
+PREFERRED_HEADING_HINTS = {
+    "라면": ["1902"],
+    "면류": ["1902"],
+    "유탕면": ["1902"],
+    "noodle": ["1902"],
+    "noodles": ["1902"],
+    "pasta": ["1902"],
+    "주꾸미": ["1605"],
+    "새우": ["1605"],
+    "shrimp": ["1605"],
+    "클렌저": ["3304"],
+    "세럼": ["3304"],
+    "화장품": ["3304"],
+}
 PRODUCT_DOMAIN_SCOPE_MAP = {
     "food": [FOOD_DOMAIN_SCOPE],
     "cosmetics": [COSMETICS_DOMAIN_SCOPE],
@@ -122,11 +170,13 @@ TERM_EXPANSION_MAP = {
     "쇠고기": ["beef", "meat"],
     "소고기": ["beef", "meat"],
     "닭": ["chicken", "meat"],
+    "닭고기": ["chicken", "meat"],
     "양념육": ["prepared meat", "preserved meat", "meat"],
     "생선": ["fish"],
     "어류": ["fish"],
     "새우": ["shrimp", "crustaceans"],
     "게": ["crab", "crustaceans"],
+    "게살": ["crab", "crustaceans"],
     "조개": ["molluscs"],
     "국수": ["noodle", "pasta"],
     "라면": ["noodle", "pasta"],
@@ -144,6 +194,22 @@ TERM_EXPANSION_MAP = {
     "치약": ["oral", "dental"],
     "화장품": ["cosmetic", "toilet preparation"],
 }
+TIER_INCLUDE_RULE_WEIGHTS = {
+    EVIDENCE_TIER_PRIMARY: 6.0,
+    EVIDENCE_TIER_SECONDARY: 3.0,
+    EVIDENCE_TIER_WEAK: 0.4,
+}
+TIER_SEARCH_KEYWORD_WEIGHTS = {
+    EVIDENCE_TIER_PRIMARY: 4.0,
+    EVIDENCE_TIER_SECONDARY: 2.0,
+    EVIDENCE_TIER_WEAK: 0.25,
+}
+TIER_DESCRIPTION_WEIGHTS = {
+    EVIDENCE_TIER_PRIMARY: 2.0,
+    EVIDENCE_TIER_SECONDARY: 1.0,
+    EVIDENCE_TIER_WEAK: 0.1,
+}
+DEFAULT_MAX_CANDIDATES_PER_HS4 = 3
 
 STAGE1_CLASSIFICATION_SYSTEM_PROMPT = """\
 You are an EU HS/CN classification review assistant for Korean exporters.
@@ -254,34 +320,60 @@ class ProductClassificationInput(BaseModel):
     )
     ocrText: str = Field(default="", alias="ocr_text", exclude=True)
 
-    def BuildSearchText(self) -> str:
-        ocrSearchText = (
-            "\n".join(self.normalizedOcrFactTexts)
-            if self.normalizedOcrFactTexts
-            else self.ocrText
+    def BuildPrimarySearchText(self) -> str:
+        return self._BuildSearchTextFromParts(
+            [
+                self.productName or "",
+                self.shortDescription or "",
+                self.brandName or "",
+            ]
         )
-        noticeOptionNameParts = (
-            []
-            if self.productNoticeText.strip()
-            else self.noticeOptionNames
-        )
-        rawParts = [
-            self.productName or "",
-            self.shortDescription or "",
-            self.brandName or "",
-            self.packageType or "",
-            self.saleUnit or "",
-            *noticeOptionNameParts,
-            *self.noticeFieldTexts,
-            self.productNoticeText,
-            ocrSearchText,
+
+    def BuildSecondarySearchText(self) -> str:
+        secondaryOcrFactTexts = [
+            factText
+            for factText in self.normalizedOcrFactTexts
+            if not self._IsWeakOcrFactText(factText)
         ]
+        return self._BuildSearchTextFromParts(
+            [
+                self.packageType or "",
+                self.saleUnit or "",
+                *self.noticeOptionNames,
+                *self.noticeFieldTexts,
+                self.productNoticeText,
+                *secondaryOcrFactTexts,
+            ]
+        )
+
+    def BuildWeakSearchText(self) -> str:
+        weakOcrFactTexts = [
+            factText
+            for factText in self.normalizedOcrFactTexts
+            if self._IsWeakOcrFactText(factText)
+        ]
+        return self._BuildSearchTextFromParts(weakOcrFactTexts)
+
+    def BuildSearchText(self) -> str:
+        rawParts = [
+            self.BuildPrimarySearchText(),
+            self.BuildSecondarySearchText(),
+            self.BuildWeakSearchText()
+            or ("" if self.normalizedOcrFactTexts else self.ocrText),
+        ]
+        return self._BuildSearchTextFromParts(rawParts)
+
+    def _BuildSearchTextFromParts(self, rawParts: Sequence[str]) -> str:
         parts = [
             part
             for part in rawParts
             if isinstance(part, str) and part.strip() != ""
         ]
         return NormalizeWhitespacePreservingLines("\n".join(parts))
+
+    def _IsWeakOcrFactText(self, factText: str) -> bool:
+        normalizedText = NormalizeWhitespace(factText).lower()
+        return any(marker in normalizedText for marker in WEAK_OCR_FACT_MARKERS)
 
     @computed_field(alias="product_notice_text_length")
     @property
@@ -361,6 +453,33 @@ class CnCandidate(BaseModel):
         default_factory=list,
         alias="exclude_rule_matches",
     )
+    primaryEvidenceMatches: List[str] = Field(
+        default_factory=list,
+        alias="primary_evidence_matches",
+    )
+    secondaryEvidenceMatches: List[str] = Field(
+        default_factory=list,
+        alias="secondary_evidence_matches",
+    )
+    weakEvidenceMatches: List[str] = Field(
+        default_factory=list,
+        alias="weak_evidence_matches",
+    )
+    includeRulePoints: float = Field(
+        default=0.0,
+        alias="include_rule_points",
+        exclude=True,
+    )
+    searchKeywordPoints: float = Field(
+        default=0.0,
+        alias="search_keyword_points",
+        exclude=True,
+    )
+    descriptionPoints: float = Field(
+        default=0.0,
+        alias="description_points",
+        exclude=True,
+    )
     hs2Code: Optional[str] = Field(default=None, alias="hs2_code", exclude=True)
     hs2Description: Optional[str] = Field(
         default=None,
@@ -435,13 +554,16 @@ class CnCandidate(BaseModel):
     @property
     def scoreBreakdown(self) -> Dict[str, Any]:
         return {
-            "include_rule_points": 4.0 * len(self.includeRuleMatches),
-            "search_keyword_points": 2.0 * len(self.searchKeywordMatches),
-            "description_points": 1.0 * len(self.descriptionMatches),
+            "include_rule_points": self.includeRulePoints,
+            "search_keyword_points": self.searchKeywordPoints,
+            "description_points": self.descriptionPoints,
+            "primary_evidence_matches": list(self.primaryEvidenceMatches[:8]),
+            "secondary_evidence_matches": list(self.secondaryEvidenceMatches[:8]),
+            "weak_evidence_matches": list(self.weakEvidenceMatches[:8]),
             "exclude_rule_triggered": len(self.excludeRuleMatches) > 0,
             "formula": (
-                "include_rule_keywords*4 + search_keywords*2 + "
-                "description_matches*1; exclude_rule match forces score 0"
+                "tiered include/search/description matches; weak OCR evidence "
+                "has low weight; exclude_rule match forces score 0"
             ),
         }
 
@@ -491,6 +613,9 @@ class CnCandidate(BaseModel):
                 "search_keyword_matches": list(self.searchKeywordMatches[:8]),
                 "description_matches": list(self.descriptionMatches[:8]),
                 "exclude_rule_matches": list(self.excludeRuleMatches[:8]),
+                "primary_evidence_matches": list(self.primaryEvidenceMatches[:8]),
+                "secondary_evidence_matches": list(self.secondaryEvidenceMatches[:8]),
+                "weak_evidence_matches": list(self.weakEvidenceMatches[:8]),
             },
             cnExplanatoryNote=self.cnExplanatoryNote,
         )
@@ -1474,7 +1599,21 @@ class CnCandidateRetriever:
     ) -> List[CnCandidate]:
         rowsByDomainScope = self._LoadRowsByDomainScope()
         searchText = productInput.BuildSearchText()
-        searchTerms = self._BuildExpandedSearchTerms(searchText)
+        primarySearchText = productInput.BuildPrimarySearchText()
+        secondarySearchText = productInput.BuildSecondarySearchText()
+        weakSearchText = productInput.BuildWeakSearchText()
+        searchTermsByTier = {
+            EVIDENCE_TIER_PRIMARY: self._BuildExpandedSearchTerms(primarySearchText),
+            EVIDENCE_TIER_SECONDARY: self._BuildExpandedSearchTerms(
+                secondarySearchText,
+            ),
+            EVIDENCE_TIER_WEAK: self._BuildExpandedSearchTerms(weakSearchText),
+        }
+        searchTextByTier = {
+            EVIDENCE_TIER_PRIMARY: primarySearchText,
+            EVIDENCE_TIER_SECONDARY: secondarySearchText,
+            EVIDENCE_TIER_WEAK: weakSearchText,
+        }
         candidates: List[CnCandidate] = []
 
         for domainScope in productInput.domainScopes:
@@ -1483,19 +1622,13 @@ class CnCandidateRetriever:
                     row=row,
                     domainScope=domainScope,
                     searchText=searchText,
-                    searchTerms=searchTerms,
+                    searchTextByTier=searchTextByTier,
+                    searchTermsByTier=searchTermsByTier,
                 )
                 if candidate.score > 0:
                     candidates.append(candidate)
 
-        return sorted(
-            candidates,
-            key=lambda candidate: (
-                -candidate.score,
-                candidate.domainScope,
-                candidate.hs8,
-            ),
-        )[: max(0, topK)]
+        return self._SelectTopCandidates(candidates, productInput, topK)
 
     def FindSiblingCandidates(
         self,
@@ -1506,11 +1639,31 @@ class CnCandidateRetriever:
     ) -> List[CnCandidate]:
         rowsByDomainScope = self._LoadRowsByDomainScope()
         searchText = productInput.BuildSearchText()
-        searchTerms = self._BuildExpandedSearchTerms(searchText)
+        primarySearchText = productInput.BuildPrimarySearchText()
+        secondarySearchText = productInput.BuildSecondarySearchText()
+        weakSearchText = productInput.BuildWeakSearchText()
+        searchTermsByTier = {
+            EVIDENCE_TIER_PRIMARY: self._BuildExpandedSearchTerms(primarySearchText),
+            EVIDENCE_TIER_SECONDARY: self._BuildExpandedSearchTerms(
+                secondarySearchText,
+            ),
+            EVIDENCE_TIER_WEAK: self._BuildExpandedSearchTerms(weakSearchText),
+        }
+        searchTextByTier = {
+            EVIDENCE_TIER_PRIMARY: primarySearchText,
+            EVIDENCE_TIER_SECONDARY: secondarySearchText,
+            EVIDENCE_TIER_WEAK: weakSearchText,
+        }
         excludedHs8CodeSet = set(excludedHs8Codes)
+        parentHs4CodesByDomainScope: Dict[str, Set[str]] = {}
         parentHs6CodesByDomainScope: Dict[str, Set[str]] = {}
 
         for candidate in currentCandidates:
+            if candidate.hs4Code is not None:
+                parentHs4CodesByDomainScope.setdefault(
+                    candidate.domainScope,
+                    set(),
+                ).add(candidate.hs4Code)
             if candidate.hs6Code is None:
                 continue
             parentHs6CodesByDomainScope.setdefault(
@@ -1520,56 +1673,156 @@ class CnCandidateRetriever:
 
         siblingCandidates: List[CnCandidate] = []
         for domainScope in productInput.domainScopes:
+            parentHs4Codes = parentHs4CodesByDomainScope.get(domainScope, set())
             parentHs6Codes = parentHs6CodesByDomainScope.get(domainScope, set())
             for row in rowsByDomainScope.get(domainScope, []):
                 hs8 = row.get("cn", "") or row.get("hs8", "")
+                hs4 = row.get("heading", "") or row.get("hs4_code", "")
                 hs6 = row.get("subheading", "") or row.get("hs6_code", "")
                 if hs8 in excludedHs8CodeSet:
                     continue
-                if parentHs6Codes and hs6 not in parentHs6Codes:
+                if parentHs4Codes and hs4 not in parentHs4Codes:
+                    continue
+                if not parentHs4Codes and parentHs6Codes and hs6 not in parentHs6Codes:
                     continue
                 candidate = self._ScoreRow(
                     row=row,
                     domainScope=domainScope,
                     searchText=searchText,
-                    searchTerms=searchTerms,
+                    searchTextByTier=searchTextByTier,
+                    searchTermsByTier=searchTermsByTier,
                 )
                 if candidate.score <= 0:
                     continue
                 siblingCandidates.append(candidate)
 
-        return sorted(
-            siblingCandidates,
-            key=lambda candidate: (
-                -candidate.score,
-                candidate.domainScope,
-                candidate.hs8,
+        currentHs6CodeSet = {
+            candidate.hs6Code
+            for candidate in currentCandidates
+            if candidate.hs6Code is not None
+        }
+        sortedSiblingCandidates = self._SortCandidates(siblingCandidates)
+        selectedCandidates: List[CnCandidate] = []
+        selectedHs8Codes: Set[str] = set()
+        selectedHs6Codes: Set[str] = set()
+
+        for candidate in sortedSiblingCandidates:
+            if len(selectedCandidates) >= topK:
+                break
+            if candidate.hs8 in selectedHs8Codes:
+                continue
+            if candidate.hs6Code in currentHs6CodeSet:
+                continue
+            if candidate.hs6Code in selectedHs6Codes:
+                continue
+            selectedCandidates.append(candidate)
+            selectedHs8Codes.add(candidate.hs8)
+            if candidate.hs6Code is not None:
+                selectedHs6Codes.add(candidate.hs6Code)
+
+        for candidate in sortedSiblingCandidates:
+            if len(selectedCandidates) >= topK:
+                break
+            if candidate.hs8 in selectedHs8Codes:
+                continue
+            if candidate.hs6Code in selectedHs6Codes:
+                continue
+            selectedCandidates.append(candidate)
+            selectedHs8Codes.add(candidate.hs8)
+            if candidate.hs6Code is not None:
+                selectedHs6Codes.add(candidate.hs6Code)
+
+        for candidate in sortedSiblingCandidates:
+            if len(selectedCandidates) >= topK:
+                break
+            if candidate.hs8 in selectedHs8Codes:
+                continue
+            selectedCandidates.append(candidate)
+            selectedHs8Codes.add(candidate.hs8)
+
+        return selectedCandidates[:topK]
+
+    def FindAlternativeCandidates(
+        self,
+        productInput: ProductClassificationInput,
+        currentCandidates: Sequence[CnCandidate],
+        excludedHs8Codes: Sequence[str],
+        topK: int = DEFAULT_CN_CANDIDATE_TOP_K,
+    ) -> List[CnCandidate]:
+        rowsByDomainScope = self._LoadRowsByDomainScope()
+        searchText = productInput.BuildSearchText()
+        primarySearchText = productInput.BuildPrimarySearchText()
+        secondarySearchText = productInput.BuildSecondarySearchText()
+        weakSearchText = productInput.BuildWeakSearchText()
+        searchTermsByTier = {
+            EVIDENCE_TIER_PRIMARY: self._BuildExpandedSearchTerms(primarySearchText),
+            EVIDENCE_TIER_SECONDARY: self._BuildExpandedSearchTerms(
+                secondarySearchText,
             ),
-        )[: max(0, topK)]
+            EVIDENCE_TIER_WEAK: self._BuildExpandedSearchTerms(weakSearchText),
+        }
+        searchTextByTier = {
+            EVIDENCE_TIER_PRIMARY: primarySearchText,
+            EVIDENCE_TIER_SECONDARY: secondarySearchText,
+            EVIDENCE_TIER_WEAK: weakSearchText,
+        }
+        excludedHs8CodeSet = set(excludedHs8Codes)
+        currentHs4Codes = {
+            candidate.hs4Code
+            for candidate in currentCandidates
+            if candidate.hs4Code is not None
+        }
+        candidates: List[CnCandidate] = []
+
+        for domainScope in productInput.domainScopes:
+            for row in rowsByDomainScope.get(domainScope, []):
+                hs8 = row.get("cn", "") or row.get("hs8", "")
+                if hs8 in excludedHs8CodeSet:
+                    continue
+                candidate = self._ScoreRow(
+                    row=row,
+                    domainScope=domainScope,
+                    searchText=searchText,
+                    searchTextByTier=searchTextByTier,
+                    searchTermsByTier=searchTermsByTier,
+                )
+                if candidate.score <= 0:
+                    continue
+                candidates.append(candidate)
+
+        nonCurrentHs4Candidates = [
+            candidate
+            for candidate in candidates
+            if candidate.hs4Code not in currentHs4Codes
+            and (
+                candidate.primaryEvidenceMatches
+                or candidate.secondaryEvidenceMatches
+            )
+        ]
+        return self._SelectTopCandidates(nonCurrentHs4Candidates, productInput, topK)
 
     def _ScoreRow(
         self,
         row: Mapping[str, str],
         domainScope: str,
         searchText: str,
-        searchTerms: Set[str],
+        searchTextByTier: Mapping[str, str],
+        searchTermsByTier: Mapping[str, Set[str]],
     ) -> CnCandidate:
         matchedTerms: Set[str] = set()
         excludedTerms: Set[str] = set()
-        score = 0.0
-
-        includeMatches = self._FindCellMatches(
+        includeTierMatches = self._FindTieredCellMatches(
             row.get("include_rule_keywords", ""),
-            searchText,
-            searchTerms,
+            searchTextByTier,
+            searchTermsByTier,
         )
-        searchKeywordMatches = self._FindCellMatches(
+        searchKeywordTierMatches = self._FindTieredCellMatches(
             row.get("search_keywords", ""),
-            searchText,
-            searchTerms,
+            searchTextByTier,
+            searchTermsByTier,
         )
         candidateContextText = self._BuildCandidateContextText(row)
-        descriptionMatches = self._FindTokenMatches(
+        descriptionTierMatches = self._FindTieredTokenMatches(
             " ".join(
                 [
                     candidateContextText,
@@ -1580,13 +1833,29 @@ class CnCandidateRetriever:
                     row.get("hs8_description", ""),
                 ]
             ),
-            searchTerms,
+            searchTermsByTier,
         )
         excludeMatches = self._FindCellMatches(
             row.get("exclude_rule_keywords", ""),
             searchText,
-            searchTerms,
+            self._BuildExpandedSearchTerms(searchText),
         )
+        includeMatches = self._FlattenTierMatches(includeTierMatches)
+        searchKeywordMatches = self._FlattenTierMatches(searchKeywordTierMatches)
+        descriptionMatches = self._FlattenTierMatches(descriptionTierMatches)
+        includeRulePoints = self._ScoreTierMatches(
+            includeTierMatches,
+            TIER_INCLUDE_RULE_WEIGHTS,
+        )
+        searchKeywordPoints = self._ScoreTierMatches(
+            searchKeywordTierMatches,
+            TIER_SEARCH_KEYWORD_WEIGHTS,
+        )
+        descriptionPoints = self._ScoreTierMatches(
+            descriptionTierMatches,
+            TIER_DESCRIPTION_WEIGHTS,
+        )
+        score = includeRulePoints + searchKeywordPoints + descriptionPoints
 
         matchedTerms.update(includeMatches)
         matchedTerms.update(searchKeywordMatches)
@@ -1604,11 +1873,15 @@ class CnCandidateRetriever:
                 searchKeywordMatches=searchKeywordMatches,
                 descriptionMatches=descriptionMatches,
                 excludeRuleMatches=excludeMatches,
+                tierMatches=self._MergeTierMatches(
+                    includeTierMatches,
+                    searchKeywordTierMatches,
+                    descriptionTierMatches,
+                ),
+                includeRulePoints=0.0,
+                searchKeywordPoints=0.0,
+                descriptionPoints=0.0,
             )
-
-        score += 4.0 * len(includeMatches)
-        score += 2.0 * len(searchKeywordMatches)
-        score += 1.0 * len(descriptionMatches)
 
         if score < 0:
             score = 0.0
@@ -1623,6 +1896,14 @@ class CnCandidateRetriever:
             searchKeywordMatches=searchKeywordMatches,
             descriptionMatches=descriptionMatches,
             excludeRuleMatches=excludeMatches,
+            tierMatches=self._MergeTierMatches(
+                includeTierMatches,
+                searchKeywordTierMatches,
+                descriptionTierMatches,
+            ),
+            includeRulePoints=includeRulePoints,
+            searchKeywordPoints=searchKeywordPoints,
+            descriptionPoints=descriptionPoints,
         )
 
     def _BuildCandidate(
@@ -1636,6 +1917,10 @@ class CnCandidateRetriever:
         searchKeywordMatches: Sequence[str],
         descriptionMatches: Sequence[str],
         excludeRuleMatches: Sequence[str],
+        tierMatches: Mapping[str, Sequence[str]],
+        includeRulePoints: float,
+        searchKeywordPoints: float,
+        descriptionPoints: float,
     ) -> CnCandidate:
         cnCode = row.get("cn", "") or row.get("hs8", "")
         chapterCode = row.get("chapter", "") or row.get("hs2_code") or None
@@ -1662,6 +1947,14 @@ class CnCandidateRetriever:
             searchKeywordMatches=list(searchKeywordMatches),
             descriptionMatches=list(descriptionMatches),
             excludeRuleMatches=list(excludeRuleMatches),
+            primaryEvidenceMatches=list(tierMatches.get(EVIDENCE_TIER_PRIMARY, [])),
+            secondaryEvidenceMatches=list(
+                tierMatches.get(EVIDENCE_TIER_SECONDARY, []),
+            ),
+            weakEvidenceMatches=list(tierMatches.get(EVIDENCE_TIER_WEAK, [])),
+            includeRulePoints=round(includeRulePoints, 3),
+            searchKeywordPoints=round(searchKeywordPoints, 3),
+            descriptionPoints=round(descriptionPoints, 3),
             hs2Code=chapterCode,
             hs2Description=row.get("chapter_description")
             or row.get("hs2_description")
@@ -1770,6 +2063,113 @@ class CnCandidateRetriever:
                 rowsByDomainScope[COSMETICS_DOMAIN_SCOPE].append(row)
         return rowsByDomainScope
 
+    def _SelectTopCandidates(
+        self,
+        candidates: Sequence[CnCandidate],
+        productInput: ProductClassificationInput,
+        topK: int,
+    ) -> List[CnCandidate]:
+        sortedCandidates = self._SortCandidates(candidates)
+        if topK <= 0:
+            return []
+
+        selectedCandidates: List[CnCandidate] = []
+        selectedHs8Codes: Set[str] = set()
+        hs4Counts: Dict[str, int] = {}
+        preferredHeadingCodes = self._BuildPreferredHeadingCodes(productInput)
+
+        for headingCode in preferredHeadingCodes:
+            for candidate in sortedCandidates:
+                if candidate.hs4Code != headingCode:
+                    continue
+                self._AppendCandidateIfNew(
+                    selectedCandidates,
+                    selectedHs8Codes,
+                    hs4Counts,
+                    candidate,
+                    enforceHs4Limit=False,
+                )
+                break
+
+        for candidate in sortedCandidates:
+            if len(selectedCandidates) >= topK:
+                break
+            self._AppendCandidateIfNew(
+                selectedCandidates,
+                selectedHs8Codes,
+                hs4Counts,
+                candidate,
+                enforceHs4Limit=True,
+            )
+
+        for candidate in sortedCandidates:
+            if len(selectedCandidates) >= topK:
+                break
+            self._AppendCandidateIfNew(
+                selectedCandidates,
+                selectedHs8Codes,
+                hs4Counts,
+                candidate,
+                enforceHs4Limit=False,
+            )
+
+        return self._SortCandidates(selectedCandidates)[:topK]
+
+    def _SortCandidates(
+        self,
+        candidates: Sequence[CnCandidate],
+    ) -> List[CnCandidate]:
+        return sorted(
+            candidates,
+            key=lambda candidate: (
+                -candidate.score,
+                candidate.domainScope,
+                candidate.hs4Code or "",
+                candidate.hs8,
+            ),
+        )
+
+    def _AppendCandidateIfNew(
+        self,
+        selectedCandidates: List[CnCandidate],
+        selectedHs8Codes: Set[str],
+        hs4Counts: Dict[str, int],
+        candidate: CnCandidate,
+        enforceHs4Limit: bool,
+    ) -> None:
+        if candidate.hs8 in selectedHs8Codes:
+            return
+        hs4Code = candidate.hs4Code or "unknown"
+        if (
+            enforceHs4Limit
+            and hs4Counts.get(hs4Code, 0) >= DEFAULT_MAX_CANDIDATES_PER_HS4
+        ):
+            return
+        selectedCandidates.append(candidate)
+        selectedHs8Codes.add(candidate.hs8)
+        hs4Counts[hs4Code] = hs4Counts.get(hs4Code, 0) + 1
+
+    def _BuildPreferredHeadingCodes(
+        self,
+        productInput: ProductClassificationInput,
+    ) -> List[str]:
+        searchText = NormalizeWhitespace(
+            "\n".join(
+                [
+                    productInput.BuildPrimarySearchText(),
+                    productInput.BuildSecondarySearchText(),
+                ]
+            )
+        ).lower()
+        preferredHeadingCodes: List[str] = []
+        for hintText, headingCodes in PREFERRED_HEADING_HINTS.items():
+            if hintText.lower() not in searchText:
+                continue
+            for headingCode in headingCodes:
+                if headingCode not in preferredHeadingCodes:
+                    preferredHeadingCodes.append(headingCode)
+        return preferredHeadingCodes
+
     def _BuildCandidateContextText(self, row: Mapping[str, str]) -> str:
         chapterCode = row.get("chapter", "") or row.get("hs2_code", "")
         subheadingDescription = row.get("subheading_description") or row.get(
@@ -1819,15 +2219,126 @@ class CnCandidateRetriever:
             contextLines.append("{0}: {1}".format(label, normalizedDescription))
         return NormalizeWhitespacePreservingLines("\n".join(contextLines))
 
+    def _FindTieredCellMatches(
+        self,
+        cellValue: str,
+        searchTextByTier: Mapping[str, str],
+        searchTermsByTier: Mapping[str, Set[str]],
+    ) -> Dict[str, List[str]]:
+        tierMatches: Dict[str, List[str]] = {}
+        alreadyMatchedTerms: Set[str] = set()
+        for tier in [
+            EVIDENCE_TIER_PRIMARY,
+            EVIDENCE_TIER_SECONDARY,
+            EVIDENCE_TIER_WEAK,
+        ]:
+            matches = [
+                match
+                for match in self._FindCellMatches(
+                    cellValue,
+                    searchTextByTier.get(tier, ""),
+                    searchTermsByTier.get(tier, set()),
+                )
+                if match not in alreadyMatchedTerms
+            ]
+            tierMatches[tier] = matches
+            alreadyMatchedTerms.update(matches)
+        return tierMatches
+
+    def _FindTieredTokenMatches(
+        self,
+        text: str,
+        searchTermsByTier: Mapping[str, Set[str]],
+    ) -> Dict[str, List[str]]:
+        tierMatches: Dict[str, List[str]] = {}
+        alreadyMatchedTerms: Set[str] = set()
+        for tier in [
+            EVIDENCE_TIER_PRIMARY,
+            EVIDENCE_TIER_SECONDARY,
+            EVIDENCE_TIER_WEAK,
+        ]:
+            matches = [
+                match
+                for match in self._FindTokenMatches(
+                    text,
+                    searchTermsByTier.get(tier, set()),
+                )
+                if match not in alreadyMatchedTerms
+            ]
+            tierMatches[tier] = matches
+            alreadyMatchedTerms.update(matches)
+        return tierMatches
+
+    def _FlattenTierMatches(
+        self,
+        tierMatches: Mapping[str, Sequence[str]],
+    ) -> List[str]:
+        flattenedMatches: List[str] = []
+        for tier in [
+            EVIDENCE_TIER_PRIMARY,
+            EVIDENCE_TIER_SECONDARY,
+            EVIDENCE_TIER_WEAK,
+        ]:
+            for match in tierMatches.get(tier, []):
+                if match not in flattenedMatches:
+                    flattenedMatches.append(match)
+        return flattenedMatches
+
+    def _MergeTierMatches(
+        self,
+        *tierMatchGroups: Mapping[str, Sequence[str]],
+    ) -> Dict[str, List[str]]:
+        mergedMatches: Dict[str, List[str]] = {
+            EVIDENCE_TIER_PRIMARY: [],
+            EVIDENCE_TIER_SECONDARY: [],
+            EVIDENCE_TIER_WEAK: [],
+        }
+        for tierMatchGroup in tierMatchGroups:
+            for tier, matches in tierMatchGroup.items():
+                tierValues = mergedMatches.setdefault(tier, [])
+                for match in matches:
+                    if match not in tierValues:
+                        tierValues.append(match)
+        return mergedMatches
+
+    def _ScoreTierMatches(
+        self,
+        tierMatches: Mapping[str, Sequence[str]],
+        tierWeights: Mapping[str, float],
+    ) -> float:
+        return sum(
+            tierWeights.get(tier, 0.0) * len(matches)
+            for tier, matches in tierMatches.items()
+        )
+
     def _BuildExpandedSearchTerms(self, searchText: str) -> Set[str]:
         terms = set(self._ExtractTerms(searchText))
         loweredSearchText = searchText.lower()
+        rawSearchTokens = {
+            token.lower()
+            for token in TOKEN_PATTERN.findall(searchText or "")
+        }
         for sourceTerm, expandedTerms in TERM_EXPANSION_MAP.items():
-            if sourceTerm.lower() not in loweredSearchText:
+            if not self._ShouldExpandSourceTerm(
+                sourceTerm,
+                loweredSearchText,
+                rawSearchTokens,
+            ):
                 continue
             for expandedTerm in expandedTerms:
                 terms.update(self._ExtractTerms(expandedTerm))
         return terms
+
+    def _ShouldExpandSourceTerm(
+        self,
+        sourceTerm: str,
+        loweredSearchText: str,
+        rawSearchTokens: Set[str],
+    ) -> bool:
+        normalizedSourceTerm = sourceTerm.lower()
+        if len(normalizedSourceTerm) <= 1:
+            return normalizedSourceTerm in rawSearchTokens
+        return normalizedSourceTerm in loweredSearchText
 
     def _FindCellMatches(
         self,
@@ -2421,6 +2932,11 @@ class Stage1ResponseValidator:
             evidencePackage,
             issues,
         )
+        self._SanitizeContradictoryCandidateCoverageClaims(
+            classificationResult,
+            candidates,
+            issues,
+        )
         self._ValidateHumanReviewWarning(classificationResult, issues)
 
     def _ValidateProductIdentity(
@@ -2715,6 +3231,122 @@ class Stage1ResponseValidator:
                     ", ".join(duplicateHs8Codes),
                 ),
             )
+
+    def _SanitizeContradictoryCandidateCoverageClaims(
+        self,
+        classificationResult: Mapping[str, Any],
+        candidates: Sequence[CnCandidate],
+        issues: List[Stage1ResponseValidationIssue],
+    ) -> None:
+        if not isinstance(classificationResult, dict):
+            return
+
+        providedCandidateCodes = self._BuildProvidedCandidateCodeSet(candidates)
+        if not providedCandidateCodes:
+            return
+
+        self._SanitizeMissingInformationList(
+            classificationResult,
+            "not_enough_information",
+            "$.classification_result.not_enough_information",
+            providedCandidateCodes,
+            issues,
+        )
+
+        candidateReviews = classificationResult.get("candidate_reviews")
+        if not isinstance(candidateReviews, list):
+            return
+
+        for index, candidateReview in enumerate(candidateReviews):
+            if not isinstance(candidateReview, dict):
+                continue
+            self._SanitizeMissingInformationList(
+                candidateReview,
+                "missing_information",
+                "$.classification_result.candidate_reviews[{0}].missing_information".format(
+                    index,
+                ),
+                providedCandidateCodes,
+                issues,
+            )
+
+    def _BuildProvidedCandidateCodeSet(
+        self,
+        candidates: Sequence[CnCandidate],
+    ) -> Set[str]:
+        candidateCodes: Set[str] = set()
+        for candidate in candidates:
+            for value in [
+                candidate.hs2Code,
+                candidate.hs4Code,
+                candidate.hs6Code,
+                candidate.hs8Code,
+                candidate.hs8,
+            ]:
+                if not isinstance(value, str):
+                    continue
+                normalizedCode = re.sub(r"\D", "", value)
+                if normalizedCode:
+                    candidateCodes.add(normalizedCode)
+        return candidateCodes
+
+    def _SanitizeMissingInformationList(
+        self,
+        targetPayload: Dict[str, Any],
+        fieldName: str,
+        fieldPath: str,
+        providedCandidateCodes: Set[str],
+        issues: List[Stage1ResponseValidationIssue],
+    ) -> None:
+        missingInformation = targetPayload.get(fieldName)
+        if not isinstance(missingInformation, list):
+            return
+
+        sanitizedValues: List[Any] = []
+        for index, value in enumerate(missingInformation):
+            if not isinstance(value, str):
+                sanitizedValues.append(value)
+                continue
+
+            referencedCodes = self._ExtractReferencedCandidateCodes(value)
+            matchedCodes = sorted(providedCandidateCodes.intersection(referencedCodes))
+            if matchedCodes and self._IsCandidateCoverageMissingClaim(value):
+                self._AddIssue(
+                    issues,
+                    "warning",
+                    "contradictory_candidate_coverage_missing_information",
+                    "{0}[{1}]".format(fieldPath, index),
+                    (
+                        "Missing-information item claims candidate coverage is "
+                        "unavailable, but referenced code is already present in "
+                        "provided candidates: {0}. Removed from parsed response."
+                    ).format(", ".join(matchedCodes)),
+                )
+                continue
+
+            sanitizedValues.append(value)
+
+        targetPayload[fieldName] = sanitizedValues
+
+    def _ExtractReferencedCandidateCodes(self, text: str) -> Set[str]:
+        referencedCodes: Set[str] = set()
+        for matchedText in CANDIDATE_COVERAGE_REFERENCE_PATTERN.findall(text):
+            normalizedCode = re.sub(r"\D", "", matchedText)
+            if 4 <= len(normalizedCode) <= 10:
+                referencedCodes.add(normalizedCode)
+        return referencedCodes
+
+    def _IsCandidateCoverageMissingClaim(self, text: str) -> bool:
+        normalizedText = NormalizeWhitespace(text).lower()
+        hasCoverageTerm = any(
+            coverageTerm.lower() in normalizedText
+            for coverageTerm in CANDIDATE_COVERAGE_TERMS
+        )
+        hasMissingTerm = any(
+            missingTerm.lower() in normalizedText
+            for missingTerm in CANDIDATE_COVERAGE_MISSING_TERMS
+        )
+        return hasCoverageTerm and hasMissingTerm
 
     def _ValidateClassificationPathReview(
         self,

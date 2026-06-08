@@ -190,58 +190,62 @@ class OntologySmokeRunner:
 
         contextBuilder = OntologyContextBuilder(self._ontologyRootPath)
 
-        runLogger.info("STEP 1/13 온톨로지 마크다운 문서를 로드합니다")
+        self._LogStepHeader(1, 13, "온톨로지 마크다운 문서를 로드합니다")
         documentSummary = self._RunDocumentLoadSmoke(contextBuilder)
 
-        runLogger.info("STEP 2/13 문서 검색 결과가 LLM 요청 컨텍스트로 변환되는지 확인합니다")
+        self._LogStepHeader(
+            2,
+            13,
+            "문서 검색 결과가 LLM 요청 컨텍스트로 변환되는지 확인합니다",
+        )
         queryResults = [
             self._RunQuerySmoke(contextBuilder, queryCase)
             for queryCase in self._smokeQueries
         ]
 
-        runLogger.info("STEP 3/13 문서 참조 관계와 frontmatter 메타데이터를 검증합니다")
+        self._LogStepHeader(3, 13, "문서 참조 관계와 frontmatter 메타데이터를 검증합니다")
         validationSummary = self._RunValidationSmoke(contextBuilder)
 
-        runLogger.info("STEP 4/13 문서에 선언된 CSV 데이터 경로를 확인합니다")
+        self._LogStepHeader(4, 13, "문서에 선언된 CSV 데이터 경로를 확인합니다")
         resourceSummary = self._RunResourceResolutionSmoke(contextBuilder)
 
-        runLogger.info("STEP 5/13 상품 정보로 CN 후보를 찾고 휴리스틱 점수를 설명합니다")
+        self._LogStepHeader(5, 13, "상품 정보로 CN 후보를 찾고 휴리스틱 점수를 설명합니다")
         classificationCandidateSummary = self._RunClassificationCandidateSmoke()
 
-        runLogger.info("STEP 6/13 후보 검토용 LLM 요청 JSON 구조를 만듭니다")
+        self._LogStepHeader(6, 13, "후보 검토용 LLM 요청 JSON 구조를 만듭니다")
         classificationRequestSummary = self._RunClassificationRequestSmoke(
             contextBuilder,
         )
 
-        runLogger.info("STEP 7/13 메인 LLM 후보 검토 응답을 생성하고 검증합니다")
+        self._LogStepHeader(7, 13, "메인 LLM 후보 검토 응답을 생성하고 검증합니다")
         llmResponseValidationSummary = self._RunLlmResponseValidationSmoke(
             contextBuilder,
         )
 
-        runLogger.info("STEP 8/13 후보 판단에 사용할 근거 묶음을 만듭니다")
+        self._LogStepHeader(8, 13, "후보 판단에 사용할 근거 묶음을 만듭니다")
         evidencePackageSummary = self._RunEvidencePackageSmoke(contextBuilder)
 
-        runLogger.info("STEP 9/13 후보 리뷰 정책을 fixture 시나리오로 검증합니다")
+        self._LogStepHeader(9, 13, "후보 리뷰 정책을 fixture 시나리오로 검증합니다")
         decisionPolicySummary = self._RunStage1DecisionPolicySmoke(contextBuilder)
 
-        runLogger.info("STEP 10/13 fixture 시나리오의 다음 파이프라인 동작을 확인합니다")
+        self._LogStepHeader(10, 13, "fixture 시나리오의 다음 파이프라인 동작을 확인합니다")
         traversalControllerSummary = self._RunStage1TraversalControllerSmoke(
             decisionPolicySummary,
         )
 
-        runLogger.info("STEP 11/13 백트래킹 예외 경로를 fixture 시나리오로 검증합니다")
+        self._LogStepHeader(11, 13, "백트래킹 예외 경로를 fixture 시나리오로 검증합니다")
         backtrackingRetrySummary = self._RunStage1BacktrackingRetrySmoke(
             contextBuilder,
             decisionPolicySummary,
         )
 
-        runLogger.info("STEP 12/13 선택된 LLM 후보 검토 결과를 후보 산출 요약으로 정리합니다")
+        self._LogStepHeader(12, 13, "선택된 LLM 후보 검토 결과를 후보 산출 요약으로 정리합니다")
         recommendationReportSummary = self._RunStage1RecommendationReportSmoke(
             llmResponseValidationSummary,
             backtrackingRetrySummary,
         )
 
-        runLogger.info("STEP 13/13 선택된 LLM 후보 검토 결과를 검토용 JSON 패키지로 만듭니다")
+        self._LogStepHeader(13, 13, "선택된 LLM 후보 검토 결과를 검토용 JSON 패키지로 만듭니다")
         humanReviewPackageSummary = self._RunStage1HumanReviewPackageSmoke(
             llmResponseValidationSummary,
             backtrackingRetrySummary,
@@ -510,9 +514,22 @@ class OntologySmokeRunner:
                         "search_text_preview": self._BuildTextPreview(searchText),
                     },
                     "scoring_rule": {
-                        "include_rule_keyword_match": "+4",
-                        "search_keyword_match": "+2",
-                        "description_token_match": "+1",
+                        "primary_product_evidence": (
+                            "상품명, 짧은 설명, 브랜드명처럼 사용자가 실제로 "
+                            "분류하려는 상품 정체성을 가장 강하게 나타내는 근거"
+                        ),
+                        "secondary_product_evidence": (
+                            "상품고시정보, 옵션명, 정규화된 OCR 핵심 사실처럼 "
+                            "상품 정체성을 보완하는 근거"
+                        ),
+                        "weak_ocr_evidence": (
+                            "마케팅 문구, 알레르기 주의사항, 혼입 가능성처럼 "
+                            "후보 탐색에는 참고하되 강하게 반영하지 않는 OCR 근거"
+                        ),
+                        "score_formula": (
+                            "include/search/description 매칭을 primary, secondary, "
+                            "weak 근거 단계별 가중치로 계산합니다."
+                        ),
                         "exclude_rule_match": "score forced to 0",
                     },
                     "candidate_count": len(candidates),
@@ -522,26 +539,22 @@ class OntologySmokeRunner:
                             "hs8": candidate.hs8,
                             "hs6_code": candidate.hs6Code,
                             "score": candidate.score,
-                            "score_breakdown": {
-                                "include_rule_points": (
-                                    4.0 * len(candidate.includeRuleMatches)
-                                ),
-                                "search_keyword_points": (
-                                    2.0 * len(candidate.searchKeywordMatches)
-                                ),
-                                "description_points": (
-                                    1.0 * len(candidate.descriptionMatches)
-                                ),
-                                "exclude_rule_triggered": (
-                                    len(candidate.excludeRuleMatches) > 0
-                                ),
-                            },
+                            "score_breakdown": candidate.scoreBreakdown,
                             "include_rule_matches": list(candidate.includeRuleMatches),
                             "search_keyword_matches": list(
                                 candidate.searchKeywordMatches,
                             ),
                             "description_matches": list(candidate.descriptionMatches),
                             "exclude_rule_matches": list(candidate.excludeRuleMatches),
+                            "primary_evidence_matches": list(
+                                candidate.primaryEvidenceMatches,
+                            ),
+                            "secondary_evidence_matches": list(
+                                candidate.secondaryEvidenceMatches,
+                            ),
+                            "weak_evidence_matches": list(
+                                candidate.weakEvidenceMatches,
+                            ),
                             "combined_description": candidate.combinedDescription,
                         }
                         for candidateIndex, candidate in enumerate(
@@ -578,8 +591,9 @@ class OntologySmokeRunner:
         candidateLogger.info(
             (
                 "점수 규칙: 먼저 상품 도메인으로 CSV 범위를 제한하고, "
-                "include_rule_keywords 매칭은 +4점, search_keywords 매칭은 +2점, "
-                "CN 설명문 토큰 매칭은 +1점으로 계산합니다. "
+                "상품명/설명/브랜드는 primary 근거, 상품고시/OCR 핵심 사실은 "
+                "secondary 근거, 마케팅성 OCR 문구는 weak 근거로 분리합니다. "
+                "include/search/description 매칭은 근거 단계별 가중치로 계산하고, "
                 "exclude_rule_keywords가 매칭되면 해당 행은 후보에서 제외합니다."
             )
         )
@@ -615,17 +629,24 @@ class OntologySmokeRunner:
                 scoreBreakdown = candidate["score_breakdown"]
                 candidateLogger.info(
                     (
-                        "후보 점수 rank={} hs8={} hs6={} score={} "
-                        "include(+4)={} search_keyword(+2)={} "
-                        "description(+1)={} exclude={} 설명={}"
+                        "\n[후보 점수]\n"
+                        "- rank: {}\n"
+                        "- hs8: {}\n"
+                        "- hs6: {}\n"
+                        "- score: {}\n"
+                        "- primary 근거: {}\n"
+                        "- secondary 근거: {}\n"
+                        "- weak 근거: {}\n"
+                        "- exclude 매칭: {}\n"
+                        "- 후보 설명: {}"
                     ),
                     candidateIndex,
                     candidate["hs8"],
                     candidate["hs6_code"],
                     candidate["score"],
-                    candidate["include_rule_matches"],
-                    candidate["search_keyword_matches"],
-                    candidate["description_matches"][:8],
+                    candidate["primary_evidence_matches"][:8],
+                    candidate["secondary_evidence_matches"][:8],
+                    candidate["weak_evidence_matches"][:8],
                     candidate["exclude_rule_matches"],
                     candidate["combined_description"],
                 )
@@ -1087,6 +1108,33 @@ class OntologySmokeRunner:
             "is_main_flow": False,
             "product_name": productInput.productName,
             "candidate_count": len(candidates),
+            "backtracking_policy": {
+                "trigger": (
+                    "validator를 통과한 LLM 후보 검토 결과에서 strong, possible, "
+                    "insufficient_information 후보가 하나도 남지 않을 때 발동합니다."
+                ),
+                "non_trigger_cases": [
+                    "LLM 응답 구조가 invalid이면 백트래킹이 아니라 LLM 응답 재시도를 요청합니다.",
+                    "strong 또는 possible 후보가 남으면 human review 패키지로 넘깁니다.",
+                    "insufficient_information 후보가 남으면 추가 상품 정보 요청으로 넘깁니다.",
+                ],
+                "candidate_scope_strategy": [
+                    "현재 후보와 이미 방문한 후보 코드는 제외합니다.",
+                    (
+                        "현재 HS4 heading과 다른 대체 후보는 primary 또는 "
+                        "secondary 근거가 있을 때만 다시 검색합니다."
+                    ),
+                    (
+                        "대체 후보가 없으면 같은 HS4 heading 아래에서 아직 "
+                        "검토하지 않은 HS6 subheading을 우선 재탐색합니다."
+                    ),
+                    "재시도 횟수는 stage1 traversal retry limit으로 제한합니다.",
+                ],
+                "output_boundary": (
+                    "백트래킹은 최종 CN8 확정을 하지 않고 다음 LLM 검토/사람 검토용 "
+                    "후보 묶음을 다시 만드는 정책입니다."
+                ),
+            },
             "possible_fixture_decision": possibleDecisionReport.model_dump(
                 mode="json",
                 by_alias=True,
@@ -1109,6 +1157,60 @@ class OntologySmokeRunner:
             result["possible_fixture_decision"]["decision_status"],
             result["backtracking_fixture_decision"]["decision_status"],
             result["backtracking_fixture_decision"]["backtracking_recommended"],
+        )
+        policyLogger = self._Logger("Stage9DecisionPolicy")
+        backtrackingPolicy = result["backtracking_policy"]
+        policyLogger.info(
+            (
+                "\n[백트래킹 정책]\n"
+                "- 발동 조건:\n"
+                "  {}\n"
+                "- 발동하지 않는 경우:\n"
+                "  1. {}\n"
+                "  2. {}\n"
+                "  3. {}\n"
+                "- 후보 범위 재탐색 순서:\n"
+                "  1. {}\n"
+                "  2. {}\n"
+                "  3. {}\n"
+                "  4. {}\n"
+                "- 출력 경계:\n"
+                "  {}"
+            ),
+            backtrackingPolicy["trigger"],
+            backtrackingPolicy["non_trigger_cases"][0],
+            backtrackingPolicy["non_trigger_cases"][1],
+            backtrackingPolicy["non_trigger_cases"][2],
+            backtrackingPolicy["candidate_scope_strategy"][0],
+            backtrackingPolicy["candidate_scope_strategy"][1],
+            backtrackingPolicy["candidate_scope_strategy"][2],
+            backtrackingPolicy["candidate_scope_strategy"][3],
+            backtrackingPolicy["output_boundary"],
+        )
+        policyLogger.info(
+            (
+                "\n[fixture 결과 비교]\n"
+                "- 일반 후보 유지 시나리오\n"
+                "  strong: {}\n"
+                "  possible: {}\n"
+                "  insufficient: {}\n"
+                "  unlikely: {}\n"
+                "- 백트래킹 발동 시나리오\n"
+                "  strong: {}\n"
+                "  possible: {}\n"
+                "  insufficient: {}\n"
+                "  unlikely: {}"
+            ),
+            result["possible_fixture_decision"]["strong_candidate_hs8_codes"],
+            result["possible_fixture_decision"]["possible_candidate_hs8_codes"],
+            result["possible_fixture_decision"]["insufficient_information_hs8_codes"],
+            result["possible_fixture_decision"]["unlikely_candidate_hs8_codes"],
+            result["backtracking_fixture_decision"]["strong_candidate_hs8_codes"],
+            result["backtracking_fixture_decision"]["possible_candidate_hs8_codes"],
+            result["backtracking_fixture_decision"][
+                "insufficient_information_hs8_codes"
+            ],
+            result["backtracking_fixture_decision"]["unlikely_candidate_hs8_codes"],
         )
         return result
 
@@ -1169,6 +1271,27 @@ class OntologySmokeRunner:
             candidateRetriever=candidateRetriever,
             topK=self._maxValidationFixtureCandidates,
         )
+        currentHs4Codes = sorted(
+            {
+                candidate.hs4Code
+                for candidate in candidates
+                if candidate.hs4Code is not None
+            }
+        )
+        backtrackingHs4Codes = sorted(
+            {
+                candidate.hs4Code
+                for candidate in backtrackingCandidates
+                if candidate.hs4Code is not None
+            }
+        )
+        backtrackingStrategy = (
+            "alternative_hs4_scope"
+            if any(hs4Code not in currentHs4Codes for hs4Code in backtrackingHs4Codes)
+            else "same_hs4_parent_scope"
+            if backtrackingCandidates
+            else "no_candidate"
+        )
         result = {
             "status": "completed",
             "scenario_kind": "policy_fixture_traversal",
@@ -1187,6 +1310,13 @@ class OntologySmokeRunner:
             "backtracking_candidate_codes": [
                 candidate.hs8 for candidate in backtrackingCandidates
             ],
+            "backtracking_scope": {
+                "strategy": backtrackingStrategy,
+                "current_hs4_codes": currentHs4Codes,
+                "retry_hs4_codes": backtrackingHs4Codes,
+                "target_level": backtrackingDecisionReport.backtrackingTargetLevel,
+                "reason": backtrackingDecisionReport.backtrackingReason,
+            },
             "backtracking_candidate_preview": [
                 candidate.model_dump(mode="json", by_alias=True) for candidate in backtrackingCandidates[:3]
             ],
@@ -1205,6 +1335,21 @@ class OntologySmokeRunner:
             result["backtracking_fixture_traversal"]["traversal_status"],
             result["backtracking_candidate_count"],
             result["backtracking_candidate_codes"],
+        )
+        traversalLogger.info(
+            (
+                "\n[백트래킹 범위 선택]\n"
+                "- strategy: {}\n"
+                "- 현재 후보 HS4: {}\n"
+                "- 재탐색 후보 HS4: {}\n"
+                "- target_level: {}\n"
+                "- reason: {}"
+            ),
+            result["backtracking_scope"]["strategy"],
+            result["backtracking_scope"]["current_hs4_codes"],
+            result["backtracking_scope"]["retry_hs4_codes"],
+            result["backtracking_scope"]["target_level"],
+            result["backtracking_scope"]["reason"],
         )
         return result
 
@@ -1279,14 +1424,58 @@ class OntologySmokeRunner:
             completedRetryCount=self._stage1BacktrackingRetryAttempt,
             maxRetryCount=DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
         )
+        currentHs4Codes = sorted(
+            {
+                candidate.hs4Code
+                for candidate in currentCandidates
+                if candidate.hs4Code is not None
+            }
+        )
+        retryHs4Codes = sorted(
+            {
+                candidate.hs4Code
+                for candidate in backtrackingCandidates
+                if candidate.hs4Code is not None
+            }
+        )
+        retryScopeStrategy = (
+            "alternative_hs4_scope"
+            if any(hs4Code not in currentHs4Codes for hs4Code in retryHs4Codes)
+            else "same_hs4_parent_scope"
+            if backtrackingCandidates
+            else "no_candidate"
+        )
         if not backtrackingCandidates:
             result = {
                 "status": "skipped",
                 "reason": "backtracking candidate set is empty",
+                "backtracking_scope": {
+                    "strategy": retryScopeStrategy,
+                    "current_hs4_codes": currentHs4Codes,
+                    "retry_hs4_codes": retryHs4Codes,
+                    "excluded_candidate_codes": currentCandidateCodes,
+                    "completed_retry_count": self._stage1BacktrackingRetryAttempt,
+                    "max_retry_count": DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
+                },
             }
             self._Logger("Stage11BacktrackingRetry").warning(
-                "status=skipped reason={}",
+                (
+                    "status=skipped reason={}\n"
+                    "\n[백트래킹 skip 범위]\n"
+                    "- strategy: {}\n"
+                    "- current_hs4: {}\n"
+                    "- retry_hs4: {}\n"
+                    "- excluded_candidates: {}\n"
+                    "- completed_retry_count: {}\n"
+                    "- max_retry_count: {}"
+                ),
                 result["reason"],
+                result["backtracking_scope"]["strategy"],
+                result["backtracking_scope"]["current_hs4_codes"],
+                result["backtracking_scope"]["retry_hs4_codes"],
+                result["backtracking_scope"]["excluded_candidate_codes"],
+                result["backtracking_scope"]["completed_retry_count"],
+                result["backtracking_scope"]["max_retry_count"],
             )
             return result
 
@@ -1306,6 +1495,9 @@ class OntologySmokeRunner:
             "visited_candidate_hs8_codes": visitedCandidateCodes,
             "max_retry_count": DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
             "completed_retry_count": self._stage1BacktrackingRetryAttempt + 1,
+            "scope_strategy": retryScopeStrategy,
+            "initial_hs4_codes": currentHs4Codes,
+            "retry_hs4_codes": retryHs4Codes,
         }
         llmConnectionResult = self._RunOptionalLlmConnectionSmoke(
             contextBuilder=contextBuilder,
@@ -1375,6 +1567,13 @@ class OntologySmokeRunner:
             "next_retry_candidate_codes": nextRetryCandidateCodes,
             "next_retry_stop_reason": nextRetryStopReason,
             "evidence_record_count": len(evidencePackage.evidenceRecords),
+            "backtracking_scope": {
+                "strategy": retryScopeStrategy,
+                "initial_hs4_codes": currentHs4Codes,
+                "retry_hs4_codes": retryHs4Codes,
+                "excluded_candidate_codes": currentCandidateCodes,
+                "visited_candidate_codes": visitedCandidateCodes,
+            },
             "llm_connection": llmConnectionResult,
         }
         retryLogger = self._Logger("Stage11BacktrackingRetry")
@@ -1390,6 +1589,21 @@ class OntologySmokeRunner:
             result["evidence_record_count"],
             result["llm_connection"]["status"],
             result["next_retry_stop_reason"],
+        )
+        retryLogger.info(
+            (
+                "\n[백트래킹 실행 범위]\n"
+                "- strategy: {}\n"
+                "- initial_hs4: {}\n"
+                "- retry_hs4: {}\n"
+                "- excluded_candidates: {}\n"
+                "- visited_candidates: {}"
+            ),
+            result["backtracking_scope"]["strategy"],
+            result["backtracking_scope"]["initial_hs4_codes"],
+            result["backtracking_scope"]["retry_hs4_codes"],
+            result["backtracking_scope"]["excluded_candidate_codes"],
+            result["backtracking_scope"]["visited_candidate_codes"],
         )
         if result["llm_connection"]["status"] == "completed":
             retryTraversal = result["llm_connection"]["traversal"]
@@ -1592,10 +1806,16 @@ class OntologySmokeRunner:
             "llm_connection",
             {},
         )
+        initialDecision = selectedLlmConnection.get("decision", {})
+        initialTraversal = selectedLlmConnection.get("traversal", {})
+        retryValidation = retryLlmConnection.get("validation", {})
         if (
             retryLlmConnection.get("status") == "completed"
-            and backtrackingRetrySummary.get("scenario_kind")
-            == "actual_backtracking_inference"
+            and retryValidation.get("is_valid") is True
+            and (
+                initialDecision.get("backtracking_recommended") is True
+                or initialTraversal.get("next_action") == "backtrack_candidate_scope"
+            )
         ):
             selectedSource = "stage11_backtracking_retry"
             selectedLlmConnection = retryLlmConnection
@@ -2245,6 +2465,14 @@ class OntologySmokeRunner:
             summary["stage1_backtracking_retry_summary"]["status"],
             summary["stage1_recommendation_report_summary"]["status"],
             summary["stage1_human_review_package_summary"]["status"],
+        )
+
+    def _LogStepHeader(self, stepIndex: int, totalStepCount: int, title: str) -> None:
+        self._Logger("Run").info(
+            "\n\n========== STEP {}/{} ==========\n{}\n==============================",
+            stepIndex,
+            totalStepCount,
+            title,
         )
 
     def _WriteSummaryArtifact(self, summary: Dict[str, Any]) -> None:

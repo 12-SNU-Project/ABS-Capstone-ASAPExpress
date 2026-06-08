@@ -265,9 +265,19 @@ class Stage1RecommendationReportBuilder:
             "domain_scopes": list(productInput.domainScopes),
             "search_text_length": len(productInput.BuildSearchText()),
             "scoring_rule": {
-                "include_rule_keyword_match": "+4 per match",
-                "search_keyword_match": "+2 per match",
-                "description_token_match": "+1 per match",
+                "primary_evidence": (
+                    "상품명/설명/브랜드 등 핵심 상품 식별 정보 기반 매칭"
+                ),
+                "secondary_evidence": (
+                    "상품고시 및 OCR 정규화 핵심 사실 기반 매칭"
+                ),
+                "weak_evidence": (
+                    "마케팅성 또는 불확실한 OCR 문구 기반 매칭, 낮은 가중치 적용"
+                ),
+                "match_targets": (
+                    "include_rule_keywords, search_keywords, candidate context, "
+                    "CN explanatory note, branch context, CN description"
+                ),
                 "exclude_rule_match": "candidate score forced to 0",
             },
             "generated_candidate_count": len(candidates),
@@ -292,21 +302,15 @@ class Stage1RecommendationReportBuilder:
     ) -> Dict[str, Any]:
         return {
             "score": candidate.score,
-            "score_breakdown": {
-                "include_rule_points": 4.0 * len(candidate.includeRuleMatches),
-                "search_keyword_points": 2.0 * len(candidate.searchKeywordMatches),
-                "description_points": 1.0 * len(candidate.descriptionMatches),
-                "exclude_rule_triggered": len(candidate.excludeRuleMatches) > 0,
-                "formula": (
-                    "include_rule_keywords*4 + search_keywords*2 + "
-                    "description_matches*1; exclude_rule match forces score 0"
-                ),
-            },
+            "score_breakdown": candidate.scoreBreakdown,
             "matched_terms": list(candidate.matchedTerms),
             "include_rule_matches": list(candidate.includeRuleMatches),
             "search_keyword_matches": list(candidate.searchKeywordMatches),
             "description_matches": list(candidate.descriptionMatches),
             "exclude_rule_matches": list(candidate.excludeRuleMatches),
+            "primary_evidence_matches": list(candidate.primaryEvidenceMatches),
+            "secondary_evidence_matches": list(candidate.secondaryEvidenceMatches),
+            "weak_evidence_matches": list(candidate.weakEvidenceMatches),
         }
 
     def _BuildEvidenceSummary(
