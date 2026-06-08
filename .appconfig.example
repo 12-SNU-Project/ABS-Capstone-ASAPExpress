@@ -8,6 +8,9 @@ endpoint_url = "http://127.0.0.1:8000"
 chat_completions_path = "/v1/chat/completions"
 timeout_seconds = 120
 supports_response_format = false
+# Google AI Studio/OpenAI reasoning 계열 모델을 쓸 때만 설정합니다.
+# none|minimal|low|medium|high 중 provider가 지원하는 값을 사용하세요.
+# reasoning_effort = "minimal"
 
 # OpenAI API 예시:
 # runtime = "openai"
@@ -16,6 +19,7 @@ supports_response_format = false
 # endpoint_url = "https://api.openai.com"
 # chat_completions_path = "/v1/chat/completions"
 # supports_response_format = true
+# reasoning_effort = "low"
 
 # Google AI Studio OpenAI-compatible API 예시:
 # runtime = "openai"
@@ -24,6 +28,7 @@ supports_response_format = false
 # endpoint_url = "https://generativelanguage.googleapis.com/v1beta/openai"
 # chat_completions_path = "/chat/completions"
 # supports_response_format = true
+# reasoning_effort = "minimal"
 
 # Ollama 예시:
 # runtime = "ollama"
