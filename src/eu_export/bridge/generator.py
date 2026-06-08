@@ -281,6 +281,9 @@ def _BuildOpenAiChatPayload(
         and request.responseFormat == LlmResponseFormat.JSON_OBJECT
     ):
         payload["response_format"] = {"type": "json_object"}
+    reasoningEffort = _ReadReasoningEffort(runtimeConfig)
+    if reasoningEffort is not None:
+        payload["reasoning_effort"] = reasoningEffort
 
     return payload
 
@@ -602,6 +605,18 @@ def _ReadStringOption(
         return optionValue.strip()
 
     return defaultValue
+
+
+def _ReadReasoningEffort(runtimeConfig: LlmRuntimeConfig) -> str | None:
+    optionValue = runtimeConfig.extraOptions.get("reasoning_effort")
+    if not isinstance(optionValue, str):
+        return None
+
+    normalizedValue = optionValue.strip().lower()
+    if normalizedValue in {"none", "minimal", "low", "medium", "high"}:
+        return normalizedValue
+
+    return None
 
 
 def _ReadOpenAiHeaders(runtimeConfig: LlmRuntimeConfig) -> Dict[str, str]:

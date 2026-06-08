@@ -179,7 +179,11 @@ class KurlyMarketSmokeRunner:
             "combined_ocr_text": combinedOcrText,
             "steps": pipelineResultData["steps"],
             "status": {
-                "is_parse_ok": self._IsParseOk(collectionResult, parsedProductPage),
+                "is_parse_ok": self._IsParseOk(
+                    collectionResult,
+                    parsedProductPage,
+                    productNoticeFieldCount,
+                ),
                 "is_ocr_fallback_ok": isOcrFallbackOk,
             },
             "product": {
@@ -241,12 +245,14 @@ class KurlyMarketSmokeRunner:
 
     @staticmethod
     def _IsParseOk(
-            collectionResult: Dict[str, Any],
+        collectionResult: Dict[str, Any],
         parsedProductPage: Dict[str, Any],
+        productNoticeFieldCount: int,
     ) -> bool:
         return (
             parsedProductPage["product_name"] is not None
             and collectionResult["product_notice_text_line_count"] > 0
+            and productNoticeFieldCount > 0
         )
 
     def _LogOne(self, resultData: Dict[str, Any]) -> None:

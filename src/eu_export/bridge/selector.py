@@ -5,7 +5,7 @@ import platform
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
-from eu_export.app_config import LoadAppConfig
+from eu_export.app_config import LlmAppConfig, LoadAppConfig
 from eu_export.bridge.probe import HOSTED_LLM_API_KEY_ENV_NAMES
 from eu_export.bridge.schema import (
     LlmRuntimeConfig,
@@ -82,34 +82,45 @@ def BuildLlmRuntimeConfigFromEnv(
 ) -> LlmRuntimeConfig:
     """.appconfig 기본값과 .env/환경 변수 값을 LlmRuntimeConfig로 분배한다."""
 
-    envValues = _ReadMergedRuntimeValues(
+    resolvedProjectRootPath = _ResolveProjectRootPath(
         envFilePath,
-        environment,
-        appConfigPath,
         projectRootPath,
     )
-    runtimeName = _ReadEnvValue(envValues, "EU_EXPORT_LLM_RUNTIME")
+    appConfig = LoadAppConfig(resolvedProjectRootPath, appConfigPath)
+    envValues = _ReadMergedEnvValues(envFilePath, environment)
+    llmConfig = appConfig.llm
+    runtimeName = _ReadConfigOrEnvString(
+        llmConfig.runtime,
+        envValues,
+        ["EU_EXPORT_LLM_RUNTIME"],
+    )
 
     if runtimeName is None:
         return BuildDefaultLlmRuntimeConfig(
             osName=osName,
-            modelName=_ReadEnvValue(envValues, "EU_EXPORT_LLM_MODEL"),
+            modelName=_ReadConfigOrEnvString(
+                llmConfig.model,
+                envValues,
+                ["EU_EXPORT_LLM_MODEL"],
+            ),
         )
 
     normalizedRuntimeName = runtimeName.strip().lower()
     if normalizedRuntimeName == LlmRuntimeKind.OPENAI.value:
-        return _BuildOpenAiRuntimeConfigFromEnv(envValues)
+        return _BuildOpenAiRuntimeConfig(llmConfig, envValues)
     if normalizedRuntimeName == LlmRuntimeKind.OMLX.value:
-        return _BuildApiRuntimeConfigFromEnv(
+        return _BuildApiRuntimeConfig(
             LlmRuntimeKind.OMLX,
+            llmConfig,
             envValues,
             DEFAULT_OMLX_ENDPOINT_URL,
             ["EU_EXPORT_OMLX_ENDPOINT_URL"],
             DEFAULT_OMLX_CHAT_COMPLETIONS_PATH,
         )
     if normalizedRuntimeName == LlmRuntimeKind.OLLAMA.value:
-        return _BuildApiRuntimeConfigFromEnv(
+        return _BuildApiRuntimeConfig(
             LlmRuntimeKind.OLLAMA,
+            llmConfig,
             envValues,
             DEFAULT_OLLAMA_ENDPOINT_URL,
             ["EU_EXPORT_OLLAMA_ENDPOINT_URL"],
@@ -121,29 +132,37 @@ def BuildLlmRuntimeConfigFromEnv(
     )
 
 
-def _BuildOpenAiRuntimeConfigFromEnv(
+def _BuildOpenAiRuntimeConfig(
+    llmConfig: LlmAppConfig,
     envValues: Mapping[str, str],
 ) -> LlmRuntimeConfig:
     providerName = (
-        _ReadEnvValue(envValues, "EU_EXPORT_LLM_PROVIDER") or "openai"
+        _ReadConfigOrEnvString(
+            llmConfig.provider,
+            envValues,
+            ["EU_EXPORT_LLM_PROVIDER"],
+        )
+        or "openai"
     ).strip()
     normalizedProviderName = providerName.lower()
 
-    extraOptions = _BuildCommonExtraOptions(envValues)
+    extraOptions = _BuildCommonExtraOptions(llmConfig, envValues)
     extraOptions["provider"] = normalizedProviderName
 
     if normalizedProviderName in {"google_ai_studio", "google", "gemini"}:
         apiKey = _ReadFirstEnvValue(envValues, HOSTED_LLM_API_KEY_ENV_NAMES)
         if apiKey is not None:
             extraOptions["api_key"] = apiKey
-        extraOptions["chat_completions_path"] = _ReadFirstEnvValue(
+        extraOptions["chat_completions_path"] = _ReadConfigOrEnvString(
+            llmConfig.chat_completions_path,
             envValues,
             ["EU_EXPORT_LLM_CHAT_COMPLETIONS_PATH"],
         ) or DEFAULT_GOOGLE_AI_STUDIO_CHAT_COMPLETIONS_PATH
 
         return LlmRuntimeConfig(
             runtimeKind=LlmRuntimeKind.OPENAI,
-            modelName=_ReadFirstEnvValue(
+            modelName=_ReadConfigOrEnvString(
+                llmConfig.model,
                 envValues,
                 [
                     "EU_EXPORT_LLM_MODEL",
@@ -151,7 +170,8 @@ def _BuildOpenAiRuntimeConfigFromEnv(
                 ],
             ),
             endpointUrl=(
-                _ReadFirstEnvValue(
+                _ReadConfigOrEnvString(
+                    llmConfig.endpoint_url,
                     envValues,
                     [
                         "EU_EXPORT_LLM_ENDPOINT_URL",
@@ -163,7 +183,8 @@ def _BuildOpenAiRuntimeConfigFromEnv(
             extraOptions=extraOptions,
         )
 
-    extraOptions["chat_completions_path"] = _ReadFirstEnvValue(
+    extraOptions["chat_completions_path"] = _ReadConfigOrEnvString(
+        llmConfig.chat_completions_path,
         envValues,
         ["EU_EXPORT_LLM_CHAT_COMPLETIONS_PATH"],
     ) or DEFAULT_OPENAI_CHAT_COMPLETIONS_PATH
@@ -174,7 +195,8 @@ def _BuildOpenAiRuntimeConfigFromEnv(
 
     return LlmRuntimeConfig(
         runtimeKind=LlmRuntimeKind.OPENAI,
-        modelName=_ReadFirstEnvValue(
+        modelName=_ReadConfigOrEnvString(
+            llmConfig.model,
             envValues,
             [
                 "EU_EXPORT_LLM_MODEL",
@@ -182,7 +204,8 @@ def _BuildOpenAiRuntimeConfigFromEnv(
             ],
         ),
         endpointUrl=(
-            _ReadFirstEnvValue(
+            _ReadConfigOrEnvString(
+                llmConfig.endpoint_url,
                 envValues,
                 [
                     "EU_EXPORT_LLM_ENDPOINT_URL",
@@ -195,14 +218,15 @@ def _BuildOpenAiRuntimeConfigFromEnv(
     )
 
 
-def _BuildApiRuntimeConfigFromEnv(
+def _BuildApiRuntimeConfig(
     runtimeKind: LlmRuntimeKind,
+    llmConfig: LlmAppConfig,
     envValues: Mapping[str, str],
     defaultEndpointUrl: str,
     endpointEnvNames: list[str],
     defaultChatCompletionsPath: Optional[str],
 ) -> LlmRuntimeConfig:
-    extraOptions = _BuildCommonExtraOptions(envValues)
+    extraOptions = _BuildCommonExtraOptions(llmConfig, envValues)
     extraOptions["provider"] = runtimeKind.value
 
     apiKey = _ReadFirstEnvValue(
@@ -214,7 +238,8 @@ def _BuildApiRuntimeConfigFromEnv(
     if apiKey is not None:
         extraOptions["api_key"] = apiKey
 
-    chatCompletionsPath = _ReadFirstEnvValue(
+    chatCompletionsPath = _ReadConfigOrEnvString(
+        llmConfig.chat_completions_path,
         envValues,
         ["EU_EXPORT_LLM_CHAT_COMPLETIONS_PATH"],
     )
@@ -230,10 +255,16 @@ def _BuildApiRuntimeConfigFromEnv(
             *endpointEnvNames,
         ],
     )
+    if endpointUrl is None:
+        endpointUrl = _ReadConfigString(llmConfig.endpoint_url)
 
     return LlmRuntimeConfig(
         runtimeKind=runtimeKind,
-        modelName=_ReadEnvValue(envValues, "EU_EXPORT_LLM_MODEL"),
+        modelName=_ReadConfigOrEnvString(
+            llmConfig.model,
+            envValues,
+            ["EU_EXPORT_LLM_MODEL"],
+        ),
         endpointUrl=endpointUrl or defaultEndpointUrl,
         extraOptions=extraOptions,
     )
@@ -254,61 +285,6 @@ def _ReadMergedEnvValues(
             envValues[envName] = envValue.strip()
 
     return envValues
-
-
-def _ReadMergedRuntimeValues(
-    envFilePath: Optional[str | Path],
-    environment: Optional[Mapping[str, str]],
-    appConfigPath: Optional[str | Path],
-    projectRootPath: Optional[str | Path],
-) -> Dict[str, str]:
-    runtimeValues = _ReadAppConfigRuntimeValues(
-        envFilePath,
-        appConfigPath,
-        projectRootPath,
-    )
-    runtimeValues.update(_ReadMergedEnvValues(envFilePath, environment))
-    return runtimeValues
-
-
-def _ReadAppConfigRuntimeValues(
-    envFilePath: Optional[str | Path],
-    appConfigPath: Optional[str | Path],
-    projectRootPath: Optional[str | Path],
-) -> Dict[str, str]:
-    resolvedProjectRootPath = _ResolveProjectRootPath(
-        envFilePath,
-        projectRootPath,
-    )
-    appConfig = LoadAppConfig(resolvedProjectRootPath, appConfigPath)
-    llmConfig = appConfig.llm
-
-    runtimeValues: Dict[str, str] = {}
-    stringValues = [
-        (llmConfig.runtime, "EU_EXPORT_LLM_RUNTIME"),
-        (llmConfig.provider, "EU_EXPORT_LLM_PROVIDER"),
-        (llmConfig.model, "EU_EXPORT_LLM_MODEL"),
-        (llmConfig.endpoint_url, "EU_EXPORT_LLM_ENDPOINT_URL"),
-        (llmConfig.chat_completions_path, "EU_EXPORT_LLM_CHAT_COMPLETIONS_PATH"),
-    ]
-    for value, envName in stringValues:
-        if isinstance(value, str) and value.strip() != "":
-            runtimeValues[envName] = value.strip()
-
-    timeoutSeconds = llmConfig.timeout_seconds
-    if (
-        isinstance(timeoutSeconds, int)
-        and not isinstance(timeoutSeconds, bool)
-        and timeoutSeconds > 0
-    ):
-        runtimeValues["EU_EXPORT_LLM_TIMEOUT_SECONDS"] = str(timeoutSeconds)
-
-    supportsResponseFormat = llmConfig.supports_response_format
-    if isinstance(supportsResponseFormat, bool):
-        runtimeValues["EU_EXPORT_LLM_SUPPORTS_RESPONSE_FORMAT"] = (
-            "true" if supportsResponseFormat else "false"
-        )
-    return runtimeValues
 
 
 def _ResolveProjectRootPath(
@@ -381,7 +357,25 @@ def _ReadFirstEnvValue(
     return None
 
 
+def _ReadConfigString(value: Optional[str]) -> Optional[str]:
+    if isinstance(value, str) and value.strip() != "":
+        return value.strip()
+    return None
+
+
+def _ReadConfigOrEnvString(
+    configValue: Optional[str],
+    envValues: Mapping[str, str],
+    envNames: list[str],
+) -> Optional[str]:
+    envValue = _ReadFirstEnvValue(envValues, envNames)
+    if envValue is not None:
+        return envValue
+    return _ReadConfigString(configValue)
+
+
 def _BuildCommonExtraOptions(
+    llmConfig: LlmAppConfig,
     envValues: Mapping[str, str],
 ) -> Dict[str, Any]:
     extraOptions: Dict[str, Any] = {}
@@ -389,6 +383,8 @@ def _BuildCommonExtraOptions(
         envValues,
         "EU_EXPORT_LLM_TIMEOUT_SECONDS",
     )
+    if timeoutSeconds is None:
+        timeoutSeconds = llmConfig.timeout_seconds
     if timeoutSeconds is not None:
         extraOptions["timeout_seconds"] = timeoutSeconds
 
@@ -396,8 +392,18 @@ def _BuildCommonExtraOptions(
         envValues,
         "EU_EXPORT_LLM_SUPPORTS_RESPONSE_FORMAT",
     )
+    if supportsResponseFormat is None:
+        supportsResponseFormat = llmConfig.supports_response_format
     if supportsResponseFormat is not None:
         extraOptions["supports_response_format"] = supportsResponseFormat
+
+    reasoningEffort = _ReadConfigOrEnvString(
+        llmConfig.reasoning_effort,
+        envValues,
+        ["EU_EXPORT_LLM_REASONING_EFFORT"],
+    )
+    if reasoningEffort is not None:
+        extraOptions["reasoning_effort"] = reasoningEffort
 
     return extraOptions
 

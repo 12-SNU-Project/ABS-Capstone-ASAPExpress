@@ -47,6 +47,7 @@ from eu_export.ontology import (  # noqa: E402
     Stage1RecommendationReportBuilder,
     Stage1ResponseValidator,
     Stage1ResponseValidationReport,
+    Stage1ResponseValidationIssue,
     Stage1RequestBuilder,
     Stage1DecisionPolicy,
     Stage1DecisionReport,
@@ -1717,7 +1718,7 @@ class OntologySmokeRunner:
             candidateReviews: List[Dict[str, Any]] = []
             notEnoughInformation: List[str] = []
             responseSummaries: List[Dict[str, Any]] = []
-            validationIssues = []
+            validationIssues: List[Stage1ResponseValidationIssue] = []
 
             for candidate in candidates:
                 reviewCandidates = [candidate]
@@ -1737,15 +1738,54 @@ class OntologySmokeRunner:
                     packagedContext=packagedContext,
                     evidencePackage=evidencePackage,
                 )
-                llmResponse = adapter.Generate(llmRequest)
+                try:
+                    llmResponse = adapter.Generate(llmRequest)
+                except RuntimeGenerationError as error:
+                    validationIssue = Stage1ResponseValidationIssue(
+                        severity="error",
+                        issueCode="candidate_llm_generation_failed",
+                        fieldPath=(
+                            "classification_result.candidate_reviews[{0}]"
+                        ).format(candidate.hs8),
+                        message=(
+                            "LLM generation failed for candidate {0}: {1}"
+                        ).format(candidate.hs8, error),
+                    )
+                    validationIssues.append(validationIssue)
+                    responseSummaries.append(
+                        {
+                            "candidate_hs8": candidate.hs8,
+                            "status": "failed",
+                            "error": str(error),
+                            "generated_text_length": 0,
+                            "generated_text_preview": "",
+                            "runtime_kind": runtimeConfig.runtimeKind.value,
+                            "model_name": runtimeConfig.modelName,
+                            "response_format": llmRequest.responseFormat.value,
+                            "finish_reason": "generation_failed",
+                            "provider_finish_reason": None,
+                            "token_usage": {
+                                "input_tokens": None,
+                                "output_tokens": None,
+                                "total_tokens": None,
+                            },
+                            "limitations": [str(error)],
+                            "validation": Stage1ResponseValidationReport(
+                                isValid=False,
+                                parsedResponse={},
+                                issues=[validationIssue],
+                            ).model_dump(mode="json", by_alias=True),
+                        }
+                    )
+                    continue
+
                 candidateValidationReport = validator.ValidateResponse(
                     llmResponse,
                     productInput,
                     reviewCandidates,
                     evidencePackage=evidencePackage,
                 )
-                if not candidateValidationReport.isValid:
-                    validationIssues.extend(candidateValidationReport.issues)
+                validationIssues.extend(candidateValidationReport.issues)
 
                 parsedResponse = candidateValidationReport.parsedResponse
                 classificationResult = (
@@ -1776,6 +1816,7 @@ class OntologySmokeRunner:
                 responseSummaries.append(
                     {
                         "candidate_hs8": candidate.hs8,
+                        "status": "completed",
                         "generated_text_length": len(llmResponse.generatedText),
                         "generated_text_preview": self._BuildTextPreview(
                             llmResponse.generatedText,
@@ -1877,6 +1918,16 @@ class OntologySmokeRunner:
                 "error": str(error),
             }
 
+        completedResponseSummaries = [
+            responseSummary
+            for responseSummary in responseSummaries
+            if responseSummary.get("status") == "completed"
+        ]
+        responseMetadataSource = (
+            completedResponseSummaries[0]
+            if completedResponseSummaries
+            else responseSummaries[0]
+        )
         finishReasonSet = {
             responseSummary["finish_reason"]
             for responseSummary in responseSummaries
@@ -1888,9 +1939,12 @@ class OntologySmokeRunner:
         tokenUsage = {}
         for tokenKey in ["input_tokens", "output_tokens", "total_tokens"]:
             tokenValues = [
-                responseSummary["token_usage"].get(tokenKey)
+                responseSummary.get("token_usage", {}).get(tokenKey)
                 for responseSummary in responseSummaries
-                if isinstance(responseSummary["token_usage"].get(tokenKey), int)
+                if isinstance(
+                    responseSummary.get("token_usage", {}).get(tokenKey),
+                    int,
+                )
             ]
             tokenUsage[tokenKey] = sum(tokenValues) if tokenValues else None
 
@@ -1907,9 +1961,9 @@ class OntologySmokeRunner:
                     responseSummary["generated_text_length"]
                     for responseSummary in responseSummaries
                 ),
-                "runtime_kind": responseSummaries[0]["runtime_kind"],
-                "model_name": responseSummaries[0]["model_name"],
-                "response_format": responseSummaries[0]["response_format"],
+                "runtime_kind": responseMetadataSource["runtime_kind"],
+                "model_name": responseMetadataSource["model_name"],
+                "response_format": responseMetadataSource["response_format"],
                 "finish_reason": (
                     next(iter(finishReasonSet))
                     if len(finishReasonSet) == 1

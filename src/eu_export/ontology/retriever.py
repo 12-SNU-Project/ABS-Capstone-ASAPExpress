@@ -16,13 +16,24 @@ from eu_export.utils import FindContainedTerms, NormalizeWhitespace
 
 DEFAULT_MAX_CHUNK_CHARACTERS = 2200
 TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣_./-]+")
+SKIPPED_MARKDOWN_SECTION_HEADINGS = frozenset(
+    {
+        "related files",
+        "status",
+    },
+)
 
 
 class OntologyRetriever:
     """초기 RAG 구현을 위한 deterministic keyword retriever."""
 
-    def __init__(self, maxChunkCharacters: int = DEFAULT_MAX_CHUNK_CHARACTERS) -> None:
+    def __init__(
+        self,
+        maxChunkCharacters: int = DEFAULT_MAX_CHUNK_CHARACTERS,
+        includeMetadataChunks: bool = False,
+    ) -> None:
         self.maxChunkCharacters = max(400, maxChunkCharacters)
+        self.includeMetadataChunks = includeMetadataChunks
 
     def BuildChunks(self, documents: Sequence[OntologyDocument]) -> List[OntologyChunk]:
         chunks: List[OntologyChunk] = []
@@ -83,7 +94,7 @@ class OntologyRetriever:
         pathBucket = self._ReadPathBucket(document.relativePath)
         metadataText = self._BuildFrontmatterSummaryText(document, pathBucket)
 
-        if metadataText:
+        if self.includeMetadataChunks and metadataText:
             chunks.extend(
                 self._BuildTextChunks(
                     document=document,
@@ -152,7 +163,7 @@ class OntologyRetriever:
 
     @staticmethod
     def _BuildChunk(
-            document: OntologyDocument,
+        document: OntologyDocument,
         headingPath: Sequence[str],
         text: str,
         chunkKind: str,
@@ -183,10 +194,9 @@ class OntologyRetriever:
 
     @staticmethod
     def _BuildFrontmatterSummaryText(
-            document: OntologyDocument,
-            pathBucket: str,
+        document: OntologyDocument,
+        pathBucket: str,
     ) -> str:
-
         if not document.frontmatter:
             return ""
 
@@ -220,7 +230,6 @@ class OntologyRetriever:
 
     @staticmethod
     def _SplitMarkdownSections(document: OntologyDocument) -> List[Tuple[List[str], str]]:
-
         if not document.content:
             return [([document.title or document.documentId], "")]
 
@@ -257,6 +266,10 @@ class OntologyRetriever:
             (headingPath, "\n".join(lines).strip())
             for headingPath, lines in sections
             if "\n".join(lines).strip()
+            and (
+                not headingPath
+                or headingPath[-1].lower() not in SKIPPED_MARKDOWN_SECTION_HEADINGS
+            )
         ]
 
     def _SplitLongText(self, text: str) -> Iterable[str]:
@@ -339,7 +352,6 @@ class OntologyRetriever:
                 continue
             terms.append(term)
         return sorted(set(terms))
-
 
     @staticmethod
     def _ReadAuthorityRank(value: Any) -> float | None:

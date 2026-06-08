@@ -20,6 +20,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 이하 fallback �
 
 
 APP_CONFIG_FILE_NAME = ".appconfig"
+REASONING_EFFORT_VALUES = frozenset({"none", "minimal", "low", "medium", "high"})
 
 
 class LlmAppConfig(BaseModel):
@@ -34,6 +35,22 @@ class LlmAppConfig(BaseModel):
     chat_completions_path: Optional[StrictStr] = None
     timeout_seconds: Optional[StrictInt] = None
     supports_response_format: Optional[StrictBool] = None
+    reasoning_effort: Optional[StrictStr] = None
+
+    @field_validator("reasoning_effort")
+    @classmethod
+    def NormalizeReasoningEffort(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+
+        normalizedValue = value.strip().lower()
+        if normalizedValue not in REASONING_EFFORT_VALUES:
+            raise ValueError(
+                "reasoning_effort must be one of: {0}".format(
+                    ", ".join(sorted(REASONING_EFFORT_VALUES)),
+                )
+            )
+        return normalizedValue
 
 
 class AppPathsConfig(BaseModel):

@@ -1763,7 +1763,7 @@ class CnCandidateRetriever:
             COSMETICS_DOMAIN_SCOPE: [],
         }
         for row in self._ReadCsvRows(csvPath):
-            chapter = row.get("chapter", "").zfill(2)
+            chapter = (row.get("chapter", "") or row.get("hs2_code", "")).zfill(2)
             if chapter in FOOD_DOMAIN_SCOPE_CHAPTERS:
                 rowsByDomainScope[FOOD_DOMAIN_SCOPE].append(row)
             if chapter in COSMETICS_DOMAIN_SCOPE_CHAPTERS:
@@ -1771,6 +1771,7 @@ class CnCandidateRetriever:
         return rowsByDomainScope
 
     def _BuildCandidateContextText(self, row: Mapping[str, str]) -> str:
+        chapterCode = row.get("chapter", "") or row.get("hs2_code", "")
         subheadingDescription = row.get("subheading_description") or row.get(
             "hs6_description",
             "",
@@ -1780,7 +1781,7 @@ class CnCandidateRetriever:
         parts = [
             (
                 "chapter",
-                row.get("chapter", "") or row.get("hs2_code", ""),
+                chapterCode,
                 row.get("chapter_description", "") or row.get("hs2_description", ""),
             ),
             (
