@@ -36,6 +36,7 @@ class TextEmbeddingRuntimeConfig(BaseModel):
         default=True,
         alias="normalize_embeddings",
     )
+    localFilesOnly: bool = Field(default=True, alias="local_files_only")
 
 
 class TextEmbeddingDependencyStatus(BaseModel):
@@ -149,12 +150,26 @@ class SentenceTransformerTextEmbeddingAdapter:
             ) from exception
 
         if self._runtimeConfig.device is None:
-            self._model = SentenceTransformer(self._runtimeConfig.modelName)
+            try:
+                self._model = SentenceTransformer(
+                    self._runtimeConfig.modelName,
+                    local_files_only=self._runtimeConfig.localFilesOnly,
+                )
+            except Exception as exception:
+                raise TextEmbeddingAdapterBuildError(
+                    "Text embedding model load failed: {0}".format(exception)
+                ) from exception
         else:
-            self._model = SentenceTransformer(
-                self._runtimeConfig.modelName,
-                device=self._runtimeConfig.device,
-            )
+            try:
+                self._model = SentenceTransformer(
+                    self._runtimeConfig.modelName,
+                    device=self._runtimeConfig.device,
+                    local_files_only=self._runtimeConfig.localFilesOnly,
+                )
+            except Exception as exception:
+                raise TextEmbeddingAdapterBuildError(
+                    "Text embedding model load failed: {0}".format(exception)
+                ) from exception
         return self._model
 
 
@@ -186,6 +201,7 @@ def BuildTextEmbeddingRuntimeConfig(
         device=embeddingConfig.device,
         batchSize=embeddingConfig.batch_size,
         normalizeEmbeddings=embeddingConfig.normalize_embeddings,
+        localFilesOnly=embeddingConfig.local_files_only,
     )
 
 

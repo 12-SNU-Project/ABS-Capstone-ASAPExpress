@@ -31,6 +31,10 @@ from eu_export.product.ocr_normalization import (
 )
 from eu_export.ontology.loader import OntologyDocumentLoader
 from eu_export.ontology.schema import PackagedOntologyContext
+from eu_export.ontology.semantic_retrieval import (
+    CnSemanticCandidateIndex,
+    CnSemanticSearchHit,
+)
 from eu_export.utils import NormalizeWhitespace, NormalizeWhitespacePreservingLines
 
 
@@ -42,6 +46,7 @@ BTI_CASE_CHUNKS_DOCUMENT_ID = "table.bti_case_chunks"
 FOOD_DOMAIN_SCOPE = "food_16_21"
 COSMETICS_DOMAIN_SCOPE = "cosmetics_33"
 DEFAULT_CN_CANDIDATE_TOP_K = 8
+DEFAULT_SEMANTIC_CANDIDATE_TOP_K = 8
 DEFAULT_STAGE1_BTI_EVIDENCE_PER_CANDIDATE = 3
 DEFAULT_STAGE1_EVIDENCE_TEXT_MAX_CHARACTERS = 1400
 DEFAULT_STAGE1_PROMPT_EVIDENCE_TEXT_MAX_CHARACTERS = 600
@@ -210,6 +215,8 @@ TIER_DESCRIPTION_WEIGHTS = {
     EVIDENCE_TIER_WEAK: 0.1,
 }
 DEFAULT_MAX_CANDIDATES_PER_HS4 = 3
+RETRIEVAL_SOURCE_HEURISTIC = "heuristic"
+RETRIEVAL_SOURCE_SEMANTIC = "semantic"
 
 STAGE1_CLASSIFICATION_SYSTEM_PROMPT = """\
 You are an EU HS/CN classification review assistant for Korean exporters.
@@ -363,6 +370,15 @@ class ProductClassificationInput(BaseModel):
         ]
         return self._BuildSearchTextFromParts(rawParts)
 
+    def BuildSemanticSearchText(self) -> str:
+        semanticText = self._BuildSearchTextFromParts(
+            [
+                self.BuildPrimarySearchText(),
+                self.BuildSecondarySearchText(),
+            ]
+        )
+        return semanticText or self.BuildSearchText()
+
     def _BuildSearchTextFromParts(self, rawParts: Sequence[str]) -> str:
         parts = [
             part
@@ -405,6 +421,15 @@ class CnCandidatePromptPayload(BaseModel):
     hs6Code: Optional[str] = Field(default=None, alias="hs6_code")
     domainScope: str = Field(alias="domain_scope")
     score: float
+    retrievalSources: List[str] = Field(
+        default_factory=list,
+        alias="retrieval_sources",
+    )
+    semanticScore: Optional[float] = Field(default=None, alias="semantic_score")
+    semanticMatches: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        alias="semantic_matches",
+    )
     codeHierarchy: Dict[str, Dict[str, Optional[str]]] = Field(
         alias="code_hierarchy",
     )
@@ -527,6 +552,15 @@ class CnCandidate(BaseModel):
     hardConditions: str = Field(default="", alias="hard_conditions", exclude=True)
     cnExplanatoryNote: str = Field(default="", alias="cn_explanatory_note")
     needsHumanReview: bool = Field(default=True, alias="needs_human_review")
+    retrievalSources: List[str] = Field(
+        default_factory=lambda: [RETRIEVAL_SOURCE_HEURISTIC],
+        alias="retrieval_sources",
+    )
+    semanticScore: Optional[float] = Field(default=None, alias="semantic_score")
+    semanticMatches: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        alias="semantic_matches",
+    )
 
     @computed_field(alias="code_hierarchy")
     @property
@@ -561,6 +595,9 @@ class CnCandidate(BaseModel):
             "secondary_evidence_matches": list(self.secondaryEvidenceMatches[:8]),
             "weak_evidence_matches": list(self.weakEvidenceMatches[:8]),
             "exclude_rule_triggered": len(self.excludeRuleMatches) > 0,
+            "retrieval_sources": list(self.retrievalSources),
+            "semantic_score": self.semanticScore,
+            "semantic_matches": list(self.semanticMatches[:3]),
             "formula": (
                 "tiered include/search/description matches; weak OCR evidence "
                 "has low weight; exclude_rule match forces score 0"
@@ -597,6 +634,9 @@ class CnCandidate(BaseModel):
             hs6Code=self.hs6Code,
             domainScope=self.domainScope,
             score=self.score,
+            retrievalSources=list(self.retrievalSources),
+            semanticScore=self.semanticScore,
+            semanticMatches=list(self.semanticMatches[:3]),
             codeHierarchy=codeHierarchy,
             hierarchyPathText=" > ".join(hierarchyPathParts),
             combinedDescription=self.combinedDescription,
@@ -1598,22 +1638,9 @@ class CnCandidateRetriever:
         topK: int = DEFAULT_CN_CANDIDATE_TOP_K,
     ) -> List[CnCandidate]:
         rowsByDomainScope = self._LoadRowsByDomainScope()
-        searchText = productInput.BuildSearchText()
-        primarySearchText = productInput.BuildPrimarySearchText()
-        secondarySearchText = productInput.BuildSecondarySearchText()
-        weakSearchText = productInput.BuildWeakSearchText()
-        searchTermsByTier = {
-            EVIDENCE_TIER_PRIMARY: self._BuildExpandedSearchTerms(primarySearchText),
-            EVIDENCE_TIER_SECONDARY: self._BuildExpandedSearchTerms(
-                secondarySearchText,
-            ),
-            EVIDENCE_TIER_WEAK: self._BuildExpandedSearchTerms(weakSearchText),
-        }
-        searchTextByTier = {
-            EVIDENCE_TIER_PRIMARY: primarySearchText,
-            EVIDENCE_TIER_SECONDARY: secondarySearchText,
-            EVIDENCE_TIER_WEAK: weakSearchText,
-        }
+        searchText, searchTextByTier, searchTermsByTier = self._BuildSearchProfile(
+            productInput,
+        )
         candidates: List[CnCandidate] = []
 
         for domainScope in productInput.domainScopes:
@@ -1630,6 +1657,203 @@ class CnCandidateRetriever:
 
         return self._SelectTopCandidates(candidates, productInput, topK)
 
+    def FindCandidatesWithSemanticIndex(
+        self,
+        productInput: ProductClassificationInput,
+        semanticIndex: CnSemanticCandidateIndex,
+        heuristicTopK: int = DEFAULT_CN_CANDIDATE_TOP_K,
+        semanticTopK: int = DEFAULT_SEMANTIC_CANDIDATE_TOP_K,
+        finalCandidateLimit: Optional[int] = None,
+        minSemanticScore: float = 0.0,
+    ) -> List[CnCandidate]:
+        semanticHits = semanticIndex.Search(
+            queryText=productInput.BuildSemanticSearchText(),
+            domainScopes=productInput.domainScopes,
+            topK=semanticTopK,
+            minScore=minSemanticScore,
+        )
+        return self._FindCandidatesWithSemanticHits(
+            productInput=productInput,
+            semanticHits=semanticHits,
+            heuristicTopK=heuristicTopK,
+            finalCandidateLimit=finalCandidateLimit,
+        )
+
+    def _FindCandidatesWithSemanticHits(
+        self,
+        productInput: ProductClassificationInput,
+        semanticHits: Sequence[CnSemanticSearchHit],
+        heuristicTopK: int = DEFAULT_CN_CANDIDATE_TOP_K,
+        finalCandidateLimit: Optional[int] = None,
+    ) -> List[CnCandidate]:
+        heuristicCandidates = self.FindCandidates(productInput, topK=heuristicTopK)
+        semanticCandidates = self._BuildCandidatesFromSemanticHits(
+            productInput,
+            semanticHits,
+        )
+        return self._MergeCandidateSets(
+            heuristicCandidates=heuristicCandidates,
+            semanticCandidates=semanticCandidates,
+            finalCandidateLimit=finalCandidateLimit,
+        )
+
+    def _BuildCandidatesFromSemanticHits(
+        self,
+        productInput: ProductClassificationInput,
+        semanticHits: Sequence[CnSemanticSearchHit],
+    ) -> List[CnCandidate]:
+        if not semanticHits:
+            return []
+
+        rowsByDomainScope = self._LoadRowsByDomainScope()
+        rowByDomainScopeAndCode: Dict[tuple[str, str], Mapping[str, str]] = {}
+        for domainScope, rows in rowsByDomainScope.items():
+            for row in rows:
+                candidateCode = row.get("cn", "") or row.get("hs8", "")
+                if candidateCode:
+                    rowByDomainScopeAndCode[(domainScope, candidateCode)] = row
+
+        searchText, searchTextByTier, searchTermsByTier = self._BuildSearchProfile(
+            productInput,
+        )
+
+        candidates: List[CnCandidate] = []
+        domainScopeSet = set(productInput.domainScopes)
+        for semanticHit in semanticHits:
+            if domainScopeSet and semanticHit.domainScope not in domainScopeSet:
+                continue
+            row = rowByDomainScopeAndCode.get(
+                (semanticHit.domainScope, semanticHit.candidateCode),
+            )
+            if row is None:
+                continue
+            candidate = self._ScoreRow(
+                row=row,
+                domainScope=semanticHit.domainScope,
+                searchText=searchText,
+                searchTextByTier=searchTextByTier,
+                searchTermsByTier=searchTermsByTier,
+            )
+            if candidate.excludeRuleMatches:
+                continue
+            candidates.append(
+                candidate.model_copy(
+                    update={
+                        "retrievalSources": [RETRIEVAL_SOURCE_SEMANTIC],
+                        "semanticScore": round(semanticHit.score, 6),
+                        "semanticMatches": [
+                            semanticMatch.model_dump(
+                                mode="json",
+                                by_alias=True,
+                            )
+                            for semanticMatch in semanticHit.matchedChunks
+                        ],
+                    },
+                )
+            )
+
+        return candidates
+
+    def _MergeCandidateSets(
+        self,
+        heuristicCandidates: Sequence[CnCandidate],
+        semanticCandidates: Sequence[CnCandidate],
+        finalCandidateLimit: Optional[int] = None,
+    ) -> List[CnCandidate]:
+        if finalCandidateLimit is not None and finalCandidateLimit <= 0:
+            return []
+
+        candidatesByCode: Dict[str, CnCandidate] = {}
+        for candidate in heuristicCandidates:
+            candidatesByCode[candidate.hs8] = candidate
+
+        for semanticCandidate in semanticCandidates:
+            existingCandidate = candidatesByCode.get(semanticCandidate.hs8)
+            if existingCandidate is None:
+                candidatesByCode[semanticCandidate.hs8] = semanticCandidate
+                continue
+            retrievalSources = list(existingCandidate.retrievalSources)
+            for retrievalSource in semanticCandidate.retrievalSources:
+                if retrievalSource not in retrievalSources:
+                    retrievalSources.append(retrievalSource)
+            candidatesByCode[semanticCandidate.hs8] = existingCandidate.model_copy(
+                update={
+                    "retrievalSources": retrievalSources,
+                    "semanticScore": semanticCandidate.semanticScore,
+                    "semanticMatches": list(semanticCandidate.semanticMatches),
+                },
+            )
+
+        bothSourceCandidates = sorted(
+            (
+                candidate
+                for candidate in candidatesByCode.values()
+                if RETRIEVAL_SOURCE_HEURISTIC in candidate.retrievalSources
+                and RETRIEVAL_SOURCE_SEMANTIC in candidate.retrievalSources
+            ),
+            key=lambda candidate: (
+                -candidate.score,
+                -(candidate.semanticScore or 0.0),
+                candidate.domainScope,
+                candidate.hs4Code or "",
+                candidate.hs8,
+            ),
+        )
+        heuristicOnlyCandidates = [
+            candidate
+            for candidate in self._SortCandidates(candidatesByCode.values())
+            if RETRIEVAL_SOURCE_HEURISTIC in candidate.retrievalSources
+            and RETRIEVAL_SOURCE_SEMANTIC not in candidate.retrievalSources
+        ]
+        semanticOnlyCandidates = sorted(
+            (
+                candidate
+                for candidate in candidatesByCode.values()
+                if RETRIEVAL_SOURCE_SEMANTIC in candidate.retrievalSources
+                and RETRIEVAL_SOURCE_HEURISTIC not in candidate.retrievalSources
+            ),
+            key=lambda candidate: (
+                -(candidate.semanticScore or 0.0),
+                -candidate.score,
+                candidate.domainScope,
+                candidate.hs4Code or "",
+                candidate.hs8,
+            ),
+        )
+
+        selectedCandidates: List[CnCandidate] = []
+        selectedCodes: Set[str] = set()
+
+        def AppendCandidate(candidate: CnCandidate) -> bool:
+            if (
+                finalCandidateLimit is not None
+                and len(selectedCandidates) >= finalCandidateLimit
+            ):
+                return False
+            if candidate.hs8 in selectedCodes:
+                return True
+            selectedCandidates.append(candidate)
+            selectedCodes.add(candidate.hs8)
+            return True
+
+        for candidate in bothSourceCandidates:
+            if not AppendCandidate(candidate):
+                return selectedCandidates
+
+        maxParallelLength = max(
+            len(heuristicOnlyCandidates),
+            len(semanticOnlyCandidates),
+        )
+        for index in range(maxParallelLength):
+            if index < len(heuristicOnlyCandidates):
+                if not AppendCandidate(heuristicOnlyCandidates[index]):
+                    return selectedCandidates
+            if index < len(semanticOnlyCandidates):
+                if not AppendCandidate(semanticOnlyCandidates[index]):
+                    return selectedCandidates
+
+        return selectedCandidates
+
     def FindSiblingCandidates(
         self,
         productInput: ProductClassificationInput,
@@ -1638,22 +1862,9 @@ class CnCandidateRetriever:
         topK: int = DEFAULT_CN_CANDIDATE_TOP_K,
     ) -> List[CnCandidate]:
         rowsByDomainScope = self._LoadRowsByDomainScope()
-        searchText = productInput.BuildSearchText()
-        primarySearchText = productInput.BuildPrimarySearchText()
-        secondarySearchText = productInput.BuildSecondarySearchText()
-        weakSearchText = productInput.BuildWeakSearchText()
-        searchTermsByTier = {
-            EVIDENCE_TIER_PRIMARY: self._BuildExpandedSearchTerms(primarySearchText),
-            EVIDENCE_TIER_SECONDARY: self._BuildExpandedSearchTerms(
-                secondarySearchText,
-            ),
-            EVIDENCE_TIER_WEAK: self._BuildExpandedSearchTerms(weakSearchText),
-        }
-        searchTextByTier = {
-            EVIDENCE_TIER_PRIMARY: primarySearchText,
-            EVIDENCE_TIER_SECONDARY: secondarySearchText,
-            EVIDENCE_TIER_WEAK: weakSearchText,
-        }
+        searchText, searchTextByTier, searchTermsByTier = self._BuildSearchProfile(
+            productInput,
+        )
         excludedHs8CodeSet = set(excludedHs8Codes)
         parentHs4CodesByDomainScope: Dict[str, Set[str]] = {}
         parentHs6CodesByDomainScope: Dict[str, Set[str]] = {}
@@ -1750,22 +1961,9 @@ class CnCandidateRetriever:
         topK: int = DEFAULT_CN_CANDIDATE_TOP_K,
     ) -> List[CnCandidate]:
         rowsByDomainScope = self._LoadRowsByDomainScope()
-        searchText = productInput.BuildSearchText()
-        primarySearchText = productInput.BuildPrimarySearchText()
-        secondarySearchText = productInput.BuildSecondarySearchText()
-        weakSearchText = productInput.BuildWeakSearchText()
-        searchTermsByTier = {
-            EVIDENCE_TIER_PRIMARY: self._BuildExpandedSearchTerms(primarySearchText),
-            EVIDENCE_TIER_SECONDARY: self._BuildExpandedSearchTerms(
-                secondarySearchText,
-            ),
-            EVIDENCE_TIER_WEAK: self._BuildExpandedSearchTerms(weakSearchText),
-        }
-        searchTextByTier = {
-            EVIDENCE_TIER_PRIMARY: primarySearchText,
-            EVIDENCE_TIER_SECONDARY: secondarySearchText,
-            EVIDENCE_TIER_WEAK: weakSearchText,
-        }
+        searchText, searchTextByTier, searchTermsByTier = self._BuildSearchProfile(
+            productInput,
+        )
         excludedHs8CodeSet = set(excludedHs8Codes)
         currentHs4Codes = {
             candidate.hs4Code
@@ -1809,6 +2007,24 @@ class CnCandidateRetriever:
             domainScope: [dict(row) for row in rows]
             for domainScope, rows in rowsByDomainScope.items()
         }
+
+    def _BuildSearchProfile(
+        self,
+        productInput: ProductClassificationInput,
+    ) -> tuple[str, Dict[str, str], Dict[str, Set[str]]]:
+        primarySearchText = productInput.BuildPrimarySearchText()
+        secondarySearchText = productInput.BuildSecondarySearchText()
+        weakSearchText = productInput.BuildWeakSearchText()
+        searchTextByTier = {
+            EVIDENCE_TIER_PRIMARY: primarySearchText,
+            EVIDENCE_TIER_SECONDARY: secondarySearchText,
+            EVIDENCE_TIER_WEAK: weakSearchText,
+        }
+        searchTermsByTier = {
+            tier: self._BuildExpandedSearchTerms(searchText)
+            for tier, searchText in searchTextByTier.items()
+        }
+        return productInput.BuildSearchText(), searchTextByTier, searchTermsByTier
 
     def _ScoreRow(
         self,
@@ -1930,6 +2146,9 @@ class CnCandidateRetriever:
         includeRulePoints: float,
         searchKeywordPoints: float,
         descriptionPoints: float,
+        retrievalSources: Optional[Sequence[str]] = None,
+        semanticScore: Optional[float] = None,
+        semanticMatches: Optional[Sequence[Mapping[str, Any]]] = None,
     ) -> CnCandidate:
         cnCode = row.get("cn", "") or row.get("hs8", "")
         chapterCode = row.get("chapter", "") or row.get("hs2_code") or None
@@ -1984,6 +2203,12 @@ class CnCandidateRetriever:
             hardConditions=row.get("hard_conditions", ""),
             cnExplanatoryNote=row.get("cn_explanatory_note", ""),
             needsHumanReview=True,
+            retrievalSources=list(retrievalSources or [RETRIEVAL_SOURCE_HEURISTIC]),
+            semanticScore=semanticScore,
+            semanticMatches=[
+                dict(semanticMatch)
+                for semanticMatch in (semanticMatches or [])
+            ],
         )
 
     def _LoadRowsByDomainScope(self) -> Dict[str, List[Dict[str, str]]]:

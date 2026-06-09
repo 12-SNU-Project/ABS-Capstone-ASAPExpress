@@ -8,6 +8,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    StrictFloat,
     StrictInt,
     StrictStr,
     field_validator,
@@ -65,6 +66,7 @@ class EmbeddingAppConfig(BaseModel):
     device: Optional[StrictStr] = "mps"
     batch_size: StrictInt = 32
     normalize_embeddings: StrictBool = True
+    local_files_only: StrictBool = True
 
     @field_validator("runtime", "provider")
     @classmethod
@@ -176,6 +178,10 @@ class OntologySmokeAppConfig(BaseModel):
     resource_check_preview_count: StrictInt = 8
     max_validation_fixture_candidates: StrictInt = 3
     stage1_backtracking_retry_attempt: StrictInt = 0
+    use_semantic_candidate_retrieval: StrictBool = True
+    semantic_candidate_top_k: StrictInt = 8
+    semantic_min_score: StrictFloat = 0.0
+    hybrid_candidate_limit: Optional[StrictInt] = None
 
 
 class AppConfig(BaseModel):

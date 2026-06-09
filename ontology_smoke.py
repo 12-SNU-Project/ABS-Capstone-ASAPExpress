@@ -29,14 +29,20 @@ if str(SOURCE_ROOT_PATH) not in sys.path:
 from eu_export.bridge import (  # noqa: E402
     BuildLlmRuntimeConfigFromEnv,
     BuildRuntimeAdapter,
+    BuildTextEmbeddingAdapter,
+    BuildTextEmbeddingRuntimeConfig,
     ProbeRuntimeDependency,
+    ProbeTextEmbeddingDependency,
     RuntimeAdapterBuildError,
     RuntimeGenerationError,
+    TextEmbeddingAdapterBuildError,
+    TextEmbeddingGenerationError,
 )
 from eu_export.app_config import LoadAppConfig  # noqa: E402
 from eu_export.ontology import (  # noqa: E402
     CnCandidate,
     CnCandidateRetriever,
+    CnSemanticCandidateIndex,
     DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
     LlmRequestBuilder,
     OntologyContextBuilder,
@@ -125,6 +131,7 @@ class OntologySmokeRunner:
         appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
         pathConfig = appConfig.paths
         smokeConfig = appConfig.ontology_smoke
+        embeddingConfig = appConfig.embedding
 
         self._ontologyRootPath = pathConfig.ResolvePath(
             PROJECT_ROOT_PATH,
@@ -159,6 +166,15 @@ class OntologySmokeRunner:
         self._stage1BacktrackingRetryAttempt = (
             smokeConfig.stage1_backtracking_retry_attempt
         )
+        self._embeddingConfig = embeddingConfig
+        self._useSemanticCandidateRetrieval = (
+            smokeConfig.use_semantic_candidate_retrieval
+        )
+        self._semanticCandidateTopK = smokeConfig.semantic_candidate_top_k
+        self._semanticMinScore = smokeConfig.semantic_min_score
+        self._hybridCandidateLimit = smokeConfig.hybrid_candidate_limit
+        self._semanticCandidateIndex: Optional[CnSemanticCandidateIndex] = None
+        self._semanticCandidateIndexStatus: Optional[Dict[str, Any]] = None
         self._smokeQueries = [
             {
                 "name": "stage1_cosmetics_classification",
@@ -209,7 +225,11 @@ class OntologySmokeRunner:
         self._LogStepHeader(4, 13, "문서에 선언된 CSV 데이터 경로를 확인합니다")
         resourceSummary = self._RunResourceResolutionSmoke(contextBuilder)
 
-        self._LogStepHeader(5, 13, "상품 정보로 CN 후보를 찾고 휴리스틱 점수를 설명합니다")
+        self._LogStepHeader(
+            5,
+            13,
+            "상품 정보로 정적/semantic CN 후보를 병렬 검색하고 점수를 설명합니다",
+        )
         classificationCandidateSummary = self._RunClassificationCandidateSmoke()
 
         self._LogStepHeader(6, 13, "후보 검토용 LLM 요청 JSON 구조를 만듭니다")
@@ -444,6 +464,7 @@ class OntologySmokeRunner:
             ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
         )
+        semanticCandidateIndex = self._GetSemanticCandidateIndex(candidateRetriever)
         productLimit = (
             self._maxProductSmokeInputs
             if maxProductCount is None
@@ -452,16 +473,154 @@ class OntologySmokeRunner:
         preparedProducts: List[Dict[str, Any]] = []
         for smokeRecord in smokeRecords[:productLimit]:
             productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecord)
+            candidates = (
+                candidateRetriever.FindCandidatesWithSemanticIndex(
+                    productInput=productInput,
+                    semanticIndex=semanticCandidateIndex,
+                    heuristicTopK=topK,
+                    semanticTopK=self._semanticCandidateTopK,
+                    finalCandidateLimit=self._hybridCandidateLimit,
+                    minSemanticScore=self._semanticMinScore,
+                )
+                if semanticCandidateIndex is not None
+                else candidateRetriever.FindCandidates(
+                    productInput,
+                    topK=topK,
+                )
+            )
             preparedProducts.append(
                 {
                     "product_input": productInput,
-                    "candidates": candidateRetriever.FindCandidates(
-                        productInput,
-                        topK=topK,
+                    "candidates": candidates,
+                    "candidate_retrieval": self._BuildCandidateRetrievalSummary(
+                        candidates,
                     ),
                 }
             )
         return preparedProducts
+
+    def _GetSemanticCandidateIndex(
+        self,
+        candidateRetriever: CnCandidateRetriever,
+    ) -> Optional[CnSemanticCandidateIndex]:
+        if self._semanticCandidateIndex is not None:
+            return self._semanticCandidateIndex
+        if self._semanticCandidateIndexStatus is not None:
+            return None
+
+        if not self._useSemanticCandidateRetrieval:
+            self._semanticCandidateIndexStatus = {
+                "status": "disabled",
+                "reason": "semantic candidate retrieval is disabled by appconfig",
+            }
+            return None
+
+        runtimeConfig = BuildTextEmbeddingRuntimeConfig(self._embeddingConfig)
+        if not runtimeConfig.enabled:
+            self._semanticCandidateIndexStatus = {
+                "status": "disabled",
+                "reason": "embedding runtime is disabled by appconfig",
+                "provider": runtimeConfig.provider.value,
+                "model": runtimeConfig.modelName,
+                "local_files_only": runtimeConfig.localFilesOnly,
+            }
+            return None
+
+        dependencyStatus = ProbeTextEmbeddingDependency(runtimeConfig)
+        if not dependencyStatus.isAvailable:
+            self._semanticCandidateIndexStatus = {
+                "status": "unavailable",
+                "reason": dependencyStatus.message,
+                "provider": dependencyStatus.provider.value,
+                "model": runtimeConfig.modelName,
+                "local_files_only": runtimeConfig.localFilesOnly,
+                "limitations": list(dependencyStatus.limitations),
+            }
+            return None
+
+        try:
+            embeddingAdapter = BuildTextEmbeddingAdapter(
+                runtimeConfig,
+                dependencyStatus=dependencyStatus,
+            )
+            if embeddingAdapter is None:
+                self._semanticCandidateIndexStatus = {
+                    "status": "disabled",
+                    "reason": "embedding adapter was not created",
+                    "provider": runtimeConfig.provider.value,
+                    "model": runtimeConfig.modelName,
+                }
+                return None
+
+            semanticCandidateIndex = CnSemanticCandidateIndex(embeddingAdapter)
+            semanticCandidateIndex.Build(candidateRetriever.LoadRowsByDomainScope())
+        except (
+            TextEmbeddingAdapterBuildError,
+            TextEmbeddingGenerationError,
+            ValueError,
+        ) as exception:
+            semanticStatus = (
+                "unavailable"
+                if runtimeConfig.localFilesOnly
+                and isinstance(exception, TextEmbeddingAdapterBuildError)
+                else "failed"
+            )
+            self._semanticCandidateIndexStatus = {
+                "status": semanticStatus,
+                "reason": str(exception),
+                "provider": runtimeConfig.provider.value,
+                "model": runtimeConfig.modelName,
+                "local_files_only": runtimeConfig.localFilesOnly,
+            }
+            return None
+
+        self._semanticCandidateIndex = semanticCandidateIndex
+        self._semanticCandidateIndexStatus = {
+            "status": "completed",
+            "provider": runtimeConfig.provider.value,
+            "model": runtimeConfig.modelName,
+            "device": runtimeConfig.device,
+            "local_files_only": runtimeConfig.localFilesOnly,
+            "chunk_count": semanticCandidateIndex.chunkCount,
+            "semantic_top_k": self._semanticCandidateTopK,
+            "semantic_min_score": self._semanticMinScore,
+            "hybrid_candidate_limit": self._hybridCandidateLimit,
+            "limitations": list(dependencyStatus.limitations),
+        }
+        return semanticCandidateIndex
+
+    def _BuildCandidateRetrievalSummary(
+        self,
+        candidates: List[CnCandidate],
+    ) -> Dict[str, Any]:
+        heuristicCount = sum(
+            1
+            for candidate in candidates
+            if "heuristic" in candidate.retrievalSources
+        )
+        semanticCount = sum(
+            1
+            for candidate in candidates
+            if "semantic" in candidate.retrievalSources
+        )
+        bothCount = sum(
+            1
+            for candidate in candidates
+            if "heuristic" in candidate.retrievalSources
+            and "semantic" in candidate.retrievalSources
+        )
+        return {
+            "mode": (
+                "hybrid"
+                if self._semanticCandidateIndexStatus is not None
+                and self._semanticCandidateIndexStatus.get("status") == "completed"
+                else "heuristic"
+            ),
+            "heuristic_candidate_count": heuristicCount,
+            "semantic_candidate_count": semanticCount,
+            "both_source_candidate_count": bothCount,
+            "semantic_index": dict(self._semanticCandidateIndexStatus or {}),
+        }
 
     def _BuildStage1ContextEvidenceData(
         self,
@@ -499,7 +658,9 @@ class OntologySmokeRunner:
         for preparedProduct in preparedProducts:
             productInput = preparedProduct["product_input"]
             candidates = preparedProduct["candidates"]
+            candidateRetrieval = preparedProduct["candidate_retrieval"]
             searchText = productInput.BuildSearchText()
+            semanticSearchText = productInput.BuildSemanticSearchText()
             productResults.append(
                 {
                     "product_input": {
@@ -512,7 +673,12 @@ class OntologySmokeRunner:
                     "scoring_input": {
                         "search_text_length": len(searchText),
                         "search_text_preview": self._BuildTextPreview(searchText),
+                        "semantic_search_text_length": len(semanticSearchText),
+                        "semantic_search_text_preview": self._BuildTextPreview(
+                            semanticSearchText,
+                        ),
                     },
+                    "candidate_retrieval": candidateRetrieval,
                     "scoring_rule": {
                         "primary_product_evidence": (
                             "상품명, 짧은 설명, 브랜드명처럼 사용자가 실제로 "
@@ -540,6 +706,9 @@ class OntologySmokeRunner:
                             "hs6_code": candidate.hs6Code,
                             "score": candidate.score,
                             "score_breakdown": candidate.scoreBreakdown,
+                            "retrieval_sources": list(candidate.retrievalSources),
+                            "semantic_score": candidate.semanticScore,
+                            "semantic_matches": list(candidate.semanticMatches[:3]),
                             "include_rule_matches": list(candidate.includeRuleMatches),
                             "search_keyword_matches": list(
                                 candidate.searchKeywordMatches,
@@ -572,6 +741,9 @@ class OntologySmokeRunner:
             "product_smoke_record_count": len(smokeRecords),
             "used_product_count": len(productResults),
             "candidate_top_k": self._cnCandidateTopK,
+            "semantic_candidate_top_k": self._semanticCandidateTopK,
+            "hybrid_candidate_limit": self._hybridCandidateLimit,
+            "semantic_index_status": dict(self._semanticCandidateIndexStatus or {}),
             "products": productResults,
         }
         self._LogCandidateScoring(result)
@@ -582,24 +754,31 @@ class OntologySmokeRunner:
         candidateLogger.info(
             (
                 "후보 검색 입력 artifact를 읽었습니다 product_records={} "
-                "used_products={} top_k={}"
+                "used_products={} heuristic_top_k={} semantic_top_k={} "
+                "hybrid_limit={} semantic_status={}"
             ),
             result["product_smoke_record_count"],
             result["used_product_count"],
             result["candidate_top_k"],
+            result["semantic_candidate_top_k"],
+            result["hybrid_candidate_limit"],
+            result["semantic_index_status"].get("status", "not_attempted"),
         )
         candidateLogger.info(
             (
-                "점수 규칙: 먼저 상품 도메인으로 CSV 범위를 제한하고, "
+                "후보 검색 규칙: 정적 후보 검색은 먼저 상품 도메인으로 CSV 범위를 제한하고, "
                 "상품명/설명/브랜드는 primary 근거, 상품고시/OCR 핵심 사실은 "
                 "secondary 근거, 마케팅성 OCR 문구는 weak 근거로 분리합니다. "
                 "include/search/description 매칭은 근거 단계별 가중치로 계산하고, "
-                "exclude_rule_keywords가 매칭되면 해당 행은 후보에서 제외합니다."
+                "exclude_rule_keywords가 매칭되면 해당 행은 후보에서 제외합니다. "
+                "semantic 후보 검색은 별도 embedding 검색으로 병렬 수행한 뒤 "
+                "CN8 기준으로 정적 후보와 병합합니다."
             )
         )
         for productResult in result["products"]:
             productInput = productResult["product_input"]
             scoringInput = productResult["scoring_input"]
+            candidateRetrieval = productResult["candidate_retrieval"]
             candidateCodes = [
                 candidate["hs8"]
                 for candidate in productResult["candidate_scores"]
@@ -607,12 +786,15 @@ class OntologySmokeRunner:
             candidateLogger.info(
                 (
                     "후보 검색 대상 상품: product={} domain={} 검색범위={} "
-                    "검색텍스트길이={} 상품고시필드={} OCR텍스트길이={} 후보코드={}"
+                    "mode={} 검색텍스트길이={} semantic검색텍스트길이={} "
+                    "상품고시필드={} OCR텍스트길이={} 후보코드={}"
                 ),
                 productInput["product_name"],
                 productInput["product_domain"],
                 productInput["domain_scopes"],
+                candidateRetrieval["mode"],
                 scoringInput["search_text_length"],
+                scoringInput["semantic_search_text_length"],
                 productInput["notice_field_count"],
                 productInput["ocr_text_length"],
                 candidateCodes,
@@ -633,20 +815,26 @@ class OntologySmokeRunner:
                         "- rank: {}\n"
                         "- hs8: {}\n"
                         "- hs6: {}\n"
+                        "- retrieval_sources: {}\n"
                         "- score: {}\n"
+                        "- semantic_score: {}\n"
                         "- primary 근거: {}\n"
                         "- secondary 근거: {}\n"
                         "- weak 근거: {}\n"
+                        "- semantic 매칭: {}\n"
                         "- exclude 매칭: {}\n"
                         "- 후보 설명: {}"
                     ),
                     candidateIndex,
                     candidate["hs8"],
                     candidate["hs6_code"],
+                    candidate["retrieval_sources"],
                     candidate["score"],
+                    candidate["semantic_score"],
                     candidate["primary_evidence_matches"][:8],
                     candidate["secondary_evidence_matches"][:8],
                     candidate["weak_evidence_matches"][:8],
+                    candidate["semantic_matches"],
                     candidate["exclude_rule_matches"],
                     candidate["combined_description"],
                 )
