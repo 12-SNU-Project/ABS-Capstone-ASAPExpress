@@ -44,6 +44,13 @@ from eu_export.ontology.schema import (
     OntologyRetrievalResult,
     PackagedOntologyContext,
 )
+from eu_export.ontology.semantic_retrieval import (
+    CnSemanticCandidateIndex,
+    CnSemanticChunk,
+    CnSemanticChunkBuilder,
+    CnSemanticChunkMatch,
+    CnSemanticSearchHit,
+)
 from eu_export.ontology.traversal import (
     DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
     Stage1TraversalController,
@@ -59,6 +66,11 @@ from eu_export.ontology.validator import (
 __all__ = [
     "CnCandidate",
     "CnCandidateRetriever",
+    "CnSemanticCandidateIndex",
+    "CnSemanticChunk",
+    "CnSemanticChunkBuilder",
+    "CnSemanticChunkMatch",
+    "CnSemanticSearchHit",
     "ContextPackager",
     "LlmRequestBuilder",
     "OntologyContextBuilder",

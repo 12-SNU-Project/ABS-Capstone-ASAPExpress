@@ -1801,6 +1801,15 @@ class CnCandidateRetriever:
         ]
         return self._SelectTopCandidates(nonCurrentHs4Candidates, productInput, topK)
 
+    def LoadRowsByDomainScope(self) -> Dict[str, List[Dict[str, str]]]:
+        """semantic retrieval 등 외부 후보 검색기가 동일 CN table row를 재사용하게 한다."""
+
+        rowsByDomainScope = self._LoadRowsByDomainScope()
+        return {
+            domainScope: [dict(row) for row in rows]
+            for domainScope, rows in rowsByDomainScope.items()
+        }
+
     def _ScoreRow(
         self,
         row: Mapping[str, str],

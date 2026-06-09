@@ -53,6 +53,53 @@ class LlmAppConfig(BaseModel):
         return normalizedValue
 
 
+class EmbeddingAppConfig(BaseModel):
+    """Semantic retrieval embedding runtime profile 설정."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: StrictBool = False
+    runtime: StrictStr = "local"
+    provider: StrictStr = "sentence_transformers"
+    model: StrictStr = "intfloat/multilingual-e5-small"
+    device: Optional[StrictStr] = "mps"
+    batch_size: StrictInt = 32
+    normalize_embeddings: StrictBool = True
+
+    @field_validator("runtime", "provider")
+    @classmethod
+    def NormalizeRuntimeName(cls, value: str) -> str:
+        normalizedValue = value.strip()
+        if normalizedValue == "":
+            raise ValueError("embedding runtime/provider must not be empty.")
+        return normalizedValue.lower()
+
+    @field_validator("model")
+    @classmethod
+    def NormalizeModelName(cls, value: str) -> str:
+        normalizedValue = value.strip()
+        if normalizedValue == "":
+            raise ValueError("embedding model must not be empty.")
+        return normalizedValue
+
+    @field_validator("batch_size")
+    @classmethod
+    def ValidateBatchSize(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("embedding batch_size must be positive.")
+        return value
+
+    @field_validator("device")
+    @classmethod
+    def NormalizeOptionalString(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalizedValue = value.strip()
+        if normalizedValue == "":
+            return None
+        return normalizedValue.lower()
+
+
 class AppPathsConfig(BaseModel):
     """앱 실행 중 참조하는 경로 설정."""
 
@@ -83,7 +130,7 @@ class KurlySmokeAppConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     product_urls: list[StrictStr] = Field(
-        default_factory=lambda: ["""여기에 링크 추가하셈."""],
+        default_factory=list,
     )
     timeout_seconds: StrictInt = 60
     scroll_count: StrictInt = 8
@@ -104,9 +151,12 @@ class KurlySmokeAppConfig(BaseModel):
         normalizedUrls = [
             item.strip()
             for item in value
-            if isinstance(item, str) and item.strip() != ""
+            if (
+                isinstance(item, str)
+                and item.strip().startswith(("http://", "https://"))
+            )
         ]
-        return normalizedUrls or ["""여기에 링크 추가하셈."""]
+        return normalizedUrls
 
 
 class OntologySmokeAppConfig(BaseModel):
@@ -134,6 +184,7 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     llm: LlmAppConfig = Field(default_factory=LlmAppConfig)
+    embedding: EmbeddingAppConfig = Field(default_factory=EmbeddingAppConfig)
     paths: AppPathsConfig = Field(default_factory=AppPathsConfig)
     kurly_smoke: KurlySmokeAppConfig = Field(default_factory=KurlySmokeAppConfig)
     ontology_smoke: OntologySmokeAppConfig = Field(
