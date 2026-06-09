@@ -25,7 +25,10 @@ class KurlyPipelineInput(BaseModel):
     productPageUrl: str
     runOcrFallback: bool = False
     artifactRootPath: Path = DEFAULT_PRODUCT_OCR_IMAGE_ARTIFACT_ROOT_PATH
-    maxOcrImageCount: int = 20
+    maxOcrImageCount: int = Field(
+        default=20,
+        description="OCR fallback image batch size. All candidate images are processed in batches.",
+    )
     downloadTimeoutSeconds: int = DEFAULT_PRODUCT_OCR_IMAGE_DOWNLOAD_TIMEOUT_SECONDS
 
 
@@ -135,5 +138,7 @@ class KurlyPipelineResult(BaseModel):
                     self.ocrImageResults,
                     start=1,
                 )
+                if imageResult.imagePath is not None
+                and imageResult.ocrText.strip() != ""
             ],
         }

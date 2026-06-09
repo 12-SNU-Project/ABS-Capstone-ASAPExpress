@@ -14,7 +14,10 @@ if str(SOURCE_ROOT_PATH) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT_PATH))
 
 from eu_export.product import (  # noqa: E402
+    KurlyGlobalPageParser,
+    KurlyPageAdapter,
     KurlyPageCollector,
+    KurlyPageParser,
     KurlyProductPipeline,
     KurlyPipelineInput,
     PaddleOcrEngine,
@@ -60,6 +63,17 @@ class KurlyMarketSmokeRunner:
             len(self._productUrls),
             self._runOcrFallback,
         )
+        if not self._productUrls:
+            runLogger.warning(
+                (
+                    "실행할 상품 URL이 없습니다. .appconfig의 "
+                    "[kurly_smoke].product_urls에 국내/해외 Kurly 상품 링크를 "
+                    "넣어주세요."
+                )
+            )
+            if self._writeSummaryArtifact:
+                self._WriteSummaryArtifact([])
+            return
 
         runLogger.info("STEP 1/4 상품 페이지 수집/OCR 파이프라인을 준비합니다")
         productSourcePipeline = self._BuildProductSourcePipeline()
@@ -89,7 +103,12 @@ class KurlyMarketSmokeRunner:
             runLogger.info("STEP 4/4 상품 수집 결과 JSON artifact 저장을 건너뜁니다")
 
     def _BuildProductSourcePipeline(self) -> KurlyProductPipeline:
+        pageAdapter = KurlyPageAdapter(
+            domesticParser=KurlyPageParser(),
+            globalParser=KurlyGlobalPageParser(),
+        )
         collector = KurlyPageCollector(
+            parser=pageAdapter,
             headless=self._headless,
             timeoutMilliseconds=self._timeoutSeconds * 1000,
             scrollCount=self._scrollCount,
@@ -495,7 +514,7 @@ class KurlyMarketSmokeRunner:
 
     @staticmethod
     def _BuildOcrImageArtifacts(
-            ocrImageResults: List[Dict[str, Any]],
+        ocrImageResults: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         return [
             {
@@ -505,6 +524,8 @@ class KurlyMarketSmokeRunner:
                 "error": imageResult["error"],
             }
             for imageIndex, imageResult in enumerate(ocrImageResults, start=1)
+            if imageResult.get("image_path") is not None
+            and imageResult.get("ocr_text", "").strip() != ""
         ]
 
     @staticmethod

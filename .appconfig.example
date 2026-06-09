@@ -36,6 +36,17 @@ supports_response_format = false
 # model = "qwen2.5:7b-instruct"
 # endpoint_url = "http://localhost:11434"
 
+[embedding]
+# 비밀값이 아닌 semantic retrieval embedding runtime profile입니다.
+# sentence-transformers는 conda 환경에 직접 설치한 뒤 enabled=true로 전환합니다.
+enabled = false
+runtime = "local"
+provider = "sentence_transformers"
+model = "intfloat/multilingual-e5-small"
+device = "mps"
+batch_size = 32
+normalize_embeddings = true
+
 [paths]
 ontology_root = "eu_export_ontology_v1"
 ontology_smoke_summary_artifact = "artifacts/ontology-smoke/runtime-smoke-summary.json"
@@ -60,6 +71,7 @@ stage1_backtracking_retry_attempt = 0
 [kurly_smoke]
 product_urls = [
   "https://www.kurly.com/goods/5037259",
+  "https://www.kurlyglobal.com/products/m00000188980",
 ]
 timeout_seconds = 60
 scroll_count = 8

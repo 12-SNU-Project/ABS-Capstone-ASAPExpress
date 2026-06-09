@@ -1,5 +1,6 @@
 """Product detail image OCR fallback runner."""
 
+import re
 from pathlib import Path
 from typing import List, Optional
 from urllib.parse import urlparse
@@ -56,20 +57,26 @@ class ProductOcrFallbackRunner:
             productPageUrl,
         )
         artifactDirectory.mkdir(parents=True, exist_ok=True)
+        for artifactPath in artifactDirectory.glob("ocr-fallback-image-*"):
+            if artifactPath.is_file():
+                artifactPath.unlink(missing_ok=True)
 
         imageResults: List[ProductOcrImageResult] = []
-        for imageIndex, imageUrl in enumerate(
-            imageUrls[:maxImageCount],
-            start=1,
-        ):
-            imageResults.append(
-                self._ExtractImageText(
-                    imageIndex=imageIndex,
+        batchImageCount = max(1, maxImageCount)
+        for batchStartIndex in range(0, len(imageUrls), batchImageCount):
+            batchImageUrls = imageUrls[
+                batchStartIndex : batchStartIndex + batchImageCount
+            ]
+            for batchOffset, imageUrl in enumerate(batchImageUrls, start=1):
+                imageResult = self._ExtractImageText(
+                    imageIndex=batchStartIndex + batchOffset,
                     imageUrl=imageUrl,
                     artifactDirectory=artifactDirectory,
                     downloadTimeoutSeconds=downloadTimeoutSeconds,
                 )
-            )
+                if imageResult is not None:
+                    imageResults.append(imageResult)
+
         return imageResults
 
     @staticmethod
@@ -86,7 +93,8 @@ class ProductOcrFallbackRunner:
         imageUrl: str,
         artifactDirectory: Path,
         downloadTimeoutSeconds: int,
-    ) -> ProductOcrImageResult:
+    ) -> Optional[ProductOcrImageResult]:
+        artifactPath: Optional[Path] = None
         try:
             imageBytes = self._DownloadImage(imageUrl, downloadTimeoutSeconds)
             artifactPath = artifactDirectory / self._BuildImageFileName(
@@ -95,12 +103,17 @@ class ProductOcrFallbackRunner:
             )
             artifactPath.write_bytes(imageBytes)
             ocrText = self._ocrEngine.ExtractTextFromImage(imageBytes)
+            if not isinstance(ocrText, str) or ocrText.strip() == "":
+                artifactPath.unlink(missing_ok=True)
+                return None
             return ProductOcrImageResult(
                 imageUrl=imageUrl,
                 imagePath=str(artifactPath),
                 ocrText=ocrText,
             )
         except Exception as error:
+            if artifactPath is not None:
+                artifactPath.unlink(missing_ok=True)
             return ProductOcrImageResult(
                 imageUrl=imageUrl,
                 error="OCR fallback failed for image {0}: {1}".format(
@@ -133,6 +146,14 @@ class ProductOcrFallbackRunner:
         pathParts = [pathPart for pathPart in parsedUrl.path.split("/") if pathPart]
         if len(pathParts) >= 2 and pathParts[0] == "goods":
             return pathParts[1]
+        if len(pathParts) >= 2 and pathParts[0] == "products":
+            return "global-{0}".format(self._BuildSafePathName(pathParts[1]))
+        if (
+            len(pathParts) >= 3
+            and pathParts[0] == "en"
+            and pathParts[1] == "products"
+        ):
+            return "global-{0}".format(self._BuildSafePathName(pathParts[2]))
         return "unknown"
 
     def _BuildImageFileName(self, imageIndex: int, imageUrl: str) -> str:
@@ -141,3 +162,7 @@ class ProductOcrFallbackRunner:
         if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
             suffix = ".img"
         return "ocr-fallback-image-{0:02d}{1}".format(imageIndex, suffix)
+
+    def _BuildSafePathName(self, value: str) -> str:
+        safeValue = re.sub(r"[^0-9A-Za-z._-]+", "-", value).strip("-")
+        return safeValue or "unknown"

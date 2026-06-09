@@ -7,6 +7,12 @@ from eu_export.product.kurly_market import (
     KurlyDomainDetector,
     KurlyPageParser,
 )
+from eu_export.product.kurly_global import (
+    KurlyGlobalPageParser,
+)
+from eu_export.product.kurly_page_adapter import (
+    KurlyPageAdapter,
+)
 from eu_export.product.kurly_market_collector import (
     KurlyCollectionError,
     KurlyPageCollector,
@@ -47,12 +53,14 @@ __all__ = [
     "KurlyBasePageParser",
     "KurlyCosmeticsPageParser",
     "KurlyFoodPageParser",
+    "KurlyGlobalPageParser",
     "KurlyProductDomain",
     "KurlyDomainDetector",
     "ProductNoticeField",
     "ProductNoticeOption",
     "KurlyCollectionResult",
     "KurlyPageCollector",
+    "KurlyPageAdapter",
     "KurlyProductPage",
     "KurlyPageParser",
     "KurlyProductPipeline",

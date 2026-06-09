@@ -186,9 +186,9 @@ class KurlyPageCollector:
         )
 
     def _BuildDefaultParser(self) -> KurlyPageParserProtocol:
-        from eu_export.product.kurly_market import KurlyPageParser
+        from eu_export.product.kurly_page_adapter import KurlyPageAdapter
 
-        return KurlyPageParser()
+        return KurlyPageAdapter()
 
     def _BlockUnnecessaryResource(self, route: Any) -> None:
         if route.request.resource_type in ("media", "font"):
@@ -197,6 +197,15 @@ class KurlyPageCollector:
         route.continue_()
 
     def _ScrollUntilProductNoticeLoaded(self, page: Any) -> None:
+        prepareRenderedPage = getattr(self._parser, "PrepareRenderedPage", None)
+        if callable(prepareRenderedPage):
+            if prepareRenderedPage(
+                page,
+                self._scrollCount,
+                self._scrollWaitMilliseconds,
+            ):
+                return
+
         scrollStep = max(
             1,
             int(
@@ -228,6 +237,18 @@ class KurlyPageCollector:
         return value
 
     def _ReadProductSummaryEvidence(self, page: Any) -> ProductSummaryEvidence:
+        readProductSummaryEvidence = getattr(
+            self._parser,
+            "ReadProductSummaryEvidence",
+            None,
+        )
+        if callable(readProductSummaryEvidence):
+            value = readProductSummaryEvidence(page)
+            if isinstance(value, ProductSummaryEvidence):
+                return value
+            if isinstance(value, dict):
+                return ProductSummaryEvidence.model_validate(value)
+
         try:
             value = page.evaluate(
                 """
@@ -347,6 +368,12 @@ class KurlyPageCollector:
         return parsedProductPage.model_copy(update=updates)
 
     def _ReadProductNoticeText(self, page: Any) -> str:
+        readProductNoticeText = getattr(self._parser, "ReadProductNoticeText", None)
+        if callable(readProductNoticeText):
+            value = readProductNoticeText(page)
+            if isinstance(value, str):
+                return value
+
         try:
             value = page.evaluate(
                 """
@@ -505,6 +532,16 @@ class KurlyPageCollector:
         return imageUrls
 
     def _LooksProductDetailImageUrl(self, imageUrl: str) -> bool:
+        looksProductDetailImageUrl = getattr(
+            self._parser,
+            "LooksProductDetailImageUrl",
+            None,
+        )
+        if callable(looksProductDetailImageUrl):
+            value = looksProductDetailImageUrl(imageUrl)
+            if isinstance(value, bool):
+                return value
+
         parsedUrl = urlparse(imageUrl)
         hostName = parsedUrl.netloc.lower()
         path = parsedUrl.path.lower()

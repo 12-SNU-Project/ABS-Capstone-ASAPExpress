@@ -87,9 +87,14 @@ PRODUCT_NOTICE_STOP_MARKERS = {
 }
 PRODUCT_NOTICE_IMAGE_REFERENCE_TERMS = {
     "상품설명 및 상품이미지 참조",
+    "상품설명/상세정보 참조",
+    "상품설명 및 상세정보 참조",
+    "상품설명/상세정보 참고",
+    "상품설명 및 상세정보 참고",
     "상품 이미지 참조",
     "상품이미지 참조",
     "상품설명 참조",
+    "상품설명 참고",
     "제품 포장 참조",
     "제품의 포장",
     "최신 정보는 제품의 포장",
@@ -400,13 +405,16 @@ class KurlyBasePageParser:
             fieldValue = NormalizeWhitespace(" ".join(valueLines))
             if fieldValue == "":
                 fieldValue = None
+            requiresOcrFallback = self._NoticeValueRequiresOcr(fieldValue)
+            if requiresOcrFallback:
+                fieldValue = None
 
             rawLines = [line] + valueLines
             currentFieldRecords.append(
                 ProductNoticeField(
                     fieldName=fieldName,
                     fieldValue=fieldValue,
-                    requiresOcrFallback=self._NoticeValueRequiresOcr(fieldValue),
+                    requiresOcrFallback=requiresOcrFallback,
                     rawText="\n".join(rawLines),
                 )
             )
@@ -500,7 +508,13 @@ class KurlyBasePageParser:
     def _NoticeValueRequiresOcr(self, value: Optional[str]) -> bool:
         if value is None:
             return False
-        return any(term in value for term in PRODUCT_NOTICE_IMAGE_REFERENCE_TERMS)
+        normalizedValue = NormalizeWhitespace(value)
+        compactValue = normalizedValue.replace(" ", "")
+        return any(
+            term in normalizedValue
+            or term.replace(" ", "") in compactValue
+            for term in PRODUCT_NOTICE_IMAGE_REFERENCE_TERMS
+        )
 
     def _BuildWarnings(
         self,

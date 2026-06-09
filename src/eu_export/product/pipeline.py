@@ -169,18 +169,23 @@ class KurlyProductPipeline:
             if imageResult.error is not None
         )
 
-        skippedImageCount = (
-            len(collectionResult.ocrCandidateImageUrls)
-            - pipelineInput.maxOcrImageCount
-        )
-        if skippedImageCount > 0:
-            errors.append("skipped OCR candidate images: {0}".format(skippedImageCount))
+        batchImageCount = max(1, pipelineInput.maxOcrImageCount)
+        candidateImageCount = len(collectionResult.ocrCandidateImageUrls)
+        batchCount = (
+            candidateImageCount + batchImageCount - 1
+        ) // batchImageCount
 
         steps.append(
             PipelineStep(
                 stepName="ocr_fallback",
                 succeeded=not errors,
-                message="ocr_image_count={0}, error_count={1}".format(
+                message=(
+                    "candidate_image_count={0}, batch_image_count={1}, "
+                    "batch_count={2}, ocr_image_count={3}, error_count={4}"
+                ).format(
+                    candidateImageCount,
+                    batchImageCount,
+                    batchCount,
                     len(imageResults),
                     len(errors),
                 ),
