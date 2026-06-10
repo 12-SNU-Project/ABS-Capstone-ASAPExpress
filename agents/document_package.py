@@ -22,23 +22,99 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+import threading
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
 try:
     import psycopg2
+    from psycopg2 import pool as psycopg2_pool
 except ImportError:
     sys.exit("[fatal] psycopg2 missing. pip install psycopg2-binary")
 
 
-DB_NAME = "asap_ontology_v1"
+DEFAULT_DB_NAME = "postgres"
+DB_SOURCE_NAME = os.environ.get("ASAP_DB_SOURCE_NAME", "supabase")
+DB_POOL_MAX_CONNECTIONS = int(os.environ.get("ASAP_DB_POOL_MAX_CONNECTIONS", "4"))
+_DB_POOL_LOCK = threading.Lock()
+_DB_POOL = None
+_DB_POOL_KEY = None
+_TABLE_EXISTS_CACHE: dict[str, bool] = {}
 
 # canonical TARIC table:
 #   taric_master_table = leaf-aware canonical table
 #   taric_master_selection_table = legacy compatibility table, do not use here
+
+
+def _db_connect_config():
+    """Return psycopg2 connection config without exposing secret values."""
+    database_url = os.environ.get("ASAP_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    if database_url:
+        return ("dsn", database_url)
+
+    host = os.environ.get("PGHOST")
+    if host:
+        conn_kwargs = {
+            "host": host,
+            "dbname": os.environ.get("PGDATABASE", DEFAULT_DB_NAME),
+            "user": os.environ.get("PGUSER"),
+            "password": os.environ.get("PGPASSWORD"),
+            "port": os.environ.get("PGPORT", "5432"),
+        }
+        sslmode = os.environ.get("PGSSLMODE")
+        if sslmode:
+            conn_kwargs["sslmode"] = sslmode
+        return ("kwargs", {k: v for k, v in conn_kwargs.items() if v})
+
+    raise RuntimeError(
+        "Database connection is not configured. Set ASAP_DATABASE_URL "
+        "(preferred) or DATABASE_URL, or set PGHOST/PGDATABASE/PGUSER/"
+        "PGPASSWORD/PGPORT. For Supabase, include sslmode=require."
+    )
+
+
+def _get_db_pool():
+    """Return a process-local connection pool.
+
+    Production/default usage is Supabase via ASAP_DATABASE_URL or DATABASE_URL.
+    Standard libpq PG* variables are also supported for local development.
+    """
+    global _DB_POOL, _DB_POOL_KEY
+    config_kind, config_value = _db_connect_config()
+    key = (config_kind, repr(config_value), DB_POOL_MAX_CONNECTIONS)
+    with _DB_POOL_LOCK:
+        if _DB_POOL is not None and _DB_POOL_KEY == key:
+            return _DB_POOL
+        if _DB_POOL is not None:
+            _DB_POOL.closeall()
+        _TABLE_EXISTS_CACHE.clear()
+        if config_kind == "dsn":
+            _DB_POOL = psycopg2_pool.ThreadedConnectionPool(
+                1, DB_POOL_MAX_CONNECTIONS, config_value
+            )
+        else:
+            _DB_POOL = psycopg2_pool.ThreadedConnectionPool(
+                1, DB_POOL_MAX_CONNECTIONS, **config_value
+            )
+        _DB_POOL_KEY = key
+        return _DB_POOL
+
+
+def _connect_db():
+    return _get_db_pool().getconn()
+
+
+def _release_db(conn) -> None:
+    if conn is None:
+        return
+    if _DB_POOL is None:
+        conn.close()
+        return
+    _DB_POOL.putconn(conn)
 
 # ---------------------------------------------------------------------------
 # Certificate code 분류
@@ -504,9 +580,14 @@ def _ancestor_goods_codes(goods_code_10: str) -> list[str]:
 
 
 def _table_exists(cur, table_name: str) -> bool:
+    cached = _TABLE_EXISTS_CACHE.get(table_name)
+    if cached is not None:
+        return cached
     cur.execute("SELECT to_regclass(%s)", (f"public.{table_name}",))
     row = cur.fetchone()
-    return bool(row and row[0])
+    exists = bool(row and row[0])
+    _TABLE_EXISTS_CACHE[table_name] = exists
+    return exists
 
 
 def _fetch_certificate_guidance(cur, certificate_codes: list[str]) -> dict[str, dict]:
@@ -873,7 +954,7 @@ def get_document_package(
             f"measures shown apply to the 10-digit parent/ancestor where applicable."
         )
 
-    conn = psycopg2.connect(host="localhost", dbname=DB_NAME)
+    conn = _connect_db()
     cur = conn.cursor()
 
     # 1. measure rows: exact + ancestor measures.
@@ -915,12 +996,12 @@ def get_document_package(
 
     if not rows:
         cur.close()
-        conn.close()
+        _release_db(conn)
         notes.append("No current measure rows found for this TARIC10.")
         return DocumentPackage(
             taric10=code, cn8=cn8, total_measure_rows=0, has_data=False,
             requirements=[], verification_urls=_verification_urls(code),
-            data_source=DB_NAME, notes=notes, product_facts=product_facts,
+            data_source=DB_SOURCE_NAME, notes=notes, product_facts=product_facts,
             checklist_summary=_checklist_summary([]),
         )
 
@@ -948,7 +1029,7 @@ def get_document_package(
 
     # 4. (선택) CELEX 본문 발췌
     celex_excerpts: dict[str, str] = {}
-    if include_celex_excerpt:
+    if include_celex_excerpt and _table_exists(cur, "taric_celex_source_chunks"):
         celex_ids = [c["celex_id"] for c in celex_map.values() if c.get("celex_id")]
         if celex_ids:
             cur.execute(
@@ -1056,7 +1137,7 @@ def get_document_package(
         )
 
     cur.close()
-    conn.close()
+    _release_db(conn)
 
     # KR 적용 measure 먼저 정렬
     requirements.sort(key=lambda r: (not r.applies_to_korea, r.measure_type))
@@ -1064,7 +1145,7 @@ def get_document_package(
     return DocumentPackage(
         taric10=code, cn8=cn8, total_measure_rows=len(rows),
         has_data=True, requirements=requirements,
-        verification_urls=_verification_urls(code), data_source=DB_NAME,
+        verification_urls=_verification_urls(code), data_source=DB_SOURCE_NAME,
         notes=notes, product_facts=product_facts,
         checklist_summary=_checklist_summary(requirements),
     )
