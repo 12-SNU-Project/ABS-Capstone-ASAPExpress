@@ -179,7 +179,26 @@ TERM_EXPANSION_MAP = {
     "양념육": ["prepared meat", "preserved meat", "meat"],
     "생선": ["fish"],
     "어류": ["fish"],
+    "수산물": ["fish", "crustaceans", "molluscs", "aquatic invertebrates"],
+    "수산물가공품": [
+        "preparations of fish",
+        "prepared fish",
+        "prepared molluscs",
+        "prepared or preserved molluscs",
+        "aquatic invertebrates",
+    ],
+    "기타수산물가공품": [
+        "preparations of fish",
+        "prepared fish",
+        "prepared molluscs",
+        "prepared or preserved molluscs",
+        "aquatic invertebrates",
+    ],
     "새우": ["shrimp", "crustaceans"],
+    "주꾸미": ["octopus", "molluscs", "aquatic invertebrates", "prepared", "preserved"],
+    "쭈꾸미": ["octopus", "molluscs", "aquatic invertebrates", "prepared", "preserved"],
+    "문어": ["octopus", "molluscs", "aquatic invertebrates"],
+    "오징어": ["squid", "cuttlefish", "molluscs", "aquatic invertebrates"],
     "게": ["crab", "crustaceans"],
     "게살": ["crab", "crustaceans"],
     "조개": ["molluscs"],
@@ -1887,7 +1906,7 @@ class CnCandidateRetriever:
             parentHs4Codes = parentHs4CodesByDomainScope.get(domainScope, set())
             parentHs6Codes = parentHs6CodesByDomainScope.get(domainScope, set())
             for row in rowsByDomainScope.get(domainScope, []):
-                hs8 = row.get("cn", "") or row.get("hs8", "")
+                hs8 = row.get("cn", "") or row.get("hs8", "") or row.get("cn8", "")
                 hs4 = row.get("heading", "") or row.get("hs4_code", "")
                 hs6 = row.get("subheading", "") or row.get("hs6_code", "")
                 if hs8 in excludedHs8CodeSet:
@@ -1974,7 +1993,7 @@ class CnCandidateRetriever:
 
         for domainScope in productInput.domainScopes:
             for row in rowsByDomainScope.get(domainScope, []):
-                hs8 = row.get("cn", "") or row.get("hs8", "")
+                hs8 = row.get("cn", "") or row.get("hs8", "") or row.get("cn8", "")
                 if hs8 in excludedHs8CodeSet:
                     continue
                 candidate = self._ScoreRow(
@@ -2054,6 +2073,7 @@ class CnCandidateRetriever:
                     row.get("combined_description", ""),
                     row.get("cn_explanatory_note", ""),
                     row.get("cn_description", ""),
+                    row.get("cn8_description", ""),
                     row.get("branch_context", ""),
                     row.get("hs8_description", ""),
                 ]
@@ -2150,7 +2170,7 @@ class CnCandidateRetriever:
         semanticScore: Optional[float] = None,
         semanticMatches: Optional[Sequence[Mapping[str, Any]]] = None,
     ) -> CnCandidate:
-        cnCode = row.get("cn", "") or row.get("hs8", "")
+        cnCode = row.get("cn", "") or row.get("hs8", "") or row.get("cn8", "")
         chapterCode = row.get("chapter", "") or row.get("hs2_code") or None
         headingCode = row.get("heading", "") or row.get("hs4_code") or None
         subheadingCode = row.get("subheading", "") or row.get("hs6_code") or None
@@ -2159,8 +2179,12 @@ class CnCandidateRetriever:
             "hs6_description",
             "",
         )
-        cnDescription = row.get("cn_description") or row.get("hs8_description", "")
-        if not subheadingDescription and cnPart == "00":
+        cnDescription = (
+            row.get("cn_description")
+            or row.get("hs8_description")
+            or row.get("cn8_description", "")
+        )
+        if not subheadingDescription and (cnPart == "00" or cnCode.endswith("00")):
             subheadingDescription = cnDescription
         candidateContextText = self._BuildCandidateContextText(row)
         combinedDescription = row.get("combined_description", "") or candidateContextText
@@ -2410,8 +2434,16 @@ class CnCandidateRetriever:
             "hs6_description",
             "",
         )
-        if not subheadingDescription and row.get("cn_part", "") == "00":
-            subheadingDescription = row.get("cn_description", "")
+        cnCode = row.get("cn", "") or row.get("hs8", "") or row.get("cn8", "")
+        cnDescription = (
+            row.get("cn_description", "")
+            or row.get("hs8_description", "")
+            or row.get("cn8_description", "")
+        )
+        if not subheadingDescription and (
+            row.get("cn_part", "") == "00" or cnCode.endswith("00")
+        ):
+            subheadingDescription = cnDescription
         parts = [
             (
                 "chapter",
@@ -2431,8 +2463,8 @@ class CnCandidateRetriever:
             ("branch_context", "", row.get("branch_context", "")),
             (
                 "cn_description",
-                row.get("cn", "") or row.get("hs8", ""),
-                row.get("cn_description", "") or row.get("hs8_description", ""),
+                cnCode,
+                cnDescription,
             ),
         ]
         contextLines = []
