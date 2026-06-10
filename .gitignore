@@ -226,3 +226,4 @@ artifacts
 .idea
 eu_export_ontology_v1
 data
+tmp
