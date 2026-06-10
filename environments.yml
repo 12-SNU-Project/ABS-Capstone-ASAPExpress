@@ -1,0 +1,33 @@
+name: asap_pw
+
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.12
+  - pip
+  - numpy
+  - pydantic
+  - pyyaml
+  - loguru
+  - pytest
+  - pip:
+      # Dash UI
+      - dash
+
+      # Runtime validation / optional admin tooling
+      - jsonschema
+      - psycopg2-binary
+
+      # Product page rendering and OCR
+      # After environment creation, install browser binaries with:
+      #   python -m playwright install chromium
+      - playwright
+      - opencv-python
+      - paddlepaddle
+      - paddleocr
+
+      # Semantic CN candidate retrieval
+      - sentence-transformers
+      - torch
