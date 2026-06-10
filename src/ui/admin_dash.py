@@ -10,7 +10,7 @@ from dash import html
 from ui.classification_dash import CARD, LABEL, PLACEHOLDER, PILL, detail_block, evidence_detail_panel, json_pre, render_progress
 
 
-PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[1])).resolve()
+PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
 RUNS_ROOT = PROJECT_ROOT / "data" / "runs"
 
 

@@ -29,7 +29,7 @@ from typing import Optional
 csv.field_size_limit(sys.maxsize)
 
 DEFAULT_MASTER_CSV = Path(
-    Path(__file__).resolve().parents[2]
+    Path(__file__).resolve().parents[3]
     / "data" / "processed" / "TARIC" / "taric_master_table.csv"
 )
 

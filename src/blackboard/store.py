@@ -28,7 +28,7 @@ except ImportError:  # pragma: no cover - optional runtime validation dependency
     jsonschema = None
 
 
-PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[1])).resolve()
+PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
 DEFAULT_RUNS_DIR = PROJECT_ROOT / "data" / "runs"
 DEFAULT_SCHEMA = (
     PROJECT_ROOT

@@ -8,7 +8,7 @@ Pages:
 
 Run:
   cd /Users/snu/ABS-Capstone-ASAPExpress
-  python -m ui.asap_dash
+  PYTHONPATH=src python -m ui.asap_dash
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from pathlib import Path
 from dash import ALL, Dash, Input, Output, State, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
-ASAP_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parent.parent)).resolve()
+ASAP_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
 ASAP_SRC_ROOT = ASAP_ROOT / "src"
 for _path in (ASAP_ROOT, ASAP_SRC_ROOT):
     if _path.exists() and str(_path) not in sys.path:

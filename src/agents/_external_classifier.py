@@ -516,7 +516,7 @@ def _expand_compact_decision_to_stage1_json(
 # 2048 leaves comfortable headroom for prompt + response.
 LLM_MAX_TOKENS = 2048
 
-ASAP_PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[1])).resolve()
+ASAP_PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
 ASAP_SRC_ROOT = ASAP_PROJECT_ROOT / "src"
 for _path in (ASAP_PROJECT_ROOT, ASAP_SRC_ROOT):
     if _path.exists() and str(_path) not in sys.path:

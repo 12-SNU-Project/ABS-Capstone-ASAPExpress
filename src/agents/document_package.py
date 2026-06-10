@@ -11,10 +11,10 @@ Document Package Resolver — TARIC10 코드 → EU 수입 시 요구 서류 패
     예: 2103901000 -> 2103900000 -> 2103000000 -> 2100000000
 
 사용:
-    python agents/document_package.py 0101210000
-    python agents/document_package.py 0101210000 --format json
-    python agents/document_package.py 0101210000 --format text
-    python agents/document_package.py 0101210000 --include-celex-excerpt
+    PYTHONPATH=src python -m agents.document_package 0101210000
+    PYTHONPATH=src python -m agents.document_package 0101210000 --format json
+    PYTHONPATH=src python -m agents.document_package 0101210000 --format text
+    PYTHONPATH=src python -m agents.document_package 0101210000 --include-celex-excerpt
 
 입력 코드는 10자리 TARIC. 8자리만 주면 자동으로 '00' 패딩 + 모든 TARIC10 변형 그룹.
 """

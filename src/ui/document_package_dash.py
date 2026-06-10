@@ -2,13 +2,13 @@
 Dash UI - EU import document package workbench.
 
 Run:
-    python agents/document_package_dash.py
+    PYTHONPATH=src python -m ui.document_package_dash
 
 Open:
     http://127.0.0.1:8050
 
 Optional:
-    ASAP_DASH_PORT=8051 python agents/document_package_dash.py
+    ASAP_DASH_PORT=8051 PYTHONPATH=src python -m ui.document_package_dash
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from errno import EADDRINUSE
 from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[1])).resolve()
+PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
 for _path in (PROJECT_ROOT, PROJECT_ROOT / "src"):
     if _path.exists() and str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
