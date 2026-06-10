@@ -1,6 +1,5 @@
-"""ASAP user-facing UI layer.
+"""ASAP Dash page/component modules.
 
-  asap_dash.py        Dash app — main UI entry
-                      입력 → Classification → TARIC10 카드 → 서류 패키지
-                      관리자 토글로 Blackboard / agent_runs 시각화
+The root ``asap_dash.py`` entrypoint assembles these page modules into the
+user-facing Dash app.
 """
