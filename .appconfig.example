@@ -46,9 +46,10 @@ model = "intfloat/multilingual-e5-small"
 device = "mps"
 batch_size = 32
 normalize_embeddings = true
+local_files_only = true
 
 [paths]
-ontology_root = "eu_export_ontology_v1"
+ontology_root = "docs/ASAP_Ontology_v1"
 ontology_smoke_summary_artifact = "artifacts/ontology-smoke/runtime-smoke-summary.json"
 ontology_human_review_package_artifact = "artifacts/ontology-smoke/stage1-human-review-package.json"
 kurly_smoke_artifact_root = "artifacts/kurly-market-smoke"
@@ -57,6 +58,13 @@ blackboard_runs_root = "data/runs"
 blackboard_schema = "docs/ASAP_Ontology_v1/linkml/generated/asap_runtime.schema.json"
 dash_url_intake_artifact_root = "tmp/asap_dash_url_intake"
 taric_master_table = "data/processed/TARIC/taric_master_table.csv"
+
+[classification]
+use_semantic_candidate_retrieval = true
+semantic_candidate_top_k = 8
+semantic_min_score = 0.0
+# null이면 UI classifier가 요청한 top_k_candidates 값을 최종 후보 수로 유지합니다.
+hybrid_candidate_limit = 8
 
 [ontology_smoke]
 phase_id = "stage1_classification"
@@ -71,6 +79,10 @@ validation_issue_preview_count = 3
 resource_check_preview_count = 8
 max_validation_fixture_candidates = 3
 stage1_backtracking_retry_attempt = 0
+use_semantic_candidate_retrieval = true
+semantic_candidate_top_k = 8
+semantic_min_score = 0.0
+hybrid_candidate_limit = 8
 
 [kurly_smoke]
 product_urls = [

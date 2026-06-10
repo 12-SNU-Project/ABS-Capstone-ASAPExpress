@@ -192,6 +192,17 @@ class OntologySmokeAppConfig(BaseModel):
     hybrid_candidate_limit: Optional[StrictInt] = None
 
 
+class ClassificationAppConfig(BaseModel):
+    """Stage 1 CN 후보 검색 설정."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    use_semantic_candidate_retrieval: StrictBool = True
+    semantic_candidate_top_k: StrictInt = 8
+    semantic_min_score: StrictFloat = 0.0
+    hybrid_candidate_limit: Optional[StrictInt] = None
+
+
 class AppConfig(BaseModel):
     """비밀값이 아닌 프로젝트 실행 설정."""
 
@@ -200,6 +211,9 @@ class AppConfig(BaseModel):
     llm: LlmAppConfig = Field(default_factory=LlmAppConfig)
     embedding: EmbeddingAppConfig = Field(default_factory=EmbeddingAppConfig)
     paths: AppPathsConfig = Field(default_factory=AppPathsConfig)
+    classification: ClassificationAppConfig = Field(
+        default_factory=ClassificationAppConfig,
+    )
     kurly_smoke: KurlySmokeAppConfig = Field(default_factory=KurlySmokeAppConfig)
     ontology_smoke: OntologySmokeAppConfig = Field(
         default_factory=OntologySmokeAppConfig,

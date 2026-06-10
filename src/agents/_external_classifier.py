@@ -527,10 +527,16 @@ from eu_export.bridge import (
     BuildDefaultLlmRuntimeConfig,
     BuildLlmRuntimeConfigFromEnv,
     BuildRuntimeAdapter,
+    BuildTextEmbeddingAdapter,
+    BuildTextEmbeddingRuntimeConfig,
     ProbeRuntimeDependency,
+    ProbeTextEmbeddingDependency,
+    TextEmbeddingAdapterBuildError,
+    TextEmbeddingGenerationError,
 )
 from eu_export.ontology import (
     CnCandidateRetriever,
+    CnSemanticCandidateIndex,
     OntologyContextBuilder,
     ProductClassificationInput,
     Stage1DecisionPolicy,
@@ -548,6 +554,8 @@ ASAP_ONTOLOGY_ROOT = APP_CONFIG.paths.ResolvePath(
     APP_CONFIG.paths.ontology_root,
 )
 ASAP_ENV_FILE = ASAP_PROJECT_ROOT / ".env"
+SEMANTIC_CANDIDATE_INDEX: CnSemanticCandidateIndex | None = None
+SEMANTIC_CANDIDATE_INDEX_STATUS: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -564,6 +572,7 @@ class ExternalClassificationResult:
     llm_model: str = ""
     prompt_text: str = ""
     citations: list[dict] = field(default_factory=list)
+    semantic_retrieval_status: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
 
 
@@ -579,6 +588,86 @@ def build_runtime_adapter():
         runtimeConfig = BuildDefaultLlmRuntimeConfig()
     dependencyStatus = ProbeRuntimeDependency(runtimeConfig)
     return BuildRuntimeAdapter(runtimeConfig, dependencyStatus)
+
+
+def build_semantic_candidate_index(
+    retriever: CnCandidateRetriever,
+) -> tuple[CnSemanticCandidateIndex | None, dict[str, Any]]:
+    global SEMANTIC_CANDIDATE_INDEX
+    global SEMANTIC_CANDIDATE_INDEX_STATUS
+
+    if SEMANTIC_CANDIDATE_INDEX is not None:
+        return SEMANTIC_CANDIDATE_INDEX, {
+            "status": "ready",
+            "chunk_count": SEMANTIC_CANDIDATE_INDEX.chunkCount,
+        }
+    if SEMANTIC_CANDIDATE_INDEX_STATUS is not None:
+        return None, dict(SEMANTIC_CANDIDATE_INDEX_STATUS)
+
+    if not APP_CONFIG.classification.use_semantic_candidate_retrieval:
+        SEMANTIC_CANDIDATE_INDEX_STATUS = {
+            "status": "disabled",
+            "reason": "semantic candidate retrieval is disabled by appconfig",
+        }
+        return None, dict(SEMANTIC_CANDIDATE_INDEX_STATUS)
+
+    runtimeConfig = BuildTextEmbeddingRuntimeConfig(APP_CONFIG.embedding)
+    if not runtimeConfig.enabled:
+        SEMANTIC_CANDIDATE_INDEX_STATUS = {
+            "status": "disabled",
+            "reason": "embedding runtime is disabled by appconfig",
+            "provider": runtimeConfig.provider.value,
+            "model": runtimeConfig.modelName,
+        }
+        return None, dict(SEMANTIC_CANDIDATE_INDEX_STATUS)
+
+    dependencyStatus = ProbeTextEmbeddingDependency(runtimeConfig)
+    if not dependencyStatus.isAvailable:
+        SEMANTIC_CANDIDATE_INDEX_STATUS = {
+            "status": "unavailable",
+            "reason": dependencyStatus.message,
+            "provider": dependencyStatus.provider.value,
+            "model": runtimeConfig.modelName,
+            "limitations": list(dependencyStatus.limitations),
+        }
+        return None, dict(SEMANTIC_CANDIDATE_INDEX_STATUS)
+
+    try:
+        embeddingAdapter = BuildTextEmbeddingAdapter(
+            runtimeConfig,
+            dependencyStatus=dependencyStatus,
+        )
+        if embeddingAdapter is None:
+            SEMANTIC_CANDIDATE_INDEX_STATUS = {
+                "status": "disabled",
+                "reason": "embedding adapter was not created",
+                "provider": runtimeConfig.provider.value,
+                "model": runtimeConfig.modelName,
+            }
+            return None, dict(SEMANTIC_CANDIDATE_INDEX_STATUS)
+
+        semanticIndex = CnSemanticCandidateIndex(embeddingAdapter)
+        semanticIndex.Build(retriever.LoadRowsByDomainScope())
+    except (
+        TextEmbeddingAdapterBuildError,
+        TextEmbeddingGenerationError,
+        ValueError,
+    ) as exception:
+        SEMANTIC_CANDIDATE_INDEX_STATUS = {
+            "status": "failed",
+            "reason": str(exception),
+            "provider": runtimeConfig.provider.value,
+            "model": runtimeConfig.modelName,
+        }
+        return None, dict(SEMANTIC_CANDIDATE_INDEX_STATUS)
+
+    SEMANTIC_CANDIDATE_INDEX = semanticIndex
+    return SEMANTIC_CANDIDATE_INDEX, {
+        "status": "ready",
+        "provider": runtimeConfig.provider.value,
+        "model": runtimeConfig.modelName,
+        "chunk_count": semanticIndex.chunkCount,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -621,10 +710,25 @@ def run_external_classifier(
 
     # 2. Retrieval
     retriever = CnCandidateRetriever(ASAP_ONTOLOGY_ROOT, ASAP_PROJECT_ROOT)
-    candidates = retriever.FindCandidates(productInput, topK=top_k_candidates)
+    semanticIndex, semanticStatus = build_semantic_candidate_index(retriever)
+    if semanticIndex is None:
+        candidates = retriever.FindCandidates(productInput, topK=top_k_candidates)
+    else:
+        candidates = retriever.FindCandidatesWithSemanticIndex(
+            productInput,
+            semanticIndex,
+            heuristicTopK=top_k_candidates,
+            semanticTopK=APP_CONFIG.classification.semantic_candidate_top_k,
+            finalCandidateLimit=(
+                APP_CONFIG.classification.hybrid_candidate_limit
+                or top_k_candidates
+            ),
+            minSemanticScore=APP_CONFIG.classification.semantic_min_score,
+        )
     if not candidates:
         return ExternalClassificationResult(
             candidates=[],
+            semantic_retrieval_status=semanticStatus,
             error="no_candidates_from_retriever",
         )
 
@@ -635,7 +739,12 @@ def run_external_classifier(
             "source_table": "cn_table",
             "source_id": c.hs8,
             "snippet": (getattr(c, "hs8Description", "") or "")[:120],
-            "reason": "Stage 1 shortlist via ASAPExpress CnCandidateRetriever.",
+            "reason": (
+                "Stage 1 shortlist via ASAPExpress CnCandidateRetriever "
+                "with retrieval sources: {0}.".format(
+                    ", ".join(getattr(c, "retrievalSources", []) or ["heuristic"])
+                )
+            ),
         })
 
     # 3. Ontology context
@@ -675,6 +784,7 @@ def run_external_classifier(
             candidates=list(candidates),
             citations=citations,
             prompt_text=prompt_text[:2000],
+            semantic_retrieval_status=semanticStatus,
             error=f"llm_error: {e}",
         )
 
@@ -760,4 +870,5 @@ def run_external_classifier(
         llm_model=str(model_name),
         prompt_text=prompt_text[:2000],
         citations=citations,
+        semantic_retrieval_status=semanticStatus,
     )
