@@ -29,6 +29,14 @@ for _path in (PROJECT_ROOT, PROJECT_ROOT / "src"):
 from dash import ALL, Dash, Input, Output, State, ctx, dcc, html, no_update
 
 from agents.document_package import _dc_to_dict, get_document_package
+from eu_export.app_config import LoadAppConfig
+
+
+APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
+RUNS_ROOT = APP_CONFIG.paths.ResolvePath(
+    PROJECT_ROOT,
+    APP_CONFIG.paths.blackboard_runs_root,
+)
 
 
 EXAMPLES: list[tuple[str, str, dict[str, Any]]] = [
@@ -1302,7 +1310,7 @@ def render_product_rules(
 def _load_pipeline_payload(run_id: str | None) -> dict[str, Any]:
     if not run_id:
         return {}
-    run_dir = PROJECT_ROOT / "data" / "runs" / run_id
+    run_dir = RUNS_ROOT / run_id
     blackboard_path = run_dir / "blackboard.json"
     agent_runs_path = run_dir / "agent_runs.jsonl"
     payload: dict[str, Any] = {"run_id": run_id, "run_dir": str(run_dir)}

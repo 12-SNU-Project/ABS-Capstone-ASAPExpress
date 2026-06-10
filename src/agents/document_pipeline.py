@@ -23,6 +23,14 @@ from agents.document_agent import DocumentAgent
 from agents.evidence_intake_agent import EvidenceIntakeAgent
 from agents.orchestrator_agent import OrchestratorAgent
 from blackboard import BlackboardStore
+from eu_export.app_config import LoadAppConfig
+
+
+APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
+URL_INTAKE_ARTIFACT_ROOT = APP_CONFIG.paths.ResolvePath(
+    PROJECT_ROOT,
+    APP_CONFIG.paths.dash_url_intake_artifact_root,
+)
 
 
 def _read_agent_runs(store: BlackboardStore) -> list[dict[str, Any]]:
@@ -82,7 +90,7 @@ def collect_kurly_url_facts(
     else:
         pipeline = KurlyProductPipeline(collector=collector)
 
-    artifact_root = PROJECT_ROOT / "tmp" / "asap_dash_url_intake"
+    artifact_root = URL_INTAKE_ARTIFACT_ROOT
     artifact_root.mkdir(parents=True, exist_ok=True)
     result = pipeline.Run(
         KurlyPipelineInput(

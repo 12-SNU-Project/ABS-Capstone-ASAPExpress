@@ -53,6 +53,10 @@ ontology_smoke_summary_artifact = "artifacts/ontology-smoke/runtime-smoke-summar
 ontology_human_review_package_artifact = "artifacts/ontology-smoke/stage1-human-review-package.json"
 kurly_smoke_artifact_root = "artifacts/kurly-market-smoke"
 kurly_smoke_summary_artifact = "artifacts/kurly-market-smoke/runtime-smoke-summary.json"
+blackboard_runs_root = "data/runs"
+blackboard_schema = "docs/ASAP_Ontology_v1/linkml/generated/asap_runtime.schema.json"
+dash_url_intake_artifact_root = "tmp/asap_dash_url_intake"
+taric_master_table = "data/processed/TARIC/taric_master_table.csv"
 
 [ontology_smoke]
 phase_id = "stage1_classification"

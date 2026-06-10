@@ -118,6 +118,14 @@ class AppPathsConfig(BaseModel):
     kurly_smoke_summary_artifact: Path = Path(
         "artifacts/kurly-market-smoke/runtime-smoke-summary.json",
     )
+    blackboard_runs_root: Path = Path("data/runs")
+    blackboard_schema: Path = Path(
+        "docs/ASAP_Ontology_v1/linkml/generated/asap_runtime.schema.json",
+    )
+    dash_url_intake_artifact_root: Path = Path("tmp/asap_dash_url_intake")
+    taric_master_table: Path = Path(
+        "data/processed/TARIC/taric_master_table.csv",
+    )
 
     def ResolvePath(self, projectRootPath: str | Path, configPath: Path) -> Path:
         expandedPath = configPath.expanduser()

@@ -21,16 +21,21 @@ from __future__ import annotations
 
 import csv
 import functools
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from eu_export.app_config import LoadAppConfig
+
 csv.field_size_limit(sys.maxsize)
 
-DEFAULT_MASTER_CSV = Path(
-    Path(__file__).resolve().parents[3]
-    / "data" / "processed" / "TARIC" / "taric_master_table.csv"
+PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[3])).resolve()
+APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
+DEFAULT_MASTER_CSV = APP_CONFIG.paths.ResolvePath(
+    PROJECT_ROOT,
+    APP_CONFIG.paths.taric_master_table,
 )
 
 

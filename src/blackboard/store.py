@@ -22,6 +22,8 @@ import os
 from pathlib import Path
 from typing import Any, Iterator
 
+from eu_export.app_config import LoadAppConfig
+
 try:
     import jsonschema
 except ImportError:  # pragma: no cover - optional runtime validation dependency
@@ -29,11 +31,14 @@ except ImportError:  # pragma: no cover - optional runtime validation dependency
 
 
 PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
-DEFAULT_RUNS_DIR = PROJECT_ROOT / "data" / "runs"
-DEFAULT_SCHEMA = (
-    PROJECT_ROOT
-    / "docs" / "ASAP_Ontology_v1" / "linkml"
-    / "generated" / "asap_runtime.schema.json"
+APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
+DEFAULT_RUNS_DIR = APP_CONFIG.paths.ResolvePath(
+    PROJECT_ROOT,
+    APP_CONFIG.paths.blackboard_runs_root,
+)
+DEFAULT_SCHEMA = APP_CONFIG.paths.ResolvePath(
+    PROJECT_ROOT,
+    APP_CONFIG.paths.blackboard_schema,
 )
 
 

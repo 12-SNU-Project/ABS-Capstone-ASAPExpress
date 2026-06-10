@@ -7,11 +7,16 @@ from typing import Any
 
 from dash import html
 
+from eu_export.app_config import LoadAppConfig
 from ui.classification_dash import CARD, LABEL, PLACEHOLDER, PILL, detail_block, evidence_detail_panel, json_pre, render_progress
 
 
 PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
-RUNS_ROOT = PROJECT_ROOT / "data" / "runs"
+APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
+RUNS_ROOT = APP_CONFIG.paths.ResolvePath(
+    PROJECT_ROOT,
+    APP_CONFIG.paths.blackboard_runs_root,
+)
 
 
 def load_run(run_id: str | None) -> dict[str, Any]:

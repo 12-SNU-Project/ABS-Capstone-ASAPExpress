@@ -522,6 +522,7 @@ for _path in (ASAP_PROJECT_ROOT, ASAP_SRC_ROOT):
     if _path.exists() and str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
+from eu_export.app_config import LoadAppConfig
 from eu_export.bridge import (
     BuildDefaultLlmRuntimeConfig,
     BuildLlmRuntimeConfigFromEnv,
@@ -541,7 +542,11 @@ from eu_export.ontology import (
 )
 
 
-ASAP_ONTOLOGY_ROOT = ASAP_PROJECT_ROOT / "docs" / "ASAP_Ontology_v1"
+APP_CONFIG = LoadAppConfig(ASAP_PROJECT_ROOT)
+ASAP_ONTOLOGY_ROOT = APP_CONFIG.paths.ResolvePath(
+    ASAP_PROJECT_ROOT,
+    APP_CONFIG.paths.ontology_root,
+)
 ASAP_ENV_FILE = ASAP_PROJECT_ROOT / ".env"
 
 
