@@ -199,7 +199,7 @@ class ClassificationAgent(BaseAgent):
         try:
             branches = self._taric_resolver.resolve(
                 cn8,
-                only_declarable_leaf=True,
+                only_declarable_leaf=False,
                 only_kr_applicable=False,
             )
         except Exception as exc:  # noqa: BLE001
