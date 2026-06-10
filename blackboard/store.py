@@ -7,7 +7,7 @@ Layout:
     agent_runs.jsonl    AgentRun records (append-only)
 
 Schema validation is against the LinkML-generated JSON Schema
-(data/processed/ASAP_Ontology_v2/linkml/generated/asap_runtime.schema.json).
+(docs/ASAP_Ontology_v1/linkml/generated/asap_runtime.schema.json).
 
 Identifier format: prefix_counter, zero-padded to 3 digits
 (cand_001, chg_001, …). Counters are derived from the live Blackboard so
@@ -32,7 +32,7 @@ PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve()
 DEFAULT_RUNS_DIR = PROJECT_ROOT / "data" / "runs"
 DEFAULT_SCHEMA = (
     PROJECT_ROOT
-    / "data" / "processed" / "ASAP_Ontology_v2" / "linkml"
+    / "docs" / "ASAP_Ontology_v1" / "linkml"
     / "generated" / "asap_runtime.schema.json"
 )
 

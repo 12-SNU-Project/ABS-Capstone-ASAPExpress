@@ -2,7 +2,7 @@
 agents/_external_classifier — adapter for the vendored Stage 1 classifier.
 
 The classifier runtime code lives in ``src/eu_export``. It reads our ontology
-data from ``data/processed/ASAP_Ontology_v2`` and orchestrates
+data from ``docs/ASAP_Ontology_v1`` and orchestrates
 its 7-step Stage 1 pipeline:
 
   1. ProductEvidenceState                → ProductClassificationInput
@@ -541,7 +541,7 @@ from eu_export.ontology import (
 )
 
 
-ASAP_ONTOLOGY_ROOT = ASAP_PROJECT_ROOT / "data" / "processed" / "ASAP_Ontology_v2"
+ASAP_ONTOLOGY_ROOT = ASAP_PROJECT_ROOT / "docs" / "ASAP_Ontology_v1"
 ASAP_ENV_FILE = ASAP_PROJECT_ROOT / ".env"
 
 
