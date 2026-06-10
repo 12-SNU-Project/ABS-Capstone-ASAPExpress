@@ -676,7 +676,62 @@ def node(kicker: str, value: Any, cls: str = "node-blue") -> html.Div:
     return html.Div([html.Div(kicker, className="node-kicker"), html.Div(str(value), className="node-main")], className=f"node {cls}")
 
 
+def _document_view(pkg: dict[str, Any]) -> dict[str, Any]:
+    direct = pkg.get("_document_view")
+    if isinstance(direct, dict):
+        return direct
+    pipeline = pkg.get("_pipeline") or {}
+    dp = pipeline.get("document_package") or {}
+    view = dp.get("document_view") if isinstance(dp, dict) else None
+    return view if isinstance(view, dict) else {}
+
+
 def package_context(pkg: dict[str, Any]) -> dict[str, Any]:
+    view = _document_view(pkg)
+    sections = view.get("sections") or {}
+    if sections:
+        metrics = view.get("metrics") or {}
+        overview = sections.get("overview") or {}
+        customs_section = sections.get("customs_check_items") or {}
+        basic_section = sections.get("basic_duty") or {}
+        pref_section = sections.get("preferential_evidence") or {}
+        docs_section = sections.get("required_documents") or {}
+        product_section = sections.get("product_regulations") or {}
+
+        controls = customs_section.get("render_bucket") or []
+        base_duty_measures = basic_section.get("render_bucket") or []
+        preferential_measures = pref_section.get("render_bucket") or []
+        duties = list(base_duty_measures) + list(preferential_measures)
+        groups = docs_section.get("document_groups") or []
+        product_reqs = product_section.get("requirements") or []
+        counts = overview.get("counts") or {}
+        missing = overview.get("missing_facts") or []
+        third_country = overview.get("third_country_duty") or find_measure(base_duty_measures, ("Third country duty",))
+        fta_pref = overview.get("fta_preference") or find_measure(preferential_measures, ("Tariff preference", "Customs Union", "Preferential"))
+        additional_duty = overview.get("additional_duty") or find_measure(base_duty_measures, ("Additional duties",))
+        product_count = len(product_section.get("pre") or []) + len(product_section.get("post") or [])
+        return {
+            "source": "document_view",
+            "document_view": view,
+            "kr": [],
+            "non_kr": [],
+            "kr_count": metrics.get("kr_measure_count", 0),
+            "non_kr_count": metrics.get("non_kr_measure_count", 0),
+            "controls": controls,
+            "duties": duties,
+            "base_duty_measures": base_duty_measures,
+            "preferential_measures": preferential_measures,
+            "third_country": third_country,
+            "fta_pref": fta_pref,
+            "additional_duty": additional_duty,
+            "groups": groups,
+            "counts": counts,
+            "missing": missing,
+            "product_reqs": product_reqs,
+            "product_view": product_section,
+            "product_count": product_count,
+        }
+
     kr, non_kr, controls, duties = split_requirements(pkg)
     base_duty_measures = [req for req in duties if is_base_duty_measure(req)]
     preferential_measures = [req for req in duties if is_preferential_measure(req)]
@@ -688,8 +743,12 @@ def package_context(pkg: dict[str, Any]) -> dict[str, Any]:
     missing = ((pkg.get("checklist_summary") or {}).get("missing_facts") or [])
     product_reqs = [r for r in kr if r.get("measure_type") == "Product regulatory requirements"]
     return {
+        "source": "raw_fallback",
+        "document_view": {},
         "kr": kr,
         "non_kr": non_kr,
+        "kr_count": len(kr),
+        "non_kr_count": len(non_kr),
         "controls": controls,
         "duties": duties,
         "base_duty_measures": base_duty_measures,
@@ -701,6 +760,8 @@ def package_context(pkg: dict[str, Any]) -> dict[str, Any]:
         "counts": counts,
         "missing": missing,
         "product_reqs": product_reqs,
+        "product_view": {},
+        "product_count": sum(len(r.get("detailed_requirements") or []) for r in product_reqs),
     }
 
 
@@ -846,7 +907,7 @@ def render_result(pkg, panel, options):
     duties = cx["duties"]
     product_reqs = cx["product_reqs"]
     selected = panel or "overview"
-    product_count = sum(len(r.get("detailed_requirements") or []) for r in product_reqs)
+    product_count = cx.get("product_count", 0)
 
     panel_defs = [
         ("overview", "전체 결론", "요약"),
@@ -863,7 +924,7 @@ def render_result(pkg, panel, options):
                 metric("TARIC10", pkg.get("taric10"), "#1d4ed8", True),
                 metric("CN8", pkg.get("cn8"), "#1d4ed8", True),
                 metric("최종 관세율 후보", duty_rate(final_duty), "#166534"),
-                metric("KR measure", len(cx["kr"])),
+                metric("KR measure", cx.get("kr_count", len(cx["kr"]))),
                 metric("필요 / 조건부", f"{counts.get('required', 0)} / {counts.get('conditional', 0)}", "#9a3412"),
                 metric("판단보류", counts.get("pending", 0), "#475569"),
             ],
@@ -906,7 +967,7 @@ def render_panel(pkg: dict[str, Any], panel: str, cx: dict[str, Any], options: l
     if panel == "bundles":
         return render_bundles(cx["groups"])
     if panel == "product":
-        return render_product_rules(cx["product_reqs"], cx["kr"])
+        return render_product_rules(cx.get("product_view") or {}, cx["product_reqs"], cx["kr"])
     return render_overview(cx, options, pkg)
 
 
@@ -1203,11 +1264,20 @@ def _related_declarations_by_domain(product_reqs: list[dict[str, Any]], kr_reqs:
     return out
 
 
-def render_product_rules(product_reqs: list[dict[str, Any]], kr_reqs: list[dict[str, Any]]):
-    details = [d for req in product_reqs for d in (req.get("detailed_requirements") or [])]
-    pre = [d for d in details if d.get("source_layer") == "chapter_route_seed"]
-    post = [d for d in details if d.get("source_layer") == "product_domain_seed"]
-    related_declarations = _related_declarations_by_domain(product_reqs, kr_reqs)
+def render_product_rules(
+    product_view: dict[str, Any],
+    product_reqs: list[dict[str, Any]],
+    kr_reqs: list[dict[str, Any]],
+):
+    if product_view:
+        pre = product_view.get("pre") or []
+        post = product_view.get("post") or []
+        related_declarations = product_view.get("related_declarations") or {}
+    else:
+        details = [d for req in product_reqs for d in (req.get("detailed_requirements") or [])]
+        pre = [d for d in details if d.get("source_layer") == "chapter_route_seed"]
+        post = [d for d in details if d.get("source_layer") == "product_domain_seed"]
+        related_declarations = _related_declarations_by_domain(product_reqs, kr_reqs)
     pre_col = html.Div(
         [
             html.Div([html.Div("Pre / domain-router 후보", className="card-title"), html.Div(f"CN chapter 기준으로 열리는 제품 규제 후보 · {len(pre)}개", className="card-meta")], className="card", style={"borderLeft": "4px solid #475569"}),
@@ -1264,6 +1334,8 @@ def load_package_for_detail(run_id: str | None, taric10: str, *, include_celex_e
         raw = dp.get("raw_document_package")
         if isinstance(raw, dict):
             package = dict(raw)
+            if isinstance(dp.get("document_view"), dict):
+                package["_document_view"] = dp["document_view"]
             package["_pipeline"] = {
                 "run_id": pipeline.get("run_id"),
                 "run_dir": pipeline.get("run_dir"),
