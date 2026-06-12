@@ -163,7 +163,16 @@ class ClassificationAgent(BaseAgent):
                 "cn8": cn8,
                 "taric10": taric10,
                 "taric10_branch_candidates": taric_branches,
+                "taric10_resolution_mode": (
+                    "enumerate_all_under_cn8" if taric_branches else "no_taric_branch_found"
+                ),
+                "taric10_is_recommended": False,
+                "taric10_branch_count": len(taric_branches),
                 "selected_taric10_reason": (
+                    selected_branch.get("selection_reason")
+                    if taric10 else "No TARIC10 branch resolved from current master table."
+                ),
+                "primary_taric10_reason": (
                     selected_branch.get("selection_reason")
                     if taric10 else "No TARIC10 branch resolved from current master table."
                 ),
@@ -263,7 +272,16 @@ class ClassificationAgent(BaseAgent):
                 "cn8": cn8,
                 "taric10": taric10,
                 "taric10_branch_candidates": taric_branches,
+                "taric10_resolution_mode": (
+                    "enumerate_all_under_cn8" if taric_branches else "no_taric_branch_found"
+                ),
+                "taric10_is_recommended": False,
+                "taric10_branch_count": len(taric_branches),
                 "selected_taric10_reason": (
+                    selected_branch.get("selection_reason")
+                    if taric10 else "No TARIC10 branch resolved from current master table."
+                ),
+                "primary_taric10_reason": (
                     selected_branch.get("selection_reason")
                     if taric10 else "No TARIC10 branch resolved from current master table."
                 ),
@@ -314,12 +332,11 @@ class ClassificationAgent(BaseAgent):
         return out
 
     def _select_taric_branch(self, branches: list[dict]) -> dict:
-        """Pick the TARIC10 recommendation from deterministic branch candidates.
+        """Pick a compatibility primary TARIC10 from deterministic branches.
 
-        The full branch list remains on the candidate for review. The selected
-        recommendation should be the best declarable line for the exporter
-        context, so KR-applicable branches are preferred over generic first-row
-        ordering from the master table.
+        This is not a legal recommendation. The full branch list remains on
+        the candidate and Document_Agent packages every branch. The primary
+        value only preserves older UI/API paths that expect cand["taric10"].
         """
         if not branches:
             return {}
@@ -337,8 +354,10 @@ class ClassificationAgent(BaseAgent):
         selected = max(branches, key=score)
         out = dict(selected)
         out["selection_reason"] = (
-            "Selected by TARIC master branch ranking: prefer KR-applicable "
-            "declarable leaf, then non-review branch, then measure coverage."
+            "Compatibility primary only, not a TARIC10 recommendation. "
+            "All TARIC master branches under this CN8 are retained in "
+            "taric10_branch_candidates; this primary prefers KR-applicable "
+            "declarable leaves, then non-review branches, then measure coverage."
         )
         return out
 

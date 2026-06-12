@@ -1,6 +1,6 @@
 """
-Document_Agent — selected TARIC10 → 5-section document package + regulatory
-domain + backtracking signals.
+Document_Agent — candidate TARIC10 branch(es) → 5-section document package,
+regulatory domain, and backtracking signals.
 
 Owned tools:
   - DocumentPackageTool   (taric10 → raw measures/certs/duty/CELEX)
@@ -236,113 +236,157 @@ class DocumentAgent(BaseAgent):
         for cand in latest["candidates"]:
             self.read_input(cand["candidate_id"])
             cn8 = (cand.get("cn8") or "").strip()
-            taric10 = (cand.get("taric10") or "").strip()
+            taric_targets = self._taric_targets_for_candidate(cand)
 
             # Sentinel: needs_more_facts candidates → no package, only signal.
-            if (cand.get("status") or "").strip() != "proposed" or not taric10 or taric10.startswith("99999999"):
+            if (cand.get("status") or "").strip() != "proposed" or not taric_targets:
                 self._emit_unresolved_package(store, cand)
                 continue
 
-            # 1. Raw TARIC measure package
-            try:
-                raw = self._doc_tool.resolve(taric10=taric10)
-            except Exception as e:  # noqa: BLE001
-                self.reason(f"DocumentPackageTool error for {taric10}: {e}")
-                self._emit_unresolved_package(store, cand, reason=f"tool_error: {e}")
-                continue
+            for target in taric_targets:
+                taric10 = target["taric10"]
+                cand_for_target = {**cand, "taric10": taric10}
 
-            requirements_raw = raw.get("requirements") or []
-            self.cite(
-                "taric_master_table",
-                f"goods_code_10={taric10}",
-                snippet=f"{raw.get('total_measure_rows')} measure rows / "
-                        f"{len(requirements_raw)} requirement groups",
-                reason="DocumentPackageTool source.",
-            )
+                # 1. Raw TARIC measure package
+                try:
+                    raw = self._doc_tool.resolve(taric10=taric10)
+                except Exception as e:  # noqa: BLE001
+                    self.reason(f"DocumentPackageTool error for {taric10}: {e}")
+                    self._emit_unresolved_package(store, cand_for_target, reason=f"tool_error: {e}")
+                    continue
 
-            # 2. Regulatory domain (fast-path)
-            measure_hints = [r.get("measure_type") for r in requirements_raw if r.get("measure_type")]
-            dom = self._domain_tool.route(
-                cn8=cn8, product_facts=product_facts, measure_type_hints=measure_hints,
-            )
-            for ev in dom.evidence:
-                self.cite("Domain_Scope_Routes", str(ev.get("chapter") or ev.get("source") or ""),
-                          snippet=str(ev)[:100], reason="DomainRouterTool evidence.")
+                requirements_raw = raw.get("requirements") or []
+                self.cite(
+                    "taric_master_table",
+                    f"goods_code_10={taric10}",
+                    snippet=f"{raw.get('total_measure_rows')} measure rows / "
+                            f"{len(requirements_raw)} requirement groups",
+                    reason="DocumentPackageTool source.",
+                )
 
-            # 3. Bucket measures into 5 sections
-            customs, duties, preferential = self._bucket_requirements(requirements_raw)
+                # 2. Regulatory domain (fast-path)
+                measure_hints = [r.get("measure_type") for r in requirements_raw if r.get("measure_type")]
+                dom = self._domain_tool.route(
+                    cn8=cn8, product_facts=product_facts, measure_type_hints=measure_hints,
+                )
+                for ev in dom.evidence:
+                    self.cite("Domain_Scope_Routes", str(ev.get("chapter") or ev.get("source") or ""),
+                              snippet=str(ev)[:100], reason="DomainRouterTool evidence.")
 
-            required_documents = self._extract_required_documents(requirements_raw)
-            product_regulations = self._build_product_regulations(dom)
-            basic_duty = self._pick_basic_duty(duties, raw)
-            document_view = self._build_document_view(
-                raw=raw,
-                dom=dom,
-                customs=customs,
-                duties=duties,
-                preferential=preferential,
-                required_documents=required_documents,
-                product_regulations=product_regulations,
-                basic_duty=basic_duty,
-            )
+                # 3. Bucket measures into 5 sections
+                customs, duties, preferential = self._bucket_requirements(requirements_raw)
 
-            # 4. CELEX basis (collect all legal bases referenced)
-            celex_basis = self._collect_celex(requirements_raw)
+                required_documents = self._extract_required_documents(requirements_raw)
+                product_regulations = self._build_product_regulations(dom)
+                basic_duty = self._pick_basic_duty(duties, raw)
+                document_view = self._build_document_view(
+                    raw=raw,
+                    dom=dom,
+                    customs=customs,
+                    duties=duties,
+                    preferential=preferential,
+                    required_documents=required_documents,
+                    product_regulations=product_regulations,
+                    basic_duty=basic_duty,
+                )
 
-            # 5. Backtracking signals
-            backtracking = self._backtracking_signals(cand, raw, dom)
+                # 4. CELEX basis (collect all legal bases referenced)
+                celex_basis = self._collect_celex(requirements_raw)
 
-            # 6. Missing facts
-            missing_facts = list(dom.missing_facts)
-            if not requirements_raw:
-                missing_facts.append("no_taric_requirements_found")
-            if dom.is_ambiguous:
-                missing_facts.append("regulatory_domain_ambiguous")
+                # 5. Backtracking signals
+                backtracking = self._backtracking_signals(cand_for_target, raw, dom)
 
-            dp_id = store.next_id("dp")
-            dp = {
-                "object_type": "DocumentPackage",
-                "created_by": self.agent_name,
-                "created_at": now_iso(),
-                "document_package_id": dp_id,
-                "candidate_id": cand["candidate_id"],
-                "cn8": cn8,
-                "taric10": taric10,
+                # 6. Missing facts
+                missing_facts = list(dom.missing_facts)
+                if not requirements_raw:
+                    missing_facts.append("no_taric_requirements_found")
+                if dom.is_ambiguous:
+                    missing_facts.append("regulatory_domain_ambiguous")
 
-                "customs_check_items": customs,
-                "basic_duty": basic_duty,
-                "preferential_evidence": preferential,
-                "required_documents": required_documents,
-                "product_regulations": product_regulations,
-                "document_view": document_view,
-                "raw_document_package": raw,
+                dp_id = store.next_id("dp")
+                dp = {
+                    "object_type": "DocumentPackage",
+                    "created_by": self.agent_name,
+                    "created_at": now_iso(),
+                    "document_package_id": dp_id,
+                    "candidate_id": cand["candidate_id"],
+                    "cn8": cn8,
+                    "taric10": taric10,
+                    "taric10_branch": target.get("branch"),
+                    "taric10_branch_index": target.get("branch_index"),
+                    "taric10_branch_count": target.get("branch_count"),
+                    "taric10_resolution_mode": target.get("resolution_mode"),
+                    "taric10_is_recommended": False,
 
-                "missing_facts": missing_facts,
-                "external_lookup": self._suggest_external(dom),
-                "celex_basis": celex_basis,
-                "backtracking_signals": backtracking,
+                    "customs_check_items": customs,
+                    "basic_duty": basic_duty,
+                    "preferential_evidence": preferential,
+                    "required_documents": required_documents,
+                    "product_regulations": product_regulations,
+                    "document_view": document_view,
+                    "raw_document_package": raw,
 
-                "summary": {
-                    "duty": (basic_duty or {}).get("rate") or "see preferential",
-                    "main_requirements": [d["title"] for d in required_documents[:5]],
-                    "domains": dom.domains,
-                    "unknowns": list(missing_facts),
-                    "view_counts": document_view.get("metrics") or {},
-                },
-                "conflicts": [],
-            }
-            store.append("document_packages", dp)
-            self.wrote(dp_id)
-            self.reason(
-                f"DocumentPackage {dp_id} for cand={cand['candidate_id']} "
-                f"({taric10}): customs={len(customs)} duties={len(duties)} "
-                f"pref={len(preferential)} reqs={len(required_documents)} "
-                f"product_rules={document_view.get('metrics', {}).get('product_rule_count', 0)} "
-                f"domains={dom.domains}"
-                + (f" backtrack={len(backtracking)}" if backtracking else "")
-            )
+                    "missing_facts": missing_facts,
+                    "external_lookup": self._suggest_external(dom),
+                    "celex_basis": celex_basis,
+                    "backtracking_signals": backtracking,
+
+                    "summary": {
+                        "duty": (basic_duty or {}).get("rate") or "see preferential",
+                        "main_requirements": [d["title"] for d in required_documents[:5]],
+                        "domains": dom.domains,
+                        "unknowns": list(missing_facts),
+                        "view_counts": document_view.get("metrics") or {},
+                    },
+                    "conflicts": [],
+                }
+                store.append("document_packages", dp)
+                self.wrote(dp_id)
+                branch_label = (
+                    f"branch {target.get('branch_index')}/{target.get('branch_count')}"
+                    if target.get("branch_count", 0) > 1
+                    else "single branch"
+                )
+                self.reason(
+                    f"DocumentPackage {dp_id} for cand={cand['candidate_id']} "
+                    f"({taric10}, {branch_label}): customs={len(customs)} duties={len(duties)} "
+                    f"pref={len(preferential)} reqs={len(required_documents)} "
+                    f"product_rules={document_view.get('metrics', {}).get('product_rule_count', 0)} "
+                    f"domains={dom.domains}"
+                    + (f" backtrack={len(backtracking)}" if backtracking else "")
+                )
 
     # ------------------------------------------------------------------ helpers
+    def _taric_targets_for_candidate(self, cand: dict) -> list[dict[str, Any]]:
+        branches = cand.get("taric10_branch_candidates") or []
+        targets: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        if branches:
+            for branch in branches:
+                taric10 = _compact_text(branch.get("taric10"))
+                if not taric10 or taric10.startswith("99999999") or taric10 in seen:
+                    continue
+                seen.add(taric10)
+                targets.append({
+                    "taric10": taric10,
+                    "branch": dict(branch),
+                    "resolution_mode": cand.get("taric10_resolution_mode") or "enumerate_all_under_cn8",
+                })
+        else:
+            taric10 = _compact_text(cand.get("taric10"))
+            if taric10 and not taric10.startswith("99999999"):
+                targets.append({
+                    "taric10": taric10,
+                    "branch": None,
+                    "resolution_mode": cand.get("taric10_resolution_mode") or "single_taric10",
+                })
+
+        count = len(targets)
+        for index, target in enumerate(targets, start=1):
+            target["branch_index"] = index
+            target["branch_count"] = count
+        return targets
+
     def _split_requirements_for_view(
         self,
         raw: dict[str, Any],

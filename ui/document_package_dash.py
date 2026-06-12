@@ -21,10 +21,7 @@ from errno import EADDRINUSE
 from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[1])).resolve()
-for _path in (PROJECT_ROOT, PROJECT_ROOT / "src"):
-    if _path.exists() and str(_path) not in sys.path:
-        sys.path.insert(0, str(_path))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dash import ALL, Dash, Input, Output, State, ctx, dcc, html, no_update
 
@@ -439,62 +436,6 @@ def duty_rate(req: dict[str, Any] | None) -> str:
     return (req.get("duty") or {}).get("rate") or "조건부"
 
 
-def is_control_measure(req: dict[str, Any]) -> bool:
-    mt = req.get("measure_type") or ""
-    return any(
-        k in mt
-        for k in (
-            "Import control",
-            "Import restriction",
-            "Veterinary",
-            "CITES",
-            "GMO",
-            "Phytosanitary",
-            "REACH",
-        )
-    ) or any(
-        k in mt.lower() for k in ("fishing", "luxury", "sanction", "restriction", "surveillance", "control")
-    )
-
-
-def is_duty_measure(req: dict[str, Any]) -> bool:
-    mt = req.get("measure_type") or ""
-    return any(k in mt for k in ("duty", "Duty", "Tariff", "Preference", "Preferential", "Customs Union", "Supplementary"))
-
-
-def is_preferential_measure(req: dict[str, Any]) -> bool:
-    mt = req.get("measure_type") or ""
-    return any(k in mt for k in ("Tariff preference", "Customs Union", "Preferential"))
-
-
-def is_base_duty_measure(req: dict[str, Any]) -> bool:
-    mt = req.get("measure_type") or ""
-    if is_preferential_measure(req):
-        return False
-    return any(k in mt for k in ("Third country duty", "Additional duties", "Supplementary unit", "duty", "Duty"))
-
-
-def split_requirements(pkg: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    reqs = pkg.get("requirements") or []
-    kr = [r for r in reqs if r.get("applies_to_korea")]
-    non_kr = [r for r in reqs if not r.get("applies_to_korea")]
-    controls, duties = [], []
-    for req in kr:
-        if req.get("measure_type") == "Product regulatory requirements":
-            continue
-        if is_control_measure(req):
-            controls.append(req)
-        elif is_duty_measure(req):
-            duties.append(req)
-        else:
-            duties.append(req)
-    return kr, non_kr, controls, duties
-
-
-def find_measure(measures: list[dict[str, Any]], needles: tuple[str, ...]) -> dict[str, Any] | None:
-    return next((m for m in measures if any(n in (m.get("measure_type") or "") for n in needles)), None)
-
-
 def cert_color(category: str) -> str:
     if category in {"mandatory_certificate", "national_document", "import_license"}:
         return "#b91c1c"
@@ -676,92 +617,84 @@ def node(kicker: str, value: Any, cls: str = "node-blue") -> html.Div:
     return html.Div([html.Div(kicker, className="node-kicker"), html.Div(str(value), className="node-main")], className=f"node {cls}")
 
 
-def _document_view(pkg: dict[str, Any]) -> dict[str, Any]:
-    direct = pkg.get("_document_view")
-    if isinstance(direct, dict):
-        return direct
-    pipeline = pkg.get("_pipeline") or {}
-    dp = pipeline.get("document_package") or {}
-    view = dp.get("document_view") if isinstance(dp, dict) else None
-    return view if isinstance(view, dict) else {}
-
-
 def package_context(pkg: dict[str, Any]) -> dict[str, Any]:
-    view = _document_view(pkg)
-    sections = view.get("sections") or {}
-    if sections:
-        metrics = view.get("metrics") or {}
-        overview = sections.get("overview") or {}
-        customs_section = sections.get("customs_check_items") or {}
-        basic_section = sections.get("basic_duty") or {}
-        pref_section = sections.get("preferential_evidence") or {}
-        docs_section = sections.get("required_documents") or {}
-        product_section = sections.get("product_regulations") or {}
+    view_context = document_view_context(pkg)
+    if view_context:
+        return view_context
+    return _unresolved_context(pkg)
 
-        controls = customs_section.get("render_bucket") or []
-        base_duty_measures = basic_section.get("render_bucket") or []
-        preferential_measures = pref_section.get("render_bucket") or []
-        duties = list(base_duty_measures) + list(preferential_measures)
-        groups = docs_section.get("document_groups") or []
-        product_reqs = product_section.get("requirements") or []
-        counts = overview.get("counts") or {}
-        missing = overview.get("missing_facts") or []
-        third_country = overview.get("third_country_duty") or find_measure(base_duty_measures, ("Third country duty",))
-        fta_pref = overview.get("fta_preference") or find_measure(preferential_measures, ("Tariff preference", "Customs Union", "Preferential"))
-        additional_duty = overview.get("additional_duty") or find_measure(base_duty_measures, ("Additional duties",))
-        product_count = len(product_section.get("pre") or []) + len(product_section.get("post") or [])
-        return {
-            "source": "document_view",
-            "document_view": view,
-            "kr": [],
-            "non_kr": [],
-            "kr_count": metrics.get("kr_measure_count", 0),
-            "non_kr_count": metrics.get("non_kr_measure_count", 0),
-            "controls": controls,
-            "duties": duties,
-            "base_duty_measures": base_duty_measures,
-            "preferential_measures": preferential_measures,
-            "third_country": third_country,
-            "fta_pref": fta_pref,
-            "additional_duty": additional_duty,
-            "groups": groups,
-            "counts": counts,
-            "missing": missing,
-            "product_reqs": product_reqs,
-            "product_view": product_section,
-            "product_count": product_count,
-        }
 
-    kr, non_kr, controls, duties = split_requirements(pkg)
-    base_duty_measures = [req for req in duties if is_base_duty_measure(req)]
-    preferential_measures = [req for req in duties if is_preferential_measure(req)]
-    third_country = find_measure(base_duty_measures, ("Third country duty",))
-    fta_pref = find_measure(preferential_measures, ("Tariff preference", "Customs Union", "Preferential"))
-    additional_duty = find_measure(base_duty_measures, ("Additional duties",))
-    groups = ((pkg.get("checklist_summary") or {}).get("document_groups") or [])
-    counts = ((pkg.get("checklist_summary") or {}).get("counts") or {})
-    missing = ((pkg.get("checklist_summary") or {}).get("missing_facts") or [])
-    product_reqs = [r for r in kr if r.get("measure_type") == "Product regulatory requirements"]
+def _unresolved_context(pkg: dict[str, Any]) -> dict[str, Any]:
     return {
-        "source": "raw_fallback",
-        "document_view": {},
+        "kr": [],
+        "non_kr": [],
+        "controls": [],
+        "duties": [],
+        "base_duty_measures": [],
+        "preferential_measures": [],
+        "third_country": None,
+        "fta_pref": None,
+        "additional_duty": None,
+        "groups": [],
+        "counts": {},
+        "missing": [],
+        "product_reqs": [],
+        "product_pre": [],
+        "product_post": [],
+        "related_declarations": {},
+        "source": "unresolved",
+        "_raw_package": pkg,
+    }
+
+
+def document_view_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
+    """Use DocumentAgent's view model when a pipeline package provides it.
+
+    Direct TARIC lookup still falls back to raw package splitting. Pipeline
+    detail pages should be display-only consumers of Document_Agent output.
+    """
+    view = pkg.get("_document_view") or pkg.get("document_view")
+    if not isinstance(view, dict):
+        return None
+    sections = view.get("sections") or {}
+    if not isinstance(sections, dict):
+        return None
+
+    overview = sections.get("overview") or {}
+    customs = sections.get("customs_check_items") or {}
+    basic = sections.get("basic_duty") or {}
+    preferential = sections.get("preferential_evidence") or {}
+    required_docs = sections.get("required_documents") or {}
+    product = sections.get("product_regulations") or {}
+
+    reqs = pkg.get("requirements") or []
+    kr = [r for r in reqs if r.get("applies_to_korea")]
+    non_kr = [r for r in reqs if not r.get("applies_to_korea")]
+    controls = customs.get("render_bucket") or customs.get("agent_bucket") or []
+    base_duty_measures = basic.get("render_bucket") or basic.get("agent_bucket") or []
+    preferential_measures = preferential.get("render_bucket") or preferential.get("agent_bucket") or []
+    groups = required_docs.get("document_groups") or []
+    product_reqs = product.get("requirements") or []
+
+    return {
         "kr": kr,
         "non_kr": non_kr,
-        "kr_count": len(kr),
-        "non_kr_count": len(non_kr),
         "controls": controls,
-        "duties": duties,
+        "duties": list(base_duty_measures) + list(preferential_measures),
         "base_duty_measures": base_duty_measures,
         "preferential_measures": preferential_measures,
-        "third_country": third_country,
-        "fta_pref": fta_pref,
-        "additional_duty": additional_duty,
+        "third_country": overview.get("third_country_duty"),
+        "fta_pref": overview.get("fta_preference"),
+        "additional_duty": overview.get("additional_duty"),
         "groups": groups,
-        "counts": counts,
-        "missing": missing,
+        "counts": overview.get("counts") or {},
+        "missing": overview.get("missing_facts") or [],
         "product_reqs": product_reqs,
-        "product_view": {},
-        "product_count": sum(len(r.get("detailed_requirements") or []) for r in product_reqs),
+        "product_pre": product.get("pre") or [],
+        "product_post": product.get("post") or [],
+        "related_declarations": product.get("related_declarations") or {},
+        "document_view": view,
+        "source": "document_view",
     }
 
 
@@ -898,6 +831,8 @@ def render_result(pkg, panel, options):
         return html.Div("이 코드에 대한 현재 적용 measure가 없습니다.", className="empty")
 
     cx = package_context(pkg)
+    if cx.get("source") == "unresolved":
+        return render_unresolved(pkg, options or [])
     third_country = cx["third_country"]
     fta_pref = cx["fta_pref"]
     final_duty = fta_pref or third_country
@@ -907,7 +842,11 @@ def render_result(pkg, panel, options):
     duties = cx["duties"]
     product_reqs = cx["product_reqs"]
     selected = panel or "overview"
-    product_count = cx.get("product_count", 0)
+    product_count = (
+        len(cx.get("product_pre") or [])
+        + len(cx.get("product_post") or [])
+        or sum(len(r.get("detailed_requirements") or []) for r in product_reqs)
+    )
 
     panel_defs = [
         ("overview", "전체 결론", "요약"),
@@ -924,7 +863,7 @@ def render_result(pkg, panel, options):
                 metric("TARIC10", pkg.get("taric10"), "#1d4ed8", True),
                 metric("CN8", pkg.get("cn8"), "#1d4ed8", True),
                 metric("최종 관세율 후보", duty_rate(final_duty), "#166534"),
-                metric("KR measure", cx.get("kr_count", len(cx["kr"]))),
+                metric("KR measure", len(cx["kr"])),
                 metric("필요 / 조건부", f"{counts.get('required', 0)} / {counts.get('conditional', 0)}", "#9a3412"),
                 metric("판단보류", counts.get("pending", 0), "#475569"),
             ],
@@ -957,6 +896,41 @@ def render_result(pkg, panel, options):
     return children
 
 
+def render_unresolved(pkg: dict[str, Any], options: list[str]):
+    taric10 = pkg.get("taric10") or "-"
+    children = [
+        html.Div(
+            [
+                html.Div("⚠ document_view missing", className="metric-label", style={"color": "#b91c1c"}),
+                html.Div(
+                    f"TARIC10 {taric10} 의 분류 결과를 받지 못했습니다.",
+                    style={"fontSize": "15px", "fontWeight": 600, "marginTop": "6px"},
+                ),
+                html.Div(
+                    "DocumentAgent 가 sections 을 채우지 못했거나, direct TARIC 조회로 pipeline 을 거치지 않았습니다. 관리자에게 pipeline 재실행을 요청하세요.",
+                    style={"fontSize": "13px", "color": "#475569", "marginTop": "4px"},
+                ),
+            ],
+            className="empty",
+            style={"borderLeft": "4px solid #b91c1c", "padding": "16px"},
+        ),
+    ]
+    if "admin" in (options or []) or "debug" in (options or []):
+        children.append(
+            html.Details(
+                [
+                    html.Summary("raw_document_package (admin debug)"),
+                    html.Pre(
+                        str(pkg)[:4000],
+                        style={"fontSize": "11px", "color": "#334155", "whiteSpace": "pre-wrap"},
+                    ),
+                ],
+                style={"marginTop": "16px"},
+            )
+        )
+    return children
+
+
 def render_panel(pkg: dict[str, Any], panel: str, cx: dict[str, Any], options: list[str]):
     if panel == "customs":
         return render_customs(pkg, cx["controls"])
@@ -967,7 +941,11 @@ def render_panel(pkg: dict[str, Any], panel: str, cx: dict[str, Any], options: l
     if panel == "bundles":
         return render_bundles(cx["groups"])
     if panel == "product":
-        return render_product_rules(cx.get("product_view") or {}, cx["product_reqs"], cx["kr"])
+        return render_product_rules_from_view(
+            cx.get("product_pre") or [],
+            cx.get("product_post") or [],
+            cx.get("related_declarations") or {},
+        )
     return render_overview(cx, options, pkg)
 
 
@@ -1198,86 +1176,11 @@ def render_bundles(groups: list[dict[str, Any]]):
     return html.Div([html.Div("요구서류 묶음", className="section-title"), html.Div(cards, className="two-col")])
 
 
-def _domain_aliases(domain: str) -> set[str]:
-    aliases = {
-        "animal_origin_food": {"animal_origin", "fishery"},
-        "animal_origin": {"animal_origin_food", "fishery"},
-        "fishery": {"animal_origin", "animal_origin_food"},
-        "cites": {"cites"},
-        "organic": {"organic", "food_feed_non_animal", "animal_origin_food"},
-        "plant_health": {"plant_health", "food_feed_non_animal"},
-        "food_feed_non_animal": {"organic", "plant_health"},
-    }
-    return {domain, *aliases.get(domain, set())} if domain else set()
-
-
-def _declaration_label(cert: dict[str, Any]) -> str:
-    code = (cert.get("code") or "").upper()
-    guidance = cert.get("guidance") or {}
-    title = _first_text(guidance.get("guidance_title"), guidance.get("certificate_description"), cert.get("description"))
-    return f"{code} {title}".strip() if title else code
-
-
-def _related_declarations_by_domain(product_reqs: list[dict[str, Any]], kr_reqs: list[dict[str, Any]]) -> dict[str, list[str]]:
-    product_domains = {
-        d.get("domain_route") or d.get("domain") or ""
-        for req in product_reqs
-        for d in (req.get("detailed_requirements") or [])
-    }
-    product_domains = {d for d in product_domains if d}
-    if not product_domains:
-        return {}
-
-    cert_by_code = {
-        (cert.get("code") or "").upper(): cert
-        for req in kr_reqs
-        for cert in (req.get("certificates") or [])
-        if cert.get("code")
-    }
-    out: dict[str, list[str]] = {domain: [] for domain in product_domains}
-    seen: set[tuple[str, str]] = set()
-    for req in kr_reqs:
-        if req.get("measure_type") == "Product regulatory requirements":
-            continue
-        for detail in req.get("detailed_requirements") or []:
-            detail_domain = detail.get("domain_route") or detail.get("domain") or ""
-            code = (detail.get("trigger_certificate_code") or "").upper()
-            cert = cert_by_code.get(code)
-            if not code or not cert:
-                continue
-            is_declaration = (
-                code.startswith("Y")
-                or cert.get("category") == "exemption_declaration"
-                or "exemption declaration" in (detail.get("required_document") or "").lower()
-            )
-            if not is_declaration:
-                continue
-            label = _declaration_label(cert)
-            for product_domain in product_domains:
-                if detail_domain not in _domain_aliases(product_domain):
-                    continue
-                key = (product_domain, label)
-                if key in seen:
-                    continue
-                seen.add(key)
-                out[product_domain].append(label)
-    return out
-
-
-def render_product_rules(
-    product_view: dict[str, Any],
-    product_reqs: list[dict[str, Any]],
-    kr_reqs: list[dict[str, Any]],
+def render_product_rules_from_view(
+    pre: list[dict[str, Any]],
+    post: list[dict[str, Any]],
+    related_declarations: dict[str, list[str]],
 ):
-    if product_view:
-        pre = product_view.get("pre") or []
-        post = product_view.get("post") or []
-        related_declarations = product_view.get("related_declarations") or {}
-    else:
-        details = [d for req in product_reqs for d in (req.get("detailed_requirements") or [])]
-        pre = [d for d in details if d.get("source_layer") == "chapter_route_seed"]
-        post = [d for d in details if d.get("source_layer") == "product_domain_seed"]
-        related_declarations = _related_declarations_by_domain(product_reqs, kr_reqs)
     pre_col = html.Div(
         [
             html.Div([html.Div("Pre / domain-router 후보", className="card-title"), html.Div(f"CN chapter 기준으로 열리는 제품 규제 후보 · {len(pre)}개", className="card-meta")], className="card", style={"borderLeft": "4px solid #475569"}),
@@ -1302,7 +1205,7 @@ def render_product_rules(
 def _load_pipeline_payload(run_id: str | None) -> dict[str, Any]:
     if not run_id:
         return {}
-    run_dir = PROJECT_ROOT / "data" / "runs" / run_id
+    run_dir = Path("/Users/snu/ASAP/data/runs") / run_id
     blackboard_path = run_dir / "blackboard.json"
     agent_runs_path = run_dir / "agent_runs.jsonl"
     payload: dict[str, Any] = {"run_id": run_id, "run_dir": str(run_dir)}
@@ -1335,7 +1238,7 @@ def load_package_for_detail(run_id: str | None, taric10: str, *, include_celex_e
         if isinstance(raw, dict):
             package = dict(raw)
             if isinstance(dp.get("document_view"), dict):
-                package["_document_view"] = dp["document_view"]
+                package["_document_view"] = dp.get("document_view")
             package["_pipeline"] = {
                 "run_id": pipeline.get("run_id"),
                 "run_dir": pipeline.get("run_dir"),

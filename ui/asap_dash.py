@@ -123,6 +123,8 @@ def _result_from_job(job: dict, job_id: str) -> dict:
     result_data["job_id"] = job_id
     result_data["job_status"] = job.get("status")
     result_data["events"] = job.get("events") or []
+    # 사용자 입력값을 UI 가 re-render 시 input 에 복원할 수 있게 store-result 에 같이 박음.
+    result_data["facts"] = job.get("facts") or {}
     if job.get("error"):
         result_data["error"] = job.get("error")
         result_data["traceback"] = job.get("traceback")
@@ -139,7 +141,7 @@ app.layout = html.Div(
         dcc.Store(id="store-run-id"),
         dcc.Store(id="store-result"),
         dcc.Store(id="document-panel-store", data="overview"),
-        dcc.Interval(id="poll", interval=1000, disabled=True),
+        dcc.Interval(id="poll", interval=2500, disabled=True),
         html.Div(id="page-root"),
     ],
     style={
