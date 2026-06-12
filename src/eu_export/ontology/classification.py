@@ -114,27 +114,42 @@ CANDIDATE_COVERAGE_MISSING_TERMS = [
     "unavailable",
 ]
 LOW_VALUE_MATCH_TERMS = {
+    "and",
     "animal",
+    "any",
+    "at",
     "blood",
+    "by",
     "containing",
     "cosmetic",
     "cosmetics",
     "crustaceans",
     "fish",
     "food",
+    "for",
+    "frozen",
+    "heat",
+    "in",
     "insects",
     "meat",
     "molluscs",
     "offal",
+    "of",
+    "or",
     "other",
+    "pre",
     "preparation",
     "preparations",
     "prepared",
     "preserved",
+    "ready",
     "toilet",
+    "the",
+    "to",
     "weight",
+    "with",
 }
-WEAK_OCR_FACT_MARKERS = {
+WEAK_SUPPLEMENTAL_FACT_MARKERS = {
     "풍미",
     "향분말",
     "향료",
@@ -144,7 +159,15 @@ WEAK_OCR_FACT_MARKERS = {
     "혼입 가능",
     "주의사항",
     "같은 제조시설",
+    "같은 제조 시설",
+    "제조시설에서 제조",
+    "사용한 제품과 같은",
     "알레르기",
+    "allergen",
+    "allergy",
+    "may contain",
+    "same facility",
+    "same manufacturing",
 }
 PREFERRED_HEADING_HINTS = {
     "라면": ["1902"],
@@ -359,7 +382,14 @@ class ProductClassificationInput(BaseModel):
         secondaryOcrFactTexts = [
             factText
             for factText in self.normalizedOcrFactTexts
-            if not self._IsWeakOcrFactText(factText)
+            if not self._IsWeakSupplementalFactText(factText)
+        ]
+        secondaryNoticeTexts = [
+            noticeText
+            for noticeText in self._SplitSupplementalFactTexts(
+                self.productNoticeText,
+            )
+            if not self._IsWeakSupplementalFactText(noticeText)
         ]
         return self._BuildSearchTextFromParts(
             [
@@ -367,7 +397,7 @@ class ProductClassificationInput(BaseModel):
                 self.saleUnit or "",
                 *self.noticeOptionNames,
                 *self.noticeFieldTexts,
-                self.productNoticeText,
+                *secondaryNoticeTexts,
                 *secondaryOcrFactTexts,
             ]
         )
@@ -376,9 +406,21 @@ class ProductClassificationInput(BaseModel):
         weakOcrFactTexts = [
             factText
             for factText in self.normalizedOcrFactTexts
-            if self._IsWeakOcrFactText(factText)
+            if self._IsWeakSupplementalFactText(factText)
         ]
-        return self._BuildSearchTextFromParts(weakOcrFactTexts)
+        weakNoticeTexts = [
+            noticeText
+            for noticeText in self._SplitSupplementalFactTexts(
+                self.productNoticeText,
+            )
+            if self._IsWeakSupplementalFactText(noticeText)
+        ]
+        return self._BuildSearchTextFromParts(
+            [
+                *weakNoticeTexts,
+                *weakOcrFactTexts,
+            ]
+        )
 
     def BuildSearchText(self) -> str:
         rawParts = [
@@ -406,9 +448,20 @@ class ProductClassificationInput(BaseModel):
         ]
         return NormalizeWhitespacePreservingLines("\n".join(parts))
 
-    def _IsWeakOcrFactText(self, factText: str) -> bool:
+    def _SplitSupplementalFactTexts(self, text: str) -> List[str]:
+        normalizedText = NormalizeWhitespacePreservingLines(text)
+        return [
+            line
+            for line in normalizedText.splitlines()
+            if line.strip() != ""
+        ]
+
+    def _IsWeakSupplementalFactText(self, factText: str) -> bool:
         normalizedText = NormalizeWhitespace(factText).lower()
-        return any(marker in normalizedText for marker in WEAK_OCR_FACT_MARKERS)
+        return any(
+            marker in normalizedText
+            for marker in WEAK_SUPPLEMENTAL_FACT_MARKERS
+        )
 
     @computed_field(alias="product_notice_text_length")
     @property
