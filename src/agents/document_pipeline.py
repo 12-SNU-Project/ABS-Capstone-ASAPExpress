@@ -64,13 +64,23 @@ def collect_kurly_url_facts(
     Evidence_Intake_Agent, so the Blackboard still starts from normalized
     product facts.
     """
-    from eu_export.product.kurly_market_collector import KurlyPageCollector
-    from eu_export.product.pipeline import KurlyProductPipeline
-    from eu_export.product.pipeline_schema import KurlyPipelineInput
+    from eu_export.product import (
+        KurlyGlobalPageParser,
+        KurlyPageAdapter,
+        KurlyPageCollector,
+        KurlyPageParser,
+        KurlyPipelineInput,
+        KurlyProductPipeline,
+    )
     from eu_export.ontology import ProductClassificationInputNormalizer
 
     warnings: list[str] = []
+    pageAdapter = KurlyPageAdapter(
+        domesticParser=KurlyPageParser(),
+        globalParser=KurlyGlobalPageParser(),
+    )
     collector = KurlyPageCollector(
+        parser=pageAdapter,
         headless=headless,
         timeoutMilliseconds=timeout_seconds * 1000,
         scrollCount=scroll_count,
@@ -125,7 +135,11 @@ def build_raw_input_from_ui(
     """Map Dash text + Product facts JSON into EvidenceIntakeAgent input."""
     facts = _normalize_loose_product_facts(facts or {})
     url = str(facts.get("url") or "").strip()
-    if url and "kurly.com/goods/" in url:
+    if url and (
+        "kurly.com/goods/" in url
+        or "kurlyglobal.com/products/" in url
+        or "kurlyglobal.com/en/products/" in url
+    ):
         try:
             collected = collect_kurly_url_facts(url)
             merged = dict(facts)
