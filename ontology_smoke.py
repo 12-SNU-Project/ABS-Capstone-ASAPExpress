@@ -227,78 +227,74 @@ class OntologySmokeRunner:
 
         contextBuilder = OntologyContextBuilder(self._ontologyRootPath)
 
-        self._LogStepHeader(1, 14, "온톨로지 마크다운 문서를 로드합니다")
-        documentSummary = self._RunDocumentLoadSmoke(contextBuilder)
+        totalPhaseCount = 5
 
         self._LogStepHeader(
-            2,
-            14,
-            "문서 검색 결과가 LLM 요청 컨텍스트로 변환되는지 확인합니다",
+            1,
+            totalPhaseCount,
+            "사전 점검: ontology 문서, 검색 컨텍스트, CSV 리소스",
         )
+        documentSummary = self._RunDocumentLoadSmoke(contextBuilder)
+
         queryResults = [
             self._RunQuerySmoke(contextBuilder, queryCase)
             for queryCase in self._smokeQueries
         ]
 
-        self._LogStepHeader(3, 14, "문서 참조 관계와 frontmatter 메타데이터를 검증합니다")
         validationSummary = self._RunValidationSmoke(contextBuilder)
 
-        self._LogStepHeader(4, 14, "문서에 선언된 CSV 데이터 경로를 확인합니다")
         resourceSummary = self._RunResourceResolutionSmoke(contextBuilder)
 
         self._LogStepHeader(
-            5,
-            14,
-            "상품 정보로 정적/semantic CN 후보를 병렬 검색하고 점수를 설명합니다",
+            2,
+            totalPhaseCount,
+            "정적 로직 + semantic retrieval 후보 생성",
         )
         classificationCandidateSummary = self._RunClassificationCandidateSmoke()
 
-        self._LogStepHeader(6, 14, "후보 검토용 LLM 요청 JSON 구조를 만듭니다")
+        self._LogStepHeader(
+            3,
+            totalPhaseCount,
+            "Retrieval 근거 패키지와 LLM 검토 입력 구성",
+        )
         classificationRequestSummary = self._RunClassificationRequestSmoke(
             contextBuilder,
         )
+        evidencePackageSummary = self._RunEvidencePackageSmoke(contextBuilder)
 
-        self._LogStepHeader(7, 14, "메인 LLM 후보 검토 응답을 생성하고 검증합니다")
+        self._LogStepHeader(
+            4,
+            totalPhaseCount,
+            "LLM 후보 검증과 Backtracking 재탐색",
+        )
         llmResponseValidationSummary = self._RunLlmResponseValidationSmoke(
             contextBuilder,
         )
-
-        self._LogStepHeader(8, 14, "후보 판단에 사용할 근거 묶음을 만듭니다")
-        evidencePackageSummary = self._RunEvidencePackageSmoke(contextBuilder)
-
-        self._LogStepHeader(9, 14, "후보 리뷰 정책을 fixture 시나리오로 검증합니다")
         decisionPolicySummary = self._RunStage1DecisionPolicySmoke(contextBuilder)
-
-        self._LogStepHeader(10, 14, "fixture 시나리오의 다음 파이프라인 동작을 확인합니다")
         traversalControllerSummary = self._RunStage1TraversalControllerSmoke(
             decisionPolicySummary,
         )
-
-        self._LogStepHeader(11, 14, "백트래킹 예외 경로를 fixture 시나리오로 검증합니다")
         backtrackingRetrySummary = self._RunStage1BacktrackingRetrySmoke(
             contextBuilder,
             decisionPolicySummary,
         )
 
-        self._LogStepHeader(12, 14, "선택된 LLM 후보 검토 결과를 후보 산출 요약으로 정리합니다")
+        self._LogStepHeader(
+            5,
+            totalPhaseCount,
+            "최종 5개 후보 산출과 answer.csv HS6 비교",
+        )
         recommendationReportSummary = self._RunStage1RecommendationReportSmoke(
             llmResponseValidationSummary,
             backtrackingRetrySummary,
         )
-
-        self._LogStepHeader(13, 14, "선택된 LLM 후보 검토 결과를 검토용 JSON 패키지로 만듭니다")
         humanReviewPackageSummary = self._RunStage1HumanReviewPackageSmoke(
             llmResponseValidationSummary,
             backtrackingRetrySummary,
         )
-
-        self._LogStepHeader(
-            14,
-            14,
-            "백트래킹 이후 최종 LLM 산출 결과 기준으로 정답을 평가합니다",
-        )
         finalAnswerEvaluationSummary = self._RunFinalAnswerEvaluationSmoke(
-            contextBuilder,
+            recommendationReportSummary,
+            humanReviewPackageSummary,
         )
 
         summary = {
@@ -1074,12 +1070,11 @@ class OntologySmokeRunner:
         candidateLogger = self._Logger("Stage5CandidateRetrieval")
         candidateLogger.info(
             (
-                "후보 검색 입력 artifact를 읽었습니다 product_records={} "
-                "used_products={} heuristic_top_k={} semantic_top_k={} "
-                "hybrid_limit={} semantic_status={}"
+                "candidate_generation products={}/{} heuristic_top_k={} "
+                "semantic_top_k={} final_limit={} semantic_status={}"
             ),
-            result["product_smoke_record_count"],
             result["used_product_count"],
+            result["product_smoke_record_count"],
             result["candidate_top_k"],
             result["semantic_candidate_top_k"],
             result["hybrid_candidate_limit"],
@@ -1088,35 +1083,33 @@ class OntologySmokeRunner:
         self._LogAnswerEvaluation(
             result,
             functionName="Stage5AnswerEvaluation",
-            includeDetails=True,
+            includeDetails=False,
         )
         answerEvaluationSummary = result["answer_evaluation_summary"]
         candidateLogger.info(
             (
-                "정답 CSV HS6 평가: answer_records={} evaluated={} "
-                "hit={} top1_hit={} missing_artifact={} missing_answer={}"
+                "candidate_answer_check basis={} evaluated={} hit={} miss={} "
+                "top1_hit={} hit_rate={} missing_artifact={} missing_answer={}"
             ),
-            result["answer_record_count"],
+            answerEvaluationSummary["hit_basis"],
             answerEvaluationSummary["evaluated_product_count"],
             answerEvaluationSummary["hit_count"],
+            answerEvaluationSummary["miss_count"],
             answerEvaluationSummary["top1_hit_count"],
+            answerEvaluationSummary["hit_rate"],
             len(result["missing_product_smoke_urls"]),
             len(result["missing_answer_urls"]),
         )
         candidateLogger.info(
             (
-                "후보 검색 규칙: 정적 후보 검색은 먼저 상품 도메인으로 CSV 범위를 제한하고, "
-                "상품명/설명/브랜드는 primary 근거, 상품고시/OCR 핵심 사실은 "
-                "secondary 근거, 마케팅성 OCR 문구는 weak 근거로 분리합니다. "
-                "include/search/description 매칭은 근거 단계별 가중치로 계산하고, "
-                "exclude_rule_keywords가 매칭되면 해당 행은 후보에서 제외합니다. "
-                "semantic 후보 검색은 별도 embedding 검색으로 병렬 수행한 뒤 "
-                "CN8 기준으로 정적 후보와 병합합니다."
-            )
+                "retrieval_policy domain_filter=true static_and_semantic_merged=true "
+                "semantic_top_k={} final_candidate_limit={}"
+            ),
+            result["semantic_candidate_top_k"],
+            result["hybrid_candidate_limit"],
         )
         for productResult in result["products"]:
             productInput = productResult["product_input"]
-            scoringInput = productResult["scoring_input"]
             candidateRetrieval = productResult["candidate_retrieval"]
             answerEvaluation = productResult["answer_evaluation"]
             candidateCodes = [
@@ -1125,88 +1118,16 @@ class OntologySmokeRunner:
             ]
             candidateLogger.info(
                 (
-                    "후보 검색 대상 상품: product={} domain={} 검색범위={} "
-                    "mode={} 검색텍스트길이={} semantic검색텍스트길이={} "
-                    "상품고시필드={} OCR텍스트길이={} 후보코드={}"
+                    "product={} domain={} mode={} candidates={} "
+                    "expected_hs6={} hit={} match_rank={}"
                 ),
                 productInput["product_name"],
                 productInput["product_domain"],
-                productInput["domain_scopes"],
                 candidateRetrieval["mode"],
-                scoringInput["search_text_length"],
-                scoringInput["semantic_search_text_length"],
-                productInput["notice_field_count"],
-                productInput["ocr_text_length"],
                 candidateCodes,
-            )
-            if answerEvaluation["expected_code"] is not None:
-                candidateLogger.info(
-                    (
-                        "정답 HS6 비교 product={} expected={} expected_hs6={} "
-                        "hit={} match_rank={}"
-                    ),
-                    productInput["product_name"],
-                    answerEvaluation["expected_code"],
-                    answerEvaluation["expected_hs6"],
-                    answerEvaluation["is_hit"],
-                    answerEvaluation["best_match_rank"],
-                )
-            candidateLogger.info(
-                "검색 텍스트 예시 product={} text={}",
-                productInput["product_name"],
-                scoringInput["search_text_preview"],
-            )
-            for candidateIndex, candidate in enumerate(
-                productResult["candidate_scores"],
-                start=1,
-            ):
-                scoreBreakdown = candidate["score_breakdown"]
-                candidateLogger.info(
-                    (
-                        "\n[후보 점수]\n"
-                        "- rank: {}\n"
-                        "- hs8: {}\n"
-                        "- hs6: {}\n"
-                        "- retrieval_sources: {}\n"
-                        "- score: {}\n"
-                        "- semantic_score: {}\n"
-                        "- primary 근거: {}\n"
-                        "- secondary 근거: {}\n"
-                        "- weak 근거: {}\n"
-                        "- semantic 매칭: {}\n"
-                        "- exclude 매칭: {}\n"
-                        "- 후보 설명: {}"
-                    ),
-                    candidateIndex,
-                    candidate["hs8"],
-                    candidate["hs6_code"],
-                    candidate["retrieval_sources"],
-                    candidate["score"],
-                    candidate["semantic_score"],
-                    candidate["primary_evidence_matches"][:8],
-                    candidate["secondary_evidence_matches"][:8],
-                    candidate["weak_evidence_matches"][:8],
-                    candidate["semantic_matches"],
-                    candidate["exclude_rule_matches"],
-                    candidate["combined_description"],
-                )
-                candidateLogger.info(
-                    (
-                        "후보 점수 계산 rank={} hs8={} include_points={} "
-                        "search_points={} description_points={} "
-                        "exclude_triggered={}"
-                    ),
-                    candidateIndex,
-                    candidate["hs8"],
-                    scoreBreakdown["include_rule_points"],
-                    scoreBreakdown["search_keyword_points"],
-                    scoreBreakdown["description_points"],
-                    scoreBreakdown["exclude_rule_triggered"],
-                )
-            candidateLogger.info(
-                "후보 검색 결과 product={} candidates={}",
-                productInput["product_name"],
-                productResult["candidate_count"],
+                answerEvaluation["expected_hs6"],
+                answerEvaluation["is_hit"],
+                answerEvaluation["best_match_rank"],
             )
 
     def _LogAnswerEvaluation(
@@ -1436,36 +1357,36 @@ class OntologySmokeRunner:
             "requests": requestResults,
         }
         requestLogger = self._Logger("Stage6ClassificationRequest")
+        totalContextChunkCount = sum(
+            requestResult.get("ontology_context_chunk_count", 0)
+            for requestResult in result["requests"]
+            if requestResult.get("status") == "completed"
+        )
+        totalEvidenceRecordCount = sum(
+            requestResult.get("evidence_package", {}).get("evidence_record_count", 0)
+            for requestResult in result["requests"]
+            if requestResult.get("status") == "completed"
+        )
         requestLogger.info(
-            "classification_requests={} completed={}",
+            (
+                "retrieval_request_summary products={} completed={} "
+                "context_chunks={} evidence_records={}"
+            ),
             result["used_product_count"],
             result["completed_request_count"],
+            totalContextChunkCount,
+            totalEvidenceRecordCount,
         )
-        for requestResult in result["requests"]:
-            if requestResult.get("status") == "skipped":
-                requestLogger.warning(
-                    "product={} domain={} status=skipped reason={}",
-                    requestResult["product_name"],
-                    requestResult["product_domain"],
-                    requestResult["reason"],
-                )
-                continue
-            requestData = requestResult["request"]
-            evidencePackageData = requestResult["evidence_package"]
-            requestLogger.info(
-                (
-                    "product={} domain={} candidates={} llm_review_candidates={} "
-                    "response_format={} context_chunks={} ontology_chunks={} "
-                    "evidence_records={}"
-                ),
-                requestResult["product_name"],
-                requestResult["product_domain"],
-                requestResult["candidate_count"],
-                requestResult["llm_review_candidate_count"],
-                requestData["response_format"],
-                requestData["context_chunk_count"],
-                requestResult["ontology_context_chunk_count"],
-                evidencePackageData["evidence_record_count"],
+        skippedRequests = [
+            requestResult
+            for requestResult in result["requests"]
+            if requestResult.get("status") == "skipped"
+        ]
+        if skippedRequests:
+            requestLogger.warning(
+                "retrieval_request_skipped count={} first_reason={}",
+                len(skippedRequests),
+                skippedRequests[0].get("reason"),
             )
         return result
 
@@ -1533,23 +1454,23 @@ class OntologySmokeRunner:
             "products": productResults,
         }
         evidenceLogger = self._Logger("Stage8EvidencePackage")
-        evidenceLogger.info(
-            "evidence_products={}",
-            result["used_product_count"],
+        totalEvidenceRecordCount = sum(
+            productResult["evidence_record_count"]
+            for productResult in result["products"]
         )
-        for productResult in result["products"]:
-            evidenceLogger.info(
-                (
-                    "product={} domain={} candidates={} evidence_records={} "
-                    "common_evidence={} bti_evidence={}"
-                ),
-                productResult["product_name"],
-                productResult["product_domain"],
-                productResult["candidate_count"],
-                productResult["evidence_record_count"],
-                productResult["common_evidence_id_count"],
-                productResult["bti_evidence_count"],
-            )
+        totalBtiEvidenceCount = sum(
+            productResult["bti_evidence_count"]
+            for productResult in result["products"]
+        )
+        evidenceLogger.info(
+            (
+                "evidence_package_summary products={} evidence_records={} "
+                "bti_evidence_records={}"
+            ),
+            result["used_product_count"],
+            totalEvidenceRecordCount,
+            totalBtiEvidenceCount,
+        )
         return result
 
     def _RunLlmResponseValidationSmoke(
@@ -1794,69 +1715,14 @@ class OntologySmokeRunner:
         }
         self._Logger("Stage9DecisionPolicy").info(
             (
-                "stage=9 scenario={} product={} candidates={} possible_status={} "
-                "backtracking_status={} backtracking_recommended={}"
+                "backtracking_policy product={} candidates={} normal_status={} "
+                "backtracking_status={} trigger_when_no_retained_candidates={}"
             ),
-            result["scenario_kind"],
             result["product_name"],
             result["candidate_count"],
             result["possible_fixture_decision"]["decision_status"],
             result["backtracking_fixture_decision"]["decision_status"],
             result["backtracking_fixture_decision"]["backtracking_recommended"],
-        )
-        policyLogger = self._Logger("Stage9DecisionPolicy")
-        backtrackingPolicy = result["backtracking_policy"]
-        policyLogger.info(
-            (
-                "\n[백트래킹 정책]\n"
-                "- 발동 조건:\n"
-                "  {}\n"
-                "- 발동하지 않는 경우:\n"
-                "  1. {}\n"
-                "  2. {}\n"
-                "  3. {}\n"
-                "- 후보 범위 재탐색 순서:\n"
-                "  1. {}\n"
-                "  2. {}\n"
-                "  3. {}\n"
-                "  4. {}\n"
-                "- 출력 경계:\n"
-                "  {}"
-            ),
-            backtrackingPolicy["trigger"],
-            backtrackingPolicy["non_trigger_cases"][0],
-            backtrackingPolicy["non_trigger_cases"][1],
-            backtrackingPolicy["non_trigger_cases"][2],
-            backtrackingPolicy["candidate_scope_strategy"][0],
-            backtrackingPolicy["candidate_scope_strategy"][1],
-            backtrackingPolicy["candidate_scope_strategy"][2],
-            backtrackingPolicy["candidate_scope_strategy"][3],
-            backtrackingPolicy["output_boundary"],
-        )
-        policyLogger.info(
-            (
-                "\n[fixture 결과 비교]\n"
-                "- 일반 후보 유지 시나리오\n"
-                "  strong: {}\n"
-                "  possible: {}\n"
-                "  insufficient: {}\n"
-                "  unlikely: {}\n"
-                "- 백트래킹 발동 시나리오\n"
-                "  strong: {}\n"
-                "  possible: {}\n"
-                "  insufficient: {}\n"
-                "  unlikely: {}"
-            ),
-            result["possible_fixture_decision"]["strong_candidate_hs8_codes"],
-            result["possible_fixture_decision"]["possible_candidate_hs8_codes"],
-            result["possible_fixture_decision"]["insufficient_information_hs8_codes"],
-            result["possible_fixture_decision"]["unlikely_candidate_hs8_codes"],
-            result["backtracking_fixture_decision"]["strong_candidate_hs8_codes"],
-            result["backtracking_fixture_decision"]["possible_candidate_hs8_codes"],
-            result["backtracking_fixture_decision"][
-                "insufficient_information_hs8_codes"
-            ],
-            result["backtracking_fixture_decision"]["unlikely_candidate_hs8_codes"],
         )
         return result
 
@@ -1970,32 +1836,15 @@ class OntologySmokeRunner:
         traversalLogger = self._Logger("Stage10TraversalController")
         traversalLogger.info(
             (
-                "stage=10 scenario={} possible_action={} possible_status={} "
-                "backtracking_action={} backtracking_status={} "
-                "backtracking_candidates={} codes={}"
-            ),
-            result["scenario_kind"],
-            result["possible_fixture_traversal"]["next_action"],
-            result["possible_fixture_traversal"]["traversal_status"],
-            result["backtracking_fixture_traversal"]["next_action"],
-            result["backtracking_fixture_traversal"]["traversal_status"],
-            result["backtracking_candidate_count"],
-            result["backtracking_candidate_codes"],
-        )
-        traversalLogger.info(
-            (
-                "\n[백트래킹 범위 선택]\n"
-                "- strategy: {}\n"
-                "- 현재 후보 HS4: {}\n"
-                "- 재탐색 후보 HS4: {}\n"
-                "- target_level: {}\n"
-                "- reason: {}"
+                "backtracking_scope strategy={} current_hs4={} retry_hs4={} "
+                "retry_candidates={} retry_codes={} next_action={}"
             ),
             result["backtracking_scope"]["strategy"],
             result["backtracking_scope"]["current_hs4_codes"],
             result["backtracking_scope"]["retry_hs4_codes"],
-            result["backtracking_scope"]["target_level"],
-            result["backtracking_scope"]["reason"],
+            result["backtracking_candidate_count"],
+            result["backtracking_candidate_codes"],
+            result["backtracking_fixture_traversal"]["next_action"],
         )
         return result
 
@@ -2106,14 +1955,9 @@ class OntologySmokeRunner:
             }
             self._Logger("Stage11BacktrackingRetry").warning(
                 (
-                    "status=skipped reason={}\n"
-                    "\n[백트래킹 skip 범위]\n"
-                    "- strategy: {}\n"
-                    "- current_hs4: {}\n"
-                    "- retry_hs4: {}\n"
-                    "- excluded_candidates: {}\n"
-                    "- completed_retry_count: {}\n"
-                    "- max_retry_count: {}"
+                    "backtracking_retry skipped reason={} strategy={} "
+                    "current_hs4={} retry_hs4={} excluded_candidates={} "
+                    "completed_retry_count={} max_retry_count={}"
                 ),
                 result["reason"],
                 result["backtracking_scope"]["strategy"],
@@ -2225,10 +2069,9 @@ class OntologySmokeRunner:
         retryLogger = self._Logger("Stage11BacktrackingRetry")
         retryLogger.info(
             (
-                "stage=11 scenario={} product={} retry_candidates={} codes={} "
+                "backtracking_retry product={} retry_candidates={} retry_codes={} "
                 "evidence_records={} llm_status={} next_retry_stop={}"
             ),
-            result["scenario_kind"],
             result["product_name"],
             result["retry_candidate_count"],
             result["retry_candidate_codes"],
@@ -2238,12 +2081,8 @@ class OntologySmokeRunner:
         )
         retryLogger.info(
             (
-                "\n[백트래킹 실행 범위]\n"
-                "- strategy: {}\n"
-                "- initial_hs4: {}\n"
-                "- retry_hs4: {}\n"
-                "- excluded_candidates: {}\n"
-                "- visited_candidates: {}"
+                "backtracking_retry_scope strategy={} initial_hs4={} retry_hs4={} "
+                "excluded_candidates={} visited_candidates={}"
             ),
             result["backtracking_scope"]["strategy"],
             result["backtracking_scope"]["initial_hs4_codes"],
@@ -2254,7 +2093,7 @@ class OntologySmokeRunner:
         if result["llm_connection"]["status"] == "completed":
             retryTraversal = result["llm_connection"]["traversal"]
             retryLogger.info(
-                "stage=11 retry_next_action={} retry_status={}",
+                "backtracking_retry_result next_action={} status={}",
                 retryTraversal["next_action"],
                 retryTraversal["traversal_status"],
             )
@@ -2326,9 +2165,8 @@ class OntologySmokeRunner:
         )
         self._Logger("Stage12RecommendationReport").info(
             (
-                "stage=12 source={} recommendation_level={} "
-                "priority_review_hs8={} comparison_candidates={} "
-                "unlikely_candidates={}"
+                "final_recommendation source={} level={} priority_hs8={} "
+                "retained_candidates={} rejected_candidates={}"
             ),
             result["selected_source"],
             recommendationReport.get("recommendation_level"),
@@ -2338,8 +2176,8 @@ class OntologySmokeRunner:
         )
         if "natural_language_answer" in result:
             self._Logger("Stage12RecommendationReport").info(
-                "선택된 LLM 후보 검토 자연어 결과\n{}",
-                result["natural_language_answer"],
+                "natural_language_answer saved_in_summary=true length={}",
+                len(result["natural_language_answer"]),
             )
         return result
 
@@ -2426,8 +2264,8 @@ class OntologySmokeRunner:
         }
         self._Logger("Stage13HumanReviewPackage").info(
             (
-                "stage=13 source={} package_id={} priority_review_hs8={} "
-                "citations={} source_evidence={} validation_issues={}"
+                "human_review_package source={} package_id={} priority_hs8={} "
+                "citations={} source_evidence={} validation_issues={} path={}"
             ),
             result["selected_source"],
             result["package_id"],
@@ -2435,224 +2273,88 @@ class OntologySmokeRunner:
             result["evidence_citation_count"],
             result["source_evidence_record_count"],
             result["validation_issue_count"],
+            result["package_artifact_path"],
         )
         return result
 
     def _RunFinalAnswerEvaluationSmoke(
         self,
-        contextBuilder: OntologyContextBuilder,
+        recommendationReportSummary: Dict[str, Any],
+        humanReviewPackageSummary: Dict[str, Any],
     ) -> Dict[str, Any]:
         smokeRecords = self._LoadProductSmokeRecords()
         answerCodeByProductUrl = self._LoadAnswerCodeByProductUrl()
-        if not self._runLlmConnectionSmoke:
-            result = {
-                "status": "skipped",
-                "reason": (
-                    "run_llm_connection_smoke is false; final LLM/backtracking "
-                    "answer evaluation requires LLM review output."
-                ),
-                "hit_basis": "final_llm_backtracking_output_hs6",
-                "product_smoke_summary_path": str(
-                    self._productSmokeSummaryArtifactPath,
-                ),
-                "configured_product_url_count": len(self._configuredProductUrls),
-                "answer_csv_path": str(self._answerCsvPath),
-                "answer_record_count": len(answerCodeByProductUrl),
-                "missing_product_smoke_urls": self._BuildMissingProductSmokeUrls(
-                    smokeRecords,
-                ),
-                "missing_answer_urls": self._BuildMissingAnswerUrls(
-                    answerCodeByProductUrl,
-                ),
-                "product_smoke_record_count": len(smokeRecords),
-                "used_product_count": 0,
-                "initial_candidate_limit": self._BuildFinalReviewCandidateLimit(),
-                "answer_evaluation_summary": {
-                    "hit_basis": "final_llm_backtracking_output_hs6",
-                    "evaluated_product_count": 0,
-                    "hit_count": 0,
-                    "miss_count": 0,
-                    "top1_hit_count": 0,
-                    "hs6_prefix_hit_count": 0,
-                    "hit_rate": None,
-                    "top1_hit_rate": None,
-                    "hs6_prefix_hit_rate": None,
-                },
-                "backtracking_attempt_count": 0,
-                "completed_llm_product_count": 0,
-                "products": [],
-            }
-            self._LogFinalAnswerEvaluation(result)
-            return result
-
-        reviewCandidateLimit = self._BuildFinalReviewCandidateLimit()
-        preparedProducts = self._BuildStage1PreparedProducts(
-            topK=reviewCandidateLimit,
-        )
-        requestBuilder = Stage1RequestBuilder()
-        evidencePackageBuilder = Stage1EvidencePackageBuilder(
-            ontologyRootPath=self._ontologyRootPath,
-            projectRootPath=PROJECT_ROOT_PATH,
-        )
-        validator = Stage1ResponseValidator()
-        candidateRetriever = CnCandidateRetriever(
-            ontologyRootPath=self._ontologyRootPath,
-            projectRootPath=PROJECT_ROOT_PATH,
-        )
-        controller = Stage1TraversalController()
-
+        hitBasis = "stage13_final_output_hs6"
+        finalCandidateLimit = self._BuildFinalCandidateOutputLimit()
         productResults: List[Dict[str, Any]] = []
-        for preparedProduct in preparedProducts:
-            productPageUrl = preparedProduct.get("product_page_url")
-            productInput = preparedProduct["product_input"]
-            initialCandidates = preparedProduct["candidates"][:reviewCandidateLimit]
-            normalizedProductUrl = self._NormalizeProductUrl(productPageUrl)
-            expectedAnswerCode = answerCodeByProductUrl.get(normalizedProductUrl)
-            initialCandidateCodes = [
-                candidate.hs8 for candidate in initialCandidates
-            ]
+        recommendationReport = recommendationReportSummary.get("recommendation_report")
+        selectedSource = recommendationReportSummary.get("selected_source")
 
-            if not initialCandidates:
-                answerEvaluation = self._BuildAnswerEvaluationFromCandidateCodeRecords(
-                    productPageUrl=productPageUrl,
-                    expectedAnswerCode=expectedAnswerCode,
-                    candidateCodeRecords=[],
-                    hitBasis="final_llm_backtracking_output_hs6",
-                )
-                productResults.append(
-                    {
-                        "status": "skipped",
-                        "reason": NO_CN_CANDIDATE_REASON,
-                        "product_page_url": productPageUrl,
-                        "product_input": self._BuildProductInputSummary(productInput),
-                        "initial_candidate_count": 0,
-                        "initial_candidate_hs8_codes": [],
-                        "selected_source": None,
-                        "final_candidate_records": [],
-                        "answer_evaluation": answerEvaluation,
-                    }
-                )
-                continue
-
-            contextEvidenceData = self._BuildStage1ContextEvidenceData(
-                contextBuilder,
-                requestBuilder,
-                evidencePackageBuilder,
-                productInput,
-                initialCandidates,
+        if recommendationReportSummary.get("status") == "completed" and isinstance(
+            recommendationReport,
+            dict,
+        ):
+            productName = self._ReadRecommendationProductName(recommendationReport)
+            smokeRecord = self._FindSmokeRecordByProductName(smokeRecords, productName)
+            productPageUrl = (
+                smokeRecord.get("product_page_url")
+                if smokeRecord is not None
+                else None
             )
-            initialLlmConnection = self._RunOptionalLlmConnectionSmoke(
-                contextBuilder=contextBuilder,
-                productInput=productInput,
-                candidates=initialCandidates,
-                requestBuilder=requestBuilder,
-                validator=validator,
-                evidencePackage=contextEvidenceData["evidence_package"],
+            expectedAnswerCode = answerCodeByProductUrl.get(
+                self._NormalizeProductUrl(productPageUrl),
             )
-            selectedSource = "stage14_initial_llm_review"
-            selectedLlmConnection = initialLlmConnection
-            retryLlmConnection: Dict[str, Any] = {}
-            retryCandidateCodes: List[str] = []
-            backtrackingAttempted = False
-            nextRetryStopReason: Optional[str] = None
-
-            if self._ShouldBacktrackFromLlmConnection(initialLlmConnection):
-                backtrackingAttempted = True
-                initialDecisionReport = self._BuildStage1DecisionReportFromData(
-                    initialLlmConnection["decision"],
-                )
-                retryCandidates = controller.BuildBacktrackingCandidates(
-                    productInput=productInput,
-                    currentCandidates=initialCandidates,
-                    decisionReport=initialDecisionReport,
-                    candidateRetriever=candidateRetriever,
-                    topK=reviewCandidateLimit,
-                    visitedHs8Codes=initialCandidateCodes,
-                    completedRetryCount=0,
-                    maxRetryCount=DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
-                )
-                retryCandidateCodes = [candidate.hs8 for candidate in retryCandidates]
-                if retryCandidates:
-                    retryContextEvidenceData = self._BuildStage1ContextEvidenceData(
-                        contextBuilder,
-                        requestBuilder,
-                        evidencePackageBuilder,
-                        productInput,
-                        retryCandidates,
-                    )
-                    retryBacktrackingSummary = {
-                        "initial_candidate_hs8_codes": initialCandidateCodes,
-                        "retry_candidate_hs8_codes": retryCandidateCodes,
-                        "visited_candidate_hs8_codes": [
-                            *initialCandidateCodes,
-                            *retryCandidateCodes,
-                        ],
-                        "max_retry_count": DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
-                        "completed_retry_count": 1,
-                        "scope_strategy": self._BuildBacktrackingScopeStrategy(
-                            initialCandidates,
-                            retryCandidates,
-                        ),
-                    }
-                    retryLlmConnection = self._RunOptionalLlmConnectionSmoke(
-                        contextBuilder=contextBuilder,
-                        productInput=productInput,
-                        candidates=retryCandidates,
-                        requestBuilder=requestBuilder,
-                        validator=Stage1ResponseValidator(),
-                        evidencePackage=retryContextEvidenceData["evidence_package"],
-                        backtrackingSummary=retryBacktrackingSummary,
-                    )
-                    if self._IsCompletedValidLlmConnection(retryLlmConnection):
-                        selectedSource = "stage14_backtracking_retry"
-                        selectedLlmConnection = retryLlmConnection
-                    nextRetryStopReason = self._BuildNextRetryStopReason(
-                        retryLlmConnection,
-                    )
-                else:
-                    nextRetryStopReason = "no_unvisited_backtracking_candidates"
-
-            finalRecommendation = selectedLlmConnection.get("recommendation")
             finalCandidateRecords = self._BuildFinalCandidateCodeRecords(
-                finalRecommendation if isinstance(finalRecommendation, dict) else {},
-            )
+                recommendationReport,
+            )[:finalCandidateLimit]
             answerEvaluation = self._BuildAnswerEvaluationFromCandidateCodeRecords(
                 productPageUrl=productPageUrl,
                 expectedAnswerCode=expectedAnswerCode,
                 candidateCodeRecords=finalCandidateRecords,
-                hitBasis="final_llm_backtracking_output_hs6",
+                hitBasis=hitBasis,
             )
             productResults.append(
                 {
                     "status": "completed",
+                    "product_name": productName,
                     "product_page_url": productPageUrl,
-                    "product_input": self._BuildProductInputSummary(productInput),
-                    "initial_candidate_count": len(initialCandidates),
-                    "initial_candidate_hs8_codes": initialCandidateCodes,
-                    "selected_source": selectedSource,
-                    "backtracking_attempted": backtrackingAttempted,
-                    "retry_candidate_count": len(retryCandidateCodes),
-                    "retry_candidate_hs8_codes": retryCandidateCodes,
-                    "next_retry_stop_reason": nextRetryStopReason,
-                    "initial_llm_connection": self._BuildLlmConnectionSummary(
-                        initialLlmConnection,
+                    "product_input": {
+                        "product_name": productName,
+                    },
+                    "product_url_match_status": (
+                        "matched_by_product_name"
+                        if productPageUrl is not None
+                        else "not_found"
                     ),
-                    "retry_llm_connection": self._BuildLlmConnectionSummary(
-                        retryLlmConnection,
-                    )
-                    if retryLlmConnection
-                    else None,
-                    "selected_llm_connection": self._BuildLlmConnectionSummary(
-                        selectedLlmConnection,
+                    "selected_source": selectedSource,
+                    "human_review_package_status": (
+                        humanReviewPackageSummary.get("status")
+                    ),
+                    "human_review_package_path": (
+                        humanReviewPackageSummary.get("package_artifact_path")
                     ),
                     "final_candidate_records": finalCandidateRecords,
                     "answer_evaluation": answerEvaluation,
                 }
             )
+            resultStatus = "completed"
+            skippedReason = None
+        else:
+            resultStatus = "skipped"
+            skippedReason = (
+                recommendationReportSummary.get("reason")
+                or "stage12 recommendation report is unavailable"
+            )
+
+        answerEvaluationSummary = self._BuildAnswerEvaluationSummary(productResults)
+        if not productResults:
+            answerEvaluationSummary["hit_basis"] = hitBasis
 
         result = {
-            "status": "completed",
-            "hit_basis": "final_llm_backtracking_output_hs6",
+            "status": resultStatus,
+            "reason": skippedReason,
+            "hit_basis": hitBasis,
+            "selected_source": selectedSource,
             "product_smoke_summary_path": str(
                 self._productSmokeSummaryArtifactPath,
             ),
@@ -2667,105 +2369,53 @@ class OntologySmokeRunner:
             ),
             "product_smoke_record_count": len(smokeRecords),
             "used_product_count": len(productResults),
-            "initial_candidate_limit": reviewCandidateLimit,
-            "answer_evaluation_summary": self._BuildAnswerEvaluationSummary(
-                productResults,
-            ),
-            "backtracking_attempt_count": sum(
-                1
-                for productResult in productResults
-                if productResult.get("backtracking_attempted")
-            ),
-            "completed_llm_product_count": sum(
-                1
-                for productResult in productResults
-                if (
-                    productResult.get("selected_llm_connection", {}).get("status")
-                    == "completed"
-                )
-            ),
+            "final_candidate_limit": finalCandidateLimit,
+            "answer_evaluation_summary": answerEvaluationSummary,
             "products": productResults,
         }
         self._LogFinalAnswerEvaluation(result)
         return result
 
-    def _BuildFinalReviewCandidateLimit(self) -> int:
+    def _BuildFinalCandidateOutputLimit(self) -> int:
         if self._hybridCandidateLimit is not None and self._hybridCandidateLimit > 0:
-            return self._hybridCandidateLimit
-        return max(1, self._cnCandidateTopK)
+            return min(self._hybridCandidateLimit, 5)
+        return min(max(1, self._cnCandidateTopK), 5)
 
-    def _BuildProductInputSummary(
-        self,
-        productInput: ProductClassificationInput,
-    ) -> Dict[str, Any]:
-        return {
-            "product_name": productInput.productName,
-            "product_domain": productInput.productDomain,
-            "domain_scopes": list(productInput.domainScopes),
-            "notice_field_count": len(productInput.noticeFieldTexts),
-            "ocr_text_length": len(productInput.ocrText),
-        }
+    @staticmethod
+    def _ReadRecommendationProductName(
+        recommendationReport: Dict[str, Any],
+    ) -> Optional[str]:
+        productName = recommendationReport.get("product_name")
+        if isinstance(productName, str) and productName.strip():
+            return NormalizeWhitespace(productName)
+        return None
 
-    def _ShouldBacktrackFromLlmConnection(
+    def _FindSmokeRecordByProductName(
         self,
-        llmConnection: Dict[str, Any],
-    ) -> bool:
-        if not self._IsCompletedValidLlmConnection(llmConnection):
-            return False
-        decision = llmConnection.get("decision", {})
-        traversal = llmConnection.get("traversal", {})
-        return (
-            decision.get("backtracking_recommended") is True
-            or traversal.get("next_action") == "backtrack_candidate_scope"
-        )
+        smokeRecords: List[Dict[str, Any]],
+        productName: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        if productName is None:
+            return None
+        normalizedProductName = NormalizeWhitespace(productName)
+        for smokeRecord in smokeRecords:
+            smokeProductName = self._ReadSmokeRecordProductName(smokeRecord)
+            if smokeProductName == normalizedProductName:
+                return smokeRecord
+        return None
 
-    def _IsCompletedValidLlmConnection(
-        self,
-        llmConnection: Dict[str, Any],
-    ) -> bool:
-        validation = llmConnection.get("validation", {})
-        return (
-            llmConnection.get("status") == "completed"
-            and isinstance(validation, dict)
-            and validation.get("is_valid") is True
-        )
+    @staticmethod
+    def _ReadSmokeRecordProductName(smokeRecord: Dict[str, Any]) -> Optional[str]:
+        parsedProductPage = smokeRecord.get("parsed_product_page")
+        if isinstance(parsedProductPage, dict):
+            productName = parsedProductPage.get("product_name")
+            if isinstance(productName, str) and productName.strip():
+                return NormalizeWhitespace(productName)
 
-    def _BuildBacktrackingScopeStrategy(
-        self,
-        initialCandidates: List[CnCandidate],
-        retryCandidates: List[CnCandidate],
-    ) -> str:
-        initialHs4Codes = {
-            candidate.hs4Code
-            for candidate in initialCandidates
-            if candidate.hs4Code is not None
-        }
-        retryHs4Codes = {
-            candidate.hs4Code
-            for candidate in retryCandidates
-            if candidate.hs4Code is not None
-        }
-        if any(hs4Code not in initialHs4Codes for hs4Code in retryHs4Codes):
-            return "alternative_hs4_scope"
-        if retryCandidates:
-            return "same_hs4_parent_scope"
-        return "no_candidate"
-
-    def _BuildNextRetryStopReason(
-        self,
-        retryLlmConnection: Dict[str, Any],
-    ) -> str:
-        if retryLlmConnection.get("status") != "completed":
-            return "llm_retry_not_completed"
-        traversal = retryLlmConnection.get("traversal", {})
-        nextAction = traversal.get("next_action")
-        if nextAction == "prepare_human_review_package":
-            return "retry_not_required"
-        if nextAction == "retry_llm_response":
-            return "retry_llm_response_required"
-        if nextAction == "backtrack_candidate_scope":
-            return "max_retry_count_reached"
-        return "unhandled_retry_next_action:{0}".format(nextAction)
+        productName = smokeRecord.get("product_name")
+        if isinstance(productName, str) and productName.strip():
+            return NormalizeWhitespace(productName)
+        return None
 
     def _BuildFinalCandidateCodeRecords(
         self,
@@ -2820,97 +2470,37 @@ class OntologySmokeRunner:
                 AppendCandidateRecord(retainedCandidate, "retained_candidate")
         return candidateCodeRecords
 
-    def _BuildLlmConnectionSummary(
-        self,
-        llmConnection: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        if not llmConnection:
-            return {}
-        response = llmConnection.get("response", {})
-        validation = llmConnection.get("validation", {})
-        decision = llmConnection.get("decision", {})
-        traversal = llmConnection.get("traversal", {})
-        recommendation = llmConnection.get("recommendation", {})
-        recommendedCandidate = (
-            recommendation.get("recommended_candidate")
-            if isinstance(recommendation, dict)
-            else None
-        )
-        return {
-            "enabled": llmConnection.get("enabled"),
-            "status": llmConnection.get("status"),
-            "reason": llmConnection.get("reason"),
-            "error": llmConnection.get("error"),
-            "runtime_kind": llmConnection.get("runtime_kind"),
-            "model_name": llmConnection.get("model_name"),
-            "reviewed_candidate_count": response.get("reviewed_candidate_count")
-            if isinstance(response, dict)
-            else None,
-            "reviewed_candidate_hs8_codes": response.get(
-                "reviewed_candidate_hs8_codes",
-            )
-            if isinstance(response, dict)
-            else [],
-            "generated_response_count": response.get("generated_response_count")
-            if isinstance(response, dict)
-            else None,
-            "generated_text_length": response.get("generated_text_length")
-            if isinstance(response, dict)
-            else None,
-            "token_usage": response.get("token_usage", {})
-            if isinstance(response, dict)
-            else {},
-            "validation_is_valid": validation.get("is_valid")
-            if isinstance(validation, dict)
-            else None,
-            "validation_error_count": validation.get("error_count")
-            if isinstance(validation, dict)
-            else None,
-            "validation_warning_count": validation.get("warning_count")
-            if isinstance(validation, dict)
-            else None,
-            "decision_status": decision.get("decision_status")
-            if isinstance(decision, dict)
-            else None,
-            "recommended_candidate_hs8": decision.get("recommended_candidate_hs8")
-            if isinstance(decision, dict)
-            else None,
-            "backtracking_recommended": decision.get("backtracking_recommended")
-            if isinstance(decision, dict)
-            else None,
-            "traversal_status": traversal.get("traversal_status")
-            if isinstance(traversal, dict)
-            else None,
-            "next_action": traversal.get("next_action")
-            if isinstance(traversal, dict)
-            else None,
-            "recommendation_level": recommendation.get("recommendation_level")
-            if isinstance(recommendation, dict)
-            else None,
-            "recommendation_hs8": recommendedCandidate.get("hs8")
-            if isinstance(recommendedCandidate, dict)
-            else None,
-            "recommendation_hs6": recommendedCandidate.get("hs6_code")
-            if isinstance(recommendedCandidate, dict)
-            else None,
-        }
-
     def _LogFinalAnswerEvaluation(self, result: Dict[str, Any]) -> None:
         finalLogger = self._Logger("Stage14FinalAnswerEvaluation")
         answerEvaluationSummary = result["answer_evaluation_summary"]
         finalLogger.info(
             (
-                "stage=14 basis={} products={} completed_llm={} "
-                "backtracking_attempts={} hit={} miss={} hit_rate={}"
+                "final_answer_check status={} source={} basis={} products={} "
+                "final_candidate_limit={} hit={} miss={} hit_rate={}"
             ),
+            result["status"],
+            result.get("selected_source"),
             answerEvaluationSummary["hit_basis"],
             result["used_product_count"],
-            result["completed_llm_product_count"],
-            result["backtracking_attempt_count"],
+            result["final_candidate_limit"],
             answerEvaluationSummary["hit_count"],
             answerEvaluationSummary["miss_count"],
             answerEvaluationSummary["hit_rate"],
         )
+        for productResult in result.get("products", []):
+            answerEvaluation = productResult.get("answer_evaluation", {})
+            finalLogger.info(
+                (
+                    "final_candidates product={} expected_hs6={} hit={} "
+                    "match_rank={} candidate_hs6={} candidate_hs8={}"
+                ),
+                productResult.get("product_name"),
+                answerEvaluation.get("expected_hs6"),
+                answerEvaluation.get("is_hit"),
+                answerEvaluation.get("best_match_rank"),
+                answerEvaluation.get("candidate_hs6_codes"),
+                answerEvaluation.get("candidate_hs8_codes"),
+            )
         self._LogAnswerEvaluation(
             result,
             functionName="Stage14AnswerEvaluation",
@@ -3559,17 +3149,24 @@ class OntologySmokeRunner:
             for queryResult in summary["query_results"]
             if queryResult["status"]["has_context"]
         )
+        candidateEvaluationSummary = summary["classification_candidate_summary"][
+            "answer_evaluation_summary"
+        ]
+        finalEvaluationSummary = summary["final_answer_evaluation_summary"][
+            "answer_evaluation_summary"
+        ]
         summaryLogger.info(
             (
-                "summary document_count={} retrieval_document_count={} "
-                "query_context_ok={}/{} validation_valid={} "
-                "validation_errors={} validation_warnings={} "
-                "resources_valid={} resources_loadable={}/{} "
-                "classification_products={} classification_requests={} "
-                "llm_response_validation_status={} evidence_products={} "
-                "decision_policy_status={} traversal_controller_status={} "
-                "backtracking_retry_status={} recommendation_report_status={} "
-                "human_review_package_status={} final_answer_status={}"
+                "\n[Smoke 요약]\n"
+                "- 준비: documents={} retrieval_docs={} query_context={}/{} "
+                "validation={} errors={} warnings={} resources={}/{}\n"
+                "- 정적/semantic 후보: products={} hit={}/{} top1_hit={} "
+                "hit_rate={}\n"
+                "- Retrieval/LLM: requests={} evidence_products={} "
+                "llm_status={}\n"
+                "- Backtracking: policy={} traversal={} retry={}\n"
+                "- 최종 5개 후보: source={} package={} answer_status={} "
+                "hit={}/{} hit_rate={}"
             ),
             summary["document_summary"]["document_count"],
             summary["document_summary"]["retrieval_document_count"],
@@ -3578,34 +3175,30 @@ class OntologySmokeRunner:
             summary["validation_summary"]["is_valid"],
             summary["validation_summary"]["error_count"],
             summary["validation_summary"]["warning_count"],
-            summary["resource_summary"]["is_valid"],
             summary["resource_summary"]["loadable_count"],
             summary["resource_summary"]["total_count"],
             summary["classification_candidate_summary"]["used_product_count"],
+            candidateEvaluationSummary["hit_count"],
+            candidateEvaluationSummary["evaluated_product_count"],
+            candidateEvaluationSummary["top1_hit_count"],
+            candidateEvaluationSummary["hit_rate"],
             summary["classification_request_summary"]["used_product_count"],
-            summary["llm_response_validation_summary"]["status"],
             summary["evidence_package_summary"]["used_product_count"],
+            summary["llm_response_validation_summary"]["status"],
             summary["stage1_decision_policy_summary"]["status"],
             summary["stage1_traversal_controller_summary"]["status"],
             summary["stage1_backtracking_retry_summary"]["status"],
-            summary["stage1_recommendation_report_summary"]["status"],
+            summary["stage1_recommendation_report_summary"].get("selected_source"),
             summary["stage1_human_review_package_summary"]["status"],
             summary["final_answer_evaluation_summary"]["status"],
-        )
-        self._LogAnswerEvaluation(
-            summary["classification_candidate_summary"],
-            functionName="SummaryCandidateCoverageEvaluation",
-            includeDetails=False,
-        )
-        self._LogAnswerEvaluation(
-            summary["final_answer_evaluation_summary"],
-            functionName="SummaryFinalAnswerEvaluation",
-            includeDetails=False,
+            finalEvaluationSummary["hit_count"],
+            finalEvaluationSummary["evaluated_product_count"],
+            finalEvaluationSummary["hit_rate"],
         )
 
     def _LogStepHeader(self, stepIndex: int, totalStepCount: int, title: str) -> None:
         self._Logger("Run").info(
-            "\n\n========== STEP {}/{} ==========\n{}\n==============================",
+            "\n\n========== PHASE {}/{} ==========\n{}\n==============================",
             stepIndex,
             totalStepCount,
             title,
