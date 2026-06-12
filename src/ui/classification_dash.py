@@ -161,7 +161,8 @@ def evidence_detail_panel(pes: dict[str, Any] | None) -> html.Div:
     )
 
 
-def render_input_form() -> html.Div:
+def render_input_form(facts: dict | None = None) -> html.Div:
+    facts = facts or {}
     return html.Div(
         [
             html.Div("입력", style=LABEL),
@@ -171,17 +172,20 @@ def render_input_form() -> html.Div:
                         id="ipt-product-name",
                         type="text",
                         placeholder="제품명",
+                        value=facts.get("product_name") or "",
                         style=INPUT,
                     ),
                     dcc.Textarea(
                         id="ipt-description",
                         placeholder="제품 설명 / 원재료 / OCR text / COI text",
+                        value=facts.get("description") or "",
                         style=TEXTAREA,
                     ),
                     dcc.Input(
                         id="ipt-kurly-url",
                         type="text",
                         placeholder="URL",
+                        value=facts.get("url") or "",
                         style={**INPUT, "marginBottom": "12px"},
                     ),
                     html.Div(
@@ -312,6 +316,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
             [
                 html.Div(f"decision: {dec.get('decision_status') or '-'}"),
                 html.Div(f"selected: {', '.join(dec.get('selected_candidate_ids') or []) or '-'}"),
+                html.Div(f"user_questions: {', '.join(dec.get('user_questions') or []) or '-'}"),
                 detail_block("OrchestratorDecision JSON", dec, max_height=300),
             ],
             style={"fontSize": "12px", "color": "#334155", "marginTop": "6px"},
@@ -422,7 +427,14 @@ def render_decision(result: dict[str, Any]) -> html.Div:
     dec = result.get("decision") or {}
     if not dec:
         return html.Div("최종 결정이 아직 없습니다.", style=PLACEHOLDER)
-    warnings = dec.get("visible_warnings") or []
+
+    # user-facing user questions (Orchestrator 가 만든 UserQuestion 객체에서 question 텍스트만 표시)
+    bb = (result.get("blackboard") or {})
+    user_questions = [
+        q for q in (bb.get("user_questions") or [])
+        if q.get("status") == "open" and q.get("question_id") in (dec.get("user_questions") or [])
+    ]
+
     return html.Div(
         [
             html.Div(
@@ -433,8 +445,15 @@ def render_decision(result: dict[str, Any]) -> html.Div:
                 ],
                 style={"display": "flex", "gap": "10px", "flexWrap": "wrap", "marginBottom": "10px"},
             ),
-            html.Div(dec.get("reason") or "", style={"fontSize": "13px", "color": "#334155", "marginBottom": "8px"}),
-            html.Ul([html.Li(w) for w in warnings], style={"fontSize": "13px", "color": "#b91c1c"}) if warnings else html.Div("경고 없음", style={"fontSize": "13px", "color": "#166534"}),
+            html.Div(
+                [
+                    html.Div("추가 확인 필요", style={"fontSize": "13px", "fontWeight": 700, "marginBottom": "6px"}),
+                    html.Ul(
+                        [html.Li(q.get("question") or q.get("fact_key") or "") for q in user_questions],
+                        style={"fontSize": "13px", "color": "#334155", "marginTop": 0},
+                    ),
+                ]
+            ) if user_questions else html.Div("추가 확인 필요 없음", style={"fontSize": "13px", "color": "#166534"}),
         ],
         style=CARD,
     )
@@ -458,7 +477,7 @@ def render_page(result: dict[str, Any] | None = None) -> html.Div:
                 ],
                 style={"borderBottom": "2px solid #2563eb", "paddingBottom": "12px", "marginBottom": "22px"},
             ),
-            render_input_form(),
+            render_input_form(result.get("facts")),
             html.Div("진행 상태", style=LABEL),
             html.Div(render_progress(result) if result else html.Div("[Run] 버튼을 누르면 단계별 진행 상태가 표시됩니다.", style=PLACEHOLDER), id="out-progress"),
             html.Div("분류 결과", style={**LABEL, "marginTop": "22px"}),
