@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import pandas as pd
 from loguru import logger
 from pydantic import (
     BaseModel,
@@ -66,6 +67,9 @@ from eu_export.utils import NormalizeWhitespace  # noqa: E402
 
 
 NO_CN_CANDIDATE_REASON = "no CN candidates found for product input"
+ANSWER_PRODUCT_URL_COLUMN = "상품 상세"
+ANSWER_CODE_COLUMN = "미국 HS Code"
+ANSWER_EVALUATION_LOG_PREVIEW_COUNT = 10
 
 
 class ProductSmokeProductPayload(BaseModel):
@@ -132,6 +136,7 @@ class OntologySmokeRunner:
         pathConfig = appConfig.paths
         smokeConfig = appConfig.ontology_smoke
         embeddingConfig = appConfig.embedding
+        kurlySmokeConfig = appConfig.kurly_smoke
 
         self._ontologyRootPath = pathConfig.ResolvePath(
             PROJECT_ROOT_PATH,
@@ -149,6 +154,10 @@ class OntologySmokeRunner:
             PROJECT_ROOT_PATH,
             pathConfig.kurly_smoke_summary_artifact,
         )
+        self._answerCsvPath = pathConfig.ResolvePath(
+            PROJECT_ROOT_PATH,
+            smokeConfig.answer_csv_path,
+        )
 
         self._phaseId = smokeConfig.phase_id
         self._topK = smokeConfig.top_k
@@ -156,6 +165,9 @@ class OntologySmokeRunner:
         self._cnCandidateTopK = smokeConfig.cn_candidate_top_k
         self._maxProductSmokeInputs = smokeConfig.max_product_smoke_inputs
         self._writeSummaryArtifact = smokeConfig.write_summary_artifact
+        self._runKurlySmokeBeforeOntology = (
+            smokeConfig.run_kurly_smoke_before_ontology
+        )
         self._runLlmConnectionSmoke = smokeConfig.run_llm_connection_smoke
         self._textPreviewCharacters = smokeConfig.text_preview_characters
         self._validationIssuePreviewCount = smokeConfig.validation_issue_preview_count
@@ -173,6 +185,11 @@ class OntologySmokeRunner:
         self._semanticCandidateTopK = smokeConfig.semantic_candidate_top_k
         self._semanticMinScore = smokeConfig.semantic_min_score
         self._hybridCandidateLimit = smokeConfig.hybrid_candidate_limit
+        self._configuredProductUrls = list(kurlySmokeConfig.product_urls)
+        self._configuredProductUrlSet = {
+            self._NormalizeProductUrl(productUrl)
+            for productUrl in self._configuredProductUrls
+        }
         self._semanticCandidateIndex: Optional[CnSemanticCandidateIndex] = None
         self._semanticCandidateIndexStatus: Optional[Dict[str, Any]] = None
         self._smokeQueries = [
@@ -198,6 +215,10 @@ class OntologySmokeRunner:
 
     def Run(self) -> None:
         self._ConfigureLogger()
+        if self._runKurlySmokeBeforeOntology:
+            self._RunKurlyMarketSmokePrerequisite()
+            self._ConfigureLogger()
+
         runLogger = self._Logger("Run")
         runLogger.info(
             "온톨로지 smoke를 시작합니다 ontology_root={}",
@@ -206,12 +227,12 @@ class OntologySmokeRunner:
 
         contextBuilder = OntologyContextBuilder(self._ontologyRootPath)
 
-        self._LogStepHeader(1, 13, "온톨로지 마크다운 문서를 로드합니다")
+        self._LogStepHeader(1, 14, "온톨로지 마크다운 문서를 로드합니다")
         documentSummary = self._RunDocumentLoadSmoke(contextBuilder)
 
         self._LogStepHeader(
             2,
-            13,
+            14,
             "문서 검색 결과가 LLM 요청 컨텍스트로 변환되는지 확인합니다",
         )
         queryResults = [
@@ -219,56 +240,65 @@ class OntologySmokeRunner:
             for queryCase in self._smokeQueries
         ]
 
-        self._LogStepHeader(3, 13, "문서 참조 관계와 frontmatter 메타데이터를 검증합니다")
+        self._LogStepHeader(3, 14, "문서 참조 관계와 frontmatter 메타데이터를 검증합니다")
         validationSummary = self._RunValidationSmoke(contextBuilder)
 
-        self._LogStepHeader(4, 13, "문서에 선언된 CSV 데이터 경로를 확인합니다")
+        self._LogStepHeader(4, 14, "문서에 선언된 CSV 데이터 경로를 확인합니다")
         resourceSummary = self._RunResourceResolutionSmoke(contextBuilder)
 
         self._LogStepHeader(
             5,
-            13,
+            14,
             "상품 정보로 정적/semantic CN 후보를 병렬 검색하고 점수를 설명합니다",
         )
         classificationCandidateSummary = self._RunClassificationCandidateSmoke()
 
-        self._LogStepHeader(6, 13, "후보 검토용 LLM 요청 JSON 구조를 만듭니다")
+        self._LogStepHeader(6, 14, "후보 검토용 LLM 요청 JSON 구조를 만듭니다")
         classificationRequestSummary = self._RunClassificationRequestSmoke(
             contextBuilder,
         )
 
-        self._LogStepHeader(7, 13, "메인 LLM 후보 검토 응답을 생성하고 검증합니다")
+        self._LogStepHeader(7, 14, "메인 LLM 후보 검토 응답을 생성하고 검증합니다")
         llmResponseValidationSummary = self._RunLlmResponseValidationSmoke(
             contextBuilder,
         )
 
-        self._LogStepHeader(8, 13, "후보 판단에 사용할 근거 묶음을 만듭니다")
+        self._LogStepHeader(8, 14, "후보 판단에 사용할 근거 묶음을 만듭니다")
         evidencePackageSummary = self._RunEvidencePackageSmoke(contextBuilder)
 
-        self._LogStepHeader(9, 13, "후보 리뷰 정책을 fixture 시나리오로 검증합니다")
+        self._LogStepHeader(9, 14, "후보 리뷰 정책을 fixture 시나리오로 검증합니다")
         decisionPolicySummary = self._RunStage1DecisionPolicySmoke(contextBuilder)
 
-        self._LogStepHeader(10, 13, "fixture 시나리오의 다음 파이프라인 동작을 확인합니다")
+        self._LogStepHeader(10, 14, "fixture 시나리오의 다음 파이프라인 동작을 확인합니다")
         traversalControllerSummary = self._RunStage1TraversalControllerSmoke(
             decisionPolicySummary,
         )
 
-        self._LogStepHeader(11, 13, "백트래킹 예외 경로를 fixture 시나리오로 검증합니다")
+        self._LogStepHeader(11, 14, "백트래킹 예외 경로를 fixture 시나리오로 검증합니다")
         backtrackingRetrySummary = self._RunStage1BacktrackingRetrySmoke(
             contextBuilder,
             decisionPolicySummary,
         )
 
-        self._LogStepHeader(12, 13, "선택된 LLM 후보 검토 결과를 후보 산출 요약으로 정리합니다")
+        self._LogStepHeader(12, 14, "선택된 LLM 후보 검토 결과를 후보 산출 요약으로 정리합니다")
         recommendationReportSummary = self._RunStage1RecommendationReportSmoke(
             llmResponseValidationSummary,
             backtrackingRetrySummary,
         )
 
-        self._LogStepHeader(13, 13, "선택된 LLM 후보 검토 결과를 검토용 JSON 패키지로 만듭니다")
+        self._LogStepHeader(13, 14, "선택된 LLM 후보 검토 결과를 검토용 JSON 패키지로 만듭니다")
         humanReviewPackageSummary = self._RunStage1HumanReviewPackageSmoke(
             llmResponseValidationSummary,
             backtrackingRetrySummary,
+        )
+
+        self._LogStepHeader(
+            14,
+            14,
+            "백트래킹 이후 최종 LLM 산출 결과 기준으로 정답을 평가합니다",
+        )
+        finalAnswerEvaluationSummary = self._RunFinalAnswerEvaluationSmoke(
+            contextBuilder,
         )
 
         summary = {
@@ -286,10 +316,25 @@ class OntologySmokeRunner:
             "stage1_backtracking_retry_summary": backtrackingRetrySummary,
             "stage1_recommendation_report_summary": recommendationReportSummary,
             "stage1_human_review_package_summary": humanReviewPackageSummary,
+            "final_answer_evaluation_summary": finalAnswerEvaluationSummary,
         }
         self._LogSummary(summary)
         if self._writeSummaryArtifact:
             self._WriteSummaryArtifact(summary)
+
+    def _RunKurlyMarketSmokePrerequisite(self) -> None:
+        prerequisiteLogger = self._Logger("KurlyMarketSmokePrerequisite")
+        prerequisiteLogger.info(
+            (
+                "KurlyMarket 수집 smoke를 먼저 실행합니다 url_count={} "
+                "summary_artifact={}"
+            ),
+            len(self._configuredProductUrls),
+            self._productSmokeSummaryArtifactPath,
+        )
+        from kurly_market_smoke import KurlyMarketSmokeRunner
+
+        KurlyMarketSmokeRunner().Run()
 
     def _RunDocumentLoadSmoke(
         self,
@@ -470,8 +515,13 @@ class OntologySmokeRunner:
             if maxProductCount is None
             else maxProductCount
         )
+        selectedSmokeRecords = (
+            smokeRecords
+            if productLimit is not None and productLimit <= 0
+            else smokeRecords[:productLimit]
+        )
         preparedProducts: List[Dict[str, Any]] = []
-        for smokeRecord in smokeRecords[:productLimit]:
+        for smokeRecord in selectedSmokeRecords:
             productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecord)
             candidates = (
                 candidateRetriever.FindCandidatesWithSemanticIndex(
@@ -490,6 +540,7 @@ class OntologySmokeRunner:
             )
             preparedProducts.append(
                 {
+                    "product_page_url": smokeRecord.get("product_page_url"),
                     "product_input": productInput,
                     "candidates": candidates,
                     "candidate_retrieval": self._BuildCandidateRetrievalSummary(
@@ -622,6 +673,253 @@ class OntologySmokeRunner:
             "semantic_index": dict(self._semanticCandidateIndexStatus or {}),
         }
 
+    def _LoadAnswerCodeByProductUrl(self) -> Dict[str, str]:
+        if not self._answerCsvPath.exists():
+            self._Logger("_LoadAnswerCodeByProductUrl").warning(
+                "answer_csv_path={} does not exist",
+                self._answerCsvPath,
+            )
+            return {}
+
+        try:
+            answerDataFrame = pd.read_csv(
+                self._answerCsvPath,
+                dtype=str,
+                encoding="utf-8-sig",
+                keep_default_na=False,
+                index_col=False,
+                usecols=[ANSWER_PRODUCT_URL_COLUMN, ANSWER_CODE_COLUMN],
+            )
+        except Exception as exception:
+            self._Logger("_LoadAnswerCodeByProductUrl").warning(
+                "answer_csv_path={} read_failed={}",
+                self._answerCsvPath,
+                exception,
+            )
+            return {}
+
+        answerCodeByProductUrl: Dict[str, str] = {}
+        for _, answerRow in answerDataFrame.iterrows():
+            productUrl = self._NormalizeProductUrl(
+                str(answerRow.get(ANSWER_PRODUCT_URL_COLUMN, "")),
+            )
+            answerCode = self._NormalizeAnswerCode(
+                str(answerRow.get(ANSWER_CODE_COLUMN, "")),
+            )
+            if not productUrl or answerCode is None:
+                continue
+            answerCodeByProductUrl.setdefault(productUrl, answerCode)
+        return answerCodeByProductUrl
+
+    def _BuildAnswerEvaluation(
+        self,
+        productPageUrl: Any,
+        expectedAnswerCode: Optional[str],
+        candidates: List[CnCandidate],
+    ) -> Dict[str, Any]:
+        candidateCodeRecords = [
+            {
+                "rank": candidateIndex,
+                "hs8": self._NormalizeCandidateCode(candidate.hs8),
+                "hs6": self._NormalizeCandidateCode(
+                    candidate.hs6Code or candidate.hs8[:6],
+                ),
+            }
+            for candidateIndex, candidate in enumerate(candidates, start=1)
+        ]
+        return self._BuildAnswerEvaluationFromCandidateCodeRecords(
+            productPageUrl=productPageUrl,
+            expectedAnswerCode=expectedAnswerCode,
+            candidateCodeRecords=candidateCodeRecords,
+            hitBasis="selected_candidate_set_hs6",
+        )
+
+    def _BuildAnswerEvaluationFromCandidateCodeRecords(
+        self,
+        productPageUrl: Any,
+        expectedAnswerCode: Optional[str],
+        candidateCodeRecords: List[Dict[str, Any]],
+        hitBasis: str,
+    ) -> Dict[str, Any]:
+        expectedHs6 = (
+            expectedAnswerCode[:6]
+            if expectedAnswerCode is not None and len(expectedAnswerCode) >= 6
+            else None
+        )
+        normalizedCandidateCodeRecords = [
+            {
+                **candidateCodeRecord,
+                "rank": int(candidateCodeRecord.get("rank", candidateIndex)),
+                "hs8": self._NormalizeCandidateCode(
+                    candidateCodeRecord.get("hs8"),
+                ),
+                "hs6": self._NormalizeCandidateCode(
+                    candidateCodeRecord.get("hs6"),
+                ),
+            }
+            for candidateIndex, candidateCodeRecord in enumerate(
+                candidateCodeRecords,
+                start=1,
+            )
+        ]
+        hs6PrefixMatches = [
+            candidateCodeRecord
+            for candidateCodeRecord in normalizedCandidateCodeRecords
+            if expectedHs6 is not None
+            and (
+                candidateCodeRecord["hs6"] == expectedHs6
+                or candidateCodeRecord["hs8"].startswith(expectedHs6)
+            )
+        ]
+        rankedMatches = sorted(
+            [
+                {**candidateCodeRecord, "match_level": "hs6_prefix"}
+                for candidateCodeRecord in hs6PrefixMatches
+            ],
+            key=lambda candidateCodeRecord: int(candidateCodeRecord["rank"]),
+        )
+        bestMatch = rankedMatches[0] if rankedMatches else None
+        return {
+            "product_page_url": productPageUrl,
+            "hit_basis": hitBasis,
+            "selected_candidate_count": len(normalizedCandidateCodeRecords),
+            "expected_code": expectedAnswerCode,
+            "expected_hs6": expectedHs6,
+            "is_hit": bestMatch is not None,
+            "hs6_prefix_hit": len(hs6PrefixMatches) > 0,
+            "best_match_rank": (
+                bestMatch.get("rank") if bestMatch is not None else None
+            ),
+            "best_match_hs8": (
+                bestMatch.get("hs8") if bestMatch is not None else None
+            ),
+            "best_match_hs6": (
+                bestMatch.get("hs6") if bestMatch is not None else None
+            ),
+            "best_match_level": (
+                bestMatch.get("match_level") if bestMatch is not None else None
+            ),
+            "candidate_hs8_codes": [
+                candidateCodeRecord["hs8"]
+                for candidateCodeRecord in normalizedCandidateCodeRecords
+            ],
+            "candidate_hs6_codes": [
+                candidateCodeRecord["hs6"]
+                for candidateCodeRecord in normalizedCandidateCodeRecords
+            ],
+            "candidate_roles": [
+                candidateCodeRecord.get("role")
+                for candidateCodeRecord in normalizedCandidateCodeRecords
+            ],
+        }
+
+    def _BuildAnswerEvaluationSummary(
+        self,
+        productResults: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        evaluatedProductResults = [
+            productResult
+            for productResult in productResults
+            if productResult["answer_evaluation"]["expected_code"] is not None
+        ]
+        evaluatedProductCount = len(evaluatedProductResults)
+        hitCount = sum(
+            1
+            for productResult in evaluatedProductResults
+            if productResult["answer_evaluation"]["is_hit"]
+        )
+        top1HitCount = sum(
+            1
+            for productResult in evaluatedProductResults
+            if productResult["answer_evaluation"]["best_match_rank"] == 1
+        )
+        hs6PrefixHitCount = sum(
+            1
+            for productResult in evaluatedProductResults
+            if productResult["answer_evaluation"]["hs6_prefix_hit"]
+        )
+        hitBasis = "selected_candidate_set_hs6"
+        if evaluatedProductResults:
+            hitBasis = evaluatedProductResults[0]["answer_evaluation"].get(
+                "hit_basis",
+                hitBasis,
+            )
+        return {
+            "hit_basis": hitBasis,
+            "evaluated_product_count": evaluatedProductCount,
+            "hit_count": hitCount,
+            "miss_count": evaluatedProductCount - hitCount,
+            "top1_hit_count": top1HitCount,
+            "hs6_prefix_hit_count": hs6PrefixHitCount,
+            "hit_rate": self._BuildRate(hitCount, evaluatedProductCount),
+            "top1_hit_rate": self._BuildRate(top1HitCount, evaluatedProductCount),
+            "hs6_prefix_hit_rate": self._BuildRate(
+                hs6PrefixHitCount,
+                evaluatedProductCount,
+            ),
+        }
+
+    def _BuildMissingProductSmokeUrls(
+        self,
+        smokeRecords: List[Dict[str, Any]],
+    ) -> List[str]:
+        if not self._configuredProductUrlSet:
+            return []
+        smokeRecordUrlSet = {
+            self._NormalizeProductUrl(smokeRecord.get("product_page_url"))
+            for smokeRecord in smokeRecords
+        }
+        return [
+            productUrl
+            for productUrl in self._configuredProductUrls
+            if self._NormalizeProductUrl(productUrl) not in smokeRecordUrlSet
+        ]
+
+    def _BuildMissingAnswerUrls(
+        self,
+        answerCodeByProductUrl: Dict[str, str],
+    ) -> List[str]:
+        if not self._configuredProductUrlSet:
+            return []
+        return [
+            productUrl
+            for productUrl in self._configuredProductUrls
+            if self._NormalizeProductUrl(productUrl) not in answerCodeByProductUrl
+        ]
+
+    @staticmethod
+    def _BuildRate(numerator: int, denominator: int) -> Optional[float]:
+        if denominator <= 0:
+            return None
+        return round(numerator / denominator, 4)
+
+    @staticmethod
+    def _NormalizeProductUrl(productUrl: Any) -> str:
+        if not isinstance(productUrl, str):
+            return ""
+        return productUrl.strip().rstrip("/")
+
+    @staticmethod
+    def _NormalizeAnswerCode(answerCode: Any) -> Optional[str]:
+        if not isinstance(answerCode, str):
+            return None
+        digitCode = "".join(
+            character for character in answerCode if character.isdigit()
+        )
+        if not digitCode:
+            return None
+        if len(digitCode) == 9:
+            return digitCode.zfill(10)
+        return digitCode
+
+    @staticmethod
+    def _NormalizeCandidateCode(candidateCode: Any) -> str:
+        if not isinstance(candidateCode, str):
+            return ""
+        return "".join(
+            character for character in candidateCode if character.isdigit()
+        )
+
     def _BuildStage1ContextEvidenceData(
         self,
         contextBuilder: OntologyContextBuilder,
@@ -653,16 +951,26 @@ class OntologySmokeRunner:
         preparedProducts = self._BuildStage1PreparedProducts(
             topK=self._cnCandidateTopK,
         )
+        answerCodeByProductUrl = self._LoadAnswerCodeByProductUrl()
 
         productResults: List[Dict[str, Any]] = []
         for preparedProduct in preparedProducts:
+            productPageUrl = preparedProduct.get("product_page_url")
             productInput = preparedProduct["product_input"]
             candidates = preparedProduct["candidates"]
             candidateRetrieval = preparedProduct["candidate_retrieval"]
             searchText = productInput.BuildSearchText()
             semanticSearchText = productInput.BuildSemanticSearchText()
+            normalizedProductUrl = self._NormalizeProductUrl(productPageUrl)
+            expectedAnswerCode = answerCodeByProductUrl.get(normalizedProductUrl)
+            answerEvaluation = self._BuildAnswerEvaluation(
+                productPageUrl=productPageUrl,
+                expectedAnswerCode=expectedAnswerCode,
+                candidates=candidates,
+            )
             productResults.append(
                 {
+                    "product_page_url": productPageUrl,
                     "product_input": {
                         "product_name": productInput.productName,
                         "product_domain": productInput.productDomain,
@@ -699,6 +1007,7 @@ class OntologySmokeRunner:
                         "exclude_rule_match": "score forced to 0",
                     },
                     "candidate_count": len(candidates),
+                    "answer_evaluation": answerEvaluation,
                     "candidate_scores": [
                         {
                             "rank": candidateIndex,
@@ -738,12 +1047,24 @@ class OntologySmokeRunner:
             "product_smoke_summary_path": str(
                 self._productSmokeSummaryArtifactPath,
             ),
+            "configured_product_url_count": len(self._configuredProductUrls),
+            "answer_csv_path": str(self._answerCsvPath),
+            "answer_record_count": len(answerCodeByProductUrl),
+            "missing_product_smoke_urls": self._BuildMissingProductSmokeUrls(
+                smokeRecords,
+            ),
+            "missing_answer_urls": self._BuildMissingAnswerUrls(
+                answerCodeByProductUrl,
+            ),
             "product_smoke_record_count": len(smokeRecords),
             "used_product_count": len(productResults),
             "candidate_top_k": self._cnCandidateTopK,
             "semantic_candidate_top_k": self._semanticCandidateTopK,
             "hybrid_candidate_limit": self._hybridCandidateLimit,
             "semantic_index_status": dict(self._semanticCandidateIndexStatus or {}),
+            "answer_evaluation_summary": self._BuildAnswerEvaluationSummary(
+                productResults,
+            ),
             "products": productResults,
         }
         self._LogCandidateScoring(result)
@@ -764,6 +1085,24 @@ class OntologySmokeRunner:
             result["hybrid_candidate_limit"],
             result["semantic_index_status"].get("status", "not_attempted"),
         )
+        self._LogAnswerEvaluation(
+            result,
+            functionName="Stage5AnswerEvaluation",
+            includeDetails=True,
+        )
+        answerEvaluationSummary = result["answer_evaluation_summary"]
+        candidateLogger.info(
+            (
+                "정답 CSV HS6 평가: answer_records={} evaluated={} "
+                "hit={} top1_hit={} missing_artifact={} missing_answer={}"
+            ),
+            result["answer_record_count"],
+            answerEvaluationSummary["evaluated_product_count"],
+            answerEvaluationSummary["hit_count"],
+            answerEvaluationSummary["top1_hit_count"],
+            len(result["missing_product_smoke_urls"]),
+            len(result["missing_answer_urls"]),
+        )
         candidateLogger.info(
             (
                 "후보 검색 규칙: 정적 후보 검색은 먼저 상품 도메인으로 CSV 범위를 제한하고, "
@@ -779,6 +1118,7 @@ class OntologySmokeRunner:
             productInput = productResult["product_input"]
             scoringInput = productResult["scoring_input"]
             candidateRetrieval = productResult["candidate_retrieval"]
+            answerEvaluation = productResult["answer_evaluation"]
             candidateCodes = [
                 candidate["hs8"]
                 for candidate in productResult["candidate_scores"]
@@ -799,6 +1139,18 @@ class OntologySmokeRunner:
                 productInput["ocr_text_length"],
                 candidateCodes,
             )
+            if answerEvaluation["expected_code"] is not None:
+                candidateLogger.info(
+                    (
+                        "정답 HS6 비교 product={} expected={} expected_hs6={} "
+                        "hit={} match_rank={}"
+                    ),
+                    productInput["product_name"],
+                    answerEvaluation["expected_code"],
+                    answerEvaluation["expected_hs6"],
+                    answerEvaluation["is_hit"],
+                    answerEvaluation["best_match_rank"],
+                )
             candidateLogger.info(
                 "검색 텍스트 예시 product={} text={}",
                 productInput["product_name"],
@@ -855,6 +1207,112 @@ class OntologySmokeRunner:
                 "후보 검색 결과 product={} candidates={}",
                 productInput["product_name"],
                 productResult["candidate_count"],
+            )
+
+    def _LogAnswerEvaluation(
+        self,
+        result: Dict[str, Any],
+        functionName: str,
+        includeDetails: bool,
+    ) -> None:
+        answerLogger = self._Logger(functionName)
+        answerEvaluationSummary = result.get("answer_evaluation_summary", {})
+        if not isinstance(answerEvaluationSummary, dict):
+            answerLogger.warning("ANSWER_EVALUATION missing_summary=true")
+            return
+
+        missingProductSmokeUrls = result.get("missing_product_smoke_urls", [])
+        missingAnswerUrls = result.get("missing_answer_urls", [])
+        products = result.get("products", [])
+        if not isinstance(products, list):
+            products = []
+
+        answerLogger.info(
+            (
+                "ANSWER_EVALUATION summary basis={} answer_records={} evaluated={} "
+                "hit={} miss={} top1_hit={} hit_rate={} top1_hit_rate={} "
+                "missing_artifact={} missing_answer={}"
+            ),
+            answerEvaluationSummary.get(
+                "hit_basis",
+                "selected_candidate_set_hs6",
+            ),
+            result.get("answer_record_count"),
+            answerEvaluationSummary.get("evaluated_product_count"),
+            answerEvaluationSummary.get("hit_count"),
+            answerEvaluationSummary.get("miss_count"),
+            answerEvaluationSummary.get("top1_hit_count"),
+            answerEvaluationSummary.get("hit_rate"),
+            answerEvaluationSummary.get("top1_hit_rate"),
+            len(missingProductSmokeUrls) if isinstance(missingProductSmokeUrls, list) else 0,
+            len(missingAnswerUrls) if isinstance(missingAnswerUrls, list) else 0,
+        )
+
+        if not includeDetails:
+            return
+
+        hitProducts = [
+            productResult
+            for productResult in products
+            if productResult.get("answer_evaluation", {}).get("is_hit")
+        ]
+        missProducts = [
+            productResult
+            for productResult in products
+            if productResult.get("answer_evaluation", {}).get("expected_code")
+            and not productResult.get("answer_evaluation", {}).get("is_hit")
+        ]
+
+        if not hitProducts:
+            answerLogger.warning("ANSWER_EVALUATION hit_count=0")
+        for productResult in hitProducts:
+            productInput = productResult.get("product_input", {})
+            answerEvaluation = productResult.get("answer_evaluation", {})
+            selectedCandidateCount = answerEvaluation.get(
+                "selected_candidate_count",
+                len(answerEvaluation.get("candidate_hs8_codes", [])),
+            )
+            answerLogger.info(
+                (
+                    "ANSWER_EVALUATION hit product={} expected_code={} "
+                    "expected_hs6={} matched_hs8={} matched_hs6={} "
+                    "match_rank={} selected_candidate_count={} url={}"
+                ),
+                productInput.get("product_name"),
+                answerEvaluation.get("expected_code"),
+                answerEvaluation.get("expected_hs6"),
+                answerEvaluation.get("best_match_hs8"),
+                answerEvaluation.get("best_match_hs6"),
+                answerEvaluation.get("best_match_rank"),
+                selectedCandidateCount,
+                answerEvaluation.get("product_page_url"),
+            )
+
+        previewMissProducts = missProducts[:ANSWER_EVALUATION_LOG_PREVIEW_COUNT]
+        answerLogger.info(
+            "ANSWER_EVALUATION miss_preview total={} showing={}",
+            len(missProducts),
+            len(previewMissProducts),
+        )
+        for productResult in previewMissProducts:
+            productInput = productResult.get("product_input", {})
+            answerEvaluation = productResult.get("answer_evaluation", {})
+            selectedCandidateCount = answerEvaluation.get(
+                "selected_candidate_count",
+                len(answerEvaluation.get("candidate_hs8_codes", [])),
+            )
+            answerLogger.info(
+                (
+                    "ANSWER_EVALUATION miss product={} expected_code={} "
+                    "expected_hs6={} selected_candidate_count={} "
+                    "candidate_hs6={} url={}"
+                ),
+                productInput.get("product_name"),
+                answerEvaluation.get("expected_code"),
+                answerEvaluation.get("expected_hs6"),
+                selectedCandidateCount,
+                answerEvaluation.get("candidate_hs6_codes"),
+                answerEvaluation.get("product_page_url"),
             )
 
     def _RunClassificationRequestSmoke(
@@ -1980,6 +2438,485 @@ class OntologySmokeRunner:
         )
         return result
 
+    def _RunFinalAnswerEvaluationSmoke(
+        self,
+        contextBuilder: OntologyContextBuilder,
+    ) -> Dict[str, Any]:
+        smokeRecords = self._LoadProductSmokeRecords()
+        answerCodeByProductUrl = self._LoadAnswerCodeByProductUrl()
+        if not self._runLlmConnectionSmoke:
+            result = {
+                "status": "skipped",
+                "reason": (
+                    "run_llm_connection_smoke is false; final LLM/backtracking "
+                    "answer evaluation requires LLM review output."
+                ),
+                "hit_basis": "final_llm_backtracking_output_hs6",
+                "product_smoke_summary_path": str(
+                    self._productSmokeSummaryArtifactPath,
+                ),
+                "configured_product_url_count": len(self._configuredProductUrls),
+                "answer_csv_path": str(self._answerCsvPath),
+                "answer_record_count": len(answerCodeByProductUrl),
+                "missing_product_smoke_urls": self._BuildMissingProductSmokeUrls(
+                    smokeRecords,
+                ),
+                "missing_answer_urls": self._BuildMissingAnswerUrls(
+                    answerCodeByProductUrl,
+                ),
+                "product_smoke_record_count": len(smokeRecords),
+                "used_product_count": 0,
+                "initial_candidate_limit": self._BuildFinalReviewCandidateLimit(),
+                "answer_evaluation_summary": {
+                    "hit_basis": "final_llm_backtracking_output_hs6",
+                    "evaluated_product_count": 0,
+                    "hit_count": 0,
+                    "miss_count": 0,
+                    "top1_hit_count": 0,
+                    "hs6_prefix_hit_count": 0,
+                    "hit_rate": None,
+                    "top1_hit_rate": None,
+                    "hs6_prefix_hit_rate": None,
+                },
+                "backtracking_attempt_count": 0,
+                "completed_llm_product_count": 0,
+                "products": [],
+            }
+            self._LogFinalAnswerEvaluation(result)
+            return result
+
+        reviewCandidateLimit = self._BuildFinalReviewCandidateLimit()
+        preparedProducts = self._BuildStage1PreparedProducts(
+            topK=reviewCandidateLimit,
+        )
+        requestBuilder = Stage1RequestBuilder()
+        evidencePackageBuilder = Stage1EvidencePackageBuilder(
+            ontologyRootPath=self._ontologyRootPath,
+            projectRootPath=PROJECT_ROOT_PATH,
+        )
+        validator = Stage1ResponseValidator()
+        candidateRetriever = CnCandidateRetriever(
+            ontologyRootPath=self._ontologyRootPath,
+            projectRootPath=PROJECT_ROOT_PATH,
+        )
+        controller = Stage1TraversalController()
+
+        productResults: List[Dict[str, Any]] = []
+        for preparedProduct in preparedProducts:
+            productPageUrl = preparedProduct.get("product_page_url")
+            productInput = preparedProduct["product_input"]
+            initialCandidates = preparedProduct["candidates"][:reviewCandidateLimit]
+            normalizedProductUrl = self._NormalizeProductUrl(productPageUrl)
+            expectedAnswerCode = answerCodeByProductUrl.get(normalizedProductUrl)
+            initialCandidateCodes = [
+                candidate.hs8 for candidate in initialCandidates
+            ]
+
+            if not initialCandidates:
+                answerEvaluation = self._BuildAnswerEvaluationFromCandidateCodeRecords(
+                    productPageUrl=productPageUrl,
+                    expectedAnswerCode=expectedAnswerCode,
+                    candidateCodeRecords=[],
+                    hitBasis="final_llm_backtracking_output_hs6",
+                )
+                productResults.append(
+                    {
+                        "status": "skipped",
+                        "reason": NO_CN_CANDIDATE_REASON,
+                        "product_page_url": productPageUrl,
+                        "product_input": self._BuildProductInputSummary(productInput),
+                        "initial_candidate_count": 0,
+                        "initial_candidate_hs8_codes": [],
+                        "selected_source": None,
+                        "final_candidate_records": [],
+                        "answer_evaluation": answerEvaluation,
+                    }
+                )
+                continue
+
+            contextEvidenceData = self._BuildStage1ContextEvidenceData(
+                contextBuilder,
+                requestBuilder,
+                evidencePackageBuilder,
+                productInput,
+                initialCandidates,
+            )
+            initialLlmConnection = self._RunOptionalLlmConnectionSmoke(
+                contextBuilder=contextBuilder,
+                productInput=productInput,
+                candidates=initialCandidates,
+                requestBuilder=requestBuilder,
+                validator=validator,
+                evidencePackage=contextEvidenceData["evidence_package"],
+            )
+            selectedSource = "stage14_initial_llm_review"
+            selectedLlmConnection = initialLlmConnection
+            retryLlmConnection: Dict[str, Any] = {}
+            retryCandidateCodes: List[str] = []
+            backtrackingAttempted = False
+            nextRetryStopReason: Optional[str] = None
+
+            if self._ShouldBacktrackFromLlmConnection(initialLlmConnection):
+                backtrackingAttempted = True
+                initialDecisionReport = self._BuildStage1DecisionReportFromData(
+                    initialLlmConnection["decision"],
+                )
+                retryCandidates = controller.BuildBacktrackingCandidates(
+                    productInput=productInput,
+                    currentCandidates=initialCandidates,
+                    decisionReport=initialDecisionReport,
+                    candidateRetriever=candidateRetriever,
+                    topK=reviewCandidateLimit,
+                    visitedHs8Codes=initialCandidateCodes,
+                    completedRetryCount=0,
+                    maxRetryCount=DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
+                )
+                retryCandidateCodes = [candidate.hs8 for candidate in retryCandidates]
+                if retryCandidates:
+                    retryContextEvidenceData = self._BuildStage1ContextEvidenceData(
+                        contextBuilder,
+                        requestBuilder,
+                        evidencePackageBuilder,
+                        productInput,
+                        retryCandidates,
+                    )
+                    retryBacktrackingSummary = {
+                        "initial_candidate_hs8_codes": initialCandidateCodes,
+                        "retry_candidate_hs8_codes": retryCandidateCodes,
+                        "visited_candidate_hs8_codes": [
+                            *initialCandidateCodes,
+                            *retryCandidateCodes,
+                        ],
+                        "max_retry_count": DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
+                        "completed_retry_count": 1,
+                        "scope_strategy": self._BuildBacktrackingScopeStrategy(
+                            initialCandidates,
+                            retryCandidates,
+                        ),
+                    }
+                    retryLlmConnection = self._RunOptionalLlmConnectionSmoke(
+                        contextBuilder=contextBuilder,
+                        productInput=productInput,
+                        candidates=retryCandidates,
+                        requestBuilder=requestBuilder,
+                        validator=Stage1ResponseValidator(),
+                        evidencePackage=retryContextEvidenceData["evidence_package"],
+                        backtrackingSummary=retryBacktrackingSummary,
+                    )
+                    if self._IsCompletedValidLlmConnection(retryLlmConnection):
+                        selectedSource = "stage14_backtracking_retry"
+                        selectedLlmConnection = retryLlmConnection
+                    nextRetryStopReason = self._BuildNextRetryStopReason(
+                        retryLlmConnection,
+                    )
+                else:
+                    nextRetryStopReason = "no_unvisited_backtracking_candidates"
+
+            finalRecommendation = selectedLlmConnection.get("recommendation")
+            finalCandidateRecords = self._BuildFinalCandidateCodeRecords(
+                finalRecommendation if isinstance(finalRecommendation, dict) else {},
+            )
+            answerEvaluation = self._BuildAnswerEvaluationFromCandidateCodeRecords(
+                productPageUrl=productPageUrl,
+                expectedAnswerCode=expectedAnswerCode,
+                candidateCodeRecords=finalCandidateRecords,
+                hitBasis="final_llm_backtracking_output_hs6",
+            )
+            productResults.append(
+                {
+                    "status": "completed",
+                    "product_page_url": productPageUrl,
+                    "product_input": self._BuildProductInputSummary(productInput),
+                    "initial_candidate_count": len(initialCandidates),
+                    "initial_candidate_hs8_codes": initialCandidateCodes,
+                    "selected_source": selectedSource,
+                    "backtracking_attempted": backtrackingAttempted,
+                    "retry_candidate_count": len(retryCandidateCodes),
+                    "retry_candidate_hs8_codes": retryCandidateCodes,
+                    "next_retry_stop_reason": nextRetryStopReason,
+                    "initial_llm_connection": self._BuildLlmConnectionSummary(
+                        initialLlmConnection,
+                    ),
+                    "retry_llm_connection": self._BuildLlmConnectionSummary(
+                        retryLlmConnection,
+                    )
+                    if retryLlmConnection
+                    else None,
+                    "selected_llm_connection": self._BuildLlmConnectionSummary(
+                        selectedLlmConnection,
+                    ),
+                    "final_candidate_records": finalCandidateRecords,
+                    "answer_evaluation": answerEvaluation,
+                }
+            )
+
+        result = {
+            "status": "completed",
+            "hit_basis": "final_llm_backtracking_output_hs6",
+            "product_smoke_summary_path": str(
+                self._productSmokeSummaryArtifactPath,
+            ),
+            "configured_product_url_count": len(self._configuredProductUrls),
+            "answer_csv_path": str(self._answerCsvPath),
+            "answer_record_count": len(answerCodeByProductUrl),
+            "missing_product_smoke_urls": self._BuildMissingProductSmokeUrls(
+                smokeRecords,
+            ),
+            "missing_answer_urls": self._BuildMissingAnswerUrls(
+                answerCodeByProductUrl,
+            ),
+            "product_smoke_record_count": len(smokeRecords),
+            "used_product_count": len(productResults),
+            "initial_candidate_limit": reviewCandidateLimit,
+            "answer_evaluation_summary": self._BuildAnswerEvaluationSummary(
+                productResults,
+            ),
+            "backtracking_attempt_count": sum(
+                1
+                for productResult in productResults
+                if productResult.get("backtracking_attempted")
+            ),
+            "completed_llm_product_count": sum(
+                1
+                for productResult in productResults
+                if (
+                    productResult.get("selected_llm_connection", {}).get("status")
+                    == "completed"
+                )
+            ),
+            "products": productResults,
+        }
+        self._LogFinalAnswerEvaluation(result)
+        return result
+
+    def _BuildFinalReviewCandidateLimit(self) -> int:
+        if self._hybridCandidateLimit is not None and self._hybridCandidateLimit > 0:
+            return self._hybridCandidateLimit
+        return max(1, self._cnCandidateTopK)
+
+    def _BuildProductInputSummary(
+        self,
+        productInput: ProductClassificationInput,
+    ) -> Dict[str, Any]:
+        return {
+            "product_name": productInput.productName,
+            "product_domain": productInput.productDomain,
+            "domain_scopes": list(productInput.domainScopes),
+            "notice_field_count": len(productInput.noticeFieldTexts),
+            "ocr_text_length": len(productInput.ocrText),
+        }
+
+    def _ShouldBacktrackFromLlmConnection(
+        self,
+        llmConnection: Dict[str, Any],
+    ) -> bool:
+        if not self._IsCompletedValidLlmConnection(llmConnection):
+            return False
+        decision = llmConnection.get("decision", {})
+        traversal = llmConnection.get("traversal", {})
+        return (
+            decision.get("backtracking_recommended") is True
+            or traversal.get("next_action") == "backtrack_candidate_scope"
+        )
+
+    def _IsCompletedValidLlmConnection(
+        self,
+        llmConnection: Dict[str, Any],
+    ) -> bool:
+        validation = llmConnection.get("validation", {})
+        return (
+            llmConnection.get("status") == "completed"
+            and isinstance(validation, dict)
+            and validation.get("is_valid") is True
+        )
+
+    def _BuildBacktrackingScopeStrategy(
+        self,
+        initialCandidates: List[CnCandidate],
+        retryCandidates: List[CnCandidate],
+    ) -> str:
+        initialHs4Codes = {
+            candidate.hs4Code
+            for candidate in initialCandidates
+            if candidate.hs4Code is not None
+        }
+        retryHs4Codes = {
+            candidate.hs4Code
+            for candidate in retryCandidates
+            if candidate.hs4Code is not None
+        }
+        if any(hs4Code not in initialHs4Codes for hs4Code in retryHs4Codes):
+            return "alternative_hs4_scope"
+        if retryCandidates:
+            return "same_hs4_parent_scope"
+        return "no_candidate"
+
+    def _BuildNextRetryStopReason(
+        self,
+        retryLlmConnection: Dict[str, Any],
+    ) -> str:
+        if retryLlmConnection.get("status") != "completed":
+            return "llm_retry_not_completed"
+        traversal = retryLlmConnection.get("traversal", {})
+        nextAction = traversal.get("next_action")
+        if nextAction == "prepare_human_review_package":
+            return "retry_not_required"
+        if nextAction == "retry_llm_response":
+            return "retry_llm_response_required"
+        if nextAction == "backtrack_candidate_scope":
+            return "max_retry_count_reached"
+        return "unhandled_retry_next_action:{0}".format(nextAction)
+
+    def _BuildFinalCandidateCodeRecords(
+        self,
+        recommendationReport: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        candidateCodeRecords: List[Dict[str, Any]] = []
+        seenHs8Codes: set[str] = set()
+
+        def AppendCandidateRecord(
+            candidateRecord: Any,
+            role: str,
+        ) -> None:
+            if not isinstance(candidateRecord, dict):
+                return
+            hs8 = self._NormalizeCandidateCode(candidateRecord.get("hs8"))
+            hs6 = self._NormalizeCandidateCode(candidateRecord.get("hs6_code"))
+            if not hs6:
+                candidateReference = candidateRecord.get("candidate_reference")
+                if isinstance(candidateReference, dict):
+                    codeHierarchy = candidateReference.get("code_hierarchy")
+                    if isinstance(codeHierarchy, dict):
+                        hs6Data = codeHierarchy.get("hs6")
+                        if isinstance(hs6Data, dict):
+                            hs6 = self._NormalizeCandidateCode(
+                                hs6Data.get("code"),
+                            )
+            if not hs6 and hs8:
+                hs6 = hs8[:6]
+            if not hs8 and not hs6:
+                return
+            if hs8 and hs8 in seenHs8Codes:
+                return
+            candidateCodeRecords.append(
+                {
+                    "rank": len(candidateCodeRecords) + 1,
+                    "role": role,
+                    "hs8": hs8,
+                    "hs6": hs6,
+                    "status": candidateRecord.get("status"),
+                }
+            )
+            if hs8:
+                seenHs8Codes.add(hs8)
+
+        AppendCandidateRecord(
+            recommendationReport.get("recommended_candidate"),
+            "recommended_candidate",
+        )
+        retainedCandidates = recommendationReport.get("retained_candidates")
+        if isinstance(retainedCandidates, list):
+            for retainedCandidate in retainedCandidates:
+                AppendCandidateRecord(retainedCandidate, "retained_candidate")
+        return candidateCodeRecords
+
+    def _BuildLlmConnectionSummary(
+        self,
+        llmConnection: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not llmConnection:
+            return {}
+        response = llmConnection.get("response", {})
+        validation = llmConnection.get("validation", {})
+        decision = llmConnection.get("decision", {})
+        traversal = llmConnection.get("traversal", {})
+        recommendation = llmConnection.get("recommendation", {})
+        recommendedCandidate = (
+            recommendation.get("recommended_candidate")
+            if isinstance(recommendation, dict)
+            else None
+        )
+        return {
+            "enabled": llmConnection.get("enabled"),
+            "status": llmConnection.get("status"),
+            "reason": llmConnection.get("reason"),
+            "error": llmConnection.get("error"),
+            "runtime_kind": llmConnection.get("runtime_kind"),
+            "model_name": llmConnection.get("model_name"),
+            "reviewed_candidate_count": response.get("reviewed_candidate_count")
+            if isinstance(response, dict)
+            else None,
+            "reviewed_candidate_hs8_codes": response.get(
+                "reviewed_candidate_hs8_codes",
+            )
+            if isinstance(response, dict)
+            else [],
+            "generated_response_count": response.get("generated_response_count")
+            if isinstance(response, dict)
+            else None,
+            "generated_text_length": response.get("generated_text_length")
+            if isinstance(response, dict)
+            else None,
+            "token_usage": response.get("token_usage", {})
+            if isinstance(response, dict)
+            else {},
+            "validation_is_valid": validation.get("is_valid")
+            if isinstance(validation, dict)
+            else None,
+            "validation_error_count": validation.get("error_count")
+            if isinstance(validation, dict)
+            else None,
+            "validation_warning_count": validation.get("warning_count")
+            if isinstance(validation, dict)
+            else None,
+            "decision_status": decision.get("decision_status")
+            if isinstance(decision, dict)
+            else None,
+            "recommended_candidate_hs8": decision.get("recommended_candidate_hs8")
+            if isinstance(decision, dict)
+            else None,
+            "backtracking_recommended": decision.get("backtracking_recommended")
+            if isinstance(decision, dict)
+            else None,
+            "traversal_status": traversal.get("traversal_status")
+            if isinstance(traversal, dict)
+            else None,
+            "next_action": traversal.get("next_action")
+            if isinstance(traversal, dict)
+            else None,
+            "recommendation_level": recommendation.get("recommendation_level")
+            if isinstance(recommendation, dict)
+            else None,
+            "recommendation_hs8": recommendedCandidate.get("hs8")
+            if isinstance(recommendedCandidate, dict)
+            else None,
+            "recommendation_hs6": recommendedCandidate.get("hs6_code")
+            if isinstance(recommendedCandidate, dict)
+            else None,
+        }
+
+    def _LogFinalAnswerEvaluation(self, result: Dict[str, Any]) -> None:
+        finalLogger = self._Logger("Stage14FinalAnswerEvaluation")
+        answerEvaluationSummary = result["answer_evaluation_summary"]
+        finalLogger.info(
+            (
+                "stage=14 basis={} products={} completed_llm={} "
+                "backtracking_attempts={} hit={} miss={} hit_rate={}"
+            ),
+            answerEvaluationSummary["hit_basis"],
+            result["used_product_count"],
+            result["completed_llm_product_count"],
+            result["backtracking_attempt_count"],
+            answerEvaluationSummary["hit_count"],
+            answerEvaluationSummary["miss_count"],
+            answerEvaluationSummary["hit_rate"],
+        )
+        self._LogAnswerEvaluation(
+            result,
+            functionName="Stage14AnswerEvaluation",
+            includeDetails=True,
+        )
+
     def _SelectStage1LlmConnection(
         self,
         llmResponseValidationSummary: Dict[str, Any],
@@ -2632,7 +3569,7 @@ class OntologySmokeRunner:
                 "llm_response_validation_status={} evidence_products={} "
                 "decision_policy_status={} traversal_controller_status={} "
                 "backtracking_retry_status={} recommendation_report_status={} "
-                "human_review_package_status={}"
+                "human_review_package_status={} final_answer_status={}"
             ),
             summary["document_summary"]["document_count"],
             summary["document_summary"]["retrieval_document_count"],
@@ -2653,6 +3590,17 @@ class OntologySmokeRunner:
             summary["stage1_backtracking_retry_summary"]["status"],
             summary["stage1_recommendation_report_summary"]["status"],
             summary["stage1_human_review_package_summary"]["status"],
+            summary["final_answer_evaluation_summary"]["status"],
+        )
+        self._LogAnswerEvaluation(
+            summary["classification_candidate_summary"],
+            functionName="SummaryCandidateCoverageEvaluation",
+            includeDetails=False,
+        )
+        self._LogAnswerEvaluation(
+            summary["final_answer_evaluation_summary"],
+            functionName="SummaryFinalAnswerEvaluation",
+            includeDetails=False,
         )
 
     def _LogStepHeader(self, stepIndex: int, totalStepCount: int, title: str) -> None:
@@ -2708,7 +3656,22 @@ class OntologySmokeRunner:
                     exclude_none=True,
                 )
             )
-        return productSmokeRecords
+        if not self._configuredProductUrlSet:
+            return productSmokeRecords
+
+        productSmokeRecordByUrl = {
+            self._NormalizeProductUrl(productSmokeRecord.get("product_page_url")): (
+                productSmokeRecord
+            )
+            for productSmokeRecord in productSmokeRecords
+        }
+        filteredProductSmokeRecords: List[Dict[str, Any]] = []
+        for configuredProductUrl in self._configuredProductUrls:
+            normalizedProductUrl = self._NormalizeProductUrl(configuredProductUrl)
+            productSmokeRecord = productSmokeRecordByUrl.get(normalizedProductUrl)
+            if productSmokeRecord is not None:
+                filteredProductSmokeRecords.append(productSmokeRecord)
+        return filteredProductSmokeRecords
 
     def _BuildTextPreview(self, text: str) -> str:
         if len(text) <= self._textPreviewCharacters:
