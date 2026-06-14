@@ -4,13 +4,13 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from eu_export.ontology.classification import (
+from eu_export.core.classification import (
     ProductClassificationInput,
     Stage1ResponseValidationReport,
     Stage1EvidencePackage,
     Stage1EvidenceRecord,
 )
-from eu_export.ontology.recommendation import (
+from eu_export.core.recommendation import (
     Stage1RecommendationReport,
 )
 from eu_export.utils import NormalizeWhitespace

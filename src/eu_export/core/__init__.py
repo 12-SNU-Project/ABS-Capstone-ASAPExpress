@@ -1,6 +1,6 @@
 """Ontology 기반 RAG 준비 계층."""
 
-from eu_export.ontology.classification import (
+from eu_export.core.classification import (
     CnCandidate,
     CnCandidateRetriever,
     ProductClassificationInput,
@@ -15,48 +15,48 @@ from eu_export.ontology.classification import (
     Stage1ResponseValidator,
     Stage1RequestBuilder,
 )
-from eu_export.ontology.context import ContextPackager
-from eu_export.ontology.context_builder import OntologyContextBuilder
-from eu_export.ontology.decision_policy import (
+from eu_export.core.context import ContextPackager
+from eu_export.core.context_builder import OntologyContextBuilder
+from eu_export.core.decision_policy import (
     Stage1DecisionPolicy,
     Stage1DecisionReport,
 )
-from eu_export.ontology.human_review import (
+from eu_export.core.human_review import (
     Stage1HumanReviewPackage,
     Stage1HumanReviewPackageBuilder,
 )
-from eu_export.ontology.loader import OntologyDocumentLoader
-from eu_export.ontology.request_builder import LlmRequestBuilder, OntologyRequestBuilder
-from eu_export.ontology.resource_resolver import (
+from eu_export.core.loader import OntologyDocumentLoader
+from eu_export.core.request_builder import LlmRequestBuilder, OntologyRequestBuilder
+from eu_export.core.resource_resolver import (
     OntologyDataSourceCheck,
     OntologyResourceResolutionReport,
     OntologyResourceResolver,
 )
-from eu_export.ontology.retriever import OntologyRetriever
-from eu_export.ontology.recommendation import (
+from eu_export.core.retriever import OntologyRetriever
+from eu_export.core.recommendation import (
     Stage1RecommendationReport,
     Stage1RecommendationReportBuilder,
 )
-from eu_export.ontology.schema import (
+from eu_export.core.schema import (
     OntologyChunk,
     OntologyDocument,
     OntologyDocumentKind,
     OntologyRetrievalResult,
     PackagedOntologyContext,
 )
-from eu_export.ontology.semantic_retrieval import (
+from eu_export.core.semantic_retrieval import (
     CnSemanticCandidateIndex,
     CnSemanticChunk,
     CnSemanticChunkBuilder,
     CnSemanticChunkMatch,
     CnSemanticSearchHit,
 )
-from eu_export.ontology.traversal import (
+from eu_export.core.traversal import (
     DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
     Stage1TraversalController,
     Stage1TraversalReport,
 )
-from eu_export.ontology.validator import (
+from eu_export.core.validator import (
     OntologyGraphValidator,
     OntologyValidationIssue,
     OntologyValidationReport,

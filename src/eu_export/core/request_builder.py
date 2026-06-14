@@ -4,13 +4,13 @@ from pathlib import Path
 from typing import Optional
 
 from eu_export.bridge import LlmGenerationOptions, LlmRequest, LlmResponseFormat
-from eu_export.ontology.context_builder import OntologyContextBuilder
-from eu_export.ontology.schema import PackagedOntologyContext
+from eu_export.core.context_builder import OntologyContextBuilder
+from eu_export.core.schema import PackagedOntologyContext
 
 
 DEFAULT_ONTOLOGY_SYSTEM_PROMPT = """\
 You are an EU import-requirement decision-support assistant for Korean exporters.
-Use the supplied ontology context as source guidance.
+Use the supplied core context as source guidance.
 Separate HS, CN, TARIC, regulatory requirements, documents, origin, and FTA reasoning.
 Do not present candidate classification or regulatory requirements as final legal determinations.
 When evidence is insufficient, explicitly say that human review or official confirmation is needed.
@@ -44,7 +44,7 @@ class LlmRequestBuilder:
 
 
 class OntologyRequestBuilder:
-    """ontology root와 사용자 질문만으로 LlmRequest를 만드는 공개 facade."""
+    """core root와 사용자 질문만으로 LlmRequest를 만드는 공개 facade."""
 
     def __init__(
         self,

@@ -29,9 +29,9 @@ from eu_export.product.ocr_normalization import (
     ProductOcrFactNormalizer,
     ProductOcrFactNormalizationResult,
 )
-from eu_export.ontology.loader import OntologyDocumentLoader
-from eu_export.ontology.schema import PackagedOntologyContext
-from eu_export.ontology.semantic_retrieval import (
+from eu_export.core.loader import OntologyDocumentLoader
+from eu_export.core.schema import PackagedOntologyContext
+from eu_export.core.semantic_retrieval import (
     CnSemanticCandidateIndex,
     CnSemanticSearchHit,
 )
@@ -154,10 +154,12 @@ WEAK_SUPPLEMENTAL_FACT_MARKERS = {
     "향분말",
     "향료",
     "함유",
+    "주의사항",
+}
+EXCLUDED_CLASSIFICATION_FACT_MARKERS = {
     "혼입",
     "혼입가능",
     "혼입 가능",
-    "주의사항",
     "같은 제조시설",
     "같은 제조 시설",
     "제조시설에서 제조",
@@ -257,12 +259,14 @@ TIER_DESCRIPTION_WEIGHTS = {
     EVIDENCE_TIER_WEAK: 0.1,
 }
 DEFAULT_MAX_CANDIDATES_PER_HS4 = 3
+DEFAULT_INITIAL_HS4_BRANCH_REPRESENTATIVE_LIMIT = 3
+DEFAULT_INITIAL_HS6_BRANCH_REPRESENTATIVE_LIMIT = 5
 RETRIEVAL_SOURCE_HEURISTIC = "heuristic"
 RETRIEVAL_SOURCE_SEMANTIC = "semantic"
 
 STAGE1_CLASSIFICATION_SYSTEM_PROMPT = """\
 You are an EU HS/CN classification review assistant for Korean exporters.
-Use the supplied ontology context, normalized product facts, and CN candidate cards.
+Use the supplied core context, normalized product facts, and CN candidate cards.
 Do not issue a final legal/customs determination.
 Review each candidate against the product facts and explain whether it is plausible.
 Separate evidence, assumptions, missing information, and reasons to reject candidates.
@@ -382,14 +386,14 @@ class ProductClassificationInput(BaseModel):
         secondaryOcrFactTexts = [
             factText
             for factText in self.normalizedOcrFactTexts
-            if not self._IsWeakSupplementalFactText(factText)
+            if self._ShouldUseAsSecondaryClassificationFactText(factText)
         ]
         secondaryNoticeTexts = [
             noticeText
             for noticeText in self._SplitSupplementalFactTexts(
                 self.productNoticeText,
             )
-            if not self._IsWeakSupplementalFactText(noticeText)
+            if self._ShouldUseAsSecondaryClassificationFactText(noticeText)
         ]
         return self._BuildSearchTextFromParts(
             [
@@ -406,14 +410,14 @@ class ProductClassificationInput(BaseModel):
         weakOcrFactTexts = [
             factText
             for factText in self.normalizedOcrFactTexts
-            if self._IsWeakSupplementalFactText(factText)
+            if self._ShouldUseAsWeakClassificationFactText(factText)
         ]
         weakNoticeTexts = [
             noticeText
             for noticeText in self._SplitSupplementalFactTexts(
                 self.productNoticeText,
             )
-            if self._IsWeakSupplementalFactText(noticeText)
+            if self._ShouldUseAsWeakClassificationFactText(noticeText)
         ]
         return self._BuildSearchTextFromParts(
             [
@@ -427,7 +431,11 @@ class ProductClassificationInput(BaseModel):
             self.BuildPrimarySearchText(),
             self.BuildSecondarySearchText(),
             self.BuildWeakSearchText()
-            or ("" if self.normalizedOcrFactTexts else self.ocrText),
+            or (
+                ""
+                if self.normalizedOcrFactTexts
+                else self._BuildRawOcrClassificationFallbackText()
+            ),
         ]
         return self._BuildSearchTextFromParts(rawParts)
 
@@ -455,6 +463,34 @@ class ProductClassificationInput(BaseModel):
             for line in normalizedText.splitlines()
             if line.strip() != ""
         ]
+
+    def _BuildRawOcrClassificationFallbackText(self) -> str:
+        return self._BuildSearchTextFromParts(
+            [
+                line
+                for line in self._SplitSupplementalFactTexts(self.ocrText)
+                if not self._IsExcludedClassificationFactText(line)
+            ]
+        )
+
+    def _ShouldUseAsSecondaryClassificationFactText(self, factText: str) -> bool:
+        return (
+            not self._IsExcludedClassificationFactText(factText)
+            and not self._IsWeakSupplementalFactText(factText)
+        )
+
+    def _ShouldUseAsWeakClassificationFactText(self, factText: str) -> bool:
+        return (
+            not self._IsExcludedClassificationFactText(factText)
+            and self._IsWeakSupplementalFactText(factText)
+        )
+
+    def _IsExcludedClassificationFactText(self, factText: str) -> bool:
+        normalizedText = NormalizeWhitespace(factText).lower()
+        return any(
+            marker in normalizedText
+            for marker in EXCLUDED_CLASSIFICATION_FACT_MARKERS
+        )
 
     def _IsWeakSupplementalFactText(self, factText: str) -> bool:
         normalizedText = NormalizeWhitespace(factText).lower()
@@ -910,7 +946,7 @@ class Stage1EvidencePackage(BaseModel):
 
 
 class Stage1EvidencePackageBuilder:
-    """Stage 1 후보 검토에 필요한 product/CN/ontology/BTI 근거를 묶는다."""
+    """Stage 1 후보 검토에 필요한 product/CN/core/BTI 근거를 묶는다."""
 
     def __init__(
         self,
@@ -1893,24 +1929,7 @@ class CnCandidateRetriever:
             ),
         )
 
-        selectedCandidates: List[CnCandidate] = []
-        selectedCodes: Set[str] = set()
-
-        def AppendCandidate(candidate: CnCandidate) -> bool:
-            if (
-                finalCandidateLimit is not None
-                and len(selectedCandidates) >= finalCandidateLimit
-            ):
-                return False
-            if candidate.hs8 in selectedCodes:
-                return True
-            selectedCandidates.append(candidate)
-            selectedCodes.add(candidate.hs8)
-            return True
-
-        for candidate in bothSourceCandidates:
-            if not AppendCandidate(candidate):
-                return selectedCandidates
+        mergedCandidatesByPriority: List[CnCandidate] = list(bothSourceCandidates)
 
         maxParallelLength = max(
             len(heuristicOnlyCandidates),
@@ -1918,13 +1937,18 @@ class CnCandidateRetriever:
         )
         for index in range(maxParallelLength):
             if index < len(heuristicOnlyCandidates):
-                if not AppendCandidate(heuristicOnlyCandidates[index]):
-                    return selectedCandidates
+                mergedCandidatesByPriority.append(heuristicOnlyCandidates[index])
             if index < len(semanticOnlyCandidates):
-                if not AppendCandidate(semanticOnlyCandidates[index]):
-                    return selectedCandidates
+                mergedCandidatesByPriority.append(semanticOnlyCandidates[index])
 
-        return selectedCandidates
+        if finalCandidateLimit is None:
+            return mergedCandidatesByPriority
+
+        return self._SelectBranchAwareCandidates(
+            sortedCandidates=mergedCandidatesByPriority,
+            topK=finalCandidateLimit,
+            preferredHeadingCodes=[],
+        )
 
     def FindSiblingCandidates(
         self,
@@ -2384,12 +2408,25 @@ class CnCandidateRetriever:
         if topK <= 0:
             return []
 
+        return self._SelectBranchAwareCandidates(
+            sortedCandidates=sortedCandidates,
+            topK=topK,
+            preferredHeadingCodes=self._BuildPreferredHeadingCodes(productInput),
+        )
+
+    def _SelectBranchAwareCandidates(
+        self,
+        sortedCandidates: Sequence[CnCandidate],
+        topK: int,
+        preferredHeadingCodes: Sequence[str],
+    ) -> List[CnCandidate]:
         selectedCandidates: List[CnCandidate] = []
         selectedHs8Codes: Set[str] = set()
         hs4Counts: Dict[str, int] = {}
-        preferredHeadingCodes = self._BuildPreferredHeadingCodes(productInput)
 
         for headingCode in preferredHeadingCodes:
+            if len(selectedCandidates) >= topK:
+                break
             for candidate in sortedCandidates:
                 if candidate.hs4Code != headingCode:
                     continue
@@ -2401,6 +2438,33 @@ class CnCandidateRetriever:
                     enforceHs4Limit=False,
                 )
                 break
+
+        # 초기 후보군이 하나의 잘못된 HS4/HS6 루트에 갇히지 않도록
+        # 점수순 fill 전에 계층 branch 대표 후보를 먼저 확보한다.
+        self._AppendBranchRepresentatives(
+            selectedCandidates=selectedCandidates,
+            selectedHs8Codes=selectedHs8Codes,
+            hs4Counts=hs4Counts,
+            sortedCandidates=sortedCandidates,
+            branchLevel="hs4",
+            representativeLimit=min(
+                topK,
+                DEFAULT_INITIAL_HS4_BRANCH_REPRESENTATIVE_LIMIT,
+            ),
+            enforceHs4Limit=False,
+        )
+        self._AppendBranchRepresentatives(
+            selectedCandidates=selectedCandidates,
+            selectedHs8Codes=selectedHs8Codes,
+            hs4Counts=hs4Counts,
+            sortedCandidates=sortedCandidates,
+            branchLevel="hs6",
+            representativeLimit=min(
+                topK,
+                DEFAULT_INITIAL_HS6_BRANCH_REPRESENTATIVE_LIMIT,
+            ),
+            enforceHs4Limit=True,
+        )
 
         for candidate in sortedCandidates:
             if len(selectedCandidates) >= topK:
@@ -2426,6 +2490,159 @@ class CnCandidateRetriever:
 
         return self._SortCandidates(selectedCandidates)[:topK]
 
+    def _AppendBranchRepresentatives(
+        self,
+        selectedCandidates: List[CnCandidate],
+        selectedHs8Codes: Set[str],
+        hs4Counts: Dict[str, int],
+        sortedCandidates: Sequence[CnCandidate],
+        branchLevel: str,
+        representativeLimit: int,
+        enforceHs4Limit: bool,
+    ) -> None:
+        if len(selectedCandidates) >= representativeLimit:
+            return
+
+        candidatesByBranchKey = self._GroupCandidatesByBranchKey(
+            sortedCandidates,
+            branchLevel,
+        )
+        selectedBranchKeys = self._BuildSelectedBranchKeys(
+            selectedCandidates,
+            branchLevel,
+        )
+
+        for branchKey in self._RankBranchKeys(candidatesByBranchKey):
+            if len(selectedCandidates) >= representativeLimit:
+                break
+            if branchKey in selectedBranchKeys:
+                continue
+            branchCandidates = candidatesByBranchKey.get(branchKey, [])
+            representative = self._SelectBranchRepresentative(branchCandidates)
+            if representative is None:
+                continue
+            appended = self._AppendCandidateIfNew(
+                selectedCandidates,
+                selectedHs8Codes,
+                hs4Counts,
+                representative,
+                enforceHs4Limit=enforceHs4Limit,
+            )
+            if appended:
+                selectedBranchKeys.add(branchKey)
+
+    def _GroupCandidatesByBranchKey(
+        self,
+        candidates: Sequence[CnCandidate],
+        branchLevel: str,
+    ) -> Dict[str, List[CnCandidate]]:
+        candidatesByBranchKey: Dict[str, List[CnCandidate]] = {}
+        for candidate in candidates:
+            branchKey = self._BuildCandidateBranchKey(candidate, branchLevel)
+            if branchKey == "":
+                continue
+            candidatesByBranchKey.setdefault(branchKey, []).append(candidate)
+        return candidatesByBranchKey
+
+    def _BuildSelectedBranchKeys(
+        self,
+        candidates: Sequence[CnCandidate],
+        branchLevel: str,
+    ) -> Set[str]:
+        return {
+            branchKey
+            for branchKey in (
+                self._BuildCandidateBranchKey(candidate, branchLevel)
+                for candidate in candidates
+            )
+            if branchKey != ""
+        }
+
+    def _BuildCandidateBranchKey(
+        self,
+        candidate: CnCandidate,
+        branchLevel: str,
+    ) -> str:
+        if branchLevel == "hs4":
+            return candidate.hs4Code or ""
+        if branchLevel == "hs6":
+            if candidate.hs6Code is None:
+                return ""
+            return "{0}:{1}".format(candidate.hs4Code or "unknown", candidate.hs6Code)
+        return ""
+
+    def _RankBranchKeys(
+        self,
+        candidatesByBranchKey: Mapping[str, Sequence[CnCandidate]],
+    ) -> List[str]:
+        return sorted(
+            candidatesByBranchKey.keys(),
+            key=lambda branchKey: self._BuildBranchRankKey(
+                candidatesByBranchKey[branchKey],
+            ),
+        )
+
+    def _BuildBranchRankKey(
+        self,
+        branchCandidates: Sequence[CnCandidate],
+    ) -> tuple[Any, ...]:
+        sortedBranchCandidates = self._SortCandidates(branchCandidates)
+        representative = self._SelectBranchRepresentative(sortedBranchCandidates)
+        if representative is None:
+            return (1, 0.0, 0.0, 0.0, 0, 0, "", "", "", "")
+
+        hasPrimaryOrSecondaryEvidence = any(
+            self._HasPrimaryOrSecondaryEvidence(candidate)
+            for candidate in sortedBranchCandidates
+        )
+        topBranchCandidates = sortedBranchCandidates[:2]
+        aggregateScore = sum(candidate.score for candidate in topBranchCandidates)
+        semanticScore = max(
+            (candidate.semanticScore or 0.0)
+            for candidate in sortedBranchCandidates
+        )
+        primaryMatchCount = sum(
+            len(candidate.primaryEvidenceMatches)
+            for candidate in topBranchCandidates
+        )
+        secondaryMatchCount = sum(
+            len(candidate.secondaryEvidenceMatches)
+            for candidate in topBranchCandidates
+        )
+        return (
+            0 if hasPrimaryOrSecondaryEvidence else 1,
+            -representative.score,
+            -aggregateScore,
+            -semanticScore,
+            -primaryMatchCount,
+            -secondaryMatchCount,
+            representative.domainScope,
+            representative.hs4Code or "",
+            representative.hs6Code or "",
+            representative.hs8,
+        )
+
+    def _SelectBranchRepresentative(
+        self,
+        branchCandidates: Sequence[CnCandidate],
+    ) -> Optional[CnCandidate]:
+        sortedBranchCandidates = self._SortCandidates(branchCandidates)
+        for candidate in sortedBranchCandidates:
+            if self._HasPrimaryOrSecondaryEvidence(candidate):
+                return candidate
+        if not sortedBranchCandidates:
+            return None
+        return sortedBranchCandidates[0]
+
+    def _HasPrimaryOrSecondaryEvidence(
+        self,
+        candidate: CnCandidate,
+    ) -> bool:
+        return bool(
+            candidate.primaryEvidenceMatches
+            or candidate.secondaryEvidenceMatches
+        )
+
     def _SortCandidates(
         self,
         candidates: Sequence[CnCandidate],
@@ -2434,6 +2651,7 @@ class CnCandidateRetriever:
             candidates,
             key=lambda candidate: (
                 -candidate.score,
+                -(candidate.semanticScore or 0.0),
                 candidate.domainScope,
                 candidate.hs4Code or "",
                 candidate.hs8,
@@ -2447,18 +2665,19 @@ class CnCandidateRetriever:
         hs4Counts: Dict[str, int],
         candidate: CnCandidate,
         enforceHs4Limit: bool,
-    ) -> None:
+    ) -> bool:
         if candidate.hs8 in selectedHs8Codes:
-            return
+            return False
         hs4Code = candidate.hs4Code or "unknown"
         if (
             enforceHs4Limit
             and hs4Counts.get(hs4Code, 0) >= DEFAULT_MAX_CANDIDATES_PER_HS4
         ):
-            return
+            return False
         selectedCandidates.append(candidate)
         selectedHs8Codes.add(candidate.hs8)
         hs4Counts[hs4Code] = hs4Counts.get(hs4Code, 0) + 1
+        return True
 
     def _BuildPreferredHeadingCodes(
         self,

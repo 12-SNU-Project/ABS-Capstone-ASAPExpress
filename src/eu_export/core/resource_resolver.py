@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from eu_export.ontology.schema import OntologyDocument
+from eu_export.core.schema import OntologyDocument
 from eu_export.utils import NormalizeWhitespace
 
 
@@ -50,7 +50,7 @@ class OntologyDataSourceCheck(BaseModel):
 
 
 class OntologyResourceResolutionReport(BaseModel):
-    """ontology data_sources 전체 확인 결과."""
+    """core data_sources 전체 확인 결과."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 

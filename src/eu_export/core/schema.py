@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class OntologyDocumentKind(str, Enum):
-    """ontology loader가 읽은 원본 문서의 형식."""
+    """core loader가 읽은 원본 문서의 형식."""
 
     MARKDOWN = "markdown"
     YAML = "yaml"
@@ -15,7 +15,7 @@ class OntologyDocumentKind(str, Enum):
 
 
 class OntologyDocument(BaseModel):
-    """Markdown/YAML ontology 문서 하나를 나타내는 원본 단위."""
+    """Markdown/YAML core 문서 하나를 나타내는 원본 단위."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
@@ -83,7 +83,7 @@ class OntologyRetrievalResult(BaseModel):
 
 
 class PackagedOntologyContext(BaseModel):
-    """LLM 요청에 넣을 수 있도록 예산 안에 묶은 ontology context."""
+    """LLM 요청에 넣을 수 있도록 예산 안에 묶은 core context."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 

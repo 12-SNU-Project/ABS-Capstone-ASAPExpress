@@ -5,7 +5,7 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
-from eu_export.ontology.schema import (
+from eu_export.core.schema import (
     OntologyChunk,
     OntologyDocument,
     OntologyDocumentKind,
@@ -100,7 +100,7 @@ class OntologyRetriever:
                     document=document,
                     headingPath=[
                         document.title or document.documentId,
-                        "ontology metadata",
+                        "core metadata",
                     ],
                     text=metadataText,
                     chunkKind=f"{pathBucket}_metadata",

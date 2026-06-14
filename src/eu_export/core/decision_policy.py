@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from eu_export.ontology.classification import (
+from eu_export.core.classification import (
     CnCandidate,
     Stage1ResponseValidationReport,
 )

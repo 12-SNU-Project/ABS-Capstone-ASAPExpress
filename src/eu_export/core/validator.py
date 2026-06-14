@@ -6,19 +6,19 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from eu_export.ontology.schema import OntologyDocument
+from eu_export.core.schema import OntologyDocument
 from eu_export.utils import NormalizeWhitespace
 
 
 class OntologyValidationSeverity(str, Enum):
-    """ontology validation issue의 심각도."""
+    """core validation issue의 심각도."""
 
     ERROR = "error"
     WARNING = "warning"
 
 
 class OntologyValidationIssue(BaseModel):
-    """ontology 문서 검증 중 발견된 문제."""
+    """core 문서 검증 중 발견된 문제."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
@@ -31,7 +31,7 @@ class OntologyValidationIssue(BaseModel):
 
 
 class OntologyValidationReport(BaseModel):
-    """ontology validation 결과."""
+    """core validation 결과."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
@@ -62,7 +62,7 @@ class OntologyValidationReport(BaseModel):
 
 
 class OntologyGraphValidator:
-    """Markdown ontology package의 graph metadata를 검증한다."""
+    """Markdown core package의 graph metadata를 검증한다."""
 
     REQUIRED_FRONTMATTER_FIELDS = frozenset(
         {
@@ -135,7 +135,7 @@ class OntologyGraphValidator:
                     self._BuildIssue(
                         severity=OntologyValidationSeverity.ERROR,
                         issueCode="duplicate_doc_id",
-                        message=f"Duplicate ontology doc_id: {documentId}",
+                        message=f"Duplicate core doc_id: {documentId}",
                         document=document,
                         fieldName="doc_id",
                     ),
@@ -251,7 +251,7 @@ class OntologyGraphValidator:
                             severity=OntologyValidationSeverity.WARNING,
                             issueCode="missing_related_file",
                             message=(
-                                "Related file path does not exist from ontology root: "
+                                "Related file path does not exist from core root: "
                                 f"{relativeFilePath}"
                             ),
                             document=document,

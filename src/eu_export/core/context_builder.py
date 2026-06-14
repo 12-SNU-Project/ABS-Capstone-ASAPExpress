@@ -3,10 +3,10 @@
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple
 
-from eu_export.ontology.context import ContextPackager
-from eu_export.ontology.loader import OntologyDocumentLoader
-from eu_export.ontology.retriever import OntologyRetriever
-from eu_export.ontology.schema import (
+from eu_export.core.context import ContextPackager
+from eu_export.core.loader import OntologyDocumentLoader
+from eu_export.core.retriever import OntologyRetriever
+from eu_export.core.schema import (
     OntologyChunk,
     OntologyDocument,
     PackagedOntologyContext,
@@ -32,7 +32,7 @@ REFERENCE_DOCUMENT_TYPES = frozenset(
 
 
 class OntologyContextBuilder:
-    """ontology RAG context를 한 번에 구성하는 공개 진입점."""
+    """core RAG context를 한 번에 구성하는 공개 진입점."""
 
     def __init__(
         self,

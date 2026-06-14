@@ -1,9 +1,9 @@
-"""Markdown 기반 ontology 문서 loader."""
+"""Markdown 기반 core 문서 loader."""
 
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from eu_export.ontology.schema import OntologyDocument, OntologyDocumentKind
+from eu_export.core.schema import OntologyDocument, OntologyDocumentKind
 from eu_export.utils import NormalizeWhitespace
 
 
@@ -11,7 +11,7 @@ DEFAULT_ONTOLOGY_EXTENSIONS = frozenset({".md", ".yaml", ".yml"})
 
 
 class OntologyDocumentLoader:
-    """ontology root 아래의 Markdown/YAML 문서를 읽어 표준 문서 객체로 변환한다."""
+    """core root 아래의 Markdown/YAML 문서를 읽어 표준 문서 객체로 변환한다."""
 
     def __init__(
         self,

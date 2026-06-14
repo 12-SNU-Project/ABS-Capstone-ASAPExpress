@@ -4,14 +4,14 @@ from typing import List, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from eu_export.ontology.classification import (
+from eu_export.core.classification import (
     CnCandidate,
     CnCandidateRetriever,
     DEFAULT_CN_CANDIDATE_TOP_K,
     ProductClassificationInput,
     Stage1ResponseValidationReport,
 )
-from eu_export.ontology.decision_policy import (
+from eu_export.core.decision_policy import (
     Stage1DecisionPolicy,
     Stage1DecisionReport,
 )

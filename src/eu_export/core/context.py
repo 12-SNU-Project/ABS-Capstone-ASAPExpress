@@ -2,7 +2,7 @@
 
 from typing import List, Sequence
 
-from eu_export.ontology.schema import (
+from eu_export.core.schema import (
     OntologyRetrievalResult,
     PackagedOntologyContext,
 )
@@ -49,14 +49,14 @@ class ContextPackager:
         warnings: List[str] = []
         if len(retrievalResults) > len(candidateResults):
             warnings.append(
-                "Some ontology retrieval results were omitted because of maxResultCount.",
+                "Some core retrieval results were omitted because of maxResultCount.",
             )
         if stoppedByBudget:
             warnings.append(
-                "Some ontology retrieval results were omitted because of the context budget.",
+                "Some core retrieval results were omitted because of the context budget.",
             )
         if not selectedResults:
-            warnings.append("No ontology context was selected for the LLM request.")
+            warnings.append("No core context was selected for the LLM request.")
 
         return PackagedOntologyContext(
             contextChunks=contextChunks,
