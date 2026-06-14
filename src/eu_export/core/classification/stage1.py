@@ -608,6 +608,16 @@ class CnCandidate(BaseModel):
         alias="description_points",
         exclude=True,
     )
+    hierarchyLevelPoints: Dict[str, float] = Field(
+        default_factory=dict,
+        alias="hierarchy_level_points",
+        exclude=True,
+    )
+    hierarchyLevelMatches: Dict[str, List[str]] = Field(
+        default_factory=dict,
+        alias="hierarchy_level_matches",
+        exclude=True,
+    )
     hs2Code: Optional[str] = Field(default=None, alias="hs2_code", exclude=True)
     hs2Description: Optional[str] = Field(
         default=None,
@@ -694,6 +704,11 @@ class CnCandidate(BaseModel):
             "include_rule_points": self.includeRulePoints,
             "search_keyword_points": self.searchKeywordPoints,
             "description_points": self.descriptionPoints,
+            "hierarchy_level_points": dict(self.hierarchyLevelPoints),
+            "hierarchy_level_matches": {
+                level: list(matches[:8])
+                for level, matches in self.hierarchyLevelMatches.items()
+            },
             "primary_evidence_matches": list(self.primaryEvidenceMatches[:8]),
             "secondary_evidence_matches": list(self.secondaryEvidenceMatches[:8]),
             "weak_evidence_matches": list(self.weakEvidenceMatches[:8]),
@@ -1749,19 +1764,13 @@ class CnCandidateRetriever:
             searchTextByTier,
             searchTermsByTier,
         )
-        candidateContextText = self._BuildCandidateContextText(row)
-        descriptionTierMatches = self._FindTieredTokenMatches(
-            " ".join(
-                [
-                    candidateContextText,
-                    row.get("combined_description", ""),
-                    row.get("cn_explanatory_note", ""),
-                    row.get("cn_description", ""),
-                    row.get("cn8_description", ""),
-                    row.get("branch_context", ""),
-                    row.get("hs8_description", ""),
-                ]
-            ),
+        (
+            descriptionTierMatches,
+            hierarchyLevelMatches,
+            hierarchyLevelPoints,
+            descriptionPoints,
+        ) = self._ScoreHierarchyDescriptionMatches(
+            row,
             searchTermsByTier,
         )
         excludeMatches = self._FindCellMatches(
@@ -1779,10 +1788,6 @@ class CnCandidateRetriever:
         searchKeywordPoints = self._ScoreTierMatches(
             searchKeywordTierMatches,
             TIER_SEARCH_KEYWORD_WEIGHTS,
-        )
-        descriptionPoints = self._ScoreTierMatches(
-            descriptionTierMatches,
-            TIER_DESCRIPTION_WEIGHTS,
         )
         score = includeRulePoints + searchKeywordPoints + descriptionPoints
 
@@ -1810,6 +1815,8 @@ class CnCandidateRetriever:
                 includeRulePoints=0.0,
                 searchKeywordPoints=0.0,
                 descriptionPoints=0.0,
+                hierarchyLevelPoints={},
+                hierarchyLevelMatches={},
             )
 
         if score < 0:
@@ -1833,6 +1840,8 @@ class CnCandidateRetriever:
             includeRulePoints=includeRulePoints,
             searchKeywordPoints=searchKeywordPoints,
             descriptionPoints=descriptionPoints,
+            hierarchyLevelPoints=hierarchyLevelPoints,
+            hierarchyLevelMatches=hierarchyLevelMatches,
         )
 
     def _BuildCandidate(
@@ -1850,6 +1859,8 @@ class CnCandidateRetriever:
         includeRulePoints: float,
         searchKeywordPoints: float,
         descriptionPoints: float,
+        hierarchyLevelPoints: Mapping[str, float],
+        hierarchyLevelMatches: Mapping[str, Sequence[str]],
         retrievalSources: Optional[Sequence[str]] = None,
         semanticScore: Optional[float] = None,
         semanticMatches: Optional[Sequence[Mapping[str, Any]]] = None,
@@ -1891,6 +1902,14 @@ class CnCandidateRetriever:
             includeRulePoints=round(includeRulePoints, 3),
             searchKeywordPoints=round(searchKeywordPoints, 3),
             descriptionPoints=round(descriptionPoints, 3),
+            hierarchyLevelPoints={
+                level: round(points, 3)
+                for level, points in hierarchyLevelPoints.items()
+            },
+            hierarchyLevelMatches={
+                level: list(matches)
+                for level, matches in hierarchyLevelMatches.items()
+            },
             hs2Code=chapterCode,
             hs2Description=row.get("chapter_description")
             or row.get("hs2_description")
@@ -2363,6 +2382,79 @@ class CnCandidateRetriever:
                 continue
             contextLines.append("{0}: {1}".format(label, normalizedDescription))
         return NormalizeWhitespacePreservingLines("\n".join(contextLines))
+
+    def _ScoreHierarchyDescriptionMatches(
+        self,
+        row: Mapping[str, str],
+        searchTermsByTier: Mapping[str, Set[str]],
+    ) -> tuple[Dict[str, List[str]], Dict[str, List[str]], Dict[str, float], float]:
+        candidateContextText = self._BuildCandidateContextText(row)
+        descriptionTierMatches = self._FindTieredTokenMatches(
+            " ".join(
+                [
+                    candidateContextText,
+                    row.get("combined_description", ""),
+                    row.get("cn_explanatory_note", ""),
+                    row.get("cn_description", ""),
+                    row.get("cn8_description", ""),
+                    row.get("branch_context", ""),
+                    row.get("hs8_description", ""),
+                ]
+            ),
+            searchTermsByTier,
+        )
+        descriptionPoints = self._ScoreTierMatches(
+            descriptionTierMatches,
+            TIER_DESCRIPTION_WEIGHTS,
+        )
+
+        subheadingDescription = row.get("subheading_description") or row.get(
+            "hs6_description",
+            "",
+        )
+        cnCode = row.get("cn", "") or row.get("hs8", "") or row.get("cn8", "")
+        cnDescription = (
+            row.get("cn_description", "")
+            or row.get("hs8_description", "")
+            or row.get("cn8_description", "")
+        )
+        if not subheadingDescription and (
+            row.get("cn_part", "") == "00" or cnCode.endswith("00")
+        ):
+            subheadingDescription = cnDescription
+
+        hierarchyTextByLevel = {
+            "hs2": row.get("chapter_description", "")
+            or row.get("hs2_description", ""),
+            "hs4": row.get("heading_description", "")
+            or row.get("hs4_description", ""),
+            "hs6": subheadingDescription,
+            "branch": row.get("branch_context", ""),
+            "cn8": cnDescription,
+            "note": row.get("cn_explanatory_note", ""),
+        }
+        hierarchyLevelMatches: Dict[str, List[str]] = {}
+        hierarchyLevelPoints: Dict[str, float] = {}
+        for level, levelText in hierarchyTextByLevel.items():
+            levelTierMatches = self._FindTieredTokenMatches(
+                levelText,
+                searchTermsByTier,
+            )
+            levelMatches = self._FlattenTierMatches(levelTierMatches)
+            if not levelMatches:
+                continue
+            hierarchyLevelMatches[level] = levelMatches
+            hierarchyLevelPoints[level] = self._ScoreTierMatches(
+                levelTierMatches,
+                TIER_DESCRIPTION_WEIGHTS,
+            )
+
+        return (
+            descriptionTierMatches,
+            hierarchyLevelMatches,
+            hierarchyLevelPoints,
+            descriptionPoints,
+        )
 
     def _FindTieredCellMatches(
         self,
