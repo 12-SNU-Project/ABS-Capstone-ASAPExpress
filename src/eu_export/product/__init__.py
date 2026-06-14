@@ -12,6 +12,7 @@ from eu_export.product.ocr import (
     ProductOcrImageDownloader,
     ProductOcrImageResult,
     ProductOcrTableResult,
+    ProductOcrTileTextResult,
     ProductStructuredOcrResult,
 )
 from eu_export.product.pipeline import (
@@ -70,5 +71,6 @@ __all__ = [
     "ProductOcrFactNormalizationResult",
     "ProductOcrImageResult",
     "ProductOcrTableResult",
+    "ProductOcrTileTextResult",
     "ProductStructuredOcrResult",
 ]

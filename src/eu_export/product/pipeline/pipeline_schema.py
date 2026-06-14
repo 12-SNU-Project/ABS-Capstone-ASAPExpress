@@ -126,6 +126,14 @@ class KurlyPipelineResult(BaseModel):
                 len(imageResult.structuredOcr.tables)
                 for imageResult in successfulImageResults
             ),
+            "raw_tile_text_count": sum(
+                len(imageResult.structuredOcr.rawTileTexts)
+                for imageResult in successfulImageResults
+            ),
+            "raw_text_length": sum(
+                len(imageResult.structuredOcr.rawText)
+                for imageResult in successfulImageResults
+            ),
             "combined_text_length": len(self.combinedOcrText),
             "normalized_fact_count": self.ocrNormalizationResult.factLineCount,
             "raw_line_count": self.ocrNormalizationResult.rawLineCount,
@@ -149,6 +157,11 @@ class KurlyPipelineResult(BaseModel):
                     "structured_fallback_reason": (
                         imageResult.structuredOcr.fallbackReason
                     ),
+                    "text_merge_mode": imageResult.structuredOcr.textMergeMode,
+                    "raw_tile_text_count": len(
+                        imageResult.structuredOcr.rawTileTexts
+                    ),
+                    "raw_text_length": len(imageResult.structuredOcr.rawText),
                     "error": imageResult.error,
                 }
                 for imageIndex, imageResult in enumerate(

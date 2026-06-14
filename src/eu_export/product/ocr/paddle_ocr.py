@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from eu_export.product.ocr.ocr_image_tiling import ProductOcrImageTilePlanner
 from eu_export.utils import NormalizeWhitespace
@@ -28,6 +28,15 @@ class ProductOcrTableResult(BaseModel):
     plainText: str = Field(default="", alias="plain_text")
 
 
+class ProductOcrTileTextResult(BaseModel):
+    """타일 단위 raw OCR 결과."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    tileIndex: Optional[int] = Field(default=None, alias="tile_index")
+    text: str = ""
+
+
 class ProductStructuredOcrResult(BaseModel):
     """표 우선 OCR 결과와 fallback 상태를 함께 보존한다."""
 
@@ -36,6 +45,11 @@ class ProductStructuredOcrResult(BaseModel):
     text: str = ""
     structuredText: str = Field(default="", alias="structured_text")
     rawText: str = Field(default="", alias="raw_text")
+    textMergeMode: str = Field(default="raw_only", alias="text_merge_mode")
+    rawTileTexts: List[ProductOcrTileTextResult] = Field(
+        default_factory=list,
+        alias="raw_tile_texts",
+    )
     usedStructuredTables: bool = Field(
         default=False,
         alias="used_structured_tables",
@@ -43,6 +57,16 @@ class ProductStructuredOcrResult(BaseModel):
     fallbackReason: Optional[str] = Field(default=None, alias="fallback_reason")
     tables: List[ProductOcrTableResult] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+
+    @computed_field(alias="raw_table_ocr")
+    @property
+    def rawTableOcr(self) -> str:
+        return self.structuredText
+
+    @computed_field(alias="raw_ocr")
+    @property
+    def rawOcr(self) -> str:
+        return self.rawText
 
 
 class ProductOcrEngine(ABC):
@@ -60,6 +84,8 @@ class ProductOcrEngine(ABC):
         return ProductStructuredOcrResult(
             text=rawText,
             rawText=rawText,
+            textMergeMode="raw_only",
+            rawTileTexts=[ProductOcrTileTextResult(text=rawText)] if rawText else [],
             fallbackReason="structured_ocr_not_supported",
         )
 
@@ -98,6 +124,9 @@ class PaddleOcrEngine(ProductOcrEngine):
 
     def ExtractTextFromImage(self, imageBytes: bytes) -> str:
         image = self._DecodeImageBytes(imageBytes)
+        return self._ExtractTextFromDecodedImage(image)
+
+    def _ExtractTextFromDecodedImage(self, image: Any) -> str:
         ocr = self._ReadInitializedOcr()
 
         if hasattr(ocr, "predict"):
@@ -274,42 +303,56 @@ class PaddleStructureOcrEngine(PaddleOcrEngine):
     ) -> ProductStructuredOcrResult:
         image = self._DecodeImageBytes(imageBytes)
         warnings: List[str] = []
+        tileImages = self._tilePlanner.BuildTiles(image)
+        rawTileTexts = self._ExtractRawTileTexts(tileImages)
+        rawText = self._BuildRawTileText(rawTileTexts)
         try:
-            tables = self._ExtractTablesFromImage(image)
+            tables = self._ExtractTablesFromTiles(tileImages)
         except Exception as error:
             warnings.append("pp_structure_failed: {0}".format(error))
             return self._BuildRawFallbackResult(
-                imageBytes,
+                rawText,
+                rawTileTexts,
                 fallbackReason="pp_structure_failed",
                 warnings=warnings,
             )
 
         tableText = self._BuildStructuredTableText(tables)
         if tableText:
-            return ProductStructuredOcrResult(
-                text=tableText,
+            mergedText = self._BuildMergedStructuredAndRawText(
                 structuredText=tableText,
+                rawText=rawText,
+            )
+            return ProductStructuredOcrResult(
+                text=mergedText,
+                structuredText=tableText,
+                rawText=rawText,
+                textMergeMode="structured_plus_raw",
+                rawTileTexts=rawTileTexts,
                 usedStructuredTables=True,
                 tables=tables,
                 warnings=warnings,
             )
 
         return self._BuildRawFallbackResult(
-            imageBytes,
+            rawText,
+            rawTileTexts,
             fallbackReason="no_table_detected",
             warnings=warnings,
         )
 
     def _BuildRawFallbackResult(
         self,
-        imageBytes: bytes,
+        rawText: str,
+        rawTileTexts: List[ProductOcrTileTextResult],
         fallbackReason: str,
         warnings: List[str],
     ) -> ProductStructuredOcrResult:
-        rawText = self.ExtractTextFromImage(imageBytes)
         return ProductStructuredOcrResult(
             text=rawText,
             rawText=rawText,
+            textMergeMode="raw_only",
+            rawTileTexts=rawTileTexts,
             fallbackReason=fallbackReason,
             warnings=list(warnings),
         )
@@ -350,11 +393,14 @@ class PaddleStructureOcrEngine(PaddleOcrEngine):
             self._structurePipeline = PPStructureV3(**reducedOptions)
         return self._structurePipeline
 
-    def _ExtractTablesFromImage(self, image: Any) -> List[ProductOcrTableResult]:
+    def _ExtractTablesFromTiles(
+        self,
+        tileImages: List[tuple[Optional[int], Any]],
+    ) -> List[ProductOcrTableResult]:
         structurePipeline = self._ReadInitializedStructurePipeline()
         tables: List[ProductOcrTableResult] = []
         seenPlainTexts: set[str] = set()
-        for tileIndex, tileImage in self._tilePlanner.BuildTiles(image):
+        for tileIndex, tileImage in tileImages:
             output = structurePipeline.predict(input=tileImage)
             tablePayloads: List[Dict[str, Any]] = []
             self._CollectTablePayloads(output, tablePayloads)
@@ -369,6 +415,48 @@ class PaddleStructureOcrEngine(PaddleOcrEngine):
                     tables.append(tableResult)
                     seenPlainTexts.add(normalizedPlainText)
         return tables
+
+    def _ExtractRawTileTexts(
+        self,
+        tileImages: List[tuple[Optional[int], Any]],
+    ) -> List[ProductOcrTileTextResult]:
+        tileTextResults: List[ProductOcrTileTextResult] = []
+        for tileIndex, tileImage in tileImages:
+            tileText = self._ExtractTextFromDecodedImage(tileImage)
+            if tileText.strip() == "":
+                continue
+            tileTextResults.append(
+                ProductOcrTileTextResult(
+                    tileIndex=tileIndex,
+                    text=tileText,
+                )
+            )
+        return tileTextResults
+
+    def _BuildRawTileText(
+        self,
+        rawTileTexts: List[ProductOcrTileTextResult],
+    ) -> str:
+        return "\n\n".join(
+            "[tile {0}]\n{1}".format(
+                rawTileText.tileIndex if rawTileText.tileIndex is not None else 1,
+                rawTileText.text,
+            )
+            for rawTileText in rawTileTexts
+            if rawTileText.text.strip()
+        )
+
+    def _BuildMergedStructuredAndRawText(
+        self,
+        structuredText: str,
+        rawText: str,
+    ) -> str:
+        if structuredText.strip() and rawText.strip():
+            return "[structured_tables]\n{0}\n\n[raw_ocr_tiles]\n{1}".format(
+                structuredText,
+                rawText,
+            )
+        return structuredText or rawText
 
     def _CollectTablePayloads(
         self,

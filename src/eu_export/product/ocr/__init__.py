@@ -16,6 +16,7 @@ from eu_export.product.ocr.paddle_ocr import (
     ProductOcrEngine,
     ProductOcrError,
     ProductOcrTableResult,
+    ProductOcrTileTextResult,
     ProductStructuredOcrResult,
 )
 
@@ -25,6 +26,7 @@ __all__ = [
     "ProductOcrEngine",
     "ProductOcrError",
     "ProductOcrTableResult",
+    "ProductOcrTileTextResult",
     "ProductStructuredOcrResult",
     "ProductOcrFactNormalizationResult",
     "ProductOcrFactNormalizer",
