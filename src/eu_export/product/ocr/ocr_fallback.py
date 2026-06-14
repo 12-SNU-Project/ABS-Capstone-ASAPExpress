@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from eu_export.product.paddle_ocr import ProductOcrEngine
+from eu_export.product.ocr.paddle_ocr import ProductOcrEngine
 
 
 DEFAULT_PRODUCT_OCR_IMAGE_ARTIFACT_ROOT_PATH = (

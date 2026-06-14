@@ -2,7 +2,7 @@
 
 from typing import List, Sequence
 
-from eu_export.core.schema import (
+from eu_export.core.context_retrieval.schema import (
     OntologyRetrievalResult,
     PackagedOntologyContext,
 )

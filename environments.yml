@@ -14,8 +14,9 @@ dependencies:
   - loguru
   - pytest
   - pip:
-      # Dash UI
+      # UI
       - dash
+      - PySide6
 
       # Runtime validation / optional admin tooling
       - jsonschema

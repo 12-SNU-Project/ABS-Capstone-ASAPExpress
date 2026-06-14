@@ -11,9 +11,9 @@ from eu_export.core.classification import (
     ProductClassificationInput,
     Stage1ResponseValidationReport,
 )
-from eu_export.core.decision_policy import (
+from eu_export.core.decision_flow.decision_policy import (
     Stage1DecisionPolicy,
-    Stage1DecisionReport,
+    ClassificationDecisionHandler,
 )
 
 
@@ -76,7 +76,7 @@ class Stage1TraversalController:
 
     def BuildFromDecision(
         self,
-        decisionReport: Stage1DecisionReport,
+        decisionReport: ClassificationDecisionHandler,
         candidates: Sequence[CnCandidate] = (),
     ) -> Stage1TraversalReport:
         currentCandidateHs8Codes = (
@@ -134,7 +134,7 @@ class Stage1TraversalController:
         self,
         productInput: ProductClassificationInput,
         currentCandidates: Sequence[CnCandidate],
-        decisionReport: Stage1DecisionReport,
+        decisionReport: ClassificationDecisionHandler,
         candidateRetriever: CnCandidateRetriever,
         topK: int = DEFAULT_CN_CANDIDATE_TOP_K,
         visitedHs8Codes: Sequence[str] = (),

@@ -2,15 +2,15 @@
 
 from typing import List, Optional
 
-from eu_export.product.kurly_market_collector import KurlyPageCollector
-from eu_export.product.kurly_market_schema import KurlyCollectionResult
-from eu_export.product.ocr_fallback import (
+from eu_export.product.web_parser.kurly_market_collector import KurlyPageCollector
+from eu_export.product.web_parser.kurly_market_schema import KurlyCollectionResult
+from eu_export.product.ocr.ocr_fallback import (
     ProductOcrFallbackRunner,
     ProductOcrImageResult,
 )
-from eu_export.product.ocr_normalization import ProductOcrFactNormalizer
-from eu_export.product.paddle_ocr import ProductOcrEngine
-from eu_export.product.pipeline_schema import (
+from eu_export.product.ocr.ocr_normalization import ProductOcrFactNormalizer
+from eu_export.product.ocr.paddle_ocr import ProductOcrEngine
+from eu_export.product.pipeline.pipeline_schema import (
     KurlyPipelineInput,
     KurlyPipelineResult,
     PipelineStep,

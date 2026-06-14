@@ -109,10 +109,10 @@ class AppPathsConfig(BaseModel):
 
     ontology_root: Path = Path("docs/ASAP_Ontology_v1")
     ontology_smoke_summary_artifact: Path = Path(
-        "artifacts/ontology-smoke/runtime-smoke-summary.json",
+        "artifacts/core-smoke/runtime-smoke-summary.json",
     )
     ontology_human_review_package_artifact: Path = Path(
-        "artifacts/ontology-smoke/stage1-human-review-package.json",
+        "artifacts/core-smoke/stage1-human-review-package.json",
     )
     kurly_smoke_artifact_root: Path = Path("artifacts/kurly-market-smoke")
     kurly_smoke_summary_artifact: Path = Path(

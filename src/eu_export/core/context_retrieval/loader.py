@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from eu_export.core.schema import OntologyDocument, OntologyDocumentKind
+from eu_export.core.context_retrieval.schema import OntologyDocument, OntologyDocumentKind
 from eu_export.utils import NormalizeWhitespace
 
 

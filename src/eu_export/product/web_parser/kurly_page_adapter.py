@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Any, List, Optional
 from urllib.parse import urlparse
 
-from eu_export.product.kurly_global import KurlyGlobalPageParser
-from eu_export.product.kurly_market import KurlyPageParser
-from eu_export.product.kurly_market_schema import (
+from eu_export.product.web_parser.kurly_global import KurlyGlobalPageParser
+from eu_export.product.web_parser.kurly_market import KurlyPageParser
+from eu_export.product.web_parser.kurly_market_schema import (
     KurlyProductPage,
     ProductSummaryEvidence,
 )

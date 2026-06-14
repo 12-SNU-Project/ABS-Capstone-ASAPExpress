@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Any, List, Optional
 from urllib.parse import urlparse
 
-from eu_export.product.kurly_market import (
+from eu_export.product.web_parser.kurly_market import (
     ALL_PRODUCT_NOTICE_FIELD_LABELS,
     KurlyBasePageParser,
 )
-from eu_export.product.kurly_market_schema import (
+from eu_export.product.web_parser.kurly_market_schema import (
     KurlyProductDomain,
     KurlyProductPage,
     ProductSummaryEvidence,

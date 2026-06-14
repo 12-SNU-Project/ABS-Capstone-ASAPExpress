@@ -10,7 +10,7 @@ from eu_export.core.classification import (
     Stage1EvidencePackage,
     Stage1EvidenceRecord,
 )
-from eu_export.core.recommendation import (
+from eu_export.core.decision_flow.recommendation import (
     Stage1RecommendationReport,
 )
 from eu_export.utils import NormalizeWhitespace
@@ -139,9 +139,9 @@ class Stage1HumanReviewPackageBuilder:
             limitations=self.BuildLimitations(recommendationData),
         )
 
+    @staticmethod
     def BuildPackageId(
-        self,
-        productInput: ProductClassificationInput,
+            productInput: ProductClassificationInput,
         recommendationReport: Stage1RecommendationReport,
     ) -> str:
         recommendedCandidate = recommendationReport.recommendedCandidate or {}
@@ -220,9 +220,9 @@ class Stage1HumanReviewPackageBuilder:
                     )
         return citationPurposes
 
+    @staticmethod
     def BuildSystemRequiredCitationIds(
-        self,
-        validationReport: Stage1ResponseValidationReport,
+            validationReport: Stage1ResponseValidationReport,
     ) -> set[str]:
         classificationResult = validationReport.parsedResponse.get(
             "classification_result",
@@ -247,9 +247,9 @@ class Stage1HumanReviewPackageBuilder:
                     evidenceIds.add(evidenceRef)
         return evidenceIds
 
+    @staticmethod
     def BuildEvidenceCitation(
-        self,
-        evidenceRecord: Stage1EvidenceRecord,
+            evidenceRecord: Stage1EvidenceRecord,
         purpose: str,
         citationOrigin: str,
     ) -> Dict[str, Any]:
@@ -259,9 +259,9 @@ class Stage1HumanReviewPackageBuilder:
             "citation_origin": citationOrigin,
         }
 
+    @staticmethod
     def BuildReviewChecklist(
-        self,
-        recommendationData: Mapping[str, Any],
+            recommendationData: Mapping[str, Any],
     ) -> List[str]:
         checklist = [
             "우선 검토 후보의 HS2-HS4-HS6-CN8 계층 검토 코멘트가 상품 정보와 모순되지 않는지 확인한다.",
@@ -291,9 +291,9 @@ class Stage1HumanReviewPackageBuilder:
         )
         return self.BuildUniqueStrings(limitations)
 
+    @staticmethod
     def MergeCitationPurpose(
-        self,
-        currentPurpose: Optional[str],
+            currentPurpose: Optional[str],
         nextPurpose: str,
     ) -> str:
         if currentPurpose is None or currentPurpose == "":
@@ -302,13 +302,15 @@ class Stage1HumanReviewPackageBuilder:
             return currentPurpose
         return "{0}, {1}".format(currentPurpose, nextPurpose)
 
-    def BuildTextPreview(self, text: str) -> str:
+    @staticmethod
+    def BuildTextPreview(text: str) -> str:
         normalizedText = NormalizeWhitespace(text)
         if len(normalizedText) <= DEFAULT_HUMAN_REVIEW_TEXT_PREVIEW_CHARACTERS:
             return normalizedText
         return normalizedText[:DEFAULT_HUMAN_REVIEW_TEXT_PREVIEW_CHARACTERS].rstrip() + "..."
 
-    def BuildUniqueStrings(self, values: Sequence[str]) -> List[str]:
+    @staticmethod
+    def BuildUniqueStrings(values: Sequence[str]) -> List[str]:
         uniqueValues: List[str] = []
         seenValues: set[str] = set()
         for value in values:

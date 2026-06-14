@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from eu_export.core.schema import OntologyDocument
+from eu_export.core.context_retrieval.schema import OntologyDocument
 from eu_export.utils import NormalizeWhitespace
 
 

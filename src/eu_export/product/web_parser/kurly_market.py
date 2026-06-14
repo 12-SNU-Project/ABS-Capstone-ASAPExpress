@@ -4,12 +4,12 @@ import re
 from typing import List, Optional
 from urllib.parse import urlparse
 
-from eu_export.product.kurly_market_collector import (
+from eu_export.product.web_parser.kurly_market_collector import (
     KurlyCollectionError,
     KurlyPageCollector,
 )
-from eu_export.product.kurly_market_html import KurlyHtmlTextExtractor
-from eu_export.product.kurly_market_schema import (
+from eu_export.product.web_parser.kurly_market_html import KurlyHtmlTextExtractor
+from eu_export.product.web_parser.kurly_market_schema import (
     KurlyProductDomain,
     ProductNoticeField,
     ProductNoticeOption,

@@ -5,7 +5,7 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
-from eu_export.core.schema import (
+from eu_export.core.context_retrieval.schema import (
     OntologyChunk,
     OntologyDocument,
     OntologyDocumentKind,

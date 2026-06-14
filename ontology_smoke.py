@@ -1,13 +1,16 @@
 """Ontology context/request builder runtime smoke.
 
-이 파일은 ontology 관련 smoke를 단계별로 누적하는 단일 진입점이다.
+이 파일은 core 관련 smoke를 단계별로 누적하는 단일 진입점이다.
 새 smoke 단계가 필요하면 별도 파일을 만들지 말고 이 runner에 단계를 추가한다.
 """
 
 import json
+import shutil
 import sys
+import termios
+import tty
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
 from loguru import logger
@@ -35,7 +38,7 @@ from eu_export.bridge import (  # noqa: E402
     TextEmbeddingGenerationError,
 )
 from eu_export.app_config import LoadAppConfig  # noqa: E402
-from eu_export.ontology import (  # noqa: E402
+from eu_export.core import (  # noqa: E402
     CnCandidate,
     CnCandidateRetriever,
     CnSemanticCandidateIndex,
@@ -43,8 +46,8 @@ from eu_export.ontology import (  # noqa: E402
     OntologyContextBuilder,
     OntologyGraphValidator,
     OntologyResourceResolver,
-    ProductClassificationInputNormalizer,
 )
+from eu_export.input_process import ProductInputAdapter  # noqa: E402
 from eu_export.utils import NormalizeWhitespace  # noqa: E402
 
 
@@ -110,7 +113,7 @@ class ProductSmokeSummaryPayload(BaseModel):
 
 
 class OntologySmokeRunner:
-    """ontology 문서 로드, 검색 context, LLM request 생성을 확인한다."""
+    """core 문서 로드, 검색 context, LLM request 생성을 확인한다."""
 
     def __init__(self) -> None:
         appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
@@ -162,6 +165,7 @@ class OntologySmokeRunner:
         }
         self._semanticCandidateIndex: Optional[CnSemanticCandidateIndex] = None
         self._semanticCandidateIndexStatus: Optional[Dict[str, Any]] = None
+        self._candidateHierarchyViewerItems: List[Dict[str, Any]] = []
         self._smokeQueries = [
             {
                 "name": "stage1_cosmetics_classification",
@@ -184,10 +188,31 @@ class OntologySmokeRunner:
         ]
 
     def Run(self) -> None:
+        self.RunStage5Smoke(runCandidateViewer=True)
+
+    def RunStage5Smoke(
+        self,
+        *,
+        progressCallback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        writeSummaryArtifact: Optional[bool] = None,
+        runCandidateViewer: bool = False,
+    ) -> Dict[str, Any]:
         self._ConfigureLogger()
         if self._runKurlySmokeBeforeOntology:
+            self._EmitProgress(
+                progressCallback,
+                "KurlyMarketSmokePrerequisite",
+                "running",
+                "KurlyMarket 수집 smoke 실행",
+            )
             self._RunKurlyMarketSmokePrerequisite()
             self._ConfigureLogger()
+            self._EmitProgress(
+                progressCallback,
+                "KurlyMarketSmokePrerequisite",
+                "completed",
+                "KurlyMarket 수집 smoke 완료",
+            )
 
         runLogger = self._Logger("Run")
         runLogger.info(
@@ -202,25 +227,90 @@ class OntologySmokeRunner:
         self._LogStepHeader(
             1,
             totalPhaseCount,
-            "사전 점검: ontology 문서, 검색 컨텍스트, CSV 리소스",
+            "사전 점검: core 문서, 검색 컨텍스트, CSV 리소스",
+        )
+        self._EmitProgress(
+            progressCallback,
+            "Stage1DocumentLoad",
+            "running",
+            "core 문서와 retrieval 문서 로드",
         )
         documentSummary = self._RunDocumentLoadSmoke(contextBuilder)
+        self._EmitProgress(
+            progressCallback,
+            "Stage1DocumentLoad",
+            "completed",
+            "core 문서 로드 완료",
+            result=documentSummary,
+        )
 
-        queryResults = [
-            self._RunQuerySmoke(contextBuilder, queryCase)
-            for queryCase in self._smokeQueries
-        ]
+        queryResults = []
+        for queryCase in self._smokeQueries:
+            self._EmitProgress(
+                progressCallback,
+                "Stage2ContextRequest",
+                "running",
+                "검색 context 생성: {0}".format(queryCase["name"]),
+            )
+            queryResult = self._RunQuerySmoke(contextBuilder, queryCase)
+            queryResults.append(queryResult)
+            self._EmitProgress(
+                progressCallback,
+                "Stage2ContextRequest",
+                "completed",
+                "검색 context 생성 완료: {0}".format(queryCase["name"]),
+                result=queryResult,
+            )
 
+        self._EmitProgress(
+            progressCallback,
+            "Stage3GraphValidation",
+            "running",
+            "core graph validation",
+        )
         validationSummary = self._RunValidationSmoke(contextBuilder)
+        self._EmitProgress(
+            progressCallback,
+            "Stage3GraphValidation",
+            "completed",
+            "core graph validation 완료",
+            result=validationSummary,
+        )
 
+        self._EmitProgress(
+            progressCallback,
+            "Stage4ResourceResolution",
+            "running",
+            "CSV/resource loadability 확인",
+        )
         resourceSummary = self._RunResourceResolutionSmoke(contextBuilder)
+        self._EmitProgress(
+            progressCallback,
+            "Stage4ResourceResolution",
+            "completed",
+            "CSV/resource loadability 확인 완료",
+            result=resourceSummary,
+        )
 
         self._LogStepHeader(
             2,
             totalPhaseCount,
             "정적 로직 + semantic retrieval 후보 생성",
         )
+        self._EmitProgress(
+            progressCallback,
+            "Stage5CandidateRetrieval",
+            "running",
+            "상품별 CN 후보 생성 및 answer.csv HS6 hit 평가",
+        )
         classificationCandidateSummary = self._RunClassificationCandidateSmoke()
+        self._EmitProgress(
+            progressCallback,
+            "Stage5CandidateRetrieval",
+            "completed",
+            "상품별 CN 후보 생성 완료",
+            result=classificationCandidateSummary,
+        )
 
         summary = {
             "run_scope": {
@@ -235,8 +325,41 @@ class OntologySmokeRunner:
             "classification_candidate_summary": classificationCandidateSummary,
         }
         self._LogSummary(summary)
-        if self._writeSummaryArtifact:
+        shouldWriteSummaryArtifact = (
+            self._writeSummaryArtifact
+            if writeSummaryArtifact is None
+            else writeSummaryArtifact
+        )
+        if shouldWriteSummaryArtifact:
             self._WriteSummaryArtifact(summary)
+        if runCandidateViewer:
+            self._RunCandidateHierarchyViewerIfAvailable()
+        return summary
+
+    def GetCandidateHierarchyViewerItems(self) -> List[Dict[str, Any]]:
+        return [dict(viewerItem) for viewerItem in self._candidateHierarchyViewerItems]
+
+    def _EmitProgress(
+        self,
+        progressCallback: Optional[Callable[[Dict[str, Any]], None]],
+        stage: str,
+        status: str,
+        message: str,
+        **payload: Any,
+    ) -> None:
+        if progressCallback is None:
+            return
+        try:
+            progressCallback(
+                {
+                    "stage": stage,
+                    "status": status,
+                    "message": message,
+                    **payload,
+                }
+            )
+        except Exception:
+            pass
 
     def _RunKurlyMarketSmokePrerequisite(self) -> None:
         prerequisiteLogger = self._Logger("KurlyMarketSmokePrerequisite")
@@ -420,7 +543,7 @@ class OntologySmokeRunner:
         maxProductCount: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         smokeRecords = self._LoadProductSmokeRecords()
-        normalizer = ProductClassificationInputNormalizer()
+        inputAdapter = ProductInputAdapter()
         candidateRetriever = CnCandidateRetriever(
             ontologyRootPath=self._ontologyRootPath,
             projectRootPath=PROJECT_ROOT_PATH,
@@ -438,7 +561,7 @@ class OntologySmokeRunner:
         )
         preparedProducts: List[Dict[str, Any]] = []
         for smokeRecord in selectedSmokeRecords:
-            productInput = normalizer.BuildFromKurlyPipelineResultData(smokeRecord)
+            productInput = inputAdapter.BuildFromData(smokeRecord)
             heuristicCandidates = candidateRetriever.FindCandidates(
                 productInput,
                 topK=topK,
@@ -903,6 +1026,7 @@ class OntologySmokeRunner:
         answerCodeByProductUrl = self._LoadAnswerCodeByProductUrl()
 
         productResults: List[Dict[str, Any]] = []
+        candidateHierarchyViewerItems: List[Dict[str, Any]] = []
         for preparedProduct in preparedProducts:
             productPageUrl = preparedProduct.get("product_page_url")
             productInput = preparedProduct["product_input"]
@@ -925,6 +1049,21 @@ class OntologySmokeRunner:
                 heuristicCandidates=heuristicCandidates,
                 preLimitCandidates=preLimitCandidates,
                 finalCandidates=candidates,
+            )
+            candidateHierarchyViewerItems.append(
+                {
+                    "product_name": productInput.productName,
+                    "product_page_url": productPageUrl,
+                    "expected_hs6": answerEvaluation["expected_hs6"],
+                    "hit": answerEvaluation["is_hit"],
+                    "match_rank": answerEvaluation["best_match_rank"],
+                    "diagnosis": retrievalAnswerDiagnostics["diagnosis"],
+                    "candidate_hs6_codes": answerEvaluation["candidate_hs6_codes"],
+                    "tree": self._BuildCandidateHierarchyTree(
+                        "final_top5",
+                        candidates,
+                    ),
+                }
             )
             productResults.append(
                 {
@@ -1034,6 +1173,7 @@ class OntologySmokeRunner:
             ),
             "products": productResults,
         }
+        self._candidateHierarchyViewerItems = candidateHierarchyViewerItems
         self._LogCandidateScoring(result)
         return result
 
@@ -1324,6 +1464,344 @@ class OntologySmokeRunner:
         if len(text) <= self._textPreviewCharacters:
             return text
         return f"{text[:self._textPreviewCharacters]}..."
+
+    def _BuildCandidateHierarchyTree(
+        self,
+        title: str,
+        candidates: List[CnCandidate],
+    ) -> str:
+        if not candidates:
+            return "{0} candidate_hierarchy count=0".format(title)
+
+        lines = [
+            "{0} candidate_hierarchy count={1}".format(
+                title,
+                len(candidates),
+            )
+        ]
+        rankedCandidates = [
+            (rank, candidate)
+            for rank, candidate in enumerate(candidates, start=1)
+        ]
+        hs2Groups = self._GroupRankedCandidatesByKey(
+            rankedCandidates,
+            lambda rankedCandidate: rankedCandidate[1].hs2Code or "unknown",
+        )
+        for hs2Index, (hs2Code, hs2Candidates) in enumerate(hs2Groups.items()):
+            hs2Representative = hs2Candidates[0][1]
+            hs2Prefix = self._BuildTreeBranchPrefix(
+                hs2Index,
+                len(hs2Groups),
+            )
+            lines.append(
+                "{0}HS2 {1}: {2}".format(
+                    hs2Prefix,
+                    hs2Code,
+                    self._FormatTreeDescription(
+                        hs2Representative.hs2Description,
+                    ),
+                )
+            )
+            hs4Groups = self._GroupRankedCandidatesByKey(
+                hs2Candidates,
+                lambda rankedCandidate: rankedCandidate[1].hs4Code or "unknown",
+            )
+            hs2ChildIndent = self._BuildTreeChildIndent(
+                hs2Index,
+                len(hs2Groups),
+            )
+            for hs4Index, (hs4Code, hs4Candidates) in enumerate(hs4Groups.items()):
+                hs4Representative = hs4Candidates[0][1]
+                hs4Prefix = hs2ChildIndent + self._BuildTreeBranchPrefix(
+                    hs4Index,
+                    len(hs4Groups),
+                )
+                lines.append(
+                    "{0}HS4 {1}: {2}".format(
+                        hs4Prefix,
+                        hs4Code,
+                        self._FormatTreeDescription(
+                            hs4Representative.hs4Description,
+                        ),
+                    )
+                )
+                hs6Groups = self._GroupRankedCandidatesByKey(
+                    hs4Candidates,
+                    lambda rankedCandidate: rankedCandidate[1].hs6Code or "unknown",
+                )
+                hs4ChildIndent = hs2ChildIndent + self._BuildTreeChildIndent(
+                    hs4Index,
+                    len(hs4Groups),
+                )
+                for hs6Index, (hs6Code, hs6Candidates) in enumerate(hs6Groups.items()):
+                    hs6Representative = hs6Candidates[0][1]
+                    hs6Prefix = hs4ChildIndent + self._BuildTreeBranchPrefix(
+                        hs6Index,
+                        len(hs6Groups),
+                    )
+                    lines.append(
+                        "{0}HS6 {1}: {2}".format(
+                            hs6Prefix,
+                            hs6Code,
+                            self._FormatTreeDescription(
+                                hs6Representative.hs6Description,
+                            ),
+                        )
+                    )
+                    hs6ChildIndent = hs4ChildIndent + self._BuildTreeChildIndent(
+                        hs6Index,
+                        len(hs6Groups),
+                    )
+                    for candidateIndex, rankedCandidate in enumerate(hs6Candidates):
+                        rank, candidate = rankedCandidate
+                        candidatePrefix = hs6ChildIndent + self._BuildTreeBranchPrefix(
+                            candidateIndex,
+                            len(hs6Candidates),
+                        )
+                        scoreIndent = hs6ChildIndent + self._BuildTreeChildIndent(
+                            candidateIndex,
+                            len(hs6Candidates),
+                        )
+                        lines.extend(
+                            self._BuildCandidateTreeLines(
+                                candidatePrefix,
+                                scoreIndent,
+                                rank,
+                                candidate,
+                            )
+                        )
+        return "\n".join(lines)
+
+    def _BuildCandidateTreeLines(
+        self,
+        candidatePrefix: str,
+        scoreIndent: str,
+        rank: int,
+        candidate: CnCandidate,
+    ) -> List[str]:
+        scoreBreakdown = candidate.scoreBreakdown
+        semanticScore = (
+            "-"
+            if candidate.semanticScore is None
+            else "{0:.4f}".format(candidate.semanticScore)
+        )
+        retrievalSources = ",".join(candidate.retrievalSources) or "-"
+        lines = [
+            "{0}CN8 {1}: {2}".format(
+                candidatePrefix,
+                candidate.hs8,
+                self._FormatTreeDescription(candidate.hs8Description),
+            ),
+            (
+                "{0}score rank={1} total={2:.3f} semantic={3} "
+                "sources={4}"
+            ).format(
+                scoreIndent,
+                rank,
+                candidate.score,
+                semanticScore,
+                retrievalSources,
+            ),
+            (
+                "{0}breakdown include={1} search={2} description={3} "
+                "semantic={4}"
+            ).format(
+                scoreIndent,
+                scoreBreakdown.get("include_rule_points"),
+                scoreBreakdown.get("search_keyword_points"),
+                scoreBreakdown.get("description_points"),
+                scoreBreakdown.get("semantic_score"),
+            ),
+        ]
+        matchSummary = self._BuildCandidateMatchSummary(candidate)
+        if matchSummary:
+            lines.append("{0}matches {1}".format(scoreIndent, matchSummary))
+        if candidate.excludeRuleMatches:
+            lines.append(
+                "{0}exclude={1}".format(
+                    scoreIndent,
+                    self._FormatMatchList(candidate.excludeRuleMatches),
+                )
+            )
+        return lines
+
+    def _BuildCandidateMatchSummary(self, candidate: CnCandidate) -> str:
+        parts: List[str] = []
+        primaryMatches = self._FormatMatchList(candidate.primaryEvidenceMatches)
+        secondaryMatches = self._FormatMatchList(candidate.secondaryEvidenceMatches)
+        weakMatches = self._FormatMatchList(candidate.weakEvidenceMatches)
+        if primaryMatches != "-":
+            parts.append("primary={0}".format(primaryMatches))
+        if secondaryMatches != "-":
+            parts.append("secondary={0}".format(secondaryMatches))
+        if weakMatches != "-":
+            parts.append("weak={0}".format(weakMatches))
+        return " ".join(parts)
+
+    def _FormatMatchList(
+        self,
+        matches: List[str],
+        limit: int = 5,
+    ) -> str:
+        if not matches:
+            return "-"
+        formattedMatches = [
+            self._FormatTreeDescription(match, maxCharacters=28)
+            for match in matches[:limit]
+        ]
+        if len(matches) > limit:
+            formattedMatches.append("+{0}".format(len(matches) - limit))
+        return "[{0}]".format(", ".join(formattedMatches))
+
+    def _FormatTreeDescription(
+        self,
+        text: Optional[str],
+        maxCharacters: int = 80,
+    ) -> str:
+        normalizedText = " ".join(str(text or "").split())
+        if not normalizedText:
+            return "-"
+        if len(normalizedText) <= maxCharacters:
+            return normalizedText
+        return "{0}...".format(normalizedText[:maxCharacters])
+
+    def _GroupRankedCandidatesByKey(
+        self,
+        rankedCandidates: List[tuple[int, CnCandidate]],
+        keyBuilder: Callable[[tuple[int, CnCandidate]], str],
+    ) -> Dict[str, List[tuple[int, CnCandidate]]]:
+        groupedCandidates: Dict[str, List[tuple[int, CnCandidate]]] = {}
+        for rankedCandidate in rankedCandidates:
+            groupKey = str(keyBuilder(rankedCandidate))
+            groupedCandidates.setdefault(groupKey, []).append(rankedCandidate)
+        return groupedCandidates
+
+    @staticmethod
+    def _BuildTreeBranchPrefix(index: int, totalCount: int) -> str:
+        if index == totalCount - 1:
+            return "└── "
+        return "├── "
+
+    @staticmethod
+    def _BuildTreeChildIndent(index: int, totalCount: int) -> str:
+        if index == totalCount - 1:
+            return "    "
+        return "│   "
+
+    def _RunCandidateHierarchyViewerIfAvailable(self) -> None:
+        if not self._candidateHierarchyViewerItems:
+            return
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            self._Logger("CandidateTreeViewer").info(
+                "candidate_tree_viewer skipped=true reason=not_tty products={}",
+                len(self._candidateHierarchyViewerItems),
+            )
+            return
+        self._RunCandidateHierarchyViewer(self._candidateHierarchyViewerItems)
+
+    def _RunCandidateHierarchyViewer(
+        self,
+        viewerItems: List[Dict[str, Any]],
+    ) -> None:
+        terminalState = termios.tcgetattr(sys.stdin.fileno())
+        try:
+            tty.setcbreak(sys.stdin.fileno())
+            currentIndex = 0
+            while True:
+                self._RenderCandidateHierarchyViewerItem(
+                    viewerItems,
+                    currentIndex,
+                )
+                keyName = self._ReadTerminalKey()
+                if keyName in {"q", "Q", "ctrl_c", "ctrl_d"}:
+                    break
+                if keyName == "right":
+                    currentIndex = (currentIndex + 1) % len(viewerItems)
+                    continue
+                if keyName == "left":
+                    currentIndex = (currentIndex - 1) % len(viewerItems)
+                    continue
+        except KeyboardInterrupt:
+            pass
+        finally:
+            termios.tcsetattr(
+                sys.stdin.fileno(),
+                termios.TCSADRAIN,
+                terminalState,
+            )
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+
+    def _RenderCandidateHierarchyViewerItem(
+        self,
+        viewerItems: List[Dict[str, Any]],
+        currentIndex: int,
+    ) -> None:
+        viewerItem = viewerItems[currentIndex]
+        terminalSize = shutil.get_terminal_size((120, 40))
+        separator = "-" * min(terminalSize.columns, 120)
+        productName = self._FormatViewerValue(viewerItem.get("product_name"))
+        expectedHs6 = self._FormatViewerValue(viewerItem.get("expected_hs6"))
+        matchRank = self._FormatViewerValue(viewerItem.get("match_rank"))
+        candidateHs6Codes = viewerItem.get("candidate_hs6_codes", [])
+        if not isinstance(candidateHs6Codes, list):
+            candidateHs6Codes = []
+        sys.stdout.write("\033[2J\033[H")
+        sys.stdout.write(
+            (
+                "Candidate Hierarchy Viewer  {0}/{1}\n"
+                "←/→: 상품 이동   q: 종료\n"
+                "{2}\n"
+            ).format(
+                currentIndex + 1,
+                len(viewerItems),
+                separator,
+            )
+        )
+        sys.stdout.write("product: {0}\n".format(productName))
+        sys.stdout.write(
+            "expected_hs6={0} hit={1} match_rank={2} diagnosis={3}\n".format(
+                expectedHs6,
+                viewerItem.get("hit"),
+                matchRank,
+                self._FormatViewerValue(viewerItem.get("diagnosis")),
+            )
+        )
+        sys.stdout.write(
+            "candidate_hs6={0}\n".format(
+                ", ".join(str(code) for code in candidateHs6Codes) or "-",
+            )
+        )
+        sys.stdout.write("{0}\n".format(separator))
+        sys.stdout.write(str(viewerItem.get("tree", "")))
+        sys.stdout.write("\n{0}\n".format(separator))
+        sys.stdout.flush()
+
+    def _ReadTerminalKey(self) -> str:
+        firstCharacter = sys.stdin.read(1)
+        if firstCharacter == "\x03":
+            return "ctrl_c"
+        if firstCharacter == "\x04":
+            return "ctrl_d"
+        if firstCharacter != "\x1b":
+            return firstCharacter
+
+        secondCharacter = sys.stdin.read(1)
+        thirdCharacter = sys.stdin.read(1)
+        if secondCharacter == "[" and thirdCharacter == "C":
+            return "right"
+        if secondCharacter == "[" and thirdCharacter == "D":
+            return "left"
+        return "escape"
+
+    @staticmethod
+    def _FormatViewerValue(value: Any) -> str:
+        if value is None:
+            return "-"
+        text = str(value)
+        if text.strip() == "":
+            return "-"
+        return text
 
     def _ConfigureLogger(self) -> None:
         logger.remove()

@@ -30,6 +30,7 @@ class OntologyDocument(BaseModel):
         alias="document_kind",
     )
 
+    # 함수 호출 결과를 json 포맷에 직렬화 시킬 수 있도록 하는 문법
     @computed_field(alias="content_length")
     @property
     def contentLength(self) -> int:

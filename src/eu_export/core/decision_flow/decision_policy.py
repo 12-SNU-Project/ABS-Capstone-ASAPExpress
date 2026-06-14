@@ -11,7 +11,7 @@ from eu_export.core.classification import (
 from eu_export.utils import NormalizeWhitespace
 
 
-class Stage1DecisionReport(BaseModel):
+class ClassificationDecisionHandler(BaseModel):
     """검증된 Stage 1 후보 검토 응답을 다음 처리 단계용 결정 요약으로 정리한다."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
@@ -72,9 +72,9 @@ class Stage1DecisionPolicy:
         self,
         validationReport: Stage1ResponseValidationReport,
         candidates: Sequence[CnCandidate],
-    ) -> Stage1DecisionReport:
+    ) -> ClassificationDecisionHandler:
         if not validationReport.isValid:
-            return Stage1DecisionReport(
+            return ClassificationDecisionHandler(
                 decisionStatus="invalid_response_requires_retry",
                 limitations=[
                     "Validator errors must be fixed before classification traversal continues.",
@@ -85,7 +85,7 @@ class Stage1DecisionPolicy:
             "classification_result",
         )
         if not isinstance(classificationResult, Mapping):
-            return Stage1DecisionReport(
+            return ClassificationDecisionHandler(
                 decisionStatus="invalid_response_requires_retry",
                 limitations=[
                     "classification_result is unavailable after validation.",
@@ -181,7 +181,7 @@ class Stage1DecisionPolicy:
                 "candidate set from the parent HS/CN hierarchy."
             )
 
-        return Stage1DecisionReport(
+        return ClassificationDecisionHandler(
             decisionStatus=decisionStatus,
             recommendedCandidateHs8=recommendedCandidateHs8,
             strongCandidateHs8Codes=strongCandidates,

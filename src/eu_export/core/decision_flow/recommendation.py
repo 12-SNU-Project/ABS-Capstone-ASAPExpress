@@ -10,8 +10,8 @@ from eu_export.core.classification import (
     Stage1ResponseValidationReport,
     Stage1EvidencePackage,
 )
-from eu_export.core.decision_policy import Stage1DecisionReport
-from eu_export.core.traversal import Stage1TraversalReport
+from eu_export.core.decision_flow.decision_policy import ClassificationDecisionHandler
+from eu_export.core.decision_flow.traversal import Stage1TraversalReport
 from eu_export.utils import NormalizeWhitespace
 
 
@@ -74,7 +74,7 @@ class Stage1RecommendationReportBuilder:
         productInput: ProductClassificationInput,
         candidates: Sequence[CnCandidate],
         validationReport: Stage1ResponseValidationReport,
-        decisionReport: Stage1DecisionReport,
+        decisionReport: ClassificationDecisionHandler,
         traversalReport: Stage1TraversalReport,
         evidencePackage: Optional[Stage1EvidencePackage] = None,
         backtrackingSummary: Optional[Mapping[str, Any]] = None,
@@ -344,7 +344,7 @@ class Stage1RecommendationReportBuilder:
 
     def _BuildRecommendationLevel(
         self,
-        decisionReport: Stage1DecisionReport,
+        decisionReport: ClassificationDecisionHandler,
     ) -> str:
         if decisionReport.decisionStatus == "single_strong_candidate_for_human_review":
             return "single_priority_candidate_for_human_review"

@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Optional
 
 from eu_export.bridge import LlmGenerationOptions, LlmRequest, LlmResponseFormat
-from eu_export.core.context_builder import OntologyContextBuilder
-from eu_export.core.schema import PackagedOntologyContext
+from eu_export.core.context_retrieval.context_builder import OntologyContextBuilder
+from eu_export.core.context_retrieval.schema import PackagedOntologyContext
 
 
 DEFAULT_ONTOLOGY_SYSTEM_PROMPT = """\

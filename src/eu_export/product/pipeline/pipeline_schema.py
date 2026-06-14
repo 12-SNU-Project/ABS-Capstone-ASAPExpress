@@ -5,16 +5,16 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from eu_export.product.kurly_market_schema import (
+from eu_export.product.web_parser.kurly_market_schema import (
     KurlyCollectionResult,
     RenderedPageEvidence,
 )
-from eu_export.product.ocr_fallback import (
+from eu_export.product.ocr.ocr_fallback import (
     DEFAULT_PRODUCT_OCR_IMAGE_ARTIFACT_ROOT_PATH,
     DEFAULT_PRODUCT_OCR_IMAGE_DOWNLOAD_TIMEOUT_SECONDS,
     ProductOcrImageResult,
 )
-from eu_export.product.ocr_normalization import ProductOcrFactNormalizationResult
+from eu_export.product.ocr.ocr_normalization import ProductOcrFactNormalizationResult
 
 
 class KurlyPipelineInput(BaseModel):

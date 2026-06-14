@@ -3,7 +3,7 @@
 from typing import Any, List, Optional, Protocol
 from urllib.parse import urljoin, urlparse
 
-from eu_export.product.kurly_market_schema import (
+from eu_export.product.web_parser.kurly_market_schema import (
     KurlyCollectionResult,
     KurlyProductPage,
     ProductSummaryEvidence,
@@ -185,11 +185,13 @@ class KurlyPageCollector:
             warnings=warnings,
         )
 
-    def _BuildDefaultParser(self) -> KurlyPageParserProtocol:
-        from eu_export.product.kurly_page_adapter import KurlyPageAdapter
+    @staticmethod
+    def _BuildDefaultParser() -> KurlyPageParserProtocol:
+        from eu_export.product.web_parser.kurly_page_adapter import KurlyPageAdapter
 
         return KurlyPageAdapter()
 
+    @staticmethod
     def _BlockUnnecessaryResource(self, route: Any) -> None:
         if route.request.resource_type in ("media", "font"):
             route.abort()
@@ -232,6 +234,7 @@ class KurlyPageCollector:
             )
         except Exception:
             return ""
+
         if not isinstance(value, str):
             return ""
         return value

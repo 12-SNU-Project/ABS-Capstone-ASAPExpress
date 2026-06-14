@@ -3,10 +3,10 @@
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple
 
-from eu_export.core.context import ContextPackager
-from eu_export.core.loader import OntologyDocumentLoader
-from eu_export.core.retriever import OntologyRetriever
-from eu_export.core.schema import (
+from eu_export.core.context_retrieval.context import ContextPackager
+from eu_export.core.context_retrieval.loader import OntologyDocumentLoader
+from eu_export.core.context_retrieval.retriever import OntologyRetriever
+from eu_export.core.context_retrieval.schema import (
     OntologyChunk,
     OntologyDocument,
     PackagedOntologyContext,
@@ -182,13 +182,15 @@ class OntologyContextBuilder:
         activePhases = self._ReadStringList(frontmatter.get("active_in_phase"))
         return phaseId in activePhases
 
-    def _ReadOptionalString(self, value: Any) -> Optional[str]:
+    @staticmethod
+    def _ReadOptionalString(value: Any) -> Optional[str]:
         if not isinstance(value, str):
             return None
         normalizedValue = NormalizeWhitespace(value).lower()
         return normalizedValue or None
 
-    def _ReadStringList(self, value: Any) -> List[str]:
+    @staticmethod
+    def _ReadStringList(value: Any) -> List[str]:
         if isinstance(value, str):
             normalizedValue = NormalizeWhitespace(value)
             return [normalizedValue] if normalizedValue else []
