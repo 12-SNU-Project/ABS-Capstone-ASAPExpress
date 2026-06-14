@@ -110,11 +110,21 @@ class KurlyPipelineResult(BaseModel):
             for imageResult in self.ocrImageResults
             if imageResult.error is None and imageResult.ocrText.strip() != ""
         ]
+        structuredTableImageResults = [
+            imageResult
+            for imageResult in successfulImageResults
+            if imageResult.structuredOcr.usedStructuredTables
+        ]
         return {
             "image_result_count": len(self.ocrImageResults),
             "successful_image_count": len(successfulImageResults),
             "failed_image_count": (
                 len(self.ocrImageResults) - len(successfulImageResults)
+            ),
+            "structured_table_image_count": len(structuredTableImageResults),
+            "structured_table_count": sum(
+                len(imageResult.structuredOcr.tables)
+                for imageResult in successfulImageResults
             ),
             "combined_text_length": len(self.combinedOcrText),
             "normalized_fact_count": self.ocrNormalizationResult.factLineCount,
@@ -132,6 +142,13 @@ class KurlyPipelineResult(BaseModel):
                         else None
                     ),
                     "text_length": len(imageResult.ocrText),
+                    "used_structured_tables": (
+                        imageResult.structuredOcr.usedStructuredTables
+                    ),
+                    "structured_table_count": len(imageResult.structuredOcr.tables),
+                    "structured_fallback_reason": (
+                        imageResult.structuredOcr.fallbackReason
+                    ),
                     "error": imageResult.error,
                 }
                 for imageIndex, imageResult in enumerate(

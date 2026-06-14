@@ -2,12 +2,17 @@
 
 from eu_export.product.ocr import (
     PaddleOcrEngine,
+    PaddleStructureOcrEngine,
+    ProductOcrArtifactStore,
     ProductOcrEngine,
     ProductOcrError,
     ProductOcrFactNormalizationResult,
     ProductOcrFactNormalizer,
     ProductOcrFallbackRunner,
+    ProductOcrImageDownloader,
     ProductOcrImageResult,
+    ProductOcrTableResult,
+    ProductStructuredOcrResult,
 )
 from eu_export.product.pipeline import (
     KurlyPipelineInput,
@@ -55,10 +60,15 @@ __all__ = [
     "RenderedPageEvidence",
 
     "PaddleOcrEngine",
+    "PaddleStructureOcrEngine",
+    "ProductOcrArtifactStore",
     "ProductOcrFallbackRunner",
+    "ProductOcrImageDownloader",
     "ProductOcrEngine",
     "ProductOcrError",
     "ProductOcrFactNormalizer",
     "ProductOcrFactNormalizationResult",
     "ProductOcrImageResult",
+    "ProductOcrTableResult",
+    "ProductStructuredOcrResult",
 ]
