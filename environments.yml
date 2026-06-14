@@ -29,6 +29,7 @@ dependencies:
       - opencv-python
       - paddlepaddle
       - paddleocr
+      - paddlex[ocr]
 
       # Semantic CN candidate retrieval
       - sentence-transformers

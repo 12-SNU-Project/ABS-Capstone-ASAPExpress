@@ -10,7 +10,7 @@ import sys
 import termios
 import tty
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 import pandas as pd
 from loguru import logger
@@ -1613,6 +1613,26 @@ class OntologySmokeRunner:
                 scoreBreakdown.get("semantic_score"),
             ),
         ]
+        hierarchyPointSummary = self._BuildHierarchyPointSummary(
+            scoreBreakdown.get("hierarchy_level_points"),
+        )
+        if hierarchyPointSummary:
+            lines.append(
+                "{0}hierarchy_points {1}".format(
+                    scoreIndent,
+                    hierarchyPointSummary,
+                )
+            )
+        hierarchyMatchSummary = self._BuildHierarchyMatchSummary(
+            scoreBreakdown.get("hierarchy_level_matches"),
+        )
+        if hierarchyMatchSummary:
+            lines.append(
+                "{0}hierarchy_matches {1}".format(
+                    scoreIndent,
+                    hierarchyMatchSummary,
+                )
+            )
         matchSummary = self._BuildCandidateMatchSummary(candidate)
         if matchSummary:
             lines.append("{0}matches {1}".format(scoreIndent, matchSummary))
@@ -1624,6 +1644,38 @@ class OntologySmokeRunner:
                 )
             )
         return lines
+
+    def _BuildHierarchyPointSummary(self, rawValue: Any) -> str:
+        if not isinstance(rawValue, Mapping):
+            return ""
+        parts: List[str] = []
+        for level in ["hs2", "hs4", "hs6", "branch", "cn8", "note"]:
+            pointValue = rawValue.get(level)
+            if not isinstance(pointValue, (int, float)):
+                continue
+            parts.append("{0}={1:.3f}".format(level, float(pointValue)))
+        return " ".join(parts)
+
+    def _BuildHierarchyMatchSummary(self, rawValue: Any) -> str:
+        if not isinstance(rawValue, Mapping):
+            return ""
+        parts: List[str] = []
+        for level in ["hs2", "hs4", "hs6", "branch", "cn8", "note"]:
+            levelMatches = rawValue.get(level)
+            if not isinstance(levelMatches, list):
+                continue
+            formattedMatches = self._FormatMatchList(
+                [
+                    str(match)
+                    for match in levelMatches
+                    if isinstance(match, str) and match.strip()
+                ],
+                limit=3,
+            )
+            if formattedMatches == "-":
+                continue
+            parts.append("{0}={1}".format(level, formattedMatches))
+        return " ".join(parts)
 
     def _BuildCandidateMatchSummary(self, candidate: CnCandidate) -> str:
         parts: List[str] = []

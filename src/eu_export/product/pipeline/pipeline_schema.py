@@ -149,6 +149,7 @@ class KurlyPipelineResult(BaseModel):
                         if imageResult.imagePath is not None
                         else None
                     ),
+                    "image_paths": list(imageResult.imagePaths),
                     "text_length": len(imageResult.ocrText),
                     "used_structured_tables": (
                         imageResult.structuredOcr.usedStructuredTables
@@ -157,6 +158,7 @@ class KurlyPipelineResult(BaseModel):
                     "structured_fallback_reason": (
                         imageResult.structuredOcr.fallbackReason
                     ),
+                    "structured_warnings": list(imageResult.structuredOcr.warnings),
                     "text_merge_mode": imageResult.structuredOcr.textMergeMode,
                     "raw_tile_text_count": len(
                         imageResult.structuredOcr.rawTileTexts

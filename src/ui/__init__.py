@@ -1,5 +1,5 @@
-"""ASAP Dash page/component modules.
+"""ASAP UI page/component modules.
 
-The root ``asap_dash.py`` entrypoint assembles these page modules into the
-user-facing Dash app.
+``asap_dash.py`` assembles the Dash web app, while ``asap_pyside.py`` opens the
+desktop PySide shell.
 """

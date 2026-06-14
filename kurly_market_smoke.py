@@ -21,6 +21,7 @@ from eu_export.product import (  # noqa: E402
     KurlyProductPipeline,
     KurlyPipelineInput,
     PaddleOcrEngine,
+    PaddleStructureOcrEngine,
 )
 from eu_export.app_config import LoadAppConfig  # noqa: E402
 
@@ -38,7 +39,23 @@ class KurlyMarketSmokeRunner:
         self._scrollCount = smokeConfig.scroll_count
         self._headless = smokeConfig.headless
         self._runOcrFallback = smokeConfig.run_ocr_fallback
+        self._useStructuredOcr = smokeConfig.use_structured_ocr
         self._maxOcrImageCount = smokeConfig.max_ocr_image_count
+        self._structuredOcrMaxTileHeightPixels = (
+            smokeConfig.structured_ocr_max_tile_height_pixels
+        )
+        self._structuredOcrMaxTileSidePixels = (
+            smokeConfig.structured_ocr_max_tile_side_pixels
+        )
+        self._structuredOcrTileOverlapPixels = (
+            smokeConfig.structured_ocr_tile_overlap_pixels
+        )
+        self._structuredOcrUseProjectionTiling = (
+            smokeConfig.structured_ocr_use_projection_tiling
+        )
+        self._structuredOcrAllowHardCutFallback = (
+            smokeConfig.structured_ocr_allow_hard_cut_fallback
+        )
         self._writeSummaryArtifact = smokeConfig.write_summary_artifact
         self._logFullResult = smokeConfig.log_full_result
         self._artifactRootPath = pathConfig.ResolvePath(
@@ -115,6 +132,18 @@ class KurlyMarketSmokeRunner:
         )
         if not self._runOcrFallback:
             return KurlyProductPipeline(collector=collector)
+
+        if self._useStructuredOcr:
+            return KurlyProductPipeline(
+                collector=collector,
+                ocrEngine=PaddleStructureOcrEngine(
+                    useProjectionTiling=self._structuredOcrUseProjectionTiling,
+                    maxTileHeightPixels=self._structuredOcrMaxTileHeightPixels,
+                    maxTileSidePixels=self._structuredOcrMaxTileSidePixels,
+                    tileOverlapPixels=self._structuredOcrTileOverlapPixels,
+                    allowHardCutFallback=self._structuredOcrAllowHardCutFallback,
+                ),
+            )
 
         return KurlyProductPipeline(
             collector=collector,
@@ -247,6 +276,22 @@ class KurlyMarketSmokeRunner:
                     "successful_image_count",
                     len(successfulOcrResults),
                 ),
+                "structured_table_image_count": ocrSummary.get(
+                    "structured_table_image_count",
+                    0,
+                ),
+                "structured_table_count": ocrSummary.get(
+                    "structured_table_count",
+                    0,
+                ),
+                "raw_tile_text_count": ocrSummary.get(
+                    "raw_tile_text_count",
+                    0,
+                ),
+                "raw_text_length": ocrSummary.get(
+                    "raw_text_length",
+                    0,
+                ),
                 "image_artifacts": ocrSummary.get(
                     "image_artifacts",
                     self._BuildOcrImageArtifacts(ocrImageResults),
@@ -372,12 +417,18 @@ class KurlyMarketSmokeRunner:
             (
                 "detail_image_count={} ocr_candidate_count={} "
                 "ocr_result_count={} successful_ocr_count={} "
+                "structured_table_image_count={} structured_table_count={} "
+                "raw_tile_text_count={} raw_text_length={} "
                 "combined_ocr_text_length={}"
             ),
             ocrData["product_detail_image_url_count"],
             ocrData["candidate_image_url_count"],
             ocrData["image_result_count"],
             ocrData["successful_image_count"],
+            ocrData["structured_table_image_count"],
+            ocrData["structured_table_count"],
+            ocrData["raw_tile_text_count"],
+            ocrData["raw_text_length"],
             ocrData["combined_text_length"],
         )
 
@@ -386,18 +437,31 @@ class KurlyMarketSmokeRunner:
 
         for imageResult in ocrData["image_artifacts"]:
             ocrLogger.info(
-                "ocr_image index={} image_path={} text_length={} error={}",
+                (
+                    "ocr_image index={} image_path={} image_path_count={} text_length={} "
+                    "used_structured_tables={} structured_table_count={} "
+                    "raw_tile_text_count={} raw_text_length={} "
+                    "merge_mode={} fallback_reason={} warning_count={} error={}"
+                ),
                 imageResult["index"],
                 imageResult["image_path"],
+                len(imageResult.get("image_paths", []) or []),
                 imageResult["text_length"],
+                imageResult.get("used_structured_tables", False),
+                imageResult.get("structured_table_count", 0),
+                imageResult.get("raw_tile_text_count", 0),
+                imageResult.get("raw_text_length", 0),
+                imageResult.get("text_merge_mode"),
+                imageResult.get("structured_fallback_reason"),
+                len(imageResult.get("structured_warnings", []) or []),
                 imageResult["error"],
             )
-
-        if ocrData["combined_text_preview"]:
-            ocrLogger.info(
-                "combined_ocr_text_preview={}",
-                ocrData["combined_text_preview"],
-            )
+            for warning in imageResult.get("structured_warnings", []) or []:
+                ocrLogger.info(
+                    "ocr_image index={} structured_warning={}",
+                    imageResult["index"],
+                    warning,
+                )
 
     def _LogWarningsAndErrors(self, resultData: Dict[str, Any]) -> None:
         eventLogger = self._Logger("_LogWarningsAndErrors")
@@ -520,7 +584,48 @@ class KurlyMarketSmokeRunner:
             {
                 "index": imageIndex,
                 "image_path": imageResult["image_path"],
+                "image_paths": list(
+                    imageResult.get("image_paths") or [imageResult["image_path"]]
+                ),
                 "text_length": len(imageResult["ocr_text"]),
+                "used_structured_tables": (
+                    imageResult.get("structured_ocr", {}).get(
+                        "used_structured_tables",
+                        False,
+                    )
+                    if isinstance(imageResult.get("structured_ocr"), dict)
+                    else False
+                ),
+                "structured_table_count": (
+                    len(imageResult.get("structured_ocr", {}).get("tables", []))
+                    if isinstance(imageResult.get("structured_ocr"), dict)
+                    else 0
+                ),
+                "structured_fallback_reason": (
+                    imageResult.get("structured_ocr", {}).get("fallback_reason")
+                    if isinstance(imageResult.get("structured_ocr"), dict)
+                    else None
+                ),
+                "structured_warnings": (
+                    list(imageResult.get("structured_ocr", {}).get("warnings", []))
+                    if isinstance(imageResult.get("structured_ocr"), dict)
+                    else []
+                ),
+                "raw_tile_text_count": (
+                    len(imageResult.get("structured_ocr", {}).get("raw_tile_texts", []))
+                    if isinstance(imageResult.get("structured_ocr"), dict)
+                    else 0
+                ),
+                "raw_text_length": (
+                    len(imageResult.get("structured_ocr", {}).get("raw_text", ""))
+                    if isinstance(imageResult.get("structured_ocr"), dict)
+                    else 0
+                ),
+                "text_merge_mode": (
+                    imageResult.get("structured_ocr", {}).get("text_merge_mode")
+                    if isinstance(imageResult.get("structured_ocr"), dict)
+                    else None
+                ),
                 "error": imageResult["error"],
             }
             for imageIndex, imageResult in enumerate(ocrImageResults, start=1)

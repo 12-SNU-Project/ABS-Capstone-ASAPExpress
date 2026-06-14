@@ -205,7 +205,7 @@ class KurlyPageCollector:
 
         return KurlyPageAdapter()
 
-    @staticmethod
+
     def _BlockUnnecessaryResource(self, route: Any) -> None:
         if route.request.resource_type in ("media", "font"):
             route.abort()

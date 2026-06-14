@@ -2,7 +2,7 @@
 
 import re
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -32,12 +32,75 @@ class ProductOcrImageResult(BaseModel):
 
     imageUrl: str = Field(alias="image_url")
     imagePath: Optional[str] = Field(default=None, alias="image_path")
+    imagePaths: List[str] = Field(default_factory=list, alias="image_paths")
     ocrText: str = Field(default="", alias="ocr_text")
     structuredOcr: ProductStructuredOcrResult = Field(
         default_factory=ProductStructuredOcrResult,
         alias="structured_ocr",
     )
     error: Optional[str] = None
+
+
+class ProductOcrTextQualityEvaluator:
+    """숫자/기호만 남은 OCR 결과를 artifact 보존 대상에서 제외한다."""
+
+    def __init__(self, minimumMeaningfulCharacterCount: int = 3) -> None:
+        self._minimumMeaningfulCharacterCount = max(
+            1,
+            minimumMeaningfulCharacterCount,
+        )
+        self._meaningfulCharacterPattern = re.compile(r"[A-Za-z가-힣]")
+
+    def HasInformativeResult(
+        self,
+        structuredOcrResult: ProductStructuredOcrResult,
+    ) -> bool:
+        return any(
+            self.HasInformativeText(text)
+            for text in [
+                structuredOcrResult.structuredText,
+                structuredOcrResult.rawText,
+            ]
+        )
+
+    def HasInformativeTile(
+        self,
+        structuredOcrResult: ProductStructuredOcrResult,
+        tileIndex: Optional[int],
+    ) -> bool:
+        return any(
+            self.HasInformativeText(text)
+            for text in [
+                self._BuildTileTableText(structuredOcrResult, tileIndex),
+                self._BuildTileRawText(structuredOcrResult, tileIndex),
+            ]
+        )
+
+    def HasInformativeText(self, text: str) -> bool:
+        meaningfulCharacters = self._meaningfulCharacterPattern.findall(text or "")
+        return len(meaningfulCharacters) >= self._minimumMeaningfulCharacterCount
+
+    def _BuildTileTableText(
+        self,
+        structuredOcrResult: ProductStructuredOcrResult,
+        tileIndex: Optional[int],
+    ) -> str:
+        return "\n".join(
+            table.plainText
+            for table in structuredOcrResult.tables
+            if table.tileIndex == tileIndex
+        )
+
+    def _BuildTileRawText(
+        self,
+        structuredOcrResult: ProductStructuredOcrResult,
+        tileIndex: Optional[int],
+    ) -> str:
+        return "\n".join(
+            rawTileText.text
+            for rawTileText in structuredOcrResult.rawTileTexts
+            if rawTileText.tileIndex == tileIndex
+        )
 
 
 class ProductOcrImageDownloader:
@@ -90,6 +153,57 @@ class ProductOcrArtifactStore:
         artifactPath.write_bytes(imageBytes)
         return artifactPath
 
+    def ReplaceImageWithInformativeTiles(
+        self,
+        artifactPath: Path,
+        imageIndex: int,
+        imageUrl: str,
+        imageTiles: Sequence[Tuple[Optional[int], bytes]],
+        structuredOcrResult: ProductStructuredOcrResult,
+        textQualityEvaluator: ProductOcrTextQualityEvaluator,
+    ) -> List[Path]:
+        if len(imageTiles) == 1 and imageTiles[0][0] is None:
+            if textQualityEvaluator.HasInformativeResult(structuredOcrResult):
+                return [artifactPath]
+            self.DeleteImage(artifactPath)
+            return []
+
+        retainedTilePaths: List[Path] = []
+        artifactDirectory = artifactPath.parent
+        for tileIndex, tileBytes in imageTiles:
+            if not textQualityEvaluator.HasInformativeTile(
+                structuredOcrResult,
+                tileIndex,
+            ):
+                continue
+            retainedTilePaths.append(
+                self.WriteTileImage(
+                    artifactDirectory=artifactDirectory,
+                    imageIndex=imageIndex,
+                    imageUrl=imageUrl,
+                    tileIndex=tileIndex,
+                    imageBytes=tileBytes,
+                )
+            )
+        self.DeleteImage(artifactPath)
+        return retainedTilePaths
+
+    def WriteTileImage(
+        self,
+        artifactDirectory: Path,
+        imageIndex: int,
+        imageUrl: str,
+        tileIndex: Optional[int],
+        imageBytes: bytes,
+    ) -> Path:
+        tilePath = artifactDirectory / self._BuildTileImageFileName(
+            imageIndex,
+            imageUrl,
+            tileIndex,
+        )
+        tilePath.write_bytes(imageBytes)
+        return tilePath
+
     def DeleteImage(self, artifactPath: Optional[Path]) -> None:
         if artifactPath is not None:
             artifactPath.unlink(missing_ok=True)
@@ -123,6 +237,18 @@ class ProductOcrArtifactStore:
             suffix = ".img"
         return "ocr-fallback-image-{0:02d}{1}".format(imageIndex, suffix)
 
+    def _BuildTileImageFileName(
+        self,
+        imageIndex: int,
+        imageUrl: str,
+        tileIndex: Optional[int],
+    ) -> str:
+        tileNumber = tileIndex if tileIndex is not None else 1
+        return "ocr-fallback-image-{0:02d}-tile-{1:02d}.jpg".format(
+            imageIndex,
+            tileNumber,
+        )
+
     def _BuildSafePathName(self, value: str) -> str:
         safeValue = re.sub(r"[^0-9A-Za-z._-]+", "-", value).strip("-")
         return safeValue or "unknown"
@@ -137,12 +263,16 @@ class ProductOcrFallbackRunner:
         downloadUserAgent: str = DEFAULT_PRODUCT_OCR_IMAGE_DOWNLOAD_USER_AGENT,
         imageDownloader: Optional[ProductOcrImageDownloader] = None,
         artifactStore: Optional[ProductOcrArtifactStore] = None,
+        textQualityEvaluator: Optional[ProductOcrTextQualityEvaluator] = None,
     ) -> None:
         self._ocrEngine = ocrEngine
         self._imageDownloader = imageDownloader or ProductOcrImageDownloader(
             downloadUserAgent,
         )
         self._artifactStore = artifactStore or ProductOcrArtifactStore()
+        self._textQualityEvaluator = (
+            textQualityEvaluator or ProductOcrTextQualityEvaluator()
+        )
 
     def Run(
         self,
@@ -206,12 +336,29 @@ class ProductOcrFallbackRunner:
                 imageBytes,
             )
             ocrText = structuredOcrResult.text
-            if not isinstance(ocrText, str) or ocrText.strip() == "":
+            if (
+                not isinstance(ocrText, str)
+                or not self._textQualityEvaluator.HasInformativeResult(
+                    structuredOcrResult,
+                )
+            ):
                 self._artifactStore.DeleteImage(artifactPath)
+                return None
+            imageTiles = self._ocrEngine.BuildArtifactImageTiles(imageBytes)
+            artifactPaths = self._artifactStore.ReplaceImageWithInformativeTiles(
+                artifactPath=artifactPath,
+                imageIndex=imageIndex,
+                imageUrl=imageUrl,
+                imageTiles=imageTiles,
+                structuredOcrResult=structuredOcrResult,
+                textQualityEvaluator=self._textQualityEvaluator,
+            )
+            if not artifactPaths:
                 return None
             return ProductOcrImageResult(
                 imageUrl=imageUrl,
-                imagePath=str(artifactPath),
+                imagePath=str(artifactPaths[0]),
+                imagePaths=[str(path) for path in artifactPaths],
                 ocrText=ocrText,
                 structuredOcr=structuredOcrResult,
             )

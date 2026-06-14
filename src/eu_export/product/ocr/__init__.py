@@ -5,10 +5,16 @@ from eu_export.product.ocr.ocr_fallback import (
     ProductOcrFallbackRunner,
     ProductOcrImageDownloader,
     ProductOcrImageResult,
+    ProductOcrTextQualityEvaluator,
 )
 from eu_export.product.ocr.ocr_normalization import (
     ProductOcrFactNormalizationResult,
     ProductOcrFactNormalizer,
+)
+from eu_export.product.ocr.ocr_image_tiling import (
+    ProductOcrImageTile,
+    ProductOcrImageTilePlan,
+    ProductOcrImageTilePlanner,
 )
 from eu_export.product.ocr.paddle_ocr import (
     PaddleOcrEngine,
@@ -30,8 +36,12 @@ __all__ = [
     "ProductStructuredOcrResult",
     "ProductOcrFactNormalizationResult",
     "ProductOcrFactNormalizer",
+    "ProductOcrImageTile",
+    "ProductOcrImageTilePlan",
+    "ProductOcrImageTilePlanner",
     "ProductOcrArtifactStore",
     "ProductOcrFallbackRunner",
     "ProductOcrImageDownloader",
     "ProductOcrImageResult",
+    "ProductOcrTextQualityEvaluator",
 ]

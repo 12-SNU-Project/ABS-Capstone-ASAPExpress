@@ -106,7 +106,7 @@ def render_page(run_id: str | None = None, live_result: dict[str, Any] | None = 
             html.Div(
                 [
                     html.H1("ASAP Admin", style={"fontSize": "24px", "margin": 0}),
-                    html.Div("Blackboard / AgentRun / ontology read log", style={"fontSize": "12px", "color": "#64748b", "marginTop": "4px"}),
+                    html.Div("Blackboard / AgentRun / core read log", style={"fontSize": "12px", "color": "#64748b", "marginTop": "4px"}),
                     html.Div(
                         [
                             html.A("Classification", href="/classification", style={"fontSize": "12px", "fontWeight": 850, "marginRight": "14px"}),

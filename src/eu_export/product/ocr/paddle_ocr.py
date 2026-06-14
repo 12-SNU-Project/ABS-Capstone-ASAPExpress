@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from html.parser import HTMLParser
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -76,6 +76,12 @@ class ProductOcrEngine(ABC):
     def ExtractTextFromImage(self, imageBytes: bytes) -> str:
         raise NotImplementedError
 
+    def BuildArtifactImageTiles(
+        self,
+        imageBytes: bytes,
+    ) -> List[Tuple[Optional[int], bytes]]:
+        return [(None, imageBytes)]
+
     def ExtractStructuredTextFromImage(
         self,
         imageBytes: bytes,
@@ -137,6 +143,20 @@ class PaddleOcrEngine(ProductOcrEngine):
             raise ProductOcrError("PaddleOCR object does not expose predict or ocr.")
 
         return "\n".join(self._ExtractResultTexts(result))
+
+    def _EncodeImageBytes(self, image: Any, suffix: str = ".jpg") -> bytes:
+        try:
+            import cv2
+        except ImportError as error:
+            raise ProductOcrError(
+                "PaddleOcrEngine requires cv2 to encode image tiles."
+            ) from error
+
+        normalizedSuffix = suffix if suffix.startswith(".") else ".jpg"
+        success, encodedImage = cv2.imencode(normalizedSuffix, image)
+        if not success:
+            raise ProductOcrError("failed to encode OCR tile image.")
+        return bytes(encodedImage)
 
     def _ReadInitializedOcr(self) -> Any:
         if self._ocr is None:
@@ -278,14 +298,18 @@ class PaddleStructureOcrEngine(PaddleOcrEngine):
         useImageTiling: bool = True,
         useProjectionTiling: bool = True,
         maxTileHeightPixels: int = 2400,
+        maxTileSidePixels: int = 4000,
         tileOverlapPixels: int = 240,
+        allowHardCutFallback: bool = False,
     ) -> None:
         self._structureExtraOptions = dict(structureExtraOptions or {})
         self._tilePlanner = ProductOcrImageTilePlanner(
             useImageTiling=useImageTiling,
             useProjectionTiling=useProjectionTiling,
             maxTileHeightPixels=maxTileHeightPixels,
+            maxTileSidePixels=maxTileSidePixels,
             tileOverlapPixels=tileOverlapPixels,
+            allowHardCutFallback=allowHardCutFallback,
         )
         self._structurePipeline: Any = None
         super().__init__(
@@ -302,8 +326,9 @@ class PaddleStructureOcrEngine(PaddleOcrEngine):
         imageBytes: bytes,
     ) -> ProductStructuredOcrResult:
         image = self._DecodeImageBytes(imageBytes)
-        warnings: List[str] = []
-        tileImages = self._tilePlanner.BuildTiles(image)
+        tilePlan = self._tilePlanner.BuildTilePlan(image)
+        warnings: List[str] = list(tilePlan.warnings)
+        tileImages = tilePlan.AsTuples()
         rawTileTexts = self._ExtractRawTileTexts(tileImages)
         rawText = self._BuildRawTileText(rawTileTexts)
         try:
@@ -340,6 +365,19 @@ class PaddleStructureOcrEngine(PaddleOcrEngine):
             fallbackReason="no_table_detected",
             warnings=warnings,
         )
+
+    def BuildArtifactImageTiles(
+        self,
+        imageBytes: bytes,
+    ) -> List[Tuple[Optional[int], bytes]]:
+        image = self._DecodeImageBytes(imageBytes)
+        tileImages = self._tilePlanner.BuildTiles(image)
+        if len(tileImages) == 1 and tileImages[0][0] is None:
+            return [(None, imageBytes)]
+        return [
+            (tileIndex, self._EncodeImageBytes(tileImage, ".jpg"))
+            for tileIndex, tileImage in tileImages
+        ]
 
     def _BuildRawFallbackResult(
         self,
