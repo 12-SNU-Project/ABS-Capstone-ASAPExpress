@@ -6,7 +6,7 @@ from typing import Any, List, Optional
 from urllib.parse import urlparse
 
 from eu_export.product.web_parser.kurly_global import KurlyGlobalPageParser
-from eu_export.product.web_parser.kurly_market import KurlyPageParser
+from eu_export.product.web_parser.kurly_domestic import KurlyDomesticPageParser
 from eu_export.product.web_parser.kurly_market_schema import (
     KurlyProductPage,
     ProductSummaryEvidence,
@@ -18,10 +18,10 @@ class KurlyPageAdapter:
 
     def __init__(
         self,
-        domesticParser: Optional[KurlyPageParser] = None,
+        domesticParser: Optional[KurlyDomesticPageParser] = None,
         globalParser: Optional[KurlyGlobalPageParser] = None,
     ) -> None:
-        self._domesticParser = domesticParser or KurlyPageParser()
+        self._domesticParser = domesticParser or KurlyDomesticPageParser()
         self._globalParser = globalParser or KurlyGlobalPageParser()
 
     def IsSupportedProductPageUrl(self, url: str) -> bool:
@@ -72,7 +72,8 @@ class KurlyPageAdapter:
             return None
         return self._globalParser.ReadProductNoticeText(page)
 
-    def LooksProductDetailImageUrl(self, imageUrl: str) -> bool:
+    @staticmethod
+    def LooksProductDetailImageUrl(imageUrl: str) -> bool:
         parsedUrl = urlparse(imageUrl)
         hostName = parsedUrl.netloc.lower()
         path = parsedUrl.path.lower()
@@ -88,7 +89,7 @@ class KurlyPageAdapter:
     def _SelectParser(
         self,
         productPageUrl: Optional[str],
-    ) -> KurlyPageParser | KurlyGlobalPageParser:
+    ) -> KurlyDomesticPageParser | KurlyGlobalPageParser:
         if (
             productPageUrl is not None
             and self._globalParser.IsSupportedProductPageUrl(productPageUrl)

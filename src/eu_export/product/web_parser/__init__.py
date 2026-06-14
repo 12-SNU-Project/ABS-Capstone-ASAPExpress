@@ -1,12 +1,12 @@
 """Kurly product web parsing and collection components."""
 
-from eu_export.product.web_parser.kurly_market import (
+from eu_export.product.web_parser.kurly_parser import (
     KurlyBasePageParser,
     KurlyCosmeticsPageParser,
     KurlyDomainDetector,
     KurlyFoodPageParser,
-    KurlyPageParser,
 )
+from eu_export.product.web_parser.kurly_domestic import KurlyDomesticPageParser
 from eu_export.product.web_parser.kurly_global import KurlyGlobalPageParser
 from eu_export.product.web_parser.kurly_market_collector import (
     KurlyCollectionError,
@@ -32,7 +32,7 @@ __all__ = [
     "KurlyGlobalPageParser",
     "KurlyPageAdapter",
     "KurlyPageCollector",
-    "KurlyPageParser",
+    "KurlyDomesticPageParser",
     "KurlyProductDomain",
     "KurlyProductPage",
     "ProductNoticeField",

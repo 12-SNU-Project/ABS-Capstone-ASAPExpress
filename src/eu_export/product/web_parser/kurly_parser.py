@@ -1,19 +1,15 @@
-"""KurlyMarket 상품 상세 parser."""
+"""Shared Kurly product page parser primitives."""
 
 import re
 from typing import List, Optional
 from urllib.parse import urlparse
 
-from eu_export.product.web_parser.kurly_market_collector import (
-    KurlyCollectionError,
-    KurlyPageCollector,
-)
 from eu_export.product.web_parser.kurly_market_html import KurlyHtmlTextExtractor
 from eu_export.product.web_parser.kurly_market_schema import (
     KurlyProductDomain,
+    KurlyProductPage,
     ProductNoticeField,
     ProductNoticeOption,
-    KurlyProductPage,
 )
 from eu_export.utils import NormalizeWhitespace
 
@@ -21,99 +17,99 @@ from eu_export.utils import NormalizeWhitespace
 __all__ = [
     "KurlyBasePageParser",
     "KurlyCosmeticsPageParser",
-    "KurlyFoodPageParser",
     "KurlyDomainDetector",
-    "KurlyPageParser",
-    "KurlyCollectionError",
-    "KurlyPageCollector",
-    "KurlyHtmlTextExtractor",
+    "KurlyFoodPageParser",
+    "KurlyParserDefaults",
 ]
 
 
-COSMETICS_PRODUCT_NOTICE_FIELD_LABELS = [
-    "내용물의 용량 또는 중량",
-    "제품 주요 사양 (피부타입, 색상(호, 번) 등)",
-    "제품 주요 사양",
-    "사용기한 또는 개봉 후 사용기간",
-    "사용기한 또는 개봉 후 사용기간(개봉 후 사용기간을 기재할 경우에는 제조연월일을 병행표기)",
-    "사용방법",
-    "화장품제조업자, 화장품책임판매업자 및 맞춤형화장품판매업자",
-    "화장품제조업자",
-    "화장품책임판매업자",
-    "제조국",
-    "｢화장품법｣에 따라 기재ㆍ표시하여야 하는 모든 성분",
-    "화장품법에 따라 기재",
-    "모든 성분",
-    "전성분",
-    "｢화장품법｣에 따른 기능성 화장품",
-    "기능성 화장품",
-    "사용할 때의 주의사항",
-    "품질보증기준",
-    "소비자 상담 관련 전화번호",
-]
-FOOD_PRODUCT_NOTICE_FIELD_LABELS = [
-    "제품명",
-    "식품의 유형",
-    "생산자 및 소재지 (수입품의 경우 생산자, 수입자 및 제조국)",
-    "생산자 및 소재지",
-    "제조연월일, 소비기한 또는 품질유지기한",
-    "포장단위별 내용물의 용량(중량), 수량",
-    "포장단위별 내용물의 용량",
-    "원재료명 (｢농수산물의 원산지 표시 등에 관한 법률｣에 따른 원산지 표시 포함) 및 함량(원재료 함량 표시대상 식품에 한함)",
-    "원재료명",
-    "영양성분 (영양성분 표시대상 식품에 한함)",
-    "영양성분",
-    "유전자변형식품에 해당하는 경우의 표시",
-    "소비자 안전을 위한 주의사항 (｢식품 등의 표시ㆍ광고에 관한 법률 시행규칙｣ 제5조 및 [별표 2]에 따른 표시사항을 말함)",
-    "소비자 안전을 위한 주의사항",
-    "수입식품의 경우 “수입식품안전관리 특별법에 따른 수입신고를 필함”의 문구",
-    "수입식품안전관리 특별법에 따른 수입신고를 필함",
-    "소비자 상담 관련 전화번호",
-]
-ALL_PRODUCT_NOTICE_FIELD_LABELS = list(
-    dict.fromkeys(
-        COSMETICS_PRODUCT_NOTICE_FIELD_LABELS
-        + FOOD_PRODUCT_NOTICE_FIELD_LABELS
+class KurlyParserDefaults:
+    """Kurly parser 공통 label과 pattern 기본값."""
+
+    COSMETICS_PRODUCT_NOTICE_FIELD_LABELS = [
+        "내용물의 용량 또는 중량",
+        "제품 주요 사양 (피부타입, 색상(호, 번) 등)",
+        "제품 주요 사양",
+        "사용기한 또는 개봉 후 사용기간",
+        "사용기한 또는 개봉 후 사용기간(개봉 후 사용기간을 기재할 경우에는 제조연월일을 병행표기)",
+        "사용방법",
+        "화장품제조업자, 화장품책임판매업자 및 맞춤형화장품판매업자",
+        "화장품제조업자",
+        "화장품책임판매업자",
+        "제조국",
+        "｢화장품법｣에 따라 기재ㆍ표시하여야 하는 모든 성분",
+        "화장품법에 따라 기재",
+        "모든 성분",
+        "전성분",
+        "｢화장품법｣에 따른 기능성 화장품",
+        "기능성 화장품",
+        "사용할 때의 주의사항",
+        "품질보증기준",
+        "소비자 상담 관련 전화번호",
+    ]
+    FOOD_PRODUCT_NOTICE_FIELD_LABELS = [
+        "제품명",
+        "식품의 유형",
+        "생산자 및 소재지 (수입품의 경우 생산자, 수입자 및 제조국)",
+        "생산자 및 소재지",
+        "제조연월일, 소비기한 또는 품질유지기한",
+        "포장단위별 내용물의 용량(중량), 수량",
+        "포장단위별 내용물의 용량",
+        "원재료명 (｢농수산물의 원산지 표시 등에 관한 법률｣에 따른 원산지 표시 포함) 및 함량(원재료 함량 표시대상 식품에 한함)",
+        "원재료명",
+        "영양성분 (영양성분 표시대상 식품에 한함)",
+        "영양성분",
+        "유전자변형식품에 해당하는 경우의 표시",
+        "소비자 안전을 위한 주의사항 (｢식품 등의 표시ㆍ광고에 관한 법률 시행규칙｣ 제5조 및 [별표 2]에 따른 표시사항을 말함)",
+        "소비자 안전을 위한 주의사항",
+        "수입식품의 경우 “수입식품안전관리 특별법에 따른 수입신고를 필함”의 문구",
+        "수입식품안전관리 특별법에 따른 수입신고를 필함",
+        "소비자 상담 관련 전화번호",
+    ]
+    PRODUCT_NOTICE_FIELD_LABELS = list(
+        dict.fromkeys(
+            COSMETICS_PRODUCT_NOTICE_FIELD_LABELS
+            + FOOD_PRODUCT_NOTICE_FIELD_LABELS
+        )
     )
-)
-PRODUCT_NOTICE_STOP_MARKERS = {
-    "WHY KURLY",
-    "상품 후기",
-    "고객 후기",
-    "상품 리뷰",
-    "고객 리뷰",
-    "상품 문의",
-    "고객행복센터",
-}
-PRODUCT_NOTICE_IMAGE_REFERENCE_TERMS = {
-    "상품설명 및 상품이미지 참조",
-    "상품설명/상세정보 참조",
-    "상품설명 및 상세정보 참조",
-    "상품설명/상세정보 참고",
-    "상품설명 및 상세정보 참고",
-    "상품 이미지 참조",
-    "상품이미지 참조",
-    "상품설명 참조",
-    "상품설명 참고",
-    "제품 포장 참조",
-    "제품의 포장",
-    "최신 정보는 제품의 포장",
-    "최신정보는 제품 포장",
-}
-SUMMARY_FIELD_LABELS = {
-    "배송",
-    "판매자",
-    "포장타입",
-    "판매단위",
-    "중량/용량",
-    "원산지",
-}
-TITLE_SUFFIX_PATTERN = re.compile(r"\s*-\s*(마켓컬리|컬리)\s*$")
-BRACKET_BRAND_PATTERN = re.compile(r"^\[([^\]]+)\]")
+    PRODUCT_NOTICE_STOP_MARKERS = {
+        "WHY KURLY",
+        "상품 후기",
+        "고객 후기",
+        "상품 리뷰",
+        "고객 리뷰",
+        "상품 문의",
+        "고객행복센터",
+    }
+    PRODUCT_NOTICE_IMAGE_REFERENCE_TERMS = {
+        "상품설명 및 상품이미지 참조",
+        "상품설명/상세정보 참조",
+        "상품설명 및 상세정보 참조",
+        "상품설명/상세정보 참고",
+        "상품설명 및 상세정보 참고",
+        "상품 이미지 참조",
+        "상품이미지 참조",
+        "상품설명 참조",
+        "상품설명 참고",
+        "제품 포장 참조",
+        "제품의 포장",
+        "최신 정보는 제품의 포장",
+        "최신정보는 제품 포장",
+    }
+    SUMMARY_FIELD_LABELS = {
+        "배송",
+        "판매자",
+        "포장타입",
+        "판매단위",
+        "중량/용량",
+        "원산지",
+    }
+    TITLE_SUFFIX_PATTERN = re.compile(r"\s*-\s*(마켓컬리|컬리)\s*$")
+    BRACKET_BRAND_PATTERN = re.compile(r"^\[([^\]]+)\]")
 
 
 class KurlyBasePageParser:
-    """Kurly Market 상품 상세 공통 parser."""
+    """Kurly 상품 상세 공통 parser."""
 
     def __init__(
         self,
@@ -122,7 +118,7 @@ class KurlyBasePageParser:
     ) -> None:
         self._productDomain = productDomain
         self._productNoticeFieldLabels = list(
-            productNoticeFieldLabels or ALL_PRODUCT_NOTICE_FIELD_LABELS
+            productNoticeFieldLabels or KurlyParserDefaults.PRODUCT_NOTICE_FIELD_LABELS
         )
 
     def IsSupportedProductPageUrl(self, url: str) -> bool:
@@ -208,7 +204,7 @@ class KurlyBasePageParser:
         for line in normalizedLines:
             if line == "상품고시정보" or line.startswith("상품고시정보"):
                 continue
-            if any(line.startswith(marker) for marker in PRODUCT_NOTICE_STOP_MARKERS):
+            if any(line.startswith(marker) for marker in KurlyParserDefaults.PRODUCT_NOTICE_STOP_MARKERS):
                 break
             if line == "*":
                 continue
@@ -229,7 +225,7 @@ class KurlyBasePageParser:
     def _ExtractProductName(self, textLines: List[str]) -> Optional[str]:
         for line in textLines:
             if " - 마켓컬리" in line or " - 컬리" in line:
-                normalizedTitle = TITLE_SUFFIX_PATTERN.sub("", line)
+                normalizedTitle = KurlyParserDefaults.TITLE_SUFFIX_PATTERN.sub("", line)
                 if normalizedTitle != "":
                     return normalizedTitle
 
@@ -253,7 +249,7 @@ class KurlyBasePageParser:
             if index + 1 >= len(textLines):
                 return None
             candidate = textLines[index + 1]
-            if candidate in SUMMARY_FIELD_LABELS:
+            if candidate in KurlyParserDefaults.SUMMARY_FIELD_LABELS:
                 return None
             if self._LooksPriceOrRate(candidate):
                 return None
@@ -264,7 +260,7 @@ class KurlyBasePageParser:
     def _ExtractBrandName(self, productName: Optional[str]) -> Optional[str]:
         if productName is None:
             return None
-        brandMatch = BRACKET_BRAND_PATTERN.search(productName)
+        brandMatch = KurlyParserDefaults.BRACKET_BRAND_PATTERN.search(productName)
         if brandMatch is None:
             return None
         return NormalizeWhitespace(brandMatch.group(1))
@@ -289,7 +285,7 @@ class KurlyBasePageParser:
     ) -> List[str]:
         valueLines: List[str] = []
         for line in textLines[startIndex:]:
-            if line in SUMMARY_FIELD_LABELS:
+            if line in KurlyParserDefaults.SUMMARY_FIELD_LABELS:
                 break
             if line.startswith("상품설명") or line.startswith("상세정보"):
                 break
@@ -315,7 +311,7 @@ class KurlyBasePageParser:
 
         noticeLines: List[str] = []
         for line in textLines[startIndex:]:
-            if any(line.startswith(marker) for marker in PRODUCT_NOTICE_STOP_MARKERS):
+            if any(line.startswith(marker) for marker in KurlyParserDefaults.PRODUCT_NOTICE_STOP_MARKERS):
                 break
             if line == "*":
                 continue
@@ -513,7 +509,7 @@ class KurlyBasePageParser:
         return any(
             term in normalizedValue
             or term.replace(" ", "") in compactValue
-            for term in PRODUCT_NOTICE_IMAGE_REFERENCE_TERMS
+            for term in KurlyParserDefaults.PRODUCT_NOTICE_IMAGE_REFERENCE_TERMS
         )
 
     def _BuildWarnings(
@@ -538,7 +534,7 @@ class KurlyCosmeticsPageParser(KurlyBasePageParser):
     def __init__(self) -> None:
         super().__init__(
             productDomain=KurlyProductDomain.COSMETICS,
-            productNoticeFieldLabels=COSMETICS_PRODUCT_NOTICE_FIELD_LABELS,
+            productNoticeFieldLabels=KurlyParserDefaults.COSMETICS_PRODUCT_NOTICE_FIELD_LABELS,
         )
 
 
@@ -548,21 +544,39 @@ class KurlyFoodPageParser(KurlyBasePageParser):
     def __init__(self) -> None:
         super().__init__(
             productDomain=KurlyProductDomain.FOOD,
-            productNoticeFieldLabels=FOOD_PRODUCT_NOTICE_FIELD_LABELS,
+            productNoticeFieldLabels=KurlyParserDefaults.FOOD_PRODUCT_NOTICE_FIELD_LABELS,
         )
 
 
 class KurlyDomainDetector:
     """상품고시정보 label hit를 기반으로 Kurly 상품 domain을 추정한다."""
 
+    def __init__(
+        self,
+        foodFieldLabels: Optional[List[str]] = None,
+        cosmeticsFieldLabels: Optional[List[str]] = None,
+    ) -> None:
+        self._foodFieldLabels = list(
+            dict.fromkeys(
+                KurlyParserDefaults.FOOD_PRODUCT_NOTICE_FIELD_LABELS
+                + list(foodFieldLabels or [])
+            )
+        )
+        self._cosmeticsFieldLabels = list(
+            dict.fromkeys(
+                KurlyParserDefaults.COSMETICS_PRODUCT_NOTICE_FIELD_LABELS
+                + list(cosmeticsFieldLabels or [])
+            )
+        )
+
     def Detect(self, productNoticeLines: List[str]) -> KurlyProductDomain:
         foodScore = self._CountLabelHits(
             productNoticeLines,
-            FOOD_PRODUCT_NOTICE_FIELD_LABELS,
+            self._foodFieldLabels,
         )
         cosmeticsScore = self._CountLabelHits(
             productNoticeLines,
-            COSMETICS_PRODUCT_NOTICE_FIELD_LABELS,
+            self._cosmeticsFieldLabels,
         )
 
         if foodScore == 0 and cosmeticsScore == 0:
@@ -593,91 +607,3 @@ class KurlyDomainDetector:
             if comparableLine.startswith(comparableLabel):
                 return True
         return False
-
-
-class KurlyPageParser:
-    """상품고시정보 domain을 감지해 식품/화장품 parser로 분기한다."""
-
-    def __init__(
-        self,
-        domainDetector: Optional[KurlyDomainDetector] = None,
-        foodParser: Optional[KurlyFoodPageParser] = None,
-        cosmeticsParser: Optional[KurlyCosmeticsPageParser] = None,
-        fallbackParser: Optional[KurlyBasePageParser] = None,
-    ) -> None:
-        self._domainDetector = domainDetector or KurlyDomainDetector()
-        self._foodParser = foodParser or KurlyFoodPageParser()
-        self._cosmeticsParser = (
-            cosmeticsParser or KurlyCosmeticsPageParser()
-        )
-        self._fallbackParser = fallbackParser or KurlyBasePageParser()
-
-    def IsSupportedProductPageUrl(self, url: str) -> bool:
-        return self._fallbackParser.IsSupportedProductPageUrl(url)
-
-    def ParseHtml(
-        self,
-        htmlText: str,
-        productPageUrl: Optional[str] = None,
-    ) -> KurlyProductPage:
-        textLines = KurlyHtmlTextExtractor().ExtractTextLines(htmlText)
-        return self.ParseTextLines(textLines, productPageUrl=productPageUrl)
-
-    def ParseText(
-        self,
-        pageText: str,
-        productPageUrl: Optional[str] = None,
-    ) -> KurlyProductPage:
-        textLines = self.NormalizeTextLines(pageText.splitlines())
-        return self.ParseTextLines(textLines, productPageUrl=productPageUrl)
-
-    def ParseTextLines(
-        self,
-        textLines: List[str],
-        productPageUrl: Optional[str] = None,
-    ) -> KurlyProductPage:
-        return self.ParseCollectedTextLines(
-            textLines=textLines,
-            productNoticeLines=[],
-            productPageUrl=productPageUrl,
-        )
-
-    def ParseCollectedTextLines(
-        self,
-        textLines: List[str],
-        productNoticeLines: List[str],
-        productPageUrl: Optional[str] = None,
-    ) -> KurlyProductPage:
-        normalizedTextLines = self.NormalizeTextLines(textLines)
-        normalizedNoticeLines = productNoticeLines or (
-            self._fallbackParser._ExtractProductNoticeLines(normalizedTextLines)
-        )
-        parser = self._SelectParser(normalizedNoticeLines)
-        return parser.ParseCollectedTextLines(
-            textLines=normalizedTextLines,
-            productNoticeLines=normalizedNoticeLines,
-            productPageUrl=productPageUrl,
-        )
-
-    def NormalizeProductNoticeLines(self, textLines: List[str]) -> List[str]:
-        return self._fallbackParser.NormalizeProductNoticeLines(textLines)
-
-    def NormalizeTextLines(self, textLines: List[str]) -> List[str]:
-        return self._fallbackParser.NormalizeTextLines(textLines)
-
-    def DetectProductDomain(
-        self,
-        productNoticeLines: List[str],
-    ) -> KurlyProductDomain:
-        return self._domainDetector.Detect(productNoticeLines)
-
-    def _SelectParser(
-        self,
-        productNoticeLines: List[str],
-    ) -> KurlyBasePageParser:
-        productDomain = self.DetectProductDomain(productNoticeLines)
-        if productDomain == KurlyProductDomain.FOOD:
-            return self._foodParser
-        if productDomain == KurlyProductDomain.COSMETICS:
-            return self._cosmeticsParser
-        return self._fallbackParser

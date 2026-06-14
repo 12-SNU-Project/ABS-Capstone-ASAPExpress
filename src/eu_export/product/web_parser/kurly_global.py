@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Any, List, Optional
 from urllib.parse import urlparse
 
-from eu_export.product.web_parser.kurly_market import (
-    ALL_PRODUCT_NOTICE_FIELD_LABELS,
+from eu_export.product.web_parser.kurly_parser import (
     KurlyBasePageParser,
+    KurlyDomainDetector,
+    KurlyParserDefaults,
 )
 from eu_export.product.web_parser.kurly_market_schema import (
     KurlyProductDomain,
@@ -17,46 +18,42 @@ from eu_export.product.web_parser.kurly_market_schema import (
 from eu_export.utils import NormalizeWhitespace, NormalizeWhitespacePreservingLines
 
 
-KURLY_GLOBAL_PRODUCT_NOTICE_FIELD_LABELS = list(
-    dict.fromkeys(
-        ALL_PRODUCT_NOTICE_FIELD_LABELS
-        + [
-            "원산지",
-            "포장타입",
-            "중량/용량",
-            "판매단위",
-            "알레르기정보",
-            "소비기한(또는 유통기한)정보",
-        ]
-    )
-)
-KURLY_GLOBAL_FOOD_HINT_LABELS = {
-    "원산지",
-    "알레르기정보",
-    "소비기한(또는 유통기한)정보",
-    "식품의 유형",
-    "원재료명",
-    "영양성분",
-}
-KURLY_GLOBAL_COSMETICS_HINT_LABELS = {
-    "내용물의 용량 또는 중량",
-    "제품 주요 사양",
-    "사용기한 또는 개봉 후 사용기간",
-    "사용방법",
-    "전성분",
-    "모든 성분",
-    "기능성 화장품",
-    "제조국",
-}
-
-
 class KurlyGlobalPageParser(KurlyBasePageParser):
     """kurlyglobal.com Shopify 상품 페이지 parser."""
 
-    def __init__(self) -> None:
+    _EXTRA_PRODUCT_NOTICE_FIELD_LABELS = [
+        "원산지",
+        "포장타입",
+        "중량/용량",
+        "판매단위",
+        "알레르기정보",
+        "소비기한(또는 유통기한)정보",
+    ]
+    _EXTRA_FOOD_DOMAIN_HINT_LABELS = [
+        "원산지",
+        "알레르기정보",
+        "소비기한(또는 유통기한)정보",
+    ]
+    _EXTRA_COSMETICS_DOMAIN_HINT_LABELS = [
+        "전성분",
+    ]
+
+    def __init__(
+        self,
+        domainDetector: Optional[KurlyDomainDetector] = None,
+    ) -> None:
         super().__init__(
             productDomain=KurlyProductDomain.UNKNOWN,
-            productNoticeFieldLabels=KURLY_GLOBAL_PRODUCT_NOTICE_FIELD_LABELS,
+            productNoticeFieldLabels=list(
+                dict.fromkeys(
+                    KurlyParserDefaults.PRODUCT_NOTICE_FIELD_LABELS
+                    + self._EXTRA_PRODUCT_NOTICE_FIELD_LABELS
+                )
+            ),
+        )
+        self._domainDetector = domainDetector or KurlyDomainDetector(
+            foodFieldLabels=self._EXTRA_FOOD_DOMAIN_HINT_LABELS,
+            cosmeticsFieldLabels=self._EXTRA_COSMETICS_DOMAIN_HINT_LABELS,
         )
 
     def IsSupportedProductPageUrl(self, url: str) -> bool:
@@ -135,7 +132,7 @@ class KurlyGlobalPageParser(KurlyBasePageParser):
             productNoticeLines=productNoticeLines,
             productPageUrl=productPageUrl,
         )
-        detectedDomain = self._DetectProductDomain(productNoticeLines)
+        detectedDomain = self._domainDetector.Detect(productNoticeLines)
         noticeFieldValues = {
             field.fieldName: field.fieldValue
             for field in parsedProductPage.productNoticeFields
@@ -151,15 +148,16 @@ class KurlyGlobalPageParser(KurlyBasePageParser):
             }
         )
 
-    def _ClickProductTab(self, page: Any, tabName: str) -> None:
+    @staticmethod
+    def _ClickProductTab(page: Any, tabName: str) -> None:
         try:
             page.get_by_text(tabName, exact=True).first.click(timeout=3000)
             page.wait_for_timeout(400)
         except Exception:
             return
 
+    @staticmethod
     def _LimitedScroll(
-        self,
         page: Any,
         scrollCount: int,
         scrollWaitMilliseconds: int,
@@ -171,7 +169,8 @@ class KurlyGlobalPageParser(KurlyBasePageParser):
             if scrollWaitMilliseconds > 0:
                 page.wait_for_timeout(scrollWaitMilliseconds)
 
-    def _ReadProductInfoTableText(self, page: Any) -> str:
+    @staticmethod
+    def _ReadProductInfoTableText(page: Any) -> str:
         try:
             rows = page.evaluate(
                 """
@@ -210,7 +209,8 @@ class KurlyGlobalPageParser(KurlyBasePageParser):
             lines.extend([label, value])
         return NormalizeWhitespacePreservingLines("\n".join(lines))
 
-    def _ReadJsonLdDescription(self, page: Any) -> str:
+    @staticmethod
+    def _ReadJsonLdDescription(page: Any) -> str:
         try:
             value = page.evaluate(
                 """
@@ -235,35 +235,3 @@ class KurlyGlobalPageParser(KurlyBasePageParser):
         if not isinstance(value, str):
             return ""
         return NormalizeWhitespacePreservingLines(value)
-
-    def _DetectProductDomain(
-        self,
-        productNoticeLines: List[str],
-    ) -> KurlyProductDomain:
-        foodScore = self._CountLabelHits(
-            productNoticeLines,
-            KURLY_GLOBAL_FOOD_HINT_LABELS,
-        )
-        cosmeticsScore = self._CountLabelHits(
-            productNoticeLines,
-            KURLY_GLOBAL_COSMETICS_HINT_LABELS,
-        )
-        if foodScore == 0 and cosmeticsScore == 0:
-            return KurlyProductDomain.UNKNOWN
-        if foodScore == cosmeticsScore:
-            return KurlyProductDomain.AMBIGUOUS
-        if foodScore > cosmeticsScore:
-            return KurlyProductDomain.FOOD
-        return KurlyProductDomain.COSMETICS
-
-    def _CountLabelHits(self, lines: List[str], labels: set[str]) -> int:
-        labelSet = {self._NormalizeComparableText(label) for label in labels}
-        score = 0
-        for line in lines:
-            comparableLine = self._NormalizeComparableText(line)
-            if comparableLine in labelSet:
-                score += 1
-        return score
-
-    def _NormalizeComparableText(self, value: str) -> str:
-        return NormalizeWhitespace(value).lower().replace(" ", "")

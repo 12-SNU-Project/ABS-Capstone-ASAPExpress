@@ -17,7 +17,7 @@ from eu_export.product import (  # noqa: E402
     KurlyGlobalPageParser,
     KurlyPageAdapter,
     KurlyPageCollector,
-    KurlyPageParser,
+    KurlyDomesticPageParser,
     KurlyProductPipeline,
     KurlyPipelineInput,
     PaddleOcrEngine,
@@ -104,7 +104,7 @@ class KurlyMarketSmokeRunner:
 
     def _BuildProductSourcePipeline(self) -> KurlyProductPipeline:
         pageAdapter = KurlyPageAdapter(
-            domesticParser=KurlyPageParser(),
+            domesticParser=KurlyDomesticPageParser(),
             globalParser=KurlyGlobalPageParser(),
         )
         collector = KurlyPageCollector(

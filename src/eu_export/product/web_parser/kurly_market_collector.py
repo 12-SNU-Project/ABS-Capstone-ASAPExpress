@@ -11,20 +11,7 @@ from eu_export.product.web_parser.kurly_market_schema import (
 )
 
 
-DEFAULT_KURLY_MARKET_TIMEOUT_MILLISECONDS = 30000
-DEFAULT_KURLY_MARKET_SCROLL_COUNT = 8
-DEFAULT_KURLY_MARKET_SCROLL_WAIT_MILLISECONDS = 500
-DEFAULT_KURLY_MARKET_VIEWPORT_WIDTH = 1440
-DEFAULT_KURLY_MARKET_VIEWPORT_HEIGHT = 1600
-DEFAULT_KURLY_MARKET_SCROLL_STEP_RATIO = 0.75
-DEFAULT_KURLY_MARKET_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
-
-
-class KurlyPageParserProtocol(Protocol):
+class KurlyProductPageParserProtocol(Protocol):
     """Collector가 요구하는 KurlyMarket parser 최소 interface."""
 
     def IsSupportedProductPageUrl(self, url: str) -> bool:
@@ -52,14 +39,41 @@ class KurlyCollectionError(RuntimeError):
 class KurlyPageCollector:
     """Playwright로 KurlyMarket 상품 페이지를 제한 스크롤해 수집한다."""
 
+    DEFAULT_TIMEOUT_MILLISECONDS = 30000
+    DEFAULT_SCROLL_COUNT = 8
+    DEFAULT_SCROLL_WAIT_MILLISECONDS = 500
+    DEFAULT_VIEWPORT_WIDTH = 1440
+    DEFAULT_VIEWPORT_HEIGHT = 1600
+    DEFAULT_SCROLL_STEP_RATIO = 0.75
+    DEFAULT_USER_AGENT = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+
     def __init__(
         self,
-        parser: Optional[KurlyPageParserProtocol] = None,
+        parser: Optional[KurlyProductPageParserProtocol] = None,
         headless: bool = True,
-        timeoutMilliseconds: int = DEFAULT_KURLY_MARKET_TIMEOUT_MILLISECONDS,
-        scrollCount: int = DEFAULT_KURLY_MARKET_SCROLL_COUNT,
-        scrollWaitMilliseconds: int = DEFAULT_KURLY_MARKET_SCROLL_WAIT_MILLISECONDS,
+        timeoutMilliseconds: Optional[int] = None,
+        scrollCount: Optional[int] = None,
+        scrollWaitMilliseconds: Optional[int] = None,
     ) -> None:
+        timeoutMilliseconds = (
+            self.DEFAULT_TIMEOUT_MILLISECONDS
+            if timeoutMilliseconds is None
+            else timeoutMilliseconds
+        )
+        scrollCount = (
+            self.DEFAULT_SCROLL_COUNT
+            if scrollCount is None
+            else scrollCount
+        )
+        scrollWaitMilliseconds = (
+            self.DEFAULT_SCROLL_WAIT_MILLISECONDS
+            if scrollWaitMilliseconds is None
+            else scrollWaitMilliseconds
+        )
         if timeoutMilliseconds <= 0:
             raise ValueError("timeoutMilliseconds must be greater than 0.")
         if scrollCount < 0:
@@ -106,10 +120,10 @@ class KurlyPageCollector:
                 browser = playwright.chromium.launch(headless=self._headless)
                 try:
                     context = browser.new_context(
-                        user_agent=DEFAULT_KURLY_MARKET_USER_AGENT,
+                        user_agent=self.DEFAULT_USER_AGENT,
                         viewport={
-                            "width": DEFAULT_KURLY_MARKET_VIEWPORT_WIDTH,
-                            "height": DEFAULT_KURLY_MARKET_VIEWPORT_HEIGHT,
+                            "width": self.DEFAULT_VIEWPORT_WIDTH,
+                            "height": self.DEFAULT_VIEWPORT_HEIGHT,
                         },
                     )
                     try:
@@ -186,7 +200,7 @@ class KurlyPageCollector:
         )
 
     @staticmethod
-    def _BuildDefaultParser() -> KurlyPageParserProtocol:
+    def _BuildDefaultParser() -> KurlyProductPageParserProtocol:
         from eu_export.product.web_parser.kurly_page_adapter import KurlyPageAdapter
 
         return KurlyPageAdapter()
@@ -211,8 +225,8 @@ class KurlyPageCollector:
         scrollStep = max(
             1,
             int(
-                DEFAULT_KURLY_MARKET_VIEWPORT_HEIGHT
-                * DEFAULT_KURLY_MARKET_SCROLL_STEP_RATIO
+                self.DEFAULT_VIEWPORT_HEIGHT
+                * self.DEFAULT_SCROLL_STEP_RATIO
             ),
         )
         noticeFound = False
@@ -354,9 +368,9 @@ class KurlyPageCollector:
             return ProductSummaryEvidence()
         return ProductSummaryEvidence.model_validate(value)
 
+    @staticmethod
     def _ApplyProductSummaryEvidence(
-        self,
-        parsedProductPage: KurlyProductPage,
+            parsedProductPage: KurlyProductPage,
         productSummaryEvidence: ProductSummaryEvidence,
     ) -> KurlyProductPage:
         updates = {}
@@ -525,7 +539,8 @@ class KurlyPageCollector:
                 imageUrls.append(imageUrl)
         return imageUrls
 
-    def _ExpandImageUrlValue(self, baseUrl: str, value: str) -> List[str]:
+    @staticmethod
+    def _ExpandImageUrlValue(baseUrl: str, value: str) -> List[str]:
         imageUrls: List[str] = []
         for token in value.split(","):
             candidate = token.strip().split(" ")[0].strip()
@@ -559,18 +574,18 @@ class KurlyPageCollector:
 
         return False
 
+    @staticmethod
     def _BuildOcrCandidateImageUrls(
-        self,
-        parsedProductPage: KurlyProductPage,
+            parsedProductPage: KurlyProductPage,
         productDetailImageUrls: List[str],
     ) -> List[str]:
         if not parsedProductPage.requiresOcrFallback:
             return []
         return list(productDetailImageUrls)
 
+    @staticmethod
     def _BuildCollectionWarnings(
-        self,
-        parsedProductPage: KurlyProductPage,
+            parsedProductPage: KurlyProductPage,
         productDetailImageUrls: List[str],
         ocrCandidateImageUrls: List[str],
     ) -> List[str]:
