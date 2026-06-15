@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 from urllib.parse import urlparse
@@ -28,7 +29,10 @@ from eu_export.input_process.dictionary import (
     ProductDictionaryRepository,
     ProductDictionaryRetriever,
 )
-from eu_export.product.ocr.ocr_normalization import ProductOcrFactNormalizer
+from eu_export.product.ocr.ocr_normalization import (
+    OCR_FACT_LABEL_MATCHERS,
+    ProductOcrFactNormalizer,
+)
 from eu_export.utils import NormalizeWhitespace, NormalizeWhitespacePreservingLines
 
 
@@ -48,8 +52,21 @@ Correct OCR typos only when the surrounding evidence strongly supports the corre
 If evidence is insufficient or conflicting, use unresolved_facts or conflicts.
 The application will generate normalized_fact_texts after validation.
 Prefer concise high-value product facts: product name, food/cosmetic type, net content, storage, ingredients, allergens, nutrition, manufacturer, seller, expiry, package material.
+Return atomic field_name/raw_value pairs. Do not put a whole OCR block under a generic field.
+Never use field names such as OCR observation, OCR 관찰, tile, raw OCR, table marker, or evidence id.
+[tile N], [table N], source_ref, source_type, and evidence_id are collection metadata, not product facts.
 Do not copy unrelated marketing copy or duplicate OCR fragments.
 """.strip()
+
+OCR_COLLECTION_MARKER_PATTERN = re.compile(
+    r"(?im)^\s*\[\s*(?:tile|table|raw_ocr_tiles|structured_tables)\s*#?\d*\s*\]\s*$"
+)
+INLINE_OCR_COLLECTION_MARKER_PATTERN = re.compile(
+    r"(?i)\[\s*(?:tile|table)\s*#?\d+\s*\]"
+)
+GENERIC_OCR_FIELD_PATTERN = re.compile(
+    r"(?i)(?:^|\s)(?:ocr|raw\s*ocr|tile|table|관찰|관측|메타|metadata)(?:\s|$)"
+)
 
 PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
     {
@@ -175,6 +192,75 @@ class ProductFactRecord(BaseModel):
         if displayValue.startswith("{0}:".format(normalizedFieldName)):
             return displayValue
         return "{0}: {1}".format(normalizedFieldName, displayValue)
+
+
+def _StripOcrCollectionMarkers(text: str) -> str:
+    withoutInlineMarkers = INLINE_OCR_COLLECTION_MARKER_PATTERN.sub(
+        "",
+        text or "",
+    )
+    lines = [
+        line
+        for line in NormalizeWhitespacePreservingLines(
+            withoutInlineMarkers,
+        ).splitlines()
+        if OCR_COLLECTION_MARKER_PATTERN.fullmatch(line.strip()) is None
+    ]
+    return NormalizeWhitespacePreservingLines("\n".join(lines))
+
+
+def _IsGenericOcrFieldName(fieldName: str) -> bool:
+    normalizedFieldName = NormalizeWhitespace(fieldName).lower()
+    if normalizedFieldName == "":
+        return True
+    compactFieldName = normalizedFieldName.replace(" ", "")
+    if compactFieldName in {
+        "ocr관찰정보",
+        "ocr관찰함량/용량후보",
+        "rawocr",
+        "rawocrtext",
+        "tile",
+        "table",
+    }:
+        return True
+    return GENERIC_OCR_FIELD_PATTERN.search(normalizedFieldName) is not None
+
+
+def _SplitFieldText(text: str) -> Optional[tuple[str, str]]:
+    normalizedText = _StripOcrCollectionMarkers(text)
+    for separator in [":", "："]:
+        if separator in normalizedText:
+            fieldName, fieldValue = normalizedText.split(separator, 1)
+            fieldName = NormalizeWhitespace(fieldName)
+            fieldValue = NormalizeWhitespacePreservingLines(fieldValue)
+            if fieldName and fieldValue:
+                return fieldName, fieldValue
+    return _SplitKnownFieldText(normalizedText)
+
+
+def _SplitKnownFieldText(text: str) -> Optional[tuple[str, str]]:
+    normalizedText = _StripOcrCollectionMarkers(text).strip(" :：·-*[]()")
+    if normalizedText == "":
+        return None
+    normalizedLowerText = NormalizeWhitespace(normalizedText).lower()
+    compactLowerText = normalizedLowerText.replace(" ", "")
+    for (
+        fieldLabel,
+        normalizedFieldLabel,
+        compactFieldLabel,
+    ) in OCR_FACT_LABEL_MATCHERS:
+        if normalizedLowerText.startswith(normalizedFieldLabel):
+            fieldValue = normalizedText[len(fieldLabel) :].lstrip(" :：·-*[]()")
+            if fieldValue:
+                return fieldLabel, NormalizeWhitespacePreservingLines(fieldValue)
+        if compactLowerText.startswith(compactFieldLabel):
+            compactValue = compactLowerText[len(compactFieldLabel) :]
+            if compactValue:
+                return fieldLabel, NormalizeWhitespacePreservingLines(
+                    normalizedText[len(fieldLabel) :].lstrip(" :：·-*[]()")
+                    or compactValue,
+                )
+    return None
 
 
 class ProductFactReconstructionResult(BaseModel):
@@ -431,7 +517,7 @@ class ProductInputEvidenceBuilder:
         text: str,
         sourceRef: Optional[str],
     ) -> None:
-        normalizedText = NormalizeWhitespacePreservingLines(text)
+        normalizedText = _StripOcrCollectionMarkers(text)
         if normalizedText == "":
             return
         records.append(
@@ -454,31 +540,87 @@ class ProductFactReconstructionValidator:
     ) -> ProductFactReconstructionResult:
         validEvidenceIds = {record.evidenceId for record in evidencePackage.records}
         productFacts: List[ProductFactRecord] = []
+        unresolvedFacts: List[ProductFactRecord] = []
         warnings = list(result.warnings)
         for factRecord in result.productFacts:
+            cleanedFactRecord = self._CleanFactRecord(
+                factRecord,
+                warnings=warnings,
+            )
+            if cleanedFactRecord is None:
+                continue
             invalidRefs = [
                 sourceRef
-                for sourceRef in factRecord.sourceRefs
+                for sourceRef in cleanedFactRecord.sourceRefs
                 if sourceRef not in validEvidenceIds
             ]
             if invalidRefs:
                 warnings.append(
                     "rejected_fact_invalid_source_refs field={0} refs={1}".format(
-                        factRecord.fieldName,
+                        cleanedFactRecord.fieldName,
                         ",".join(invalidRefs),
                     )
                 )
                 productFacts.append(
-                    factRecord.model_copy(update={"validationStatus": "rejected"})
+                    cleanedFactRecord.model_copy(
+                        update={"validationStatus": "rejected"}
+                    )
                 )
                 continue
-            productFacts.append(factRecord)
+            productFacts.append(cleanedFactRecord)
+        for factRecord in result.unresolvedFacts:
+            cleanedFactRecord = self._CleanFactRecord(
+                factRecord,
+                warnings=warnings,
+            )
+            if cleanedFactRecord is not None:
+                unresolvedFacts.append(cleanedFactRecord)
         normalizedFactTexts = self._BuildNormalizedFactTexts(productFacts)
         return result.model_copy(
             update={
                 "productFacts": productFacts,
+                "unresolvedFacts": unresolvedFacts,
                 "normalizedFactTexts": normalizedFactTexts,
                 "warnings": warnings,
+            }
+        )
+
+    def _CleanFactRecord(
+        self,
+        factRecord: ProductFactRecord,
+        *,
+        warnings: List[str],
+    ) -> Optional[ProductFactRecord]:
+        fieldName = _StripOcrCollectionMarkers(factRecord.fieldName)
+        rawValue = _StripOcrCollectionMarkers(factRecord.rawValue)
+        normalizedValue = _StripOcrCollectionMarkers(factRecord.normalizedValue)
+        displayValue = normalizedValue or rawValue
+        if _IsGenericOcrFieldName(fieldName):
+            splitText = _SplitKnownFieldText(displayValue)
+            if splitText is None:
+                warnings.append(
+                    "rejected_fact_generic_ocr_field field={0}".format(
+                        factRecord.fieldName,
+                    )
+                )
+                return None
+            fieldName, splitValue = splitText
+            rawValue = splitValue
+            normalizedValue = splitValue
+        if fieldName == "" or (rawValue == "" and normalizedValue == ""):
+            warnings.append(
+                "rejected_fact_empty_field_or_value field={0}".format(
+                    factRecord.fieldName,
+                )
+            )
+            return None
+        return factRecord.model_copy(
+            update={
+                "fieldName": NormalizeWhitespace(fieldName),
+                "rawValue": NormalizeWhitespacePreservingLines(rawValue),
+                "normalizedValue": NormalizeWhitespacePreservingLines(
+                    normalizedValue,
+                ),
             }
         )
 
@@ -491,7 +633,10 @@ class ProductFactReconstructionValidator:
         for factRecord in productFacts:
             if factRecord.validationStatus != "accepted":
                 continue
+            if _IsGenericOcrFieldName(factRecord.fieldName):
+                continue
             factText = factRecord.ToFactText()
+            factText = _StripOcrCollectionMarkers(factText)
             if factText and factText not in seenFactTexts:
                 seenFactTexts.add(factText)
                 factTexts.append(factText)
@@ -555,10 +700,12 @@ class DeterministicProductFactReconstructor:
         record: ProductInputEvidenceRecord,
         dictionaryMatches: Sequence[ProductDictionaryMatch],
     ) -> Optional[ProductFactRecord]:
-        splitText = self._SplitFieldText(record.text)
+        splitText = _SplitFieldText(record.text)
         if splitText is None:
             return None
         fieldName, fieldValue = splitText
+        if _IsGenericOcrFieldName(fieldName):
+            return None
         normalizedValue = self.ApplyDictionaryCorrections(
             fieldValue,
             dictionaryMatches,
@@ -589,11 +736,15 @@ class DeterministicProductFactReconstructor:
         sourceRefs = self._FindSourceRefs(factText, evidencePackage)
         if not sourceRefs:
             sourceRefs = [evidencePackage.records[0].evidenceId] if evidencePackage.records else []
-        splitText = self._SplitFieldText(factText)
+        splitText = _SplitFieldText(factText)
         if splitText is None:
-            fieldName = "OCR 관찰 정보"
-            fieldValue = factText
+            return None
         else:
+            fieldName, fieldValue = splitText
+        if _IsGenericOcrFieldName(fieldName):
+            splitText = _SplitKnownFieldText(fieldValue)
+            if splitText is None:
+                return None
             fieldName, fieldValue = splitText
         normalizedValue = self.ApplyDictionaryCorrections(
             fieldValue,
@@ -636,17 +787,6 @@ class DeterministicProductFactReconstructor:
             if normalizedFactText in NormalizeWhitespace(record.text):
                 sourceRefs.append(record.evidenceId)
         return sourceRefs
-
-    def _SplitFieldText(self, text: str) -> Optional[tuple[str, str]]:
-        normalizedText = NormalizeWhitespacePreservingLines(text)
-        for separator in [":", "："]:
-            if separator in normalizedText:
-                fieldName, fieldValue = normalizedText.split(separator, 1)
-                fieldName = NormalizeWhitespace(fieldName)
-                fieldValue = NormalizeWhitespacePreservingLines(fieldValue)
-                if fieldName and fieldValue:
-                    return fieldName, fieldValue
-        return None
 
     def _DeduplicateFactRecords(
         self,

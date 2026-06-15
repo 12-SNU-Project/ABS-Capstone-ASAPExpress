@@ -30,6 +30,38 @@ class EvidenceIntakeAgent(BaseAgent):
             "product_name": self.raw_input.get("product_name", ""),
             "description": self.raw_input.get("description", ""),
             "composition": self.raw_input.get("composition", []),
+            "classification_input_product_facts": self.raw_input.get(
+                "classification_input_product_facts",
+                [],
+            ),
+            "structured_product_facts": self.raw_input.get(
+                "structured_product_facts",
+                [],
+            ),
+            "llm_reconstructed_product_facts": self.raw_input.get(
+                "llm_reconstructed_product_facts",
+                [],
+            ),
+            "fallback_product_facts": self.raw_input.get(
+                "fallback_product_facts",
+                [],
+            ),
+            "unresolved_product_facts": self.raw_input.get(
+                "unresolved_product_facts",
+                [],
+            ),
+            "product_fact_conflicts": self.raw_input.get(
+                "product_fact_conflicts",
+                [],
+            ),
+            "classification_fact_texts": self.raw_input.get(
+                "classification_fact_texts",
+                [],
+            ),
+            "classification_input_fact_texts": self.raw_input.get(
+                "classification_input_fact_texts",
+                [],
+            ),
             "ocr_text": self.raw_input.get("ocr_text", []),
             "source_urls": self.raw_input.get("source_urls", []),
             "origin_country": self.raw_input.get("origin_country", "KR"),

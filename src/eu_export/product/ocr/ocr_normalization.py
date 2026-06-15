@@ -393,7 +393,7 @@ class ProductOcrFactNormalizer:
         )
         if not hasKoreanText and not hasMeaningfulLatinText:
             return None
-        return "OCR 관찰 함량/용량 후보: {0}".format(normalizedLine)
+        return "함량/용량 정보: {0}".format(normalizedLine)
 
     def _TrimFieldNoiseFromLine(self, line: str) -> str:
         trimmedLine = NormalizeWhitespace(line)

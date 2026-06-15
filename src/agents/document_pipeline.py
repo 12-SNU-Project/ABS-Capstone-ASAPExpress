@@ -197,6 +197,37 @@ def collect_kurly_url_facts(
         step.model_dump(mode="json", by_alias=True)
         for step in result.steps
     ]
+    reconstructed_product_facts = [
+        fact.model_dump(mode="json", by_alias=True)
+        for fact in input_reconstruction.productFacts
+    ]
+    unresolved_product_facts = [
+        fact.model_dump(mode="json", by_alias=True)
+        for fact in input_reconstruction.unresolvedFacts
+    ]
+    classification_fact_texts = list(input_reconstruction.normalizedFactTexts)
+    used_llm_reconstruction = input_reconstruction.usedLlmReconstruction
+    reconstruction_mode = (
+        "llm_reconstruction"
+        if used_llm_reconstruction
+        else "fallback_reconstruction"
+        if reconstructed_product_facts or classification_fact_texts
+        else "unavailable"
+    )
+    reconstruction_error = (
+        input_reconstruction.fallbackReason
+        if input_reconstruction.fallbackReason
+        and input_reconstruction.fallbackReason not in {
+            "llm_reconstruction_not_used",
+        }
+        else None
+    )
+    llm_reconstructed_product_facts = (
+        reconstructed_product_facts if used_llm_reconstruction else []
+    )
+    fallback_product_facts = (
+        [] if used_llm_reconstruction else reconstructed_product_facts
+    )
     facts = {
         "url": url,
         "source_urls": [url],
@@ -206,6 +237,14 @@ def collect_kurly_url_facts(
         "product_domain": product_input.productDomain or "unknown",
         "ocr_text": [product_input.ocrText] if product_input.ocrText else [],
         "ingredient_list": list(product_input.normalizedOcrFactTexts or []),
+        "classification_input_product_facts": reconstructed_product_facts,
+        "structured_product_facts": reconstructed_product_facts,
+        "llm_reconstructed_product_facts": llm_reconstructed_product_facts,
+        "fallback_product_facts": fallback_product_facts,
+        "unresolved_product_facts": unresolved_product_facts,
+        "product_fact_conflicts": list(input_reconstruction.conflicts),
+        "classification_input_fact_texts": classification_fact_texts,
+        "classification_fact_texts": classification_fact_texts,
         "origin_country": "KR",
         "intended_use": "human consumption",
         "warnings": warnings,
@@ -217,26 +256,24 @@ def collect_kurly_url_facts(
             "parse_warning_count": len(result.collectionResult.warnings),
         },
         "input_reconstruction": {
+            "mode": reconstruction_mode,
             "used_llm_reconstruction": (
-                input_reconstruction.usedLlmReconstruction
+                used_llm_reconstruction
             ),
             "fallback_reason": input_reconstruction.fallbackReason,
+            "error": reconstruction_error,
             "fact_count": len(input_reconstruction.productFacts),
             "unresolved_count": len(input_reconstruction.unresolvedFacts),
             "conflict_count": len(input_reconstruction.conflicts),
             "fact_text_count": len(input_reconstruction.normalizedFactTexts),
-            "product_facts": [
-                fact.model_dump(mode="json", by_alias=True)
-                for fact in input_reconstruction.productFacts
-            ],
-            "unresolved_facts": [
-                fact.model_dump(mode="json", by_alias=True)
-                for fact in input_reconstruction.unresolvedFacts
-            ],
+            "product_facts": reconstructed_product_facts,
+            "classification_input_product_facts": reconstructed_product_facts,
+            "llm_reconstructed_product_facts": llm_reconstructed_product_facts,
+            "fallback_product_facts": fallback_product_facts,
+            "unresolved_facts": unresolved_product_facts,
             "conflicts": list(input_reconstruction.conflicts),
-            "classification_fact_texts": list(
-                input_reconstruction.normalizedFactTexts
-            ),
+            "classification_input_fact_texts": classification_fact_texts,
+            "classification_fact_texts": classification_fact_texts,
             "warnings": list(input_reconstruction.warnings),
             "debug_artifacts": dict(input_reconstruction.debugArtifacts),
         },
@@ -275,18 +312,69 @@ def build_raw_input_from_ui(
     ocr_text = facts.get("ocr_text") or facts.get("coi_text") or facts.get("coi") or []
     if isinstance(ocr_text, str):
         ocr_text = [ocr_text] if ocr_text.strip() else []
+    input_reconstruction = facts.get("input_reconstruction") or {}
+    structured_product_facts = (
+        facts.get("classification_input_product_facts")
+        or facts.get("structured_product_facts")
+        or input_reconstruction.get("classification_input_product_facts")
+        or input_reconstruction.get("product_facts")
+        or []
+    )
+    llm_reconstructed_product_facts = (
+        facts.get("llm_reconstructed_product_facts")
+        or input_reconstruction.get("llm_reconstructed_product_facts")
+        or []
+    )
+    fallback_product_facts = (
+        facts.get("fallback_product_facts")
+        or input_reconstruction.get("fallback_product_facts")
+        or []
+    )
+    unresolved_product_facts = (
+        facts.get("unresolved_product_facts")
+        or input_reconstruction.get("unresolved_facts")
+        or []
+    )
+    product_fact_conflicts = (
+        facts.get("product_fact_conflicts")
+        or input_reconstruction.get("conflicts")
+        or []
+    )
+    classification_fact_texts = (
+        facts.get("classification_input_fact_texts")
+        or input_reconstruction.get("classification_input_fact_texts")
+        or facts.get("classification_fact_texts")
+        or input_reconstruction.get("classification_fact_texts")
+        or facts.get("ingredient_list")
+        or []
+    )
+    legacy_structured_product_facts = (
+        facts.get("structured_product_facts")
+        or input_reconstruction.get("product_facts")
+        or []
+    )
+    if not structured_product_facts:
+        structured_product_facts = legacy_structured_product_facts
 
     return {
         "product_name": facts.get("product_name") or query,
         "description": facts.get("description") or facts.get("short_description") or "",
-        "composition": facts.get("composition") or facts.get("ingredient_list") or [],
+        "composition": facts.get("composition") or classification_fact_texts or [],
+        "classification_input_product_facts": structured_product_facts,
+        "structured_product_facts": structured_product_facts,
+        "llm_reconstructed_product_facts": llm_reconstructed_product_facts,
+        "fallback_product_facts": fallback_product_facts,
+        "unresolved_product_facts": unresolved_product_facts,
+        "product_fact_conflicts": product_fact_conflicts,
+        "classification_input_fact_texts": classification_fact_texts,
+        "classification_fact_texts": classification_fact_texts,
         "ocr_text": ocr_text,
         "source_urls": source_urls,
         "origin_country": facts.get("origin_country") or "KR",
         "intended_use": facts.get("intended_use") or "unknown",
         "warnings": facts.get("warnings") or [],
         "url_intake": facts.get("url_intake") or {},
-        "input_reconstruction": facts.get("input_reconstruction") or {},
+        "input_reconstruction": input_reconstruction,
     }
 
 

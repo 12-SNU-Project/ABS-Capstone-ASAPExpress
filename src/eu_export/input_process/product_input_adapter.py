@@ -561,15 +561,16 @@ class ProductInputAdapter:
         )
         normalizedOcrFactTexts: List[str] = []
         excludedOcrTextPreview = ""
-        if (
-            inputReconstructionData is not None
-            and inputReconstructionData.normalizedFactTexts
-        ):
+        if inputReconstructionData is not None:
             normalizedOcrFactTexts = inputReconstructionData.normalizedFactTexts
         elif ocrNormalizationData is not None:
             normalizedOcrFactTexts = ocrNormalizationData.factTexts
             excludedOcrTextPreview = ocrNormalizationData.excludedTextPreview or ""
-        if not normalizedOcrFactTexts and combinedOcrText.strip() != "":
+        if (
+            inputReconstructionData is None
+            and not normalizedOcrFactTexts
+            and combinedOcrText.strip() != ""
+        ):
             ocrNormalizationResult = self.ocrFactNormalizer.Normalize(
                 combinedOcrText,
                 productDomain=productDomain,

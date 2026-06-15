@@ -8,7 +8,10 @@ from eu_export.product.ocr.ocr_fallback import (
     ProductOcrFallbackRunner,
     ProductOcrImageResult,
 )
-from eu_export.product.ocr.ocr_normalization import ProductOcrFactNormalizer
+from eu_export.product.ocr.ocr_normalization import (
+    ProductOcrFactNormalizationResult,
+    ProductOcrFactNormalizer,
+)
 from eu_export.product.ocr.paddle_ocr import ProductOcrEngine
 from eu_export.input_process.reconstruction import (
     ProductFactReconstructionResult,
@@ -109,10 +112,17 @@ class KurlyProductPipeline:
         combinedOcrText = ProductOcrFallbackRunner.BuildCombinedOcrText(
             ocrImageResults
         )
-        ocrNormalizationResult = self._ocrFactNormalizer.Normalize(
-            combinedOcrText,
-            productDomain=collectionResult.parsedProductPage.productDomain.value,
-        )
+        if self._inputReconstructionService is None:
+            ocrNormalizationResult = self._ocrFactNormalizer.Normalize(
+                combinedOcrText,
+                productDomain=collectionResult.parsedProductPage.productDomain.value,
+            )
+        else:
+            ocrNormalizationResult = ProductOcrFactNormalizationResult(
+                rawLineCount=len(
+                    [line for line in combinedOcrText.splitlines() if line.strip()]
+                ),
+            )
         inputReconstructionResult = (
             self._inputReconstructionService.ReconstructFromPipelineParts(
                 collectionResult=collectionResult,

@@ -193,6 +193,36 @@ def _fact_source_text(fact: dict[str, Any]) -> str:
     return str(refs or "")
 
 
+def _BuildDisplayFactsFromFactTexts(factTexts: list[Any]) -> list[dict[str, Any]]:
+    displayFacts: list[dict[str, Any]] = []
+    for factText in factTexts:
+        text = str(factText or "").strip()
+        if not text:
+            continue
+        splitText = None
+        for separator in (":", "："):
+            if separator in text:
+                fieldName, fieldValue = text.split(separator, 1)
+                fieldName = fieldName.strip()
+                fieldValue = fieldValue.strip()
+                if fieldName and fieldValue:
+                    splitText = (fieldName, fieldValue)
+                    break
+        if splitText is None:
+            continue
+        fieldName, fieldValue = splitText
+        displayFacts.append(
+            {
+                "field_name": fieldName,
+                "normalized_value": fieldValue,
+                "validation_status": "accepted",
+                "correction_type": "display_fallback",
+                "source_refs": [],
+            }
+        )
+    return displayFacts
+
+
 def _reconstruction_fact_table(
     title: str,
     facts: list[dict[str, Any]],
@@ -311,11 +341,18 @@ def input_reconstruction_card(
     if not input_reconstruction and not classification_facts:
         return None
 
-    productFacts = input_reconstruction.get("product_facts") or []
+    productFacts = (
+        input_reconstruction.get("classification_input_product_facts")
+        or input_reconstruction.get("product_facts")
+        or []
+    )
+    llmFacts = input_reconstruction.get("llm_reconstructed_product_facts") or []
+    fallbackFacts = input_reconstruction.get("fallback_product_facts") or []
     unresolvedFacts = input_reconstruction.get("unresolved_facts") or []
     conflicts = input_reconstruction.get("conflicts") or []
     factTexts = (
-        input_reconstruction.get("classification_fact_texts")
+        input_reconstruction.get("classification_input_fact_texts")
+        or input_reconstruction.get("classification_fact_texts")
         or classification_facts
         or []
     )
@@ -323,8 +360,23 @@ def input_reconstruction_card(
         productFacts = []
     if not isinstance(unresolvedFacts, list):
         unresolvedFacts = []
+    if not isinstance(llmFacts, list):
+        llmFacts = []
+    if not isinstance(fallbackFacts, list):
+        fallbackFacts = []
     if not isinstance(conflicts, list):
         conflicts = [str(conflicts)] if str(conflicts).strip() else []
+    if not productFacts:
+        productFacts = _BuildDisplayFactsFromFactTexts(factTexts)
+    reconstructionMode = input_reconstruction.get("mode") or (
+        "llm_reconstruction"
+        if input_reconstruction.get("used_llm_reconstruction")
+        else "fallback_reconstruction"
+        if fallbackFacts
+        else "unknown"
+    )
+    reconstructionError = input_reconstruction.get("error")
+    fallbackReason = input_reconstruction.get("fallback_reason")
 
     return html.Div(
         [
@@ -341,13 +393,28 @@ def input_reconstruction_card(
             html.Div(
                 [
                     _small("LLM", "on" if input_reconstruction.get("used_llm_reconstruction") else "off"),
-                    _small("facts", input_reconstruction.get("fact_count") or len(productFacts)),
-                    _small("classification lines", input_reconstruction.get("fact_text_count") or len(factTexts)),
-                    _small("fallback", input_reconstruction.get("fallback_reason") or "-"),
+                    _small("mode", reconstructionMode),
+                    _small("input facts", input_reconstruction.get("fact_count") or len(productFacts)),
+                    _small("search text lines", input_reconstruction.get("fact_text_count") or len(factTexts)),
                 ],
                 style={"display": "flex", "gap": "8px", "flexWrap": "wrap"},
             ),
-            _reconstruction_fact_table("Structured product facts", productFacts),
+            html.Div(
+                [
+                    html.Div("Input reconstruction issue", style={"fontSize": "12px", "fontWeight": 900, "color": "#92400e", "marginBottom": "4px"}),
+                    html.Div(
+                        reconstructionError or fallbackReason or "fallback reconstruction is being used",
+                        style={"fontSize": "12px", "color": "#78350f"},
+                    ),
+                ],
+                style={"marginTop": "10px", "padding": "10px", "border": "1px solid #fcd34d", "borderRadius": "8px", "background": "#fffbeb"},
+            ) if reconstructionError or (
+                reconstructionMode == "fallback_reconstruction"
+                and not input_reconstruction.get("used_llm_reconstruction")
+            ) else None,
+            _reconstruction_fact_table("Classification input product facts", productFacts),
+            _reconstruction_fact_table("LLM reconstructed product facts", llmFacts),
+            _reconstruction_fact_table("Fallback product facts", fallbackFacts),
             _classification_fact_text_table(factTexts),
             _reconstruction_fact_table("Unresolved facts", unresolvedFacts, max_rows=6),
             html.Div(
@@ -471,12 +538,12 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
                 ) if url_intake else None,
                 html.Div(
                     (
-                        "Input reconstruction: llm={0}, classification_facts={1}, "
-                        "fallback={2}"
+                        "Input reconstruction: mode={0}, llm={1}, "
+                        "search_text_lines={2}"
                     ).format(
+                        input_reconstruction.get("mode") or "-",
                         input_reconstruction.get("used_llm_reconstruction"),
                         input_reconstruction.get("fact_text_count"),
-                        input_reconstruction.get("fallback_reason") or "-",
                     )
                 ) if input_reconstruction else None,
                 input_reconstruction_card(

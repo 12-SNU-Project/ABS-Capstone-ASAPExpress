@@ -361,6 +361,18 @@ class ProductClassificationInput(BaseModel):
         default_factory=list,
         alias="normalized_ocr_fact_texts",
     )
+    structuredProductFacts: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        alias="structured_product_facts",
+    )
+    unresolvedProductFacts: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        alias="unresolved_product_facts",
+    )
+    productFactConflicts: List[Any] = Field(
+        default_factory=list,
+        alias="product_fact_conflicts",
+    )
     excludedOcrTextPreview: str = Field(
         default="",
         alias="excluded_ocr_text_preview",
