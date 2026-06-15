@@ -52,11 +52,11 @@ def _read_agent_runs(store: BlackboardStore) -> list[dict[str, Any]]:
 def collect_kurly_url_facts(
     url: str,
     *,
-    run_ocr: bool = True,
-    headless: bool = True,
-    timeout_seconds: int = 60,
-    scroll_count: int = 8,
-    max_ocr_images: int = 8,
+    run_ocr: bool | None = None,
+    headless: bool | None = None,
+    timeout_seconds: int | None = None,
+    scroll_count: int | None = None,
+    max_ocr_images: int | None = None,
 ) -> dict[str, Any]:
     """Collect product facts from a Kurly product URL.
 
@@ -71,10 +71,33 @@ def collect_kurly_url_facts(
         KurlyDomesticPageParser,
         KurlyPipelineInput,
         KurlyProductPipeline,
+        PaddleOcrEngine,
+        PaddleStructureOcrEngine,
     )
-    from eu_export.input_process import ProductInputAdapter
+    from eu_export.bridge import (
+        BuildLlmRuntimeConfigFromEnv,
+        BuildRuntimeAdapter,
+        RuntimeAdapterBuildError,
+    )
+    from eu_export.input_process import (
+        ProductInputAdapter,
+        ProductInputReconstructionService,
+    )
 
     warnings: list[str] = []
+    smoke_config = APP_CONFIG.kurly_smoke
+    run_ocr = smoke_config.run_ocr_fallback if run_ocr is None else run_ocr
+    headless = smoke_config.headless if headless is None else headless
+    timeout_seconds = (
+        smoke_config.timeout_seconds if timeout_seconds is None else timeout_seconds
+    )
+    scroll_count = smoke_config.scroll_count if scroll_count is None else scroll_count
+    max_ocr_images = (
+        smoke_config.max_ocr_image_count
+        if max_ocr_images is None
+        else max_ocr_images
+    )
+
     pageAdapter = KurlyPageAdapter(
         domesticParser=KurlyDomesticPageParser(),
         globalParser=KurlyGlobalPageParser(),
@@ -85,20 +108,77 @@ def collect_kurly_url_facts(
         timeoutMilliseconds=timeout_seconds * 1000,
         scrollCount=scroll_count,
     )
+    input_reconstruction_service = None
+    if smoke_config.use_input_reconstruction:
+        runtime_adapter = None
+        if smoke_config.use_llm_input_reconstruction:
+            try:
+                runtime_adapter = BuildRuntimeAdapter(
+                    BuildLlmRuntimeConfigFromEnv(projectRootPath=PROJECT_ROOT),
+                    requireAvailable=True,
+                )
+            except RuntimeAdapterBuildError as exc:
+                warnings.append(f"llm_input_reconstruction_unavailable: {exc}")
+        input_reconstruction_service = ProductInputReconstructionService(
+            dictionaryPath=(
+                str(
+                    APP_CONFIG.paths.ResolvePath(
+                        PROJECT_ROOT,
+                        smoke_config.input_dictionary_path,
+                    )
+                )
+                if smoke_config.input_dictionary_path is not None
+                else None
+            ),
+            runtimeAdapter=runtime_adapter,
+            fuzzyMinRatio=smoke_config.input_dictionary_fuzzy_min_ratio,
+            llmMaxTokens=smoke_config.llm_input_reconstruction_max_tokens,
+            llmDebugArtifactRootPath=(
+                URL_INTAKE_ARTIFACT_ROOT
+                if (
+                    runtime_adapter is not None
+                    and smoke_config.write_llm_input_reconstruction_debug_artifacts
+                )
+                else None
+            ),
+        )
+
     if run_ocr:
         try:
-            from eu_export.product.ocr.paddle_ocr import PaddleStructureOcrEngine
-
+            ocr_engine = (
+                PaddleStructureOcrEngine(
+                    useProjectionTiling=(
+                        smoke_config.structured_ocr_use_projection_tiling
+                    ),
+                    maxTileHeightPixels=(
+                        smoke_config.structured_ocr_max_tile_height_pixels
+                    ),
+                    maxTileSidePixels=smoke_config.structured_ocr_max_tile_side_pixels,
+                    tileOverlapPixels=smoke_config.structured_ocr_tile_overlap_pixels,
+                    allowHardCutFallback=(
+                        smoke_config.structured_ocr_allow_hard_cut_fallback
+                    ),
+                )
+                if smoke_config.use_structured_ocr
+                else PaddleOcrEngine()
+            )
             pipeline = KurlyProductPipeline(
                 collector=collector,
-                ocrEngine=PaddleStructureOcrEngine(),
+                ocrEngine=ocr_engine,
+                inputReconstructionService=input_reconstruction_service,
             )
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"ocr_engine_unavailable: {exc}")
-            pipeline = KurlyProductPipeline(collector=collector)
+            pipeline = KurlyProductPipeline(
+                collector=collector,
+                inputReconstructionService=input_reconstruction_service,
+            )
             run_ocr = False
     else:
-        pipeline = KurlyProductPipeline(collector=collector)
+        pipeline = KurlyProductPipeline(
+            collector=collector,
+            inputReconstructionService=input_reconstruction_service,
+        )
 
     artifact_root = URL_INTAKE_ARTIFACT_ROOT
     artifact_root.mkdir(parents=True, exist_ok=True)
@@ -111,6 +191,12 @@ def collect_kurly_url_facts(
         )
     )
     product_input = ProductInputAdapter().BuildFromObject(result)
+    input_reconstruction = result.inputReconstructionResult
+    warnings.extend(input_reconstruction.warnings)
+    pipeline_steps = [
+        step.model_dump(mode="json", by_alias=True)
+        for step in result.steps
+    ]
     facts = {
         "url": url,
         "source_urls": [url],
@@ -123,6 +209,25 @@ def collect_kurly_url_facts(
         "origin_country": "KR",
         "intended_use": "human consumption",
         "warnings": warnings,
+        "url_intake": {
+            "artifact_root": str(artifact_root),
+            "pipeline_steps": pipeline_steps,
+            "ocr_image_count": len(result.ocrImageResults),
+            "combined_ocr_text_length": len(result.combinedOcrText),
+            "parse_warning_count": len(result.collectionResult.warnings),
+        },
+        "input_reconstruction": {
+            "used_llm_reconstruction": (
+                input_reconstruction.usedLlmReconstruction
+            ),
+            "fallback_reason": input_reconstruction.fallbackReason,
+            "fact_count": len(input_reconstruction.productFacts),
+            "unresolved_count": len(input_reconstruction.unresolvedFacts),
+            "conflict_count": len(input_reconstruction.conflicts),
+            "fact_text_count": len(input_reconstruction.normalizedFactTexts),
+            "warnings": list(input_reconstruction.warnings),
+            "debug_artifacts": dict(input_reconstruction.debugArtifacts),
+        },
     }
     return facts
 
@@ -168,6 +273,8 @@ def build_raw_input_from_ui(
         "origin_country": facts.get("origin_country") or "KR",
         "intended_use": facts.get("intended_use") or "unknown",
         "warnings": facts.get("warnings") or [],
+        "url_intake": facts.get("url_intake") or {},
+        "input_reconstruction": facts.get("input_reconstruction") or {},
     }
 
 
@@ -238,13 +345,33 @@ def _normalize_kurly_result_facts(facts: dict[str, Any]) -> dict[str, Any]:
     """
     if not isinstance(facts, dict):
         return {}
-    parsed = facts.get("parsed_product_page") or {}
+    raw_collection = facts.get("raw_collection") or {}
+    parsed = (
+        facts.get("parsed_product_page")
+        or raw_collection.get("parsed_product_page")
+        or {}
+    )
     product = facts.get("product") or {}
     ocr_summary = facts.get("ocr_summary") or {}
+    ocr_evidence = raw_collection.get("ocr_evidence") or {}
+    llm_reconstruction = (
+        facts.get("llm_reconstruction")
+        or facts.get("input_reconstruction")
+        or {}
+    )
     normalization = ocr_summary.get("normalization") or {}
 
-    fact_texts = normalization.get("fact_texts") or []
-    combined_ocr_text = facts.get("combined_ocr_text") or ""
+    fact_texts = (
+        llm_reconstruction.get("fact_texts_for_classification")
+        or llm_reconstruction.get("normalized_fact_texts")
+        or normalization.get("fact_texts")
+        or []
+    )
+    combined_ocr_text = (
+        facts.get("combined_ocr_text")
+        or ocr_evidence.get("combined_ocr_text")
+        or ""
+    )
     ocr_text: list[str] = []
     if isinstance(combined_ocr_text, str) and combined_ocr_text.strip():
         ocr_text.append(combined_ocr_text)

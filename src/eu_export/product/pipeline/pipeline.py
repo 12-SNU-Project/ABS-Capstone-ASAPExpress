@@ -154,8 +154,8 @@ class KurlyProductPipeline:
             )
         steps.append(
             PipelineStep(
-                stepName="normalize_ocr_text",
-                message="raw_line_count={0}, fact_line_count={1}".format(
+                stepName="build_classification_fact_texts",
+                message="raw_line_count={0}, classification_fact_text_count={1}".format(
                     ocrNormalizationResult.rawLineCount,
                     ocrNormalizationResult.factLineCount,
                 ),
