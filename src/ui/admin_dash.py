@@ -8,7 +8,17 @@ from typing import Any
 from dash import html
 
 from eu_export.app_config import LoadAppConfig
-from ui.classification_dash import CARD, LABEL, PLACEHOLDER, PILL, detail_block, evidence_detail_panel, json_pre, render_progress
+from ui.classification_dash import (
+    CARD,
+    LABEL,
+    PLACEHOLDER,
+    PILL,
+    detail_block,
+    display_stage_name,
+    evidence_detail_panel,
+    json_pre,
+    render_progress,
+)
 
 
 PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
@@ -51,7 +61,7 @@ def _agent_run_cards(agent_runs: list[dict[str, Any]]) -> html.Div:
                 [
                     html.Div(
                         [
-                            html.Span(run.get("agent_name") or "-", style={"fontWeight": 900}),
+                            html.Span(display_stage_name(run.get("agent_name")), style={"fontWeight": 900}),
                             html.Span(f" {run.get('duration_ms', 0)}ms", style={"fontSize": "11px", "color": "#64748b"}),
                         ]
                     ),
@@ -73,7 +83,7 @@ def _citations(agent_runs: list[dict[str, Any]]) -> html.Div:
     citations = []
     for run in agent_runs:
         for cit in run.get("ontology_reads") or []:
-            citations.append({"agent": run.get("agent_name"), **cit})
+            citations.append({"agent": display_stage_name(run.get("agent_name")), **cit})
     if not citations:
         return html.Div("citation 없음", style=PLACEHOLDER)
     return html.Div(

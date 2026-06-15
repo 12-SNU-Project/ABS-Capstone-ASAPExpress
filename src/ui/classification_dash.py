@@ -63,6 +63,31 @@ MONO = {
     "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
     "fontSize": "12px",
 }
+STAGE_DISPLAY_NAMES = {
+    "Input": "Input",
+    "Pipeline": "Pipeline",
+    "Input_Intake": "Input Processing",
+    "Evidence_Intake_Agent": "Product Evidence Builder",
+    "Classification_Agent": "Classification",
+    "Document_Agent": "Document Recommendation",
+    "Orchestrator_Agent": "Result Orchestration",
+    "Product_Intake": "Product Evidence",
+    "Classification": "Classification",
+    "Document_Recommendation": "Document Recommendation",
+    "Orchestration": "Result Orchestration",
+}
+
+
+def display_stage_name(stage: Any) -> str:
+    stageText = str(stage or "").strip()
+    return STAGE_DISPLAY_NAMES.get(stageText, stageText or "-")
+
+
+def display_stage_message(message: Any) -> str:
+    messageText = str(message or "")
+    for rawStageName, displayName in STAGE_DISPLAY_NAMES.items():
+        messageText = messageText.replace(rawStageName, displayName)
+    return messageText
 
 
 def _small(label: str, value: Any) -> html.Div:
@@ -141,6 +166,208 @@ def _text_list_block(title: str, values: list[Any], *, max_items: int = 20) -> h
     return html.Details(
         [html.Summary(f"{title} 원문 보기 ({len(values)})", style={"cursor": "pointer", "fontSize": "12px", "fontWeight": 850}), html.Div(items)],
         style={"marginTop": "8px"},
+    )
+
+
+def _short_text(value: Any, *, max_length: int = 160) -> str:
+    text = str(value or "").strip()
+    if len(text) <= max_length:
+        return text or "-"
+    return text[: max_length - 1].rstrip() + "..."
+
+
+def _fact_display_value(fact: dict[str, Any]) -> str:
+    return str(
+        fact.get("normalized_value")
+        or fact.get("normalizedValue")
+        or fact.get("raw_value")
+        or fact.get("rawValue")
+        or ""
+    ).strip()
+
+
+def _fact_source_text(fact: dict[str, Any]) -> str:
+    refs = fact.get("source_refs") or fact.get("sourceRefs") or []
+    if isinstance(refs, list):
+        return ", ".join(str(ref) for ref in refs[:3] if str(ref).strip())
+    return str(refs or "")
+
+
+def _reconstruction_fact_table(
+    title: str,
+    facts: list[dict[str, Any]],
+    *,
+    max_rows: int = 12,
+) -> html.Div | None:
+    if not facts:
+        return None
+
+    gridStyle = {
+        "display": "grid",
+        "gridTemplateColumns": "minmax(110px, 0.8fr) minmax(180px, 1.6fr) minmax(90px, 0.7fr) minmax(90px, 0.7fr) minmax(130px, 1fr)",
+        "gap": "0",
+        "minWidth": "720px",
+    }
+    headerCell = {
+        "padding": "8px 10px",
+        "fontSize": "11px",
+        "fontWeight": 900,
+        "color": "#475569",
+        "background": "#f8fafc",
+        "borderBottom": "1px solid #e5e7eb",
+    }
+    cell = {
+        "padding": "9px 10px",
+        "fontSize": "12px",
+        "color": "#334155",
+        "borderBottom": "1px solid #edf2f7",
+        "overflowWrap": "anywhere",
+    }
+    rows: list[Any] = [
+        html.Div("Field", style=headerCell),
+        html.Div("Value", style=headerCell),
+        html.Div("Status", style=headerCell),
+        html.Div("Correction", style=headerCell),
+        html.Div("Source", style=headerCell),
+    ]
+    for fact in facts[:max_rows]:
+        fieldName = fact.get("field_name") or fact.get("fieldName") or "-"
+        rows.extend(
+            [
+                html.Div(_short_text(fieldName, max_length=72), style={**cell, "fontWeight": 850}),
+                html.Div(_short_text(_fact_display_value(fact), max_length=220), style=cell),
+                html.Div(_short_text(fact.get("validation_status") or fact.get("validationStatus") or "-", max_length=48), style=cell),
+                html.Div(_short_text(fact.get("correction_type") or fact.get("correctionType") or "-", max_length=48), style=cell),
+                html.Div(_short_text(_fact_source_text(fact), max_length=100), style=cell),
+            ]
+        )
+
+    more = None
+    if len(facts) > max_rows:
+        more = html.Div(
+            f"+ {len(facts) - max_rows} more reconstructed facts",
+            style={"fontSize": "12px", "color": "#64748b", "marginTop": "8px"},
+        )
+
+    return html.Div(
+        [
+            html.Div(title, style={"fontSize": "12px", "fontWeight": 900, "color": "#0f172a", "marginBottom": "8px"}),
+            html.Div(html.Div(rows, style=gridStyle), style={"overflowX": "auto", "border": "1px solid #e5e7eb", "borderRadius": "8px"}),
+            more,
+        ],
+        style={"marginTop": "10px"},
+    )
+
+
+def _classification_fact_text_table(
+    fact_texts: list[Any],
+    *,
+    max_rows: int = 12,
+) -> html.Div | None:
+    cleaned = [str(text).strip() for text in fact_texts if str(text).strip()]
+    if not cleaned:
+        return None
+
+    rows = []
+    for index, text in enumerate(cleaned[:max_rows], start=1):
+        rows.append(
+            html.Div(
+                [
+                    html.Div(str(index), style={**MONO, "color": "#64748b", "fontWeight": 850}),
+                    html.Div(_short_text(text, max_length=260), style={"overflowWrap": "anywhere"}),
+                ],
+                style={
+                    "display": "grid",
+                    "gridTemplateColumns": "42px minmax(0, 1fr)",
+                    "gap": "10px",
+                    "padding": "8px 10px",
+                    "borderBottom": "1px solid #edf2f7",
+                    "fontSize": "12px",
+                    "color": "#334155",
+                },
+            )
+        )
+    if len(cleaned) > max_rows:
+        rows.append(
+            html.Div(
+                f"+ {len(cleaned) - max_rows} more classification fact lines",
+                style={"fontSize": "12px", "color": "#64748b", "padding": "8px 10px"},
+            )
+        )
+
+    return html.Div(
+        [
+            html.Div("Classification fact text", style={"fontSize": "12px", "fontWeight": 900, "color": "#0f172a", "marginBottom": "8px"}),
+            html.Div(rows, style={"border": "1px solid #e5e7eb", "borderRadius": "8px", "overflow": "hidden"}),
+        ],
+        style={"marginTop": "10px"},
+    )
+
+
+def input_reconstruction_card(
+    input_reconstruction: dict[str, Any],
+    classification_facts: list[Any],
+) -> html.Div | None:
+    if not input_reconstruction and not classification_facts:
+        return None
+
+    productFacts = input_reconstruction.get("product_facts") or []
+    unresolvedFacts = input_reconstruction.get("unresolved_facts") or []
+    conflicts = input_reconstruction.get("conflicts") or []
+    factTexts = (
+        input_reconstruction.get("classification_fact_texts")
+        or classification_facts
+        or []
+    )
+    if not isinstance(productFacts, list):
+        productFacts = []
+    if not isinstance(unresolvedFacts, list):
+        unresolvedFacts = []
+    if not isinstance(conflicts, list):
+        conflicts = [str(conflicts)] if str(conflicts).strip() else []
+
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Div("Reconstructed Input", style={"fontSize": "13px", "fontWeight": 950, "color": "#0f172a"}),
+                    html.Div(
+                        "분류 후보 생성에 실제로 전달되는 상품 fact 요약",
+                        style={"fontSize": "12px", "color": "#64748b", "marginTop": "2px"},
+                    ),
+                ],
+                style={"marginBottom": "10px"},
+            ),
+            html.Div(
+                [
+                    _small("LLM", "on" if input_reconstruction.get("used_llm_reconstruction") else "off"),
+                    _small("facts", input_reconstruction.get("fact_count") or len(productFacts)),
+                    _small("classification lines", input_reconstruction.get("fact_text_count") or len(factTexts)),
+                    _small("fallback", input_reconstruction.get("fallback_reason") or "-"),
+                ],
+                style={"display": "flex", "gap": "8px", "flexWrap": "wrap"},
+            ),
+            _reconstruction_fact_table("Structured product facts", productFacts),
+            _classification_fact_text_table(factTexts),
+            _reconstruction_fact_table("Unresolved facts", unresolvedFacts, max_rows=6),
+            html.Div(
+                [
+                    html.Div("Conflicts", style={"fontSize": "12px", "fontWeight": 900, "color": "#991b1b", "marginBottom": "6px"}),
+                    html.Ul(
+                        [html.Li(_short_text(conflict, max_length=220)) for conflict in conflicts[:6]],
+                        style={"margin": "0 0 0 18px", "padding": 0, "fontSize": "12px", "color": "#7f1d1d"},
+                    ),
+                ],
+                style={"marginTop": "10px", "padding": "10px", "border": "1px solid #fecaca", "borderRadius": "8px", "background": "#fef2f2"},
+            ) if conflicts else None,
+        ],
+        style={
+            "marginTop": "10px",
+            "padding": "12px",
+            "border": "1px solid #dbeafe",
+            "borderRadius": "8px",
+            "background": "#fbfdff",
+        },
     )
 
 
@@ -236,7 +463,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
                 html.Div(f"ocr_text chunks: {len(raw.get('ocr_text') or [])} / composition: {len(raw.get('composition') or [])}"),
                 html.Div(
                     (
-                        "url_intake: ocr_images={0}, combined_ocr_chars={1}"
+                        "URL collection: ocr_images={0}, combined_ocr_chars={1}"
                     ).format(
                         url_intake.get("ocr_image_count", "-"),
                         url_intake.get("combined_ocr_text_length", "-"),
@@ -244,7 +471,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
                 ) if url_intake else None,
                 html.Div(
                     (
-                        "input_reconstruction: llm={0}, facts={1}, "
+                        "Input reconstruction: llm={0}, classification_facts={1}, "
                         "fallback={2}"
                     ).format(
                         input_reconstruction.get("used_llm_reconstruction"),
@@ -252,6 +479,10 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
                         input_reconstruction.get("fallback_reason") or "-",
                     )
                 ) if input_reconstruction else None,
+                input_reconstruction_card(
+                    input_reconstruction,
+                    raw.get("composition") or [],
+                ),
                 _text_list_block("raw OCR chunk", raw.get("ocr_text") or []),
                 _text_list_block("raw composition/fact", raw.get("composition") or []),
                 detail_block(
@@ -260,7 +491,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
                     max_height=180,
                 ) if debug_artifacts else None,
                 detail_block(
-                    "url intake pipeline steps",
+                    "URL collection pipeline steps",
                     url_intake.get("pipeline_steps") or [],
                     max_height=260,
                 ) if url_intake.get("pipeline_steps") else None,
@@ -272,7 +503,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
     if stage == "Evidence_Intake_Agent":
         if status == "running":
             return html.Div(
-                "Evidence_Intake_Agent 실행 전입니다. 완료 이벤트에서 실제 OCR/composition count를 표시합니다.",
+                "Product Evidence Builder 실행 전입니다. 완료 이벤트에서 실제 OCR/composition count를 표시합니다.",
                 style={"fontSize": "12px", "color": "#64748b", "marginTop": "6px"},
             )
         pes = bb.get("product_evidence_state") or {}
@@ -292,7 +523,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
     if stage == "Classification_Agent":
         if status == "running":
             return html.Div(
-                "classifier retriever/LLM/TARIC branch resolver 실행 중입니다. 완료 이벤트에서 후보 수를 표시합니다.",
+                "Classification retriever/LLM/TARIC branch resolver 실행 중입니다. 완료 이벤트에서 후보 수를 표시합니다.",
                 style={"fontSize": "12px", "color": "#64748b", "marginTop": "6px"},
             )
         ccs = partial.get("candidate_code_set") or {}
@@ -369,8 +600,8 @@ def render_progress(result: dict[str, Any]) -> html.Div:
                 [
                     html.Span(event.get("ts") or "", style={**MONO, "color": "#64748b", "marginRight": "8px"}),
                     html.Span(st.upper(), style={**PILL, "background": bg, "color": color}),
-                    html.Span(event.get("stage") or "-", style={"fontWeight": 850}),
-                    html.Div(event.get("message") or "", style={"fontSize": "12px", "color": "#334155", "marginTop": "4px"}),
+                    html.Span(display_stage_name(event.get("stage")), style={"fontWeight": 850}),
+                    html.Div(display_stage_message(event.get("message")), style={"fontSize": "12px", "color": "#334155", "marginTop": "4px"}),
                     _event_summary(event),
                     detail_block(
                         "stage event JSON",

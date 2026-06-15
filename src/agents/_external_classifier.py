@@ -268,10 +268,18 @@ def _build_compact_decision_request(
         "Do not select an ingredient-specific candidate unless that ingredient or condition is explicit in the product facts.",
         "For example, `Containing eggs` requires explicit egg/난/albumen/egg powder evidence; fish/meat/stuffed candidates require explicit matching evidence and percentage conditions.",
         "For instant ramen/noodle products described as 유탕면/라면/dried noodles with wheat flour and no explicit egg/stuffed/fish/meat percentage condition, prefer the dry/other noodle candidate over egg/stuffed/meat/fish candidates.",
+        "The product_text below may include classification fact lines reconstructed from product notice tables, structured OCR, raw OCR, and LLM input reconstruction.",
+        "Treat reconstructed fact lines as the primary product facts for candidate review, but do not infer facts that are not explicitly present.",
+        "Use product type, physical form, processing state, storage state, ingredients, composition ratios, content weight, and origin facts when they are explicit.",
+        "Do not treat allergen warnings, cross-contamination warnings, or same-facility statements as proof that the allergen is a main ingredient or satisfies an ingredient-specific CN condition.",
+        "If a fact line appears contradictory or looks like OCR/reconstruction noise, mark the affected candidate as possible_candidate or insufficient_information instead of forcing a strong_candidate.",
         "Allowed status values: strong_candidate, possible_candidate, unlikely_candidate, insufficient_information.",
         "Review the strongest few candidates; unreviewed candidates will be filled deterministically as unlikely/insufficient.",
         "product_name: {0}".format(product_input.productName or "unknown"),
         "product_domain: {0}".format(product_input.productDomain),
+        "classification_fact_count: {0}".format(
+            len(getattr(product_input, "normalizedOcrFactTexts", []) or [])
+        ),
         "product_text:",
         product_input.BuildSearchText()[:3000],
         "candidate_contract:",

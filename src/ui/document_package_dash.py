@@ -30,6 +30,7 @@ from dash import ALL, Dash, Input, Output, State, ctx, dcc, html, no_update
 
 from agents.document_package import _dc_to_dict, get_document_package
 from eu_export.app_config import LoadAppConfig
+from ui.classification_dash import display_stage_name
 
 
 APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
@@ -1031,7 +1032,10 @@ def render_blackboard_log(pkg: dict[str, Any]) -> html.Div | None:
             html.Div(
                 [
                     html.Div(
-                        f"{run.get('agent_name')} · {run.get('stage')}",
+                        (
+                            f"{display_stage_name(run.get('agent_name'))} · "
+                            f"{display_stage_name(run.get('stage'))}"
+                        ),
                         className="card-title",
                     ),
                     html.Div(

@@ -225,6 +225,18 @@ def collect_kurly_url_facts(
             "unresolved_count": len(input_reconstruction.unresolvedFacts),
             "conflict_count": len(input_reconstruction.conflicts),
             "fact_text_count": len(input_reconstruction.normalizedFactTexts),
+            "product_facts": [
+                fact.model_dump(mode="json", by_alias=True)
+                for fact in input_reconstruction.productFacts
+            ],
+            "unresolved_facts": [
+                fact.model_dump(mode="json", by_alias=True)
+                for fact in input_reconstruction.unresolvedFacts
+            ],
+            "conflicts": list(input_reconstruction.conflicts),
+            "classification_fact_texts": list(
+                input_reconstruction.normalizedFactTexts
+            ),
             "warnings": list(input_reconstruction.warnings),
             "debug_artifacts": dict(input_reconstruction.debugArtifacts),
         },
