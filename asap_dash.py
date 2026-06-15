@@ -74,7 +74,7 @@ def _build_run_facts(
 
 def _start_pipeline_run(*, query: str, facts: Mapping[str, Any]) -> str:
     jobId = f"job_{uuid.uuid4().hex[:10]}"
-    RUN_REGISTRY.CreateRun(
+    runId = RUN_REGISTRY.CreateRun(
         jobId,
         status="queued",
         query=query,
@@ -87,7 +87,11 @@ def _start_pipeline_run(*, query: str, facts: Mapping[str, Any]) -> str:
                 "message": "작업이 등록되었습니다.",
             }
         ],
+        reuseActive=True,
     )
+    if runId != jobId:
+        return runId
+
     PIPELINE_RUN_SERVICE.StartBackgroundRun(
         jobId,
         PipelineRunRequest(query=query, facts=dict(facts)),
@@ -189,11 +193,21 @@ app.layout = html.Div(
     State("ipt-product-name", "value"),
     State("ipt-description", "value"),
     State("ipt-kurly-url", "value"),
+    State("store-run-id", "data"),
+    State("store-result", "data"),
     prevent_initial_call=True,
 )
-def start_run(n_clicks, product_name, description, kurly_url):
+def start_run(n_clicks, product_name, description, kurly_url, current_run_id, result_data):
     if not n_clicks:
         raise PreventUpdate
+
+    if (
+        current_run_id
+        and isinstance(result_data, dict)
+        and result_data.get("job_id") == current_run_id
+        and result_data.get("job_status") in {"queued", "running"}
+    ):
+        return current_run_id, "/classification"
 
     product_name = (product_name or "").strip()
     description = (description or "").strip()
@@ -257,6 +271,19 @@ def toggle_polling(job_id, result_data):
     if result_data.get("job_id") != job_id:
         return False
     return result_data.get("job_status") in {"completed", "failed"}
+
+
+@app.callback(
+    Output("btn-run", "disabled"),
+    Input("store-run-id", "data"),
+    Input("store-result", "data"),
+)
+def toggle_run_button(job_id, result_data):
+    if not job_id or not isinstance(result_data, dict):
+        return False
+    if result_data.get("job_id") != job_id:
+        return False
+    return result_data.get("job_status") in {"queued", "running"}
 
 
 @app.callback(
