@@ -13,14 +13,15 @@ from __future__ import annotations
 
 import os
 import sys
-import threading
 import time
-import traceback
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from dash import ALL, MATCH, Dash, Input, Output, State, dcc, html, no_update
 from dash.exceptions import PreventUpdate
+from flask import Response, jsonify, request as flask_request
 
 ASAP_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parent)).resolve()
 ASAP_SRC_ROOT = ASAP_ROOT / "src"
@@ -29,6 +30,7 @@ for _path in (ASAP_ROOT, ASAP_SRC_ROOT):
         sys.path.insert(0, str(_path))
 
 from agents.document_pipeline import run_document_pipeline
+from backend import PipelineRunRequest, PipelineRunService, RunRegistry
 from ui import admin_dash, classification_dash, document_package_dash
 
 
@@ -40,98 +42,126 @@ server = app.server
 app.index_string = document_package_dash.app.index_string
 
 
-JOBS: dict[str, dict] = {}
-JOBS_LOCK = threading.Lock()
-
-
-def _strip_store(result: dict) -> dict:
-    return {k: v for k, v in result.items() if k != "store"}
-
-
-def _job_snapshot(job_id: str) -> dict | None:
-    with JOBS_LOCK:
-        job = JOBS.get(job_id)
-        if job is None:
-            return None
-        snap = dict(job)
-        snap["events"] = list(job.get("events") or [])
-        partial = job.get("partial_result")
-        if isinstance(partial, dict):
-            snap["partial_result"] = dict(partial)
-        result = job.get("result")
-        if isinstance(result, dict):
-            snap["result"] = dict(result)
-        return snap
-
-
-def _update_job(job_id: str, **updates) -> None:
-    with JOBS_LOCK:
-        job = JOBS.setdefault(job_id, {})
-        job.update(updates)
-
-
-def _append_job_event(job_id: str, event: dict) -> None:
-    event = dict(event)
-    event.setdefault("ts", time.strftime("%H:%M:%S"))
-    with JOBS_LOCK:
-        job = JOBS.setdefault(job_id, {})
-        job.setdefault("events", []).append(event)
-        partial = event.get("partial_result")
-        if isinstance(partial, dict):
-            job["partial_result"] = partial
-
-
-def _start_pipeline_job(job_id: str, *, query: str, facts: dict) -> None:
-    _update_job(job_id, status="running", started_at=time.time(), query=query, facts=facts)
-    try:
-        result = run_document_pipeline(
-            query=query,
-            facts=facts,
-            progress_callback=lambda event: _append_job_event(job_id, event),
-        )
-        result_data = _strip_store(result)
-        _update_job(
-            job_id,
-            status="completed",
-            finished_at=time.time(),
-            result=result_data,
-            partial_result=result_data,
-        )
-        _append_job_event(
-            job_id,
-            {
-                "stage": "Pipeline",
-                "status": "completed",
-                "message": "전체 파이프라인 완료",
-                "run_id": result_data.get("run_id"),
-            },
-        )
-    except Exception as exc:  # noqa: BLE001
-        _update_job(
-            job_id,
-            status="failed",
-            finished_at=time.time(),
-            error=str(exc),
-            traceback=traceback.format_exc(),
-        )
-        _append_job_event(job_id, {"stage": "Pipeline", "status": "failed", "message": str(exc)})
-
-
-def _result_from_job(job: dict, job_id: str) -> dict:
-    result_data = dict(job.get("result") or job.get("partial_result") or {})
-    result_data["job_id"] = job_id
-    result_data["job_status"] = job.get("status")
-    result_data["events"] = job.get("events") or []
-    # 사용자 입력값을 UI 가 re-render 시 input 에 복원할 수 있게 store-result 에 같이 박음.
-    result_data["facts"] = job.get("facts") or {}
-    if job.get("error"):
-        result_data["error"] = job.get("error")
-        result_data["traceback"] = job.get("traceback")
-    return result_data
+RUN_REGISTRY = RunRegistry()
+PIPELINE_RUN_SERVICE = PipelineRunService(
+    registry=RUN_REGISTRY,
+    pipelineCallable=run_document_pipeline,
+)
 
 
 def _split_path(pathname: str | None) -> list[str]:
     return [p for p in (pathname or "/classification").split("/") if p]
+
+
+def _build_run_facts(
+    *,
+    productName: str,
+    description: str,
+    kurlyUrl: str,
+    extraFacts: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    facts = dict(extraFacts or {})
+    facts.update({
+        "product_name": productName,
+        "description": description,
+        "url": kurlyUrl,
+        "source_urls": [kurlyUrl] if kurlyUrl else facts.get("source_urls", []),
+        "origin_country": facts.get("origin_country") or "KR",
+        "intended_use": facts.get("intended_use") or "human consumption",
+    })
+    return facts
+
+
+def _start_pipeline_run(*, query: str, facts: Mapping[str, Any]) -> str:
+    jobId = f"job_{uuid.uuid4().hex[:10]}"
+    RUN_REGISTRY.CreateRun(
+        jobId,
+        status="queued",
+        query=query,
+        facts=facts,
+        events=[
+            {
+                "ts": time.strftime("%H:%M:%S"),
+                "stage": "Pipeline",
+                "status": "queued",
+                "message": "작업이 등록되었습니다.",
+            }
+        ],
+    )
+    PIPELINE_RUN_SERVICE.StartBackgroundRun(
+        jobId,
+        PipelineRunRequest(query=query, facts=dict(facts)),
+    )
+    return jobId
+
+
+@server.route("/api/runs", methods=["POST"])
+def create_run():
+    payload = flask_request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "invalid_json_payload"}), 400
+
+    extraFacts = payload.get("facts") if isinstance(payload.get("facts"), dict) else {}
+    productName = str(
+        payload.get("product_name") or extraFacts.get("product_name") or ""
+    ).strip()
+    description = str(
+        payload.get("description") or extraFacts.get("description") or ""
+    ).strip()
+    kurlyUrl = str(
+        payload.get("url")
+        or payload.get("kurly_url")
+        or extraFacts.get("url")
+        or ""
+    ).strip()
+    query = str(
+        payload.get("query") or productName or description or kurlyUrl
+    ).strip()
+    if not query:
+        return jsonify({"error": "missing_query"}), 400
+
+    facts = _build_run_facts(
+        productName=productName,
+        description=description,
+        kurlyUrl=kurlyUrl,
+        extraFacts=extraFacts,
+    )
+    jobId = _start_pipeline_run(query=query, facts=facts)
+    return jsonify({
+        "job_id": jobId,
+        "status": "queued",
+        "events_url": f"/api/runs/{jobId}/events",
+        "result_url": f"/api/runs/{jobId}",
+    }), 202
+
+
+@server.route("/api/runs/<job_id>")
+def read_run_snapshot(job_id: str):
+    snapshot = RUN_REGISTRY.BuildUiResult(job_id)
+    if not snapshot:
+        return jsonify({"error": "run_not_found", "job_id": job_id}), 404
+    return jsonify(snapshot)
+
+
+@server.route("/api/runs/<job_id>/events")
+def stream_run_events(job_id: str):
+    lastEventId = flask_request.headers.get("Last-Event-ID")
+    startIndexText = lastEventId or flask_request.args.get("start") or "0"
+    try:
+        startIndex = int(startIndexText)
+    except ValueError:
+        startIndex = 0
+    if lastEventId:
+        startIndex += 1
+
+    return Response(
+        RUN_REGISTRY.StreamEvents(job_id, startIndex=startIndex),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 app.layout = html.Div(
@@ -165,16 +195,17 @@ def start_run(n_clicks, product_name, description, kurly_url):
     if not n_clicks:
         raise PreventUpdate
 
-    job_id = f"job_{uuid.uuid4().hex[:10]}"
     product_name = (product_name or "").strip()
     description = (description or "").strip()
     kurly_url = (kurly_url or "").strip()
     query = product_name or description or kurly_url
     if not query:
-        _update_job(
+        job_id = f"job_{uuid.uuid4().hex[:10]}"
+        RUN_REGISTRY.CreateRun(
             job_id,
+            query="",
+            facts={},
             status="failed",
-            error="제품명, 설명, URL 중 하나는 입력해야 합니다.",
             events=[
                 {
                     "ts": time.strftime("%H:%M:%S"),
@@ -184,37 +215,18 @@ def start_run(n_clicks, product_name, description, kurly_url):
                 }
             ],
         )
+        RUN_REGISTRY.UpdateRun(
+            job_id,
+            error="제품명, 설명, URL 중 하나는 입력해야 합니다.",
+        )
         return job_id, "/classification"
 
-    facts = {
-        "product_name": product_name,
-        "description": description,
-        "url": kurly_url,
-        "source_urls": [kurly_url] if kurly_url else [],
-        "origin_country": "KR",
-        "intended_use": "human consumption",
-    }
-
-    _update_job(
-        job_id,
-        status="queued",
-        query=query,
-        facts=facts,
-        events=[
-            {
-                "ts": time.strftime("%H:%M:%S"),
-                "stage": "Pipeline",
-                "status": "queued",
-                "message": "작업이 등록되었습니다.",
-            }
-        ],
+    facts = _build_run_facts(
+        productName=product_name,
+        description=description,
+        kurlyUrl=kurly_url,
     )
-    thread = threading.Thread(
-        target=_start_pipeline_job,
-        kwargs={"job_id": job_id, "query": query, "facts": facts},
-        daemon=True,
-    )
-    thread.start()
+    job_id = _start_pipeline_run(query=query, facts=facts)
     return job_id, "/classification"
 
 
@@ -226,10 +238,10 @@ def start_run(n_clicks, product_name, description, kurly_url):
 def poll_run(_n, job_id):
     if not job_id:
         raise PreventUpdate
-    job = _job_snapshot(job_id)
-    if not job:
+    resultData = RUN_REGISTRY.BuildUiResult(job_id)
+    if not resultData:
         raise PreventUpdate
-    return _result_from_job(job, job_id)
+    return resultData
 
 
 @app.callback(

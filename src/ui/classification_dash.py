@@ -134,41 +134,6 @@ def detail_block(title: str, data: Any, *, max_height: int = 320, open_: bool = 
     )
 
 
-def _text_list_block(title: str, values: list[Any], *, max_items: int = 20) -> html.Details | None:
-    if not values:
-        return None
-    items = []
-    for idx, value in enumerate(values[:max_items], start=1):
-        items.append(
-            html.Div(
-                [
-                    html.Div(f"{title} #{idx}", style={"fontSize": "11px", "fontWeight": 850, "color": "#64748b", "marginBottom": "4px"}),
-                    html.Pre(
-                        str(value),
-                        style={
-                            **MONO,
-                            "whiteSpace": "pre-wrap",
-                            "overflow": "auto",
-                            "maxHeight": "220px",
-                            "background": "#f8fafc",
-                            "border": "1px solid #e5e7eb",
-                            "borderRadius": "8px",
-                            "padding": "10px",
-                            "color": "#111827",
-                        },
-                    ),
-                ],
-                style={"marginTop": "8px"},
-            )
-        )
-    if len(values) > max_items:
-        items.append(html.Div(f"+ {len(values) - max_items} more", style={"fontSize": "12px", "color": "#64748b"}))
-    return html.Details(
-        [html.Summary(f"{title} 원문 보기 ({len(values)})", style={"cursor": "pointer", "fontSize": "12px", "fontWeight": 850}), html.Div(items)],
-        style={"marginTop": "8px"},
-    )
-
-
 def _short_text(value: Any, *, max_length: int = 160) -> str:
     text = str(value or "").strip()
     if len(text) <= max_length:
@@ -446,23 +411,6 @@ def input_reconstruction_card(
     )
 
 
-def evidence_detail_panel(pes: dict[str, Any] | None) -> html.Div:
-    pes = pes or {}
-    facts = pes.get("observed_facts") or {}
-    inferred = pes.get("inferred_facts") or []
-    ocr_text = facts.get("ocr_text") or []
-    composition = facts.get("composition") or []
-    return html.Div(
-        [
-            _text_list_block("OCR chunk", ocr_text),
-            _text_list_block("composition/fact", composition),
-            detail_block("inferred_facts JSON", inferred, max_height=260) if inferred else None,
-            detail_block("ProductEvidenceState JSON", pes, max_height=420),
-        ],
-        style={"marginTop": "8px"},
-    )
-
-
 def render_input_form(facts: dict | None = None) -> html.Div:
     facts = facts or {}
     return html.Div(
@@ -520,7 +468,6 @@ def render_input_form(facts: dict | None = None) -> html.Div:
 
 def _event_summary(event: dict[str, Any]) -> html.Div | None:
     partial = event.get("partial_result") or {}
-    bb = partial.get("blackboard") or {}
     stage = event.get("stage") or ""
     status = event.get("status") or ""
 
@@ -535,7 +482,14 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
             [
                 html.Div(f"product_name: {raw.get('product_name') or '-'}"),
                 html.Div(f"description: {(raw.get('description') or '-')[:180]}"),
-                html.Div(f"ocr_text chunks: {len(raw.get('ocr_text') or [])} / composition: {len(raw.get('composition') or [])}"),
+                html.Div(
+                    "ocr_text chunks: {0} / composition: {1}".format(
+                        raw.get("ocr_text_count")
+                        or len(raw.get("ocr_text") or []),
+                        raw.get("composition_count")
+                        or len(raw.get("composition") or []),
+                    )
+                ),
                 html.Div(
                     (
                         "URL collection: ocr_images={0}, combined_ocr_chars={1}"
@@ -575,16 +529,19 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
                 "Product Evidence Builder 실행 전입니다. 완료 이벤트에서 실제 OCR/composition count를 표시합니다.",
                 style={"fontSize": "12px", "color": "#64748b", "marginTop": "6px"},
             )
-        pes = bb.get("product_evidence_state") or {}
-        facts = pes.get("observed_facts") or {}
-        inferred = pes.get("inferred_facts") or []
+        pes = partial.get("product_evidence_summary") or {}
+        if not pes:
+            return html.Div(
+                "Product evidence 생성 완료. 상세 audit은 Admin log에서 확인할 수 있습니다.",
+                style={"fontSize": "12px", "color": "#64748b", "marginTop": "6px"},
+            )
         return html.Div(
             [
                 html.Div(f"product_id: {pes.get('product_id') or '-'}"),
-                html.Div(f"observed: {facts.get('product_name') or '-'} / OCR {len(facts.get('ocr_text') or [])} chunks"),
-                html.Div(f"inferred: {', '.join(str(x.get('fact_key')) + '=' + str(x.get('value')) for x in inferred[:4]) or '-'}"),
+                html.Div(f"observed: {pes.get('product_name') or '-'} / OCR {pes.get('ocr_text_count') or 0} chunks"),
+                html.Div(f"composition facts: {pes.get('composition_count') or 0}"),
+                html.Div(f"inferred facts: {pes.get('inferred_fact_count') or 0}"),
                 html.Div(f"unknowns: {', '.join(pes.get('unknowns') or []) or '-'}"),
-                evidence_detail_panel(pes),
             ],
             style={"fontSize": "12px", "color": "#334155", "marginTop": "6px"},
         )
@@ -759,12 +716,14 @@ def render_decision(result: dict[str, Any]) -> html.Div:
     if not dec:
         return html.Div("최종 결정이 아직 없습니다.", style=PLACEHOLDER)
 
-    # user-facing user questions (Orchestrator 가 만든 UserQuestion 객체에서 question 텍스트만 표시)
-    bb = (result.get("blackboard") or {})
-    user_questions = [
-        q for q in (bb.get("user_questions") or [])
-        if q.get("status") == "open" and q.get("question_id") in (dec.get("user_questions") or [])
-    ]
+    # User-facing 질문은 compact DTO 필드를 우선 사용하고, 과거 결과만 blackboard fallback을 허용한다.
+    user_questions = result.get("user_questions") or []
+    if not user_questions:
+        bb = result.get("blackboard") or {}
+        user_questions = [
+            q for q in (bb.get("user_questions") or [])
+            if q.get("status") == "open" and q.get("question_id") in (dec.get("user_questions") or [])
+        ]
 
     return html.Div(
         [

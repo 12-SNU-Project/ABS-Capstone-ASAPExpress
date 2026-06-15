@@ -15,7 +15,6 @@ from ui.classification_dash import (
     PILL,
     detail_block,
     display_stage_name,
-    evidence_detail_panel,
     json_pre,
     render_progress,
 )
@@ -104,6 +103,77 @@ def _citations(agent_runs: list[dict[str, Any]]) -> html.Div:
     )
 
 
+def _text_list_block(title: str, values: list[Any], *, max_items: int = 20) -> html.Details | None:
+    if not values:
+        return None
+    items = [
+        html.Div(
+            [
+                html.Div(
+                    f"{title} #{idx}",
+                    style={
+                        "fontSize": "11px",
+                        "fontWeight": 850,
+                        "color": "#64748b",
+                        "marginBottom": "4px",
+                    },
+                ),
+                html.Pre(
+                    str(value),
+                    style={
+                        "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                        "fontSize": "12px",
+                        "whiteSpace": "pre-wrap",
+                        "overflow": "auto",
+                        "maxHeight": "220px",
+                        "background": "#f8fafc",
+                        "border": "1px solid #e5e7eb",
+                        "borderRadius": "8px",
+                        "padding": "10px",
+                        "color": "#111827",
+                    },
+                ),
+            ],
+            style={"marginTop": "8px"},
+        )
+        for idx, value in enumerate(values[:max_items], start=1)
+    ]
+    if len(values) > max_items:
+        items.append(
+            html.Div(
+                f"+ {len(values) - max_items} more",
+                style={"fontSize": "12px", "color": "#64748b"},
+            )
+        )
+    return html.Details(
+        [
+            html.Summary(
+                f"{title} 원문 보기 ({len(values)})",
+                style={"cursor": "pointer", "fontSize": "12px", "fontWeight": 850},
+            ),
+            html.Div(items),
+        ],
+        style={"marginTop": "8px"},
+    )
+
+
+def _evidence_detail_panel(pes: dict[str, Any] | None) -> html.Div:
+    pes = pes or {}
+    facts = pes.get("observed_facts") or {}
+    inferred = pes.get("inferred_facts") or []
+    ocrText = facts.get("ocr_text") or []
+    composition = facts.get("composition") or []
+    return html.Div(
+        [
+            _text_list_block("OCR chunk", ocrText),
+            _text_list_block("composition/fact", composition),
+            detail_block("inferred_facts JSON", inferred, max_height=260) if inferred else None,
+            detail_block("ProductEvidenceState JSON", pes, max_height=420),
+        ],
+        style={"marginTop": "8px"},
+    )
+
+
 def render_page(run_id: str | None = None, live_result: dict[str, Any] | None = None) -> html.Div:
     data = live_result or load_run(run_id)
     blackboard = data.get("blackboard") or {}
@@ -136,7 +206,7 @@ def render_page(run_id: str | None = None, live_result: dict[str, Any] | None = 
             html.Div(
                 [
                     html.Div(f"product_id: {pes.get('product_id') or '-'}", style={"fontSize": "12px", "color": "#334155"}),
-                    evidence_detail_panel(pes) if pes else html.Div("ProductEvidenceState 없음", style=PLACEHOLDER),
+                    _evidence_detail_panel(pes) if pes else html.Div("ProductEvidenceState 없음", style=PLACEHOLDER),
                 ],
                 style=CARD,
             ),
