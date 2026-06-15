@@ -64,6 +64,12 @@ class KurlyMarketSmokeRunner:
         )
         self._useInputReconstruction = smokeConfig.use_input_reconstruction
         self._useLlmInputReconstruction = smokeConfig.use_llm_input_reconstruction
+        self._writeLlmInputReconstructionDebugArtifacts = (
+            smokeConfig.write_llm_input_reconstruction_debug_artifacts
+        )
+        self._llmInputReconstructionMaxTokens = (
+            smokeConfig.llm_input_reconstruction_max_tokens
+        )
         self._inputDictionaryPath = (
             pathConfig.ResolvePath(PROJECT_ROOT_PATH, smokeConfig.input_dictionary_path)
             if smokeConfig.input_dictionary_path is not None
@@ -197,6 +203,15 @@ class KurlyMarketSmokeRunner:
             ),
             runtimeAdapter=runtimeAdapter,
             fuzzyMinRatio=self._inputDictionaryFuzzyMinRatio,
+            llmMaxTokens=self._llmInputReconstructionMaxTokens,
+            llmDebugArtifactRootPath=(
+                self._artifactRootPath
+                if (
+                    runtimeAdapter is not None
+                    and self._writeLlmInputReconstructionDebugArtifacts
+                )
+                else None
+            ),
         )
 
     def _RunOne(
@@ -270,17 +285,65 @@ class KurlyMarketSmokeRunner:
             )
         )
 
+        noticeData = {
+            "line_count": collectionResult["product_notice_text_line_count"],
+            "option_count": len(parsedProductPage["product_notice_options"]),
+            "field_count": productNoticeFieldCount,
+            "option_names": parsedProductPage["product_notice_option_names"],
+            "options_preview": self._BuildOptionPreview(
+                parsedProductPage["product_notice_options"],
+            ),
+            "requires_ocr_fallback": requiresOcrFallback,
+            "image_reference_detected": parsedProductPage[
+                "image_reference_detected"
+            ],
+        }
+        ocrEvidenceData = {
+            "product_detail_image_url_count": collectionResult.get(
+                "product_detail_image_url_count",
+                len(collectionResult.get("product_detail_image_urls", [])),
+            ),
+            "candidate_image_url_count": collectionResult.get(
+                "ocr_candidate_image_url_count",
+                len(collectionResult.get("ocr_candidate_image_urls", [])),
+            ),
+            "candidate_image_urls_preview": collectionResult.get(
+                "ocr_candidate_image_urls",
+                [],
+            )[:self._maxLoggedOcrCandidateUrls],
+            "image_result_count": ocrSummary.get(
+                "image_result_count",
+                len(ocrImageResults),
+            ),
+            "successful_image_count": ocrSummary.get(
+                "successful_image_count",
+                len(successfulOcrResults),
+            ),
+            "structured_table_image_count": ocrSummary.get(
+                "structured_table_image_count",
+                0,
+            ),
+            "structured_table_count": ocrSummary.get(
+                "structured_table_count",
+                0,
+            ),
+            "raw_tile_text_count": ocrSummary.get(
+                "raw_tile_text_count",
+                0,
+            ),
+            "raw_text_length": ocrSummary.get(
+                "raw_text_length",
+                0,
+            ),
+            "image_artifacts": ocrSummary.get(
+                "image_artifacts",
+                self._BuildOcrImageArtifacts(ocrImageResults),
+            ),
+            "combined_text_length": len(combinedOcrText),
+            "combined_ocr_text": combinedOcrText,
+        }
         return {
             "product_page_url": productUrl,
-            "parsed_product_page": parsedProductPage,
-            "collection_summary": collectionResult,
-            "rendered_page_evidence_summary": pipelineResultData.get(
-                "rendered_page_evidence_summary",
-            ),
-            "ocr_summary": ocrSummary,
-            "combined_ocr_text": combinedOcrText,
-            "input_reconstruction": inputReconstruction,
-            "steps": pipelineResultData["steps"],
             "status": {
                 "is_parse_ok": self._IsParseOk(
                     collectionResult,
@@ -297,66 +360,18 @@ class KurlyMarketSmokeRunner:
                 "package_type": parsedProductPage["package_type"],
                 "sale_unit": parsedProductPage["sale_unit"],
             },
-            "notice": {
-                "line_count": collectionResult["product_notice_text_line_count"],
-                "option_count": len(parsedProductPage["product_notice_options"]),
-                "field_count": productNoticeFieldCount,
-                "option_names": parsedProductPage["product_notice_option_names"],
-                "options_preview": self._BuildOptionPreview(
-                    parsedProductPage["product_notice_options"],
+            "raw_collection": {
+                "page_collection": collectionResult,
+                "rendered_page_evidence": pipelineResultData.get(
+                    "rendered_page_evidence_summary",
                 ),
-                "requires_ocr_fallback": requiresOcrFallback,
-                "image_reference_detected": parsedProductPage[
-                    "image_reference_detected"
-                ],
+                "parsed_product_page": parsedProductPage,
+                "notice": noticeData,
+                "ocr_evidence": ocrEvidenceData,
             },
-            "ocr": {
-                "product_detail_image_url_count": collectionResult.get(
-                    "product_detail_image_url_count",
-                    len(collectionResult.get("product_detail_image_urls", [])),
-                ),
-                "candidate_image_url_count": collectionResult.get(
-                    "ocr_candidate_image_url_count",
-                    len(collectionResult.get("ocr_candidate_image_urls", [])),
-                ),
-                "candidate_image_urls_preview": collectionResult.get(
-                    "ocr_candidate_image_urls",
-                    [],
-                )[:self._maxLoggedOcrCandidateUrls],
-                "image_result_count": ocrSummary.get(
-                    "image_result_count",
-                    len(ocrImageResults),
-                ),
-                "successful_image_count": ocrSummary.get(
-                    "successful_image_count",
-                    len(successfulOcrResults),
-                ),
-                "structured_table_image_count": ocrSummary.get(
-                    "structured_table_image_count",
-                    0,
-                ),
-                "structured_table_count": ocrSummary.get(
-                    "structured_table_count",
-                    0,
-                ),
-                "raw_tile_text_count": ocrSummary.get(
-                    "raw_tile_text_count",
-                    0,
-                ),
-                "raw_text_length": ocrSummary.get(
-                    "raw_text_length",
-                    0,
-                ),
-                "image_artifacts": ocrSummary.get(
-                    "image_artifacts",
-                    self._BuildOcrImageArtifacts(ocrImageResults),
-                ),
-                "combined_text_length": len(combinedOcrText),
-                "combined_text_preview": self._BuildTextPreview(
-                    combinedOcrText,
-                    self._ocrTextPreviewCharacters,
-                ),
-            },
+            "llm_reconstruction": self._BuildInputReconstructionView(
+                inputReconstruction,
+            ),
             "pipeline_steps": pipelineResultData["steps"],
             "warnings": collectionResult["warnings"],
             "errors": pipelineResultData["errors"],
@@ -387,7 +402,7 @@ class KurlyMarketSmokeRunner:
 
         self._LogPipelineSteps(resultData)
         productData = resultData["product"]
-        noticeData = resultData["notice"]
+        noticeData = resultData["raw_collection"]["notice"]
         smokeLogger.info(
             "url={} product_name={} domain={} parse_ok={} ocr_fallback_ok={}",
             resultData["product_page_url"],
@@ -432,7 +447,7 @@ class KurlyMarketSmokeRunner:
 
     def _LogNoticeOptions(self, resultData: Dict[str, Any]) -> None:
         noticeLogger = self._Logger("_LogNoticeOptions")
-        noticeData = resultData["notice"]
+        noticeData = resultData["raw_collection"]["notice"]
         optionNames = noticeData["option_names"]
         if optionNames:
             noticeLogger.info("notice_option_names={}", optionNames)
@@ -458,25 +473,26 @@ class KurlyMarketSmokeRunner:
 
     def _LogInputReconstruction(self, resultData: Dict[str, Any]) -> None:
         reconstructionLogger = self._Logger("_LogInputReconstruction")
-        inputReconstruction = resultData.get("input_reconstruction", {})
+        inputReconstruction = resultData.get("llm_reconstruction", {})
         if not isinstance(inputReconstruction, dict) or not inputReconstruction:
             return
         reconstructionLogger.info(
             (
-                "input_reconstruction facts={} unresolved={} conflicts={} "
-                "dictionary_matches={} used_llm={} fallback_reason={}"
+                "llm_reconstruction method={} facts={} unresolved={} "
+                "conflicts={} used_llm={} fallback_reason={}"
             ),
-            len(inputReconstruction.get("product_facts", []) or []),
+            inputReconstruction.get("method"),
+            len(inputReconstruction.get("facts", []) or []),
             len(inputReconstruction.get("unresolved_facts", []) or []),
             len(inputReconstruction.get("conflicts", []) or []),
-            len(inputReconstruction.get("dictionary_matches", []) or []),
             inputReconstruction.get("used_llm_reconstruction"),
             inputReconstruction.get("fallback_reason"),
         )
 
     def _LogNoticeFields(self, resultData: Dict[str, Any]) -> None:
         noticeLogger = self._Logger("_LogNoticeFields")
-        for fieldRecord in resultData["notice"].get("fields_preview", []):
+        noticeData = resultData["raw_collection"]["notice"]
+        for fieldRecord in noticeData.get("fields_preview", []):
             noticeLogger.info(
                 "notice_field name={} value={} requires_ocr_fallback={}",
                 fieldRecord["field_name"],
@@ -486,7 +502,7 @@ class KurlyMarketSmokeRunner:
 
     def _LogOcrSummary(self, resultData: Dict[str, Any]) -> None:
         ocrLogger = self._Logger("_LogOcrSummary")
-        ocrData = resultData["ocr"]
+        ocrData = resultData["raw_collection"]["ocr_evidence"]
         ocrLogger.info(
             (
                 "detail_image_count={} ocr_candidate_count={} "
@@ -575,6 +591,61 @@ class KurlyMarketSmokeRunner:
             "summary_artifact_path={}",
             self._summaryArtifactPath,
         )
+
+    def _BuildInputReconstructionView(
+        self,
+        inputReconstruction: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        facts = [
+            self._BuildReconstructedFactView(factRecord)
+            for factRecord in inputReconstruction.get("product_facts", []) or []
+            if isinstance(factRecord, dict)
+        ]
+        unresolvedFacts = [
+            self._BuildReconstructedFactView(factRecord)
+            for factRecord in inputReconstruction.get("unresolved_facts", []) or []
+            if isinstance(factRecord, dict)
+        ]
+        usedLlmReconstruction = bool(
+            inputReconstruction.get("used_llm_reconstruction"),
+        )
+        if usedLlmReconstruction:
+            method = "llm"
+        elif facts:
+            method = "deterministic"
+        else:
+            method = "none"
+
+        return {
+            "method": method,
+            "used_llm_reconstruction": usedLlmReconstruction,
+            "fallback_reason": inputReconstruction.get("fallback_reason"),
+            "facts": facts,
+            "unresolved_facts": unresolvedFacts,
+            "conflicts": inputReconstruction.get("conflicts", []) or [],
+            "fact_texts_for_classification": inputReconstruction.get(
+                "normalized_fact_texts",
+                [],
+            )
+            or [],
+            "warnings": inputReconstruction.get("warnings", []) or [],
+            "debug_artifacts": inputReconstruction.get("debug_artifacts", {}) or {},
+        }
+
+    @staticmethod
+    def _BuildReconstructedFactView(
+        factRecord: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        rawValue = factRecord.get("raw_value") or ""
+        reconstructedValue = factRecord.get("normalized_value") or rawValue
+        return {
+            "field_name": factRecord.get("field_name"),
+            "raw_evidence_value": rawValue,
+            "reconstructed_value": reconstructedValue,
+            "source_refs": factRecord.get("source_refs", []) or [],
+            "reconstruction_type": factRecord.get("correction_type"),
+            "validation_status": factRecord.get("validation_status"),
+        }
 
     @staticmethod
     def _BuildTextPreview(text: Any, maxCharacters: int) -> Any:

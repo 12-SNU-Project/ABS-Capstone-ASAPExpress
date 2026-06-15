@@ -226,13 +226,44 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
         raw = event.get("raw_input") or {}
         if not raw:
             return None
+        url_intake = raw.get("url_intake") or {}
+        input_reconstruction = raw.get("input_reconstruction") or {}
+        debug_artifacts = input_reconstruction.get("debug_artifacts") or {}
         return html.Div(
             [
                 html.Div(f"product_name: {raw.get('product_name') or '-'}"),
                 html.Div(f"description: {(raw.get('description') or '-')[:180]}"),
                 html.Div(f"ocr_text chunks: {len(raw.get('ocr_text') or [])} / composition: {len(raw.get('composition') or [])}"),
+                html.Div(
+                    (
+                        "url_intake: ocr_images={0}, combined_ocr_chars={1}"
+                    ).format(
+                        url_intake.get("ocr_image_count", "-"),
+                        url_intake.get("combined_ocr_text_length", "-"),
+                    )
+                ) if url_intake else None,
+                html.Div(
+                    (
+                        "input_reconstruction: llm={0}, facts={1}, "
+                        "fallback={2}"
+                    ).format(
+                        input_reconstruction.get("used_llm_reconstruction"),
+                        input_reconstruction.get("fact_text_count"),
+                        input_reconstruction.get("fallback_reason") or "-",
+                    )
+                ) if input_reconstruction else None,
                 _text_list_block("raw OCR chunk", raw.get("ocr_text") or []),
                 _text_list_block("raw composition/fact", raw.get("composition") or []),
+                detail_block(
+                    "input reconstruction debug artifacts",
+                    debug_artifacts,
+                    max_height=180,
+                ) if debug_artifacts else None,
+                detail_block(
+                    "url intake pipeline steps",
+                    url_intake.get("pipeline_steps") or [],
+                    max_height=260,
+                ) if url_intake.get("pipeline_steps") else None,
                 detail_block("raw_input JSON", raw, max_height=360),
             ],
             style={"fontSize": "12px", "color": "#334155", "marginTop": "6px"},

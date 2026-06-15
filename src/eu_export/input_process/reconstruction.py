@@ -5,8 +5,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
+from urllib.parse import urlparse
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+)
 
 from eu_export.bridge import (
     LlmGenerationOptions,
@@ -24,13 +32,23 @@ from eu_export.product.ocr.ocr_normalization import ProductOcrFactNormalizer
 from eu_export.utils import NormalizeWhitespace, NormalizeWhitespacePreservingLines
 
 
+DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS = 4096
+
 PRODUCT_FACT_RECONSTRUCTION_SYSTEM_PROMPT = """
-You reconstruct structured product input facts from Korean product notice, PP-Structure table OCR, raw OCR text, and deterministic dictionary matches.
+You reconstruct structured product input facts from Korean product notice, PP-Structure table OCR, and raw OCR text.
 Return strict JSON only.
+Return exactly one JSON object. Do not append markdown, commentary, or extra braces after the root object.
+Return only these top-level keys: product_facts, unresolved_facts, conflicts, warnings.
+product_facts and unresolved_facts must be arrays of objects with exactly these keys:
+field_name, raw_value, normalized_value, source_refs, correction_type, validation_status.
+conflicts and warnings must be arrays of strings.
 Do not infer HS, CN, TARIC, customs, legal, or regulatory conclusions.
 Do not create product facts that are absent from the provided evidence.
-Do not invent ingredient names outside dictionary matches when correcting OCR text.
+Correct OCR typos only when the surrounding evidence strongly supports the correction.
 If evidence is insufficient or conflicting, use unresolved_facts or conflicts.
+The application will generate normalized_fact_texts after validation.
+Prefer concise high-value product facts: product name, food/cosmetic type, net content, storage, ingredients, allergens, nutrition, manufacturer, seller, expiry, package material.
+Do not copy unrelated marketing copy or duplicate OCR fragments.
 """.strip()
 
 PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
@@ -38,30 +56,10 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
         "input": {
             "evidence": [
                 {
-                    "evidence_id": "table-1",
+                    "evidence_id": "evidence-1",
                     "source_type": "pp_table",
                     "text": "영양성분 나트류 320mg 탄수하물 40g 단백질 8g",
                 }
-            ],
-            "dictionary_matches": [
-                {
-                    "raw_text": "나트류",
-                    "matched_text": "나트류",
-                    "canonical_name": "나트륨",
-                    "term_type": "nutrition_label",
-                    "match_type": "alias",
-                    "source_ref": "dictionary:nutrition_label_sodium:nutrition_001",
-                    "correction_action": "auto_corrected",
-                },
-                {
-                    "raw_text": "탄수하물",
-                    "matched_text": "탄수하물",
-                    "canonical_name": "탄수화물",
-                    "term_type": "nutrition_label",
-                    "match_type": "alias",
-                    "source_ref": "dictionary:nutrition_label_carbohydrate:nutrition_002",
-                    "correction_action": "auto_corrected",
-                },
             ],
         },
         "output": {
@@ -70,22 +68,66 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                     "field_name": "영양성분",
                     "raw_value": "나트류 320mg 탄수하물 40g 단백질 8g",
                     "normalized_value": "나트륨 320mg 탄수화물 40g 단백질 8g",
-                    "source_refs": ["table-1"],
+                    "source_refs": ["evidence-1"],
                     "correction_type": "llm_reconstructed",
                     "validation_status": "accepted",
                 }
             ],
             "unresolved_facts": [],
             "conflicts": [],
-            "normalized_fact_texts": [
-                "영양성분: 나트륨 320mg 탄수화물 40g 단백질 8g"
+            "warnings": [],
+        },
+    },
+    {
+        "input": {
+            "evidence": [
+                {
+                    "evidence_id": "evidence-1",
+                    "source_type": "raw_ocr_tile",
+                    "text": "제품명 오봉집낙지볶음 내용량 300g(274kcal) 식품의 유형 기타수산물가공품",
+                },
+                {
+                    "evidence_id": "evidence-2",
+                    "source_type": "raw_ocr_tile",
+                    "text": "제품명 오봉집낙지볶음 내용량 500g(457kcal) 식품의 유형 기타수산물가공품",
+                },
+            ],
+        },
+        "output": {
+            "product_facts": [
+                {
+                    "field_name": "제품명",
+                    "raw_value": "오봉집낙지볶음",
+                    "normalized_value": "오봉집낙지볶음",
+                    "source_refs": ["evidence-1", "evidence-2"],
+                    "correction_type": "none",
+                    "validation_status": "accepted",
+                },
+                {
+                    "field_name": "식품의 유형",
+                    "raw_value": "기타수산물가공품",
+                    "normalized_value": "기타수산물가공품",
+                    "source_refs": ["evidence-1", "evidence-2"],
+                    "correction_type": "none",
+                    "validation_status": "accepted",
+                },
+            ],
+            "unresolved_facts": [
+                {
+                    "field_name": "포장단위별 내용물의 용량(중량), 수량",
+                    "raw_value": "300g(274kcal) / 500g(457kcal)",
+                    "normalized_value": "",
+                    "source_refs": ["evidence-1", "evidence-2"],
+                    "correction_type": "none",
+                    "validation_status": "unresolved",
+                }
+            ],
+            "conflicts": [
+                "포장단위별 내용물의 용량(중량), 수량이 evidence-1에서는 300g, evidence-2에서는 500g으로 충돌한다."
             ],
             "warnings": [],
-            "used_llm_reconstruction": True,
-            "fallback_reason": None,
-            "dictionary_matches": [],
         },
-    }
+    },
 ]
 
 
@@ -123,14 +165,16 @@ class ProductFactRecord(BaseModel):
 
     def ToFactText(self) -> str:
         normalizedFieldName = NormalizeWhitespace(self.fieldName)
-        normalizedValue = NormalizeWhitespacePreservingLines(self.normalizedValue)
+        displayValue = NormalizeWhitespacePreservingLines(
+            self.normalizedValue or self.rawValue
+        )
         if normalizedFieldName == "":
-            return normalizedValue
-        if normalizedValue == "":
+            return displayValue
+        if displayValue == "":
             return normalizedFieldName
-        if normalizedValue.startswith("{0}:".format(normalizedFieldName)):
-            return normalizedValue
-        return "{0}: {1}".format(normalizedFieldName, normalizedValue)
+        if displayValue.startswith("{0}:".format(normalizedFieldName)):
+            return displayValue
+        return "{0}: {1}".format(normalizedFieldName, displayValue)
 
 
 class ProductFactReconstructionResult(BaseModel):
@@ -161,6 +205,38 @@ class ProductFactReconstructionResult(BaseModel):
         default_factory=list,
         alias="dictionary_matches",
     )
+    debugArtifacts: Dict[str, str] = Field(
+        default_factory=dict,
+        alias="debug_artifacts",
+    )
+
+    @field_validator("conflicts", "warnings", mode="before")
+    @classmethod
+    def NormalizeIssueTexts(cls, value: Any) -> List[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value] if NormalizeWhitespace(value) else []
+        if isinstance(value, Mapping):
+            return [json.dumps(value, ensure_ascii=False, sort_keys=True)]
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+            normalizedValues: List[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    normalizedItem = NormalizeWhitespacePreservingLines(item)
+                elif isinstance(item, Mapping):
+                    normalizedItem = json.dumps(
+                        item,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                else:
+                    normalizedItem = NormalizeWhitespace(str(item))
+                if normalizedItem:
+                    normalizedValues.append(normalizedItem)
+            return normalizedValues
+        normalizedValue = NormalizeWhitespace(str(value))
+        return [normalizedValue] if normalizedValue else []
 
 
 class _BoundModel(BaseModel):
@@ -398,12 +474,6 @@ class ProductFactReconstructionValidator:
                 continue
             productFacts.append(factRecord)
         normalizedFactTexts = self._BuildNormalizedFactTexts(productFacts)
-        if result.normalizedFactTexts:
-            normalizedFactTexts = [
-                factText
-                for factText in result.normalizedFactTexts
-                if NormalizeWhitespace(factText)
-            ]
         return result.model_copy(
             update={
                 "productFacts": productFacts,
@@ -451,11 +521,6 @@ class DeterministicProductFactReconstructor:
         factRecords = self._BuildFactRecords(evidencePackage, dictionaryMatches)
         result = ProductFactReconstructionResult(
             productFacts=factRecords,
-            normalizedFactTexts=[
-                factRecord.ToFactText()
-                for factRecord in factRecords
-                if factRecord.validationStatus == "accepted"
-            ],
             usedLlmReconstruction=False,
             fallbackReason="llm_reconstruction_not_used",
             dictionaryMatches=dictionaryMatches,
@@ -494,7 +559,10 @@ class DeterministicProductFactReconstructor:
         if splitText is None:
             return None
         fieldName, fieldValue = splitText
-        normalizedValue = self._ApplyAutoCorrections(fieldValue, dictionaryMatches)
+        normalizedValue = self.ApplyDictionaryCorrections(
+            fieldValue,
+            dictionaryMatches,
+        )
         correctionType = (
             "dictionary_fuzzy"
             if normalizedValue != fieldValue
@@ -527,7 +595,10 @@ class DeterministicProductFactReconstructor:
             fieldValue = factText
         else:
             fieldName, fieldValue = splitText
-        normalizedValue = self._ApplyAutoCorrections(fieldValue, dictionaryMatches)
+        normalizedValue = self.ApplyDictionaryCorrections(
+            fieldValue,
+            dictionaryMatches,
+        )
         return ProductFactRecord(
             fieldName=fieldName,
             rawValue=fieldValue,
@@ -537,7 +608,7 @@ class DeterministicProductFactReconstructor:
             validationStatus="accepted",
         )
 
-    def _ApplyAutoCorrections(
+    def ApplyDictionaryCorrections(
         self,
         text: str,
         dictionaryMatches: Sequence[ProductDictionaryMatch],
@@ -598,64 +669,81 @@ class LlmProductFactReconstructor:
     def __init__(
         self,
         runtimeAdapter: Optional[RuntimeAdapter[Any]],
-        deterministicReconstructor: DeterministicProductFactReconstructor,
         validator: Optional[ProductFactReconstructionValidator] = None,
+        maxTokens: int = DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS,
+        debugArtifactRootPath: Optional[Path] = None,
     ) -> None:
         self._runtimeAdapter = runtimeAdapter
-        self._deterministicReconstructor = deterministicReconstructor
         self._validator = validator or ProductFactReconstructionValidator()
+        self._maxTokens = max(1, maxTokens)
+        self._debugStore = (
+            ProductInputReconstructionDebugStore(debugArtifactRootPath)
+            if debugArtifactRootPath is not None
+            else None
+        )
 
     def Reconstruct(
         self,
         evidencePackage: ProductInputEvidencePackage,
     ) -> ProductFactReconstructionResult:
-        deterministicResult = self._deterministicReconstructor.Reconstruct(
-            evidencePackage
-        )
         if self._runtimeAdapter is None:
-            return deterministicResult
+            return ProductFactReconstructionResult(
+                warnings=["llm_reconstruction_failed: runtime adapter is not configured"],
+                fallbackReason="llm_runtime_not_configured",
+            )
 
-        request = self._BuildRequest(evidencePackage, deterministicResult)
+        request = self._BuildRequest(evidencePackage)
+        debugArtifacts = self._TryWriteDebugArtifact(
+            lambda: self._debugStore.WriteRequest(evidencePackage, request)
+            if self._debugStore is not None
+            else None,
+            "request",
+        )
         try:
             response = self._runtimeAdapter.Generate(request)
+            debugArtifacts.update(
+                self._TryWriteDebugArtifact(
+                    lambda: self._debugStore.WriteResponse(evidencePackage, response)
+                    if self._debugStore is not None
+                    else None,
+                    "response",
+                )
+            )
             payload = self._ParseJsonPayload(response.generatedText)
             result = ProductFactReconstructionResult.model_validate(payload)
             result = result.model_copy(
                 update={
+                    "normalizedFactTexts": [],
                     "usedLlmReconstruction": True,
                     "fallbackReason": None,
-                    "dictionaryMatches": deterministicResult.dictionaryMatches,
+                    "dictionaryMatches": [],
+                    "debugArtifacts": debugArtifacts,
                 }
             )
             return self._validator.Validate(result, evidencePackage)
         except (ValueError, ValidationError, RuntimeError) as error:
-            return deterministicResult.model_copy(
-                update={
-                    "warnings": [
-                        *deterministicResult.warnings,
-                        "llm_reconstruction_failed: {0}".format(error),
-                    ],
-                    "fallbackReason": "llm_reconstruction_failed",
-                }
+            debugArtifacts.update(
+                self._TryWriteDebugArtifact(
+                    lambda: self._debugStore.WriteError(evidencePackage, error)
+                    if self._debugStore is not None
+                    else None,
+                    "error",
+                )
+            )
+            return ProductFactReconstructionResult(
+                warnings=["llm_reconstruction_failed: {0}".format(error)],
+                fallbackReason="llm_reconstruction_failed",
+                debugArtifacts=debugArtifacts,
             )
 
     def _BuildRequest(
         self,
         evidencePackage: ProductInputEvidencePackage,
-        deterministicResult: ProductFactReconstructionResult,
     ) -> LlmRequest:
         contextPayload = {
             "evidence": [
                 evidenceRecord.model_dump(mode="json", by_alias=True)
                 for evidenceRecord in evidencePackage.records
-            ],
-            "dictionary_matches": [
-                dictionaryMatch.model_dump(mode="json", by_alias=True)
-                for dictionaryMatch in deterministicResult.dictionaryMatches
-            ],
-            "deterministic_facts": [
-                factRecord.model_dump(mode="json", by_alias=True)
-                for factRecord in deterministicResult.productFacts
             ],
             "few_shot_examples": PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES,
         }
@@ -663,14 +751,18 @@ class LlmProductFactReconstructor:
             systemPrompt=PRODUCT_FACT_RECONSTRUCTION_SYSTEM_PROMPT,
             userPrompt="\n".join(
                 [
-                    "아래 evidence와 dictionary match만 사용해 ProductFactReconstructionResult JSON을 작성하라.",
-                    "출력 key는 product_facts, unresolved_facts, conflicts, normalized_fact_texts, warnings, used_llm_reconstruction, fallback_reason, dictionary_matches를 사용하라.",
+                    "아래 evidence만 사용해 상품 입력 fact JSON을 작성하라.",
+                    "출력 key는 product_facts, unresolved_facts, conflicts, warnings만 사용하라.",
+                    "normalized_fact_texts, dictionary_matches, used_llm_reconstruction, fallback_reason은 출력하지 마라.",
                     "source_refs에는 evidence_id만 사용하라.",
                     json.dumps(contextPayload, ensure_ascii=False, separators=(",", ":")),
                 ]
             ),
             responseFormat=LlmResponseFormat.JSON_OBJECT,
-            generationOptions=LlmGenerationOptions(temperature=0.0, maxTokens=2048),
+            generationOptions=LlmGenerationOptions(
+                temperature=0.0,
+                maxTokens=self._maxTokens,
+            ),
         )
 
     def _ParseJsonPayload(self, generatedText: str) -> Dict[str, Any]:
@@ -689,16 +781,140 @@ class LlmProductFactReconstructor:
             raise ValueError("LLM reconstruction response must be a JSON object.")
         return payload
 
+    def _TryWriteDebugArtifact(
+        self,
+        writeCallable: Any,
+        artifactName: str,
+    ) -> Dict[str, str]:
+        if self._debugStore is None:
+            return {}
+        try:
+            artifactPath = writeCallable()
+        except OSError:
+            return {}
+        if artifactPath is None:
+            return {}
+        return {artifactName: str(artifactPath)}
+
+
+class ProductInputReconstructionDebugStore:
+    """LLM input reconstruction 요청/응답 artifact를 상품별 디렉터리에 저장한다."""
+
+    def __init__(self, artifactRootPath: Path) -> None:
+        self._artifactRootPath = artifactRootPath
+
+    def WriteRequest(
+        self,
+        evidencePackage: ProductInputEvidencePackage,
+        request: LlmRequest,
+    ) -> Path:
+        return self._WriteJson(
+            evidencePackage,
+            "llm-input-reconstruction-request.json",
+            {
+                "product_page_url": evidencePackage.productPageUrl,
+                "evidence_record_count": len(evidencePackage.records),
+                "request": request.model_dump(mode="json", by_alias=True),
+            },
+        )
+
+    def WriteResponse(
+        self,
+        evidencePackage: ProductInputEvidencePackage,
+        response: Any,
+    ) -> Path:
+        return self._WriteJson(
+            evidencePackage,
+            "llm-input-reconstruction-response.json",
+            response.model_dump(mode="json", by_alias=True),
+        )
+
+    def WriteError(
+        self,
+        evidencePackage: ProductInputEvidencePackage,
+        error: Exception,
+    ) -> Path:
+        return self._WriteJson(
+            evidencePackage,
+            "llm-input-reconstruction-error.json",
+            {
+                "product_page_url": evidencePackage.productPageUrl,
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+            },
+        )
+
+    def _WriteJson(
+        self,
+        evidencePackage: ProductInputEvidencePackage,
+        fileName: str,
+        payload: Mapping[str, Any],
+    ) -> Path:
+        artifactDirectory = self._BuildArtifactDirectory(evidencePackage)
+        artifactDirectory.mkdir(parents=True, exist_ok=True)
+        artifactPath = artifactDirectory / fileName
+        artifactPath.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return artifactPath
+
+    def _BuildArtifactDirectory(
+        self,
+        evidencePackage: ProductInputEvidencePackage,
+    ) -> Path:
+        return self._artifactRootPath / self._ExtractProductId(
+            evidencePackage.productPageUrl,
+        )
+
+    def _ExtractProductId(self, productPageUrl: Optional[str]) -> str:
+        if productPageUrl is None:
+            return "unknown"
+        parsedUrl = urlparse(productPageUrl)
+        pathParts = [pathPart for pathPart in parsedUrl.path.split("/") if pathPart]
+        if len(pathParts) >= 2 and pathParts[0] == "goods":
+            return self._BuildSafePathName(pathParts[1])
+        if len(pathParts) >= 2 and pathParts[0] == "products":
+            return "global-{0}".format(self._BuildSafePathName(pathParts[1]))
+        if (
+            len(pathParts) >= 3
+            and pathParts[0] == "en"
+            and pathParts[1] == "products"
+        ):
+            return "global-{0}".format(self._BuildSafePathName(pathParts[2]))
+        return self._BuildSafePathName(parsedUrl.path.strip("/") or "unknown")
+
+    @staticmethod
+    def _BuildSafePathName(value: str) -> str:
+        safeName = "".join(
+            character
+            if character.isalnum() or character in {"-", "_"}
+            else "-"
+            for character in value
+        ).strip("-")
+        return safeName or "unknown"
+
 
 class ProductInputReconstructionService:
-    """Evidence build, dictionary correction, optional LLM reconstruction을 묶는다."""
+    """Evidence build와 선택된 input reconstruction strategy를 묶는다."""
 
     def __init__(
         self,
         dictionaryPath: Optional[str] = None,
         runtimeAdapter: Optional[RuntimeAdapter[Any]] = None,
         fuzzyMinRatio: float = 0.86,
+        llmMaxTokens: int = DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS,
+        llmDebugArtifactRootPath: Optional[Path] = None,
     ) -> None:
+        self._evidenceBuilder = ProductInputEvidenceBuilder()
+        if runtimeAdapter is not None:
+            self._reconstructor = LlmProductFactReconstructor(
+                runtimeAdapter=runtimeAdapter,
+                maxTokens=llmMaxTokens,
+                debugArtifactRootPath=llmDebugArtifactRootPath,
+            )
+            return
+
         resolvedDictionaryPath = (
             DEFAULT_PRODUCT_INPUT_DICTIONARY_PATH
             if dictionaryPath is None
@@ -711,13 +927,8 @@ class ProductInputReconstructionService:
             dictionaryEntries,
             fuzzyMinRatio=fuzzyMinRatio,
         )
-        self._evidenceBuilder = ProductInputEvidenceBuilder()
-        self._deterministicReconstructor = DeterministicProductFactReconstructor(
+        self._reconstructor = DeterministicProductFactReconstructor(
             dictionaryRetriever,
-        )
-        self._llmReconstructor = LlmProductFactReconstructor(
-            runtimeAdapter=runtimeAdapter,
-            deterministicReconstructor=self._deterministicReconstructor,
         )
 
     def ReconstructFromPipelineParts(
@@ -731,4 +942,4 @@ class ProductInputReconstructionService:
             ocrImageResults=ocrImageResults,
             combinedOcrText=combinedOcrText,
         )
-        return self._llmReconstructor.Reconstruct(evidencePackage)
+        return self._reconstructor.Reconstruct(evidencePackage)

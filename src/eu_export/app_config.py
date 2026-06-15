@@ -155,6 +155,8 @@ class KurlySmokeAppConfig(BaseModel):
     structured_ocr_allow_hard_cut_fallback: StrictBool = False
     use_input_reconstruction: StrictBool = True
     use_llm_input_reconstruction: StrictBool = False
+    write_llm_input_reconstruction_debug_artifacts: StrictBool = True
+    llm_input_reconstruction_max_tokens: StrictInt = 4096
     input_dictionary_path: Optional[Path] = None
     input_dictionary_fuzzy_min_ratio: StrictFloat = 0.86
     write_summary_artifact: StrictBool = True
@@ -177,6 +179,13 @@ class KurlySmokeAppConfig(BaseModel):
             )
         ]
         return normalizedUrls
+
+    @field_validator("llm_input_reconstruction_max_tokens")
+    @classmethod
+    def ValidateLlmInputReconstructionMaxTokens(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("llm_input_reconstruction_max_tokens must be positive.")
+        return value
 
 
 class OntologySmokeAppConfig(BaseModel):
