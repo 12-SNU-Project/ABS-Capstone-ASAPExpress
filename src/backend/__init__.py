@@ -1,5 +1,6 @@
 """Backend service boundary for UI-facing pipeline execution."""
 
+from backend.pipeline_api import PipelineApi
 from backend.pipeline_service import (
     PipelineRunRequest,
     PipelineRunResult,
@@ -8,6 +9,7 @@ from backend.pipeline_service import (
 )
 
 __all__ = [
+    "PipelineApi",
     "PipelineRunRequest",
     "PipelineRunResult",
     "PipelineRunService",
