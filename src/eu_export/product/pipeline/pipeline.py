@@ -10,6 +10,10 @@ from eu_export.product.ocr.ocr_fallback import (
 )
 from eu_export.product.ocr.ocr_normalization import ProductOcrFactNormalizer
 from eu_export.product.ocr.paddle_ocr import ProductOcrEngine
+from eu_export.input_process.reconstruction import (
+    ProductFactReconstructionResult,
+    ProductInputReconstructionService,
+)
 from eu_export.product.pipeline.pipeline_schema import (
     KurlyPipelineInput,
     KurlyPipelineResult,
@@ -25,10 +29,12 @@ class KurlyProductPipeline:
         collector: KurlyPageCollector,
         ocrEngine: Optional[ProductOcrEngine] = None,
         ocrFactNormalizer: Optional[ProductOcrFactNormalizer] = None,
+        inputReconstructionService: Optional[ProductInputReconstructionService] = None,
     ) -> None:
         self._collector = collector
         self._ocrEngine = ocrEngine
         self._ocrFactNormalizer = ocrFactNormalizer or ProductOcrFactNormalizer()
+        self._inputReconstructionService = inputReconstructionService
 
     def Run(
         self,
@@ -107,6 +113,45 @@ class KurlyProductPipeline:
             combinedOcrText,
             productDomain=collectionResult.parsedProductPage.productDomain.value,
         )
+        inputReconstructionResult = (
+            self._inputReconstructionService.ReconstructFromPipelineParts(
+                collectionResult=collectionResult,
+                ocrImageResults=ocrImageResults,
+                combinedOcrText=combinedOcrText,
+            )
+            if self._inputReconstructionService is not None
+            else None
+        )
+        if inputReconstructionResult is not None:
+            ocrNormalizationResult = ocrNormalizationResult.model_copy(
+                update={
+                    "factTexts": list(inputReconstructionResult.normalizedFactTexts),
+                    "factLineCount": len(inputReconstructionResult.normalizedFactTexts),
+                }
+            )
+            steps.append(
+                PipelineStep(
+                    stepName="reconstruct_product_input",
+                    message=(
+                        "fact_count={0}, unresolved_count={1}, conflict_count={2}, "
+                        "dictionary_match_count={3}, used_llm={4}, fallback_reason={5}"
+                    ).format(
+                        len(inputReconstructionResult.productFacts),
+                        len(inputReconstructionResult.unresolvedFacts),
+                        len(inputReconstructionResult.conflicts),
+                        len(inputReconstructionResult.dictionaryMatches),
+                        inputReconstructionResult.usedLlmReconstruction,
+                        inputReconstructionResult.fallbackReason,
+                    ),
+                )
+            )
+        else:
+            steps.append(
+                PipelineStep(
+                    stepName="reconstruct_product_input",
+                    message="skipped because input reconstruction is not configured",
+                )
+            )
         steps.append(
             PipelineStep(
                 stepName="normalize_ocr_text",
@@ -123,6 +168,9 @@ class KurlyProductPipeline:
             ocrImageResults=ocrImageResults,
             combinedOcrText=combinedOcrText,
             ocrNormalizationResult=ocrNormalizationResult,
+            inputReconstructionResult=inputReconstructionResult
+            if inputReconstructionResult is not None
+            else ProductFactReconstructionResult(),
             steps=steps,
             errors=errors,
         )

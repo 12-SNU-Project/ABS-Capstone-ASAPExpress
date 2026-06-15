@@ -149,8 +149,14 @@ class KurlySmokeAppConfig(BaseModel):
     use_structured_ocr: StrictBool = True
     max_ocr_image_count: StrictInt = 8
     structured_ocr_max_tile_height_pixels: StrictInt = 2400
+    structured_ocr_max_tile_side_pixels: StrictInt = 4000
     structured_ocr_tile_overlap_pixels: StrictInt = 240
     structured_ocr_use_projection_tiling: StrictBool = True
+    structured_ocr_allow_hard_cut_fallback: StrictBool = False
+    use_input_reconstruction: StrictBool = True
+    use_llm_input_reconstruction: StrictBool = False
+    input_dictionary_path: Optional[Path] = None
+    input_dictionary_fuzzy_min_ratio: StrictFloat = 0.86
     write_summary_artifact: StrictBool = True
     log_full_result: StrictBool = False
     max_logged_notice_options: StrictInt = 3

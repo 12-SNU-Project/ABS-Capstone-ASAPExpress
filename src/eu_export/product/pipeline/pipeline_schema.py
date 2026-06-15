@@ -15,6 +15,7 @@ from eu_export.product.ocr.ocr_fallback import (
     ProductOcrImageResult,
 )
 from eu_export.product.ocr.ocr_normalization import ProductOcrFactNormalizationResult
+from eu_export.input_process.reconstruction import ProductFactReconstructionResult
 
 
 class KurlyPipelineInput(BaseModel):
@@ -60,6 +61,10 @@ class KurlyPipelineResult(BaseModel):
     ocrNormalizationResult: ProductOcrFactNormalizationResult = Field(
         default_factory=ProductOcrFactNormalizationResult,
         alias="ocr_normalization",
+    )
+    inputReconstructionResult: ProductFactReconstructionResult = Field(
+        default_factory=ProductFactReconstructionResult,
+        alias="input_reconstruction",
     )
     steps: List[PipelineStep] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
@@ -137,6 +142,10 @@ class KurlyPipelineResult(BaseModel):
             "combined_text_length": len(self.combinedOcrText),
             "normalized_fact_count": self.ocrNormalizationResult.factLineCount,
             "raw_line_count": self.ocrNormalizationResult.rawLineCount,
+            "input_reconstruction": self.inputReconstructionResult.model_dump(
+                mode="json",
+                by_alias=True,
+            ),
             "normalization": self.ocrNormalizationResult.model_dump(
                 mode="json",
                 by_alias=True,

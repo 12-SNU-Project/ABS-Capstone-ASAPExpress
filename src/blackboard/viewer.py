@@ -2,7 +2,7 @@
 Admin viewer — read-only CLI inspection of a run's Blackboard + AgentRun log.
 
 ADMIN ONLY. End-users must not see this output. Renders the agent trace,
-ontology citations, reasoning summaries, challenges, and final orchestrator
+core citations, reasoning summaries, challenges, and final orchestrator
 decision so an operator can answer "why did the system decide X."
 
 Usage:
@@ -145,7 +145,7 @@ def cmd_timeline(args: argparse.Namespace) -> int:
         if r.get("outputs_written"):
             print(f"  writes:   {r['outputs_written']}")
         if r.get("ontology_reads"):
-            print(f"  cites:    {len(r['ontology_reads'])} ontology row(s):")
+            print(f"  cites:    {len(r['ontology_reads'])} core row(s):")
             for c in r["ontology_reads"]:
                 lvl = f" lvl={c['level']}" if c.get("level") else ""
                 print(f"            · {c['source_table']}/{c['source_id']}{lvl}")
@@ -251,7 +251,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("run_id")
     sp.set_defaults(func=cmd_timeline)
 
-    sp = sub.add_parser("citations", help="Group ontology citations by source table.")
+    sp = sub.add_parser("citations", help="Group core citations by source table.")
     sp.add_argument("run_id")
     sp.add_argument("--agent", default=None)
     sp.set_defaults(func=cmd_citations)

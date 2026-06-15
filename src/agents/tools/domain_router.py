@@ -26,7 +26,7 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 # Fast-path table — chapter → primary regulatory domains.
 # 한 chapter 에 여러 domain 매핑 가능 (예: 02류 = food + animal_origin).
-# 출처: Domain_Scope_Routes spec (v2 ontology) + EU 일반 규제 매트릭스.
+# 출처: Domain_Scope_Routes spec (v2 core) + EU 일반 규제 매트릭스.
 # ---------------------------------------------------------------------------
 _CHAPTER_TO_DOMAINS: dict[str, list[str]] = {
     # Live animals + animal products (SPS, CHED-P 영역)

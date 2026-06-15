@@ -128,6 +128,13 @@ class OcrNormalizationData(_AdapterDataModel):
     )
 
 
+class InputReconstructionData(_AdapterDataModel):
+    normalizedFactTexts: TextList = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("normalized_fact_texts", "normalizedFactTexts"),
+    )
+
+
 class ParsedProductPageData(_AdapterDataModel):
     productName: OptionalText = Field(
         default=None,
@@ -207,8 +214,20 @@ class TopLevelParsedPageData(_AdapterDataModel):
         default_factory=OcrNormalizationData,
         validation_alias=AliasChoices("ocr_normalization", "ocrNormalizationResult"),
     )
+    inputReconstruction: InputReconstructionData = Field(
+        default_factory=InputReconstructionData,
+        validation_alias=AliasChoices(
+            "input_reconstruction",
+            "inputReconstructionResult",
+        ),
+    )
 
-    @field_validator("parsedProductPage", "ocrNormalization", mode="before")
+    @field_validator(
+        "parsedProductPage",
+        "ocrNormalization",
+        "inputReconstruction",
+        mode="before",
+    )
     @classmethod
     def _NormalizeNestedPayload(cls, value: Any) -> Mapping[str, Any]:
         return _NormalizeMapping(value)
@@ -243,8 +262,20 @@ class CollectionResultData(_AdapterDataModel):
         default_factory=OcrNormalizationData,
         validation_alias=AliasChoices("ocr_normalization", "ocrNormalizationResult"),
     )
+    inputReconstruction: InputReconstructionData = Field(
+        default_factory=InputReconstructionData,
+        validation_alias=AliasChoices(
+            "input_reconstruction",
+            "inputReconstructionResult",
+        ),
+    )
 
-    @field_validator("collectionResult", "ocrNormalization", mode="before")
+    @field_validator(
+        "collectionResult",
+        "ocrNormalization",
+        "inputReconstruction",
+        mode="before",
+    )
     @classmethod
     def _NormalizeNestedPayload(cls, value: Any) -> Mapping[str, Any]:
         return _NormalizeMapping(value)
@@ -334,8 +365,22 @@ class SmokeSummaryData(_AdapterDataModel):
         default_factory=SmokeOcrSummaryData,
         validation_alias=AliasChoices("ocr_summary", "ocrSummary"),
     )
+    inputReconstruction: InputReconstructionData = Field(
+        default_factory=InputReconstructionData,
+        validation_alias=AliasChoices(
+            "input_reconstruction",
+            "inputReconstructionResult",
+        ),
+    )
 
-    @field_validator("product", "notice", "ocr", "ocrSummary", mode="before")
+    @field_validator(
+        "product",
+        "notice",
+        "ocr",
+        "ocrSummary",
+        "inputReconstruction",
+        mode="before",
+    )
     @classmethod
     def _NormalizeNestedPayload(cls, value: Any) -> Mapping[str, Any]:
         return _NormalizeMapping(value)
@@ -435,6 +480,7 @@ class ProductInputAdapter:
             parsedProductPage=sourceData.parsedProductPage,
             combinedOcrText=sourceData.combinedOcrText or "",
             ocrNormalizationData=sourceData.ocrNormalization,
+            inputReconstructionData=sourceData.inputReconstruction,
         )
 
     def _BuildFromCollectionResultData(
@@ -447,6 +493,7 @@ class ProductInputAdapter:
             parsedProductPage=sourceData.collectionResult.parsedProductPage,
             combinedOcrText=sourceData.combinedOcrText or "",
             ocrNormalizationData=sourceData.ocrNormalization,
+            inputReconstructionData=sourceData.inputReconstruction,
         )
 
     def _BuildFromSmokeSummaryData(
@@ -472,6 +519,7 @@ class ProductInputAdapter:
             or sourceData.ocr.combinedTextPreview
             or "",
             ocrNormalizationData=sourceData.ocrSummary.normalization,
+            inputReconstructionData=sourceData.inputReconstruction,
         )
 
     def _BuildFromFlatSmokeArtifactData(
@@ -491,6 +539,7 @@ class ProductInputAdapter:
         parsedProductPage: ParsedProductPageData,
         combinedOcrText: str,
         ocrNormalizationData: Optional[OcrNormalizationData] = None,
+        inputReconstructionData: Optional[InputReconstructionData] = None,
     ) -> ProductClassificationInput:
         productDomain = parsedProductPage.productDomain or "unknown"
         noticeOptions = parsedProductPage.productNoticeOptions
@@ -512,7 +561,12 @@ class ProductInputAdapter:
         )
         normalizedOcrFactTexts: List[str] = []
         excludedOcrTextPreview = ""
-        if ocrNormalizationData is not None:
+        if (
+            inputReconstructionData is not None
+            and inputReconstructionData.normalizedFactTexts
+        ):
+            normalizedOcrFactTexts = inputReconstructionData.normalizedFactTexts
+        elif ocrNormalizationData is not None:
             normalizedOcrFactTexts = ocrNormalizationData.factTexts
             excludedOcrTextPreview = ocrNormalizationData.excludedTextPreview or ""
         if not normalizedOcrFactTexts and combinedOcrText.strip() != "":

@@ -6,7 +6,7 @@ Goal: enforce the audit-trail contract from
 emit, for each invocation:
 
   - inputs_read / outputs_written  → which Blackboard object IDs it touched
-  - ontology_reads                  → which ontology rows (EvidenceCitation)
+  - ontology_reads                  → which core rows (EvidenceCitation)
                                       it consulted
   - reasoning_summary               → one-paragraph "why" trace
   - llm_model / tokens (optional)   → cost & repeatability
@@ -26,7 +26,7 @@ Usage:
         def run(self, store: BlackboardStore) -> AgentResult:
             pes = store.load()["product_evidence_state"]
             self.read_input(pes["product_id"])
-            # ... read ontology and cite ...
+            # ... read core and cite ...
             self.cite("cn_hs8_pair_rows", "19023010", "...", "...")
             self.reason("Product matches 1902.30.10 because ...")
             # produce an output
@@ -178,5 +178,5 @@ class BaseAgent:
 
     # ------------------------------------------------------------------ override
     def run(self, store: BlackboardStore) -> None:
-        """Subclass entrypoint. Read inputs, cite ontology rows, reason, write outputs."""
+        """Subclass entrypoint. Read inputs, cite core rows, reason, write outputs."""
         raise NotImplementedError

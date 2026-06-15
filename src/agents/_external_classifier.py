@@ -1,7 +1,7 @@
 """
 agents/_external_classifier — adapter for the vendored Stage 1 classifier.
 
-The classifier runtime code lives in ``src/eu_export``. It reads our ontology
+The classifier runtime code lives in ``src/eu_export``. It reads our core
 data from ``docs/ASAP_Ontology_v1`` and orchestrates
 its 7-step Stage 1 pipeline:
 
@@ -534,7 +534,7 @@ from eu_export.bridge import (
     TextEmbeddingAdapterBuildError,
     TextEmbeddingGenerationError,
 )
-from eu_export.ontology import (
+from eu_export.core import (
     CnCandidateRetriever,
     CnSemanticCandidateIndex,
     OntologyContextBuilder,

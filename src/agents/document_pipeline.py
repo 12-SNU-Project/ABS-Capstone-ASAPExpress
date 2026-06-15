@@ -68,15 +68,15 @@ def collect_kurly_url_facts(
         KurlyGlobalPageParser,
         KurlyPageAdapter,
         KurlyPageCollector,
-        KurlyPageParser,
+        KurlyDomesticPageParser,
         KurlyPipelineInput,
         KurlyProductPipeline,
     )
-    from eu_export.ontology import ProductClassificationInputNormalizer
+    from eu_export.input_process import ProductInputAdapter
 
     warnings: list[str] = []
     pageAdapter = KurlyPageAdapter(
-        domesticParser=KurlyPageParser(),
+        domesticParser=KurlyDomesticPageParser(),
         globalParser=KurlyGlobalPageParser(),
     )
     collector = KurlyPageCollector(
@@ -87,11 +87,11 @@ def collect_kurly_url_facts(
     )
     if run_ocr:
         try:
-            from eu_export.product.paddle_ocr import PaddleOcrEngine
+            from eu_export.product.ocr.paddle_ocr import PaddleStructureOcrEngine
 
             pipeline = KurlyProductPipeline(
                 collector=collector,
-                ocrEngine=PaddleOcrEngine(),
+                ocrEngine=PaddleStructureOcrEngine(),
             )
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"ocr_engine_unavailable: {exc}")
@@ -110,7 +110,7 @@ def collect_kurly_url_facts(
             maxOcrImageCount=max_ocr_images,
         )
     )
-    product_input = ProductClassificationInputNormalizer().BuildFromKurlyPipelineResult(result)
+    product_input = ProductInputAdapter().BuildFromObject(result)
     facts = {
         "url": url,
         "source_urls": [url],

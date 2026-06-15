@@ -24,6 +24,12 @@ from eu_export.product import (  # noqa: E402
     PaddleStructureOcrEngine,
 )
 from eu_export.app_config import LoadAppConfig  # noqa: E402
+from eu_export.bridge import (  # noqa: E402
+    BuildLlmRuntimeConfigFromEnv,
+    BuildRuntimeAdapter,
+    RuntimeAdapterBuildError,
+)
+from eu_export.input_process import ProductInputReconstructionService  # noqa: E402
 
 
 class KurlyMarketSmokeRunner:
@@ -55,6 +61,16 @@ class KurlyMarketSmokeRunner:
         )
         self._structuredOcrAllowHardCutFallback = (
             smokeConfig.structured_ocr_allow_hard_cut_fallback
+        )
+        self._useInputReconstruction = smokeConfig.use_input_reconstruction
+        self._useLlmInputReconstruction = smokeConfig.use_llm_input_reconstruction
+        self._inputDictionaryPath = (
+            pathConfig.ResolvePath(PROJECT_ROOT_PATH, smokeConfig.input_dictionary_path)
+            if smokeConfig.input_dictionary_path is not None
+            else None
+        )
+        self._inputDictionaryFuzzyMinRatio = (
+            smokeConfig.input_dictionary_fuzzy_min_ratio
         )
         self._writeSummaryArtifact = smokeConfig.write_summary_artifact
         self._logFullResult = smokeConfig.log_full_result
@@ -130,8 +146,12 @@ class KurlyMarketSmokeRunner:
             timeoutMilliseconds=self._timeoutSeconds * 1000,
             scrollCount=self._scrollCount,
         )
+        inputReconstructionService = self._BuildInputReconstructionService()
         if not self._runOcrFallback:
-            return KurlyProductPipeline(collector=collector)
+            return KurlyProductPipeline(
+                collector=collector,
+                inputReconstructionService=inputReconstructionService,
+            )
 
         if self._useStructuredOcr:
             return KurlyProductPipeline(
@@ -143,11 +163,40 @@ class KurlyMarketSmokeRunner:
                     tileOverlapPixels=self._structuredOcrTileOverlapPixels,
                     allowHardCutFallback=self._structuredOcrAllowHardCutFallback,
                 ),
+                inputReconstructionService=inputReconstructionService,
             )
 
         return KurlyProductPipeline(
             collector=collector,
             ocrEngine=PaddleOcrEngine(),
+            inputReconstructionService=inputReconstructionService,
+        )
+
+    def _BuildInputReconstructionService(self) -> ProductInputReconstructionService | None:
+        if not self._useInputReconstruction:
+            return None
+
+        runtimeAdapter = None
+        if self._useLlmInputReconstruction:
+            try:
+                runtimeAdapter = BuildRuntimeAdapter(
+                    BuildLlmRuntimeConfigFromEnv(projectRootPath=PROJECT_ROOT_PATH),
+                    requireAvailable=True,
+                )
+            except RuntimeAdapterBuildError as error:
+                self._Logger("_BuildInputReconstructionService").warning(
+                    "LLM input reconstruction disabled because runtime is unavailable: {}",
+                    error,
+                )
+
+        return ProductInputReconstructionService(
+            dictionaryPath=(
+                str(self._inputDictionaryPath)
+                if self._inputDictionaryPath is not None
+                else None
+            ),
+            runtimeAdapter=runtimeAdapter,
+            fuzzyMinRatio=self._inputDictionaryFuzzyMinRatio,
         )
 
     def _RunOne(
@@ -189,6 +238,11 @@ class KurlyMarketSmokeRunner:
         ocrSummary = pipelineResultData.get("ocr_summary", {})
         if not isinstance(ocrSummary, dict):
             ocrSummary = {}
+        inputReconstruction = pipelineResultData.get("input_reconstruction", {})
+        if not isinstance(inputReconstruction, dict):
+            inputReconstruction = ocrSummary.get("input_reconstruction", {})
+        if not isinstance(inputReconstruction, dict):
+            inputReconstruction = {}
         ocrImageResults = pipelineResultData.get("ocr_image_results", [])
         combinedOcrText = pipelineResultData["combined_ocr_text"]
         requiresOcrFallback = parsedProductPage["requires_ocr_fallback"]
@@ -225,6 +279,7 @@ class KurlyMarketSmokeRunner:
             ),
             "ocr_summary": ocrSummary,
             "combined_ocr_text": combinedOcrText,
+            "input_reconstruction": inputReconstruction,
             "steps": pipelineResultData["steps"],
             "status": {
                 "is_parse_ok": self._IsParseOk(
@@ -362,6 +417,7 @@ class KurlyMarketSmokeRunner:
         self._LogNoticeOptions(resultData)
         self._LogNoticeFields(resultData)
         self._LogOcrSummary(resultData)
+        self._LogInputReconstruction(resultData)
         self._LogWarningsAndErrors(resultData)
 
     def _LogPipelineSteps(self, resultData: Dict[str, Any]) -> None:
@@ -399,6 +455,24 @@ class KurlyMarketSmokeRunner:
                     fieldRecord["field_value"],
                     fieldRecord["requires_ocr_fallback"],
                 )
+
+    def _LogInputReconstruction(self, resultData: Dict[str, Any]) -> None:
+        reconstructionLogger = self._Logger("_LogInputReconstruction")
+        inputReconstruction = resultData.get("input_reconstruction", {})
+        if not isinstance(inputReconstruction, dict) or not inputReconstruction:
+            return
+        reconstructionLogger.info(
+            (
+                "input_reconstruction facts={} unresolved={} conflicts={} "
+                "dictionary_matches={} used_llm={} fallback_reason={}"
+            ),
+            len(inputReconstruction.get("product_facts", []) or []),
+            len(inputReconstruction.get("unresolved_facts", []) or []),
+            len(inputReconstruction.get("conflicts", []) or []),
+            len(inputReconstruction.get("dictionary_matches", []) or []),
+            inputReconstruction.get("used_llm_reconstruction"),
+            inputReconstruction.get("fallback_reason"),
+        )
 
     def _LogNoticeFields(self, resultData: Dict[str, Any]) -> None:
         noticeLogger = self._Logger("_LogNoticeFields")
