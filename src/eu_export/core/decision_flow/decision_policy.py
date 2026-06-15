@@ -8,7 +8,7 @@ from eu_export.core.classification import (
     CnCandidate,
     Stage1ResponseValidationReport,
 )
-from eu_export.utils import NormalizeWhitespace
+from eu_export.utils import NormalizeWhiteSpace
 
 
 class ClassificationDecisionHandler(BaseModel):
@@ -226,7 +226,7 @@ class Stage1DecisionPolicy:
         for value in values:
             if not isinstance(value, str):
                 continue
-            normalizedValue = NormalizeWhitespace(value)
+            normalizedValue = NormalizeWhiteSpace(value)
             if normalizedValue == "" or normalizedValue in seenValues:
                 continue
             target.append(normalizedValue)

@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from eu_export.core.context_retrieval.schema import OntologyDocument
-from eu_export.utils import NormalizeWhitespace
+from eu_export.utils import NormalizeWhiteSpace
 
 
 class OntologyValidationSeverity(str, Enum):
@@ -319,13 +319,13 @@ class OntologyGraphValidator:
 
     def _ReadReferenceIds(self, value: Any) -> List[str]:
         if isinstance(value, str):
-            normalizedValue = NormalizeWhitespace(value)
+            normalizedValue = NormalizeWhiteSpace(value)
             return [normalizedValue] if normalizedValue else []
         if isinstance(value, list):
             references: List[str] = []
             for item in value:
                 if isinstance(item, str):
-                    normalizedItem = NormalizeWhitespace(item)
+                    normalizedItem = NormalizeWhiteSpace(item)
                     if normalizedItem:
                         references.append(normalizedItem)
             return references
@@ -337,14 +337,14 @@ class OntologyGraphValidator:
     def _ReadOptionalString(self, value: Any) -> Optional[str]:
         if not isinstance(value, str):
             return None
-        normalizedValue = NormalizeWhitespace(value)
+        normalizedValue = NormalizeWhiteSpace(value)
         return normalizedValue or None
 
     def _IsMissingValue(self, value: Any) -> bool:
         if value is None:
             return True
         if isinstance(value, str):
-            return NormalizeWhitespace(value) == ""
+            return NormalizeWhiteSpace(value) == ""
         if isinstance(value, list):
             return len(value) == 0
         return False

@@ -15,7 +15,7 @@ from eu_export.product.web_parser.kurly_market_schema import (
     KurlyProductPage,
     ProductSummaryEvidence,
 )
-from eu_export.utils import NormalizeWhitespace, NormalizeWhitespacePreservingLines
+from eu_export.utils import NormalizeWhiteSpace, NormalizeWhitespaceLines
 
 
 class KurlyGlobalPageParser(KurlyBasePageParser):
@@ -202,12 +202,12 @@ class KurlyGlobalPageParser(KurlyBasePageParser):
         for row in rows:
             if not isinstance(row, list) or len(row) < 2:
                 continue
-            label = NormalizeWhitespace(str(row[0]))
-            value = NormalizeWhitespace(" ".join(str(item) for item in row[1:]))
+            label = NormalizeWhiteSpace(str(row[0]))
+            value = NormalizeWhiteSpace(" ".join(str(item) for item in row[1:]))
             if label == "" or value == "":
                 continue
             lines.extend([label, value])
-        return NormalizeWhitespacePreservingLines("\n".join(lines))
+        return NormalizeWhitespaceLines("\n".join(lines))
 
     @staticmethod
     def _ReadJsonLdDescription(page: Any) -> str:
@@ -234,4 +234,4 @@ class KurlyGlobalPageParser(KurlyBasePageParser):
             return ""
         if not isinstance(value, str):
             return ""
-        return NormalizeWhitespacePreservingLines(value)
+        return NormalizeWhitespaceLines(value)

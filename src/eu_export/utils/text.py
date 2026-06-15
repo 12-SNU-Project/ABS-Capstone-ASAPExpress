@@ -9,19 +9,15 @@ URL_PATTERN = re.compile(
 )
 
 
-def NormalizeWhitespace(text: str) -> str:
-    return " ".join(text.strip().split())
+def NormalizeWhiteSpace(text: str) -> str:
+    return " ".join((text or "").strip().split())
 
-
-def NormalizeWhitespacePreservingLines(text: str) -> str:
+def NormalizeWhitespaceLines(text: str) -> str:
     return "\n".join(
-        normalizedLine
-        for normalizedLine in (
-            NormalizeWhitespace(line) for line in text.splitlines()
-        )
-        if normalizedLine != ""
+        NormalizeWhiteSpace(line)
+        for line in (text or "").splitlines()
+        if NormalizeWhiteSpace(line)
     )
-
 
 def IsUrlLike(text: str) -> bool:
     return URL_PATTERN.match(text.strip()) is not None

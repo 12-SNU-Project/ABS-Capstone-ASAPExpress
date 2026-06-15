@@ -13,7 +13,7 @@ from eu_export.core.classification import (
 from eu_export.core.decision_flow.recommendation import (
     Stage1RecommendationReport,
 )
-from eu_export.utils import NormalizeWhitespace
+from eu_export.utils import NormalizeWhiteSpace
 
 
 DEFAULT_HUMAN_REVIEW_TEXT_PREVIEW_CHARACTERS = 500
@@ -146,7 +146,7 @@ class Stage1HumanReviewPackageBuilder:
     ) -> str:
         recommendedCandidate = recommendationReport.recommendedCandidate or {}
         recommendedHs8 = recommendedCandidate.get("hs8") or "unresolved"
-        productName = NormalizeWhitespace(productInput.productName or "unknown")
+        productName = NormalizeWhiteSpace(productInput.productName or "unknown")
         normalizedProductName = (
             "".join(
                 character.lower()
@@ -304,7 +304,7 @@ class Stage1HumanReviewPackageBuilder:
 
     @staticmethod
     def BuildTextPreview(text: str) -> str:
-        normalizedText = NormalizeWhitespace(text)
+        normalizedText = NormalizeWhiteSpace(text)
         if len(normalizedText) <= DEFAULT_HUMAN_REVIEW_TEXT_PREVIEW_CHARACTERS:
             return normalizedText
         return normalizedText[:DEFAULT_HUMAN_REVIEW_TEXT_PREVIEW_CHARACTERS].rstrip() + "..."
@@ -314,7 +314,7 @@ class Stage1HumanReviewPackageBuilder:
         uniqueValues: List[str] = []
         seenValues: set[str] = set()
         for value in values:
-            normalizedValue = NormalizeWhitespace(value)
+            normalizedValue = NormalizeWhiteSpace(value)
             if normalizedValue == "" or normalizedValue in seenValues:
                 continue
             seenValues.add(normalizedValue)

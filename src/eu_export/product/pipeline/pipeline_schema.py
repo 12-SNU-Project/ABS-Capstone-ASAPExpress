@@ -69,6 +69,215 @@ class KurlyPipelineResult(BaseModel):
     steps: List[PipelineStep] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
 
+    def BuildPublicResult(self) -> Dict[str, object]:
+        """UI/API에 전달할 입력 처리 결과만 노출한다."""
+
+        reconstructionData = self.inputReconstructionResult.model_dump(
+            mode="json",
+            by_alias=True,
+            include={
+                "productFacts",
+                "unresolvedFacts",
+                "conflicts",
+                "normalizedFactTexts",
+                "warnings",
+                "usedLlmReconstruction",
+                "fallbackReason",
+            },
+        )
+        productFacts = list(reconstructionData.get("product_facts", []))
+        unresolvedFacts = list(reconstructionData.get("unresolved_facts", []))
+        classificationFactTexts = list(
+            reconstructionData.get("normalized_fact_texts", [])
+        )
+        usedLlmReconstruction = bool(
+            reconstructionData.get("used_llm_reconstruction")
+        )
+        fallbackReason = reconstructionData.get("fallback_reason")
+        collectionData = self.collectionResult.model_dump(
+            mode="json",
+            by_alias=True,
+            include={
+                "visibleTextLineCount",
+                "productNoticeTextLineCount",
+                "productDetailImageUrlCount",
+                "ocrCandidateImageUrlCount",
+                "warnings",
+            },
+        )
+        collectionData["product_detail_image_count"] = collectionData.pop(
+            "product_detail_image_url_count",
+            0,
+        )
+        collectionData["ocr_candidate_image_count"] = collectionData.pop(
+            "ocr_candidate_image_url_count",
+            0,
+        )
+        collectionData["warning_count"] = len(self.collectionResult.warnings)
+        warnings = list(
+            dict.fromkeys(
+                [
+                    *self.collectionResult.warnings,
+                    *reconstructionData.get("warnings", []),
+                    *[
+                        "pipeline_error: {0}".format(error)
+                        for error in self.errors
+                    ],
+                ]
+            )
+        )
+        return {
+            "product_page_url": self.collectionResult.productPageUrl,
+            "source_product_page": (
+                self.collectionResult.parsedProductPage.model_dump(
+                    mode="json",
+                    by_alias=True,
+                )
+            ),
+            "collection": collectionData,
+            "ocr": self._BuildOcrSummary(includeDebugArtifacts=False),
+            "input_reconstruction": {
+                "mode": (
+                    "llm_reconstruction"
+                    if usedLlmReconstruction
+                    else "fallback_reconstruction"
+                    if productFacts or classificationFactTexts
+                    else "unavailable"
+                ),
+                "used_llm_reconstruction": usedLlmReconstruction,
+                "fallback_reason": fallbackReason,
+                "error": (
+                    fallbackReason
+                    if fallbackReason
+                    and fallbackReason not in {"llm_reconstruction_not_used"}
+                    else None
+                ),
+                "fact_count": len(productFacts),
+                "unresolved_count": len(unresolvedFacts),
+                "conflict_count": len(reconstructionData.get("conflicts", [])),
+                "fact_text_count": len(classificationFactTexts),
+                "classification_input_product_facts": productFacts,
+                "llm_reconstructed_product_facts": (
+                    productFacts if usedLlmReconstruction else []
+                ),
+                "fallback_product_facts": (
+                    [] if usedLlmReconstruction else productFacts
+                ),
+                "unresolved_product_facts": unresolvedFacts,
+                "product_fact_conflicts": list(
+                    reconstructionData.get("conflicts", [])
+                ),
+                "classification_input_fact_texts": classificationFactTexts,
+                "warnings": list(reconstructionData.get("warnings", [])),
+                "debug_artifact_count": len(
+                    self.inputReconstructionResult.debugArtifacts
+                ),
+            },
+            "pipeline_steps": [
+                step.model_dump(mode="json", by_alias=True)
+                for step in self.steps
+            ],
+            "errors": list(self.errors),
+            "warnings": warnings,
+        }
+
+    def _BuildOcrSummary(self, includeDebugArtifacts: bool) -> Dict[str, object]:
+        successfulImageResults = [
+            imageResult
+            for imageResult in self.ocrImageResults
+            if imageResult.error is None and imageResult.ocrText.strip() != ""
+        ]
+        structuredTableImageResults = [
+            imageResult
+            for imageResult in successfulImageResults
+            if imageResult.structuredOcr.usedStructuredTables
+        ]
+        summary: Dict[str, object] = {
+            "image_result_count": len(self.ocrImageResults),
+            "successful_image_count": len(successfulImageResults),
+            "failed_image_count": (
+                len(self.ocrImageResults) - len(successfulImageResults)
+            ),
+            "artifact_image_count": sum(
+                len(imageResult.imagePaths)
+                if imageResult.imagePaths
+                else 1
+                if imageResult.imagePath is not None
+                else 0
+                for imageResult in self.ocrImageResults
+            ),
+            "structured_table_image_count": len(structuredTableImageResults),
+            "structured_table_count": sum(
+                len(imageResult.structuredOcr.tables)
+                for imageResult in successfulImageResults
+            ),
+            "raw_tile_text_count": sum(
+                len(imageResult.structuredOcr.rawTileTexts)
+                for imageResult in successfulImageResults
+            ),
+            "raw_text_length": sum(
+                len(imageResult.structuredOcr.rawText)
+                for imageResult in successfulImageResults
+            ),
+            "combined_text_length": len(self.combinedOcrText),
+            "raw_line_count": self.ocrNormalizationResult.rawLineCount,
+        }
+        if not includeDebugArtifacts:
+            return summary
+
+        summary.update(
+            {
+                "normalized_fact_count": self.ocrNormalizationResult.factLineCount,
+                "input_reconstruction": (
+                    self.inputReconstructionResult.model_dump(
+                        mode="json",
+                        by_alias=True,
+                    )
+                ),
+                "normalization": self.ocrNormalizationResult.model_dump(
+                    mode="json",
+                    by_alias=True,
+                ),
+                "image_artifacts": [
+                    {
+                        "index": imageIndex,
+                        "image_path": (
+                            str(imageResult.imagePath)
+                            if imageResult.imagePath is not None
+                            else None
+                        ),
+                        "image_paths": list(imageResult.imagePaths),
+                        "text_length": len(imageResult.ocrText),
+                        "used_structured_tables": (
+                            imageResult.structuredOcr.usedStructuredTables
+                        ),
+                        "structured_table_count": len(
+                            imageResult.structuredOcr.tables
+                        ),
+                        "structured_fallback_reason": (
+                            imageResult.structuredOcr.fallbackReason
+                        ),
+                        "structured_warnings": list(
+                            imageResult.structuredOcr.warnings
+                        ),
+                        "text_merge_mode": imageResult.structuredOcr.textMergeMode,
+                        "raw_tile_text_count": len(
+                            imageResult.structuredOcr.rawTileTexts
+                        ),
+                        "raw_text_length": len(imageResult.structuredOcr.rawText),
+                        "error": imageResult.error,
+                    }
+                    for imageIndex, imageResult in enumerate(
+                        self.ocrImageResults,
+                        start=1,
+                    )
+                    if imageResult.imagePath is not None
+                    and imageResult.ocrText.strip() != ""
+                ],
+            }
+        )
+        return summary
+
     @computed_field(alias="product_page_url")
     @property
     def productPageUrl(self) -> str:
@@ -85,20 +294,18 @@ class KurlyPipelineResult(BaseModel):
     @computed_field(alias="collection_summary")
     @property
     def collectionSummary(self) -> Dict[str, object]:
-        return {
-            "product_page_url": self.collectionResult.productPageUrl,
-            "visible_text_line_count": self.collectionResult.visibleTextLineCount,
-            "product_notice_text_line_count": (
-                self.collectionResult.productNoticeTextLineCount
-            ),
-            "product_detail_image_url_count": len(
-                self.collectionResult.productDetailImageUrls,
-            ),
-            "ocr_candidate_image_url_count": len(
-                self.collectionResult.ocrCandidateImageUrls,
-            ),
-            "warnings": list(self.collectionResult.warnings),
-        }
+        return self.collectionResult.model_dump(
+            mode="json",
+            by_alias=True,
+            include={
+                "productPageUrl",
+                "visibleTextLineCount",
+                "productNoticeTextLineCount",
+                "productDetailImageUrlCount",
+                "ocrCandidateImageUrlCount",
+                "warnings",
+            },
+        )
 
     @computed_field(alias="rendered_page_evidence_summary")
     @property
@@ -110,76 +317,4 @@ class KurlyPipelineResult(BaseModel):
     @computed_field(alias="ocr_summary")
     @property
     def ocrSummary(self) -> Dict[str, object]:
-        successfulImageResults = [
-            imageResult
-            for imageResult in self.ocrImageResults
-            if imageResult.error is None and imageResult.ocrText.strip() != ""
-        ]
-        structuredTableImageResults = [
-            imageResult
-            for imageResult in successfulImageResults
-            if imageResult.structuredOcr.usedStructuredTables
-        ]
-        return {
-            "image_result_count": len(self.ocrImageResults),
-            "successful_image_count": len(successfulImageResults),
-            "failed_image_count": (
-                len(self.ocrImageResults) - len(successfulImageResults)
-            ),
-            "structured_table_image_count": len(structuredTableImageResults),
-            "structured_table_count": sum(
-                len(imageResult.structuredOcr.tables)
-                for imageResult in successfulImageResults
-            ),
-            "raw_tile_text_count": sum(
-                len(imageResult.structuredOcr.rawTileTexts)
-                for imageResult in successfulImageResults
-            ),
-            "raw_text_length": sum(
-                len(imageResult.structuredOcr.rawText)
-                for imageResult in successfulImageResults
-            ),
-            "combined_text_length": len(self.combinedOcrText),
-            "normalized_fact_count": self.ocrNormalizationResult.factLineCount,
-            "raw_line_count": self.ocrNormalizationResult.rawLineCount,
-            "input_reconstruction": self.inputReconstructionResult.model_dump(
-                mode="json",
-                by_alias=True,
-            ),
-            "normalization": self.ocrNormalizationResult.model_dump(
-                mode="json",
-                by_alias=True,
-            ),
-            "image_artifacts": [
-                {
-                    "index": imageIndex,
-                    "image_path": (
-                        str(imageResult.imagePath)
-                        if imageResult.imagePath is not None
-                        else None
-                    ),
-                    "image_paths": list(imageResult.imagePaths),
-                    "text_length": len(imageResult.ocrText),
-                    "used_structured_tables": (
-                        imageResult.structuredOcr.usedStructuredTables
-                    ),
-                    "structured_table_count": len(imageResult.structuredOcr.tables),
-                    "structured_fallback_reason": (
-                        imageResult.structuredOcr.fallbackReason
-                    ),
-                    "structured_warnings": list(imageResult.structuredOcr.warnings),
-                    "text_merge_mode": imageResult.structuredOcr.textMergeMode,
-                    "raw_tile_text_count": len(
-                        imageResult.structuredOcr.rawTileTexts
-                    ),
-                    "raw_text_length": len(imageResult.structuredOcr.rawText),
-                    "error": imageResult.error,
-                }
-                for imageIndex, imageResult in enumerate(
-                    self.ocrImageResults,
-                    start=1,
-                )
-                if imageResult.imagePath is not None
-                and imageResult.ocrText.strip() != ""
-            ],
-        }
+        return self._BuildOcrSummary(includeDebugArtifacts=True)

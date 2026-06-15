@@ -348,8 +348,16 @@ def input_reconstruction_card(
     )
     llmFacts = input_reconstruction.get("llm_reconstructed_product_facts") or []
     fallbackFacts = input_reconstruction.get("fallback_product_facts") or []
-    unresolvedFacts = input_reconstruction.get("unresolved_facts") or []
-    conflicts = input_reconstruction.get("conflicts") or []
+    unresolvedFacts = (
+        input_reconstruction.get("unresolved_product_facts")
+        or input_reconstruction.get("unresolved_facts")
+        or []
+    )
+    conflicts = (
+        input_reconstruction.get("product_fact_conflicts")
+        or input_reconstruction.get("conflicts")
+        or []
+    )
     factTexts = (
         input_reconstruction.get("classification_input_fact_texts")
         or input_reconstruction.get("classification_fact_texts")
@@ -522,7 +530,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
             return None
         url_intake = raw.get("url_intake") or {}
         input_reconstruction = raw.get("input_reconstruction") or {}
-        debug_artifacts = input_reconstruction.get("debug_artifacts") or {}
+        ocr_summary = url_intake.get("ocr") or {}
         return html.Div(
             [
                 html.Div(f"product_name: {raw.get('product_name') or '-'}"),
@@ -532,8 +540,10 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
                     (
                         "URL collection: ocr_images={0}, combined_ocr_chars={1}"
                     ).format(
-                        url_intake.get("ocr_image_count", "-"),
-                        url_intake.get("combined_ocr_text_length", "-"),
+                        ocr_summary.get("image_result_count")
+                        or url_intake.get("ocr_image_count", "-"),
+                        ocr_summary.get("combined_text_length")
+                        or url_intake.get("combined_ocr_text_length", "-"),
                     )
                 ) if url_intake else None,
                 html.Div(
@@ -550,19 +560,11 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
                     input_reconstruction,
                     raw.get("composition") or [],
                 ),
-                _text_list_block("raw OCR chunk", raw.get("ocr_text") or []),
-                _text_list_block("raw composition/fact", raw.get("composition") or []),
-                detail_block(
-                    "input reconstruction debug artifacts",
-                    debug_artifacts,
-                    max_height=180,
-                ) if debug_artifacts else None,
                 detail_block(
                     "URL collection pipeline steps",
                     url_intake.get("pipeline_steps") or [],
                     max_height=260,
                 ) if url_intake.get("pipeline_steps") else None,
-                detail_block("raw_input JSON", raw, max_height=360),
             ],
             style={"fontSize": "12px", "color": "#334155", "marginTop": "6px"},
         )

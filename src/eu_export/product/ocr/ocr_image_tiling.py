@@ -2,14 +2,17 @@
 
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Tuple
+import numpy as np
+import numpy.typing as npt
 
+ImageArray = npt.NDArray[np.uint8]
 
 @dataclass(frozen=True)
 class ProductOcrImageTile:
     """OCR 입력으로 넘길 단일 이미지 타일."""
 
     tileIndex: Optional[int]
-    image: Any
+    image: ImageArray
 
 
 @dataclass(frozen=True)
@@ -56,24 +59,17 @@ class ProductOcrImageTilePlanner:
             )
 
         imageHeight, imageWidth = self._ReadImageSize(image)
-        verticalImages, verticalWarnings, verticalTransformed = (
-            self._BuildHeightLimitedImages(image, imageHeight)
-        )
-
+        verticalImages, verticalWarnings, verticalTransformed = (self._BuildHeightLimitedImages(image, imageHeight))
         sideLimitedImages: List[Any] = []
         warnings = list(verticalWarnings)
         sideTransformed = False
         for verticalImage in verticalImages:
-            trimmedImage, trimmed, trimWarning = self._TrimHorizontalOuterMargins(
-                verticalImage,
-            )
+            trimmedImage, trimmed, trimWarning = self._TrimHorizontalOuterMargins(verticalImage,)
             if trimWarning:
                 warnings.append(trimWarning)
             sideTransformed = sideTransformed or trimmed
 
-            widthLimitedImages, widthWarnings, widthTransformed = (
-                self._BuildWidthLimitedImages(trimmedImage)
-            )
+            widthLimitedImages, widthWarnings, widthTransformed = (self._BuildWidthLimitedImages(trimmedImage))
             sideLimitedImages.extend(widthLimitedImages)
             warnings.extend(widthWarnings)
             sideTransformed = sideTransformed or widthTransformed
@@ -98,8 +94,7 @@ class ProductOcrImageTilePlanner:
         image: Any,
         imageHeight: int,
     ) -> Tuple[List[Any], List[str], bool]:
-        if imageHeight <= self._maxTileHeightPixels:
-            return [image], [], False
+        if imageHeight <= self._maxTileHeightPixels: return [image], [], False
 
         if self._useProjectionTiling:
             projectionImages = self._BuildProjectionImages(

@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from eu_export.core.context_retrieval.schema import OntologyDocument
-from eu_export.utils import NormalizeWhitespace
+from eu_export.utils import NormalizeWhiteSpace
 
 
 class OntologyDataSourceCheck(BaseModel):
@@ -198,7 +198,7 @@ class OntologyResourceResolver:
                         and primaryKey in row
                         and len(primaryKeyPreview) < 5
                     ):
-                        value = NormalizeWhitespace(row.get(primaryKey) or "")
+                        value = NormalizeWhiteSpace(row.get(primaryKey) or "")
                         if value:
                             primaryKeyPreview.append(value)
 
@@ -265,12 +265,12 @@ class OntologyResourceResolver:
     def _ReadString(self, value: Any) -> Optional[str]:
         if not isinstance(value, str):
             return None
-        normalizedValue = NormalizeWhitespace(value)
+        normalizedValue = NormalizeWhiteSpace(value)
         return normalizedValue or None
 
     def _ReadStringList(self, value: Any) -> List[str]:
         if isinstance(value, str):
-            normalizedValue = NormalizeWhitespace(value)
+            normalizedValue = NormalizeWhiteSpace(value)
             return [normalizedValue] if normalizedValue else []
         if isinstance(value, list):
             values: List[str] = []

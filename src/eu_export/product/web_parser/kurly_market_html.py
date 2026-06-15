@@ -3,7 +3,7 @@
 from html.parser import HTMLParser
 from typing import List, Optional
 
-from eu_export.utils import NormalizeWhitespace
+from eu_export.utils import NormalizeWhiteSpace
 
 
 class KurlyHtmlTextExtractor(HTMLParser):
@@ -76,7 +76,7 @@ class KurlyHtmlTextExtractor(HTMLParser):
         return [
             normalizedLine
             for normalizedLine in (
-                NormalizeWhitespace(line) for line in text.splitlines()
+                NormalizeWhiteSpace(line) for line in text.splitlines()
             )
             if normalizedLine != ""
         ]

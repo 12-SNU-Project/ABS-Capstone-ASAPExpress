@@ -11,7 +11,7 @@ from eu_export.product.web_parser.kurly_market_schema import (
     ProductNoticeField,
     ProductNoticeOption,
 )
-from eu_export.utils import NormalizeWhitespace
+from eu_export.utils import NormalizeWhiteSpace
 
 
 __all__ = [
@@ -214,7 +214,7 @@ class KurlyBasePageParser:
     def NormalizeTextLines(self, textLines: List[str]) -> List[str]:
         normalizedLines: List[str] = []
         for textLine in textLines:
-            normalizedLine = NormalizeWhitespace(textLine)
+            normalizedLine = NormalizeWhiteSpace(textLine)
             if normalizedLine == "":
                 continue
             if normalizedLines and normalizedLines[-1] == normalizedLine:
@@ -263,7 +263,7 @@ class KurlyBasePageParser:
         brandMatch = KurlyParserDefaults.BRACKET_BRAND_PATTERN.search(productName)
         if brandMatch is None:
             return None
-        return NormalizeWhitespace(brandMatch.group(1))
+        return NormalizeWhiteSpace(brandMatch.group(1))
 
     def _ExtractSummaryField(
         self,
@@ -275,7 +275,7 @@ class KurlyBasePageParser:
                 continue
             valueLines = self._ReadFollowingValueLines(textLines, index + 1)
             if valueLines:
-                return NormalizeWhitespace(" ".join(valueLines))
+                return NormalizeWhiteSpace(" ".join(valueLines))
         return None
 
     def _ReadFollowingValueLines(
@@ -398,7 +398,7 @@ class KurlyBasePageParser:
                 valueLines.append(nextLine)
                 index += 1
 
-            fieldValue = NormalizeWhitespace(" ".join(valueLines))
+            fieldValue = NormalizeWhiteSpace(" ".join(valueLines))
             if fieldValue == "":
                 fieldValue = None
             requiresOcrFallback = self._NoticeValueRequiresOcr(fieldValue)
@@ -476,20 +476,20 @@ class KurlyBasePageParser:
         line: str,
         fieldName: str,
     ) -> Optional[str]:
-        normalizedLine = NormalizeWhitespace(line)
-        normalizedFieldName = NormalizeWhitespace(fieldName)
+        normalizedLine = NormalizeWhiteSpace(line)
+        normalizedFieldName = NormalizeWhiteSpace(fieldName)
         if normalizedLine == normalizedFieldName:
             return None
 
         candidateLabels = sorted(
             self._productNoticeFieldLabels,
-            key=lambda label: len(NormalizeWhitespace(label)),
+            key=lambda label: len(NormalizeWhiteSpace(label)),
             reverse=True,
         )
         for candidateLabel in candidateLabels:
             if self._NormalizeProductNoticeFieldName(candidateLabel) != fieldName:
                 continue
-            normalizedCandidate = NormalizeWhitespace(candidateLabel)
+            normalizedCandidate = NormalizeWhiteSpace(candidateLabel)
             if normalizedLine.startswith(normalizedCandidate):
                 remainder = normalizedLine[len(normalizedCandidate) :].strip(
                     " :：·-"
@@ -504,7 +504,7 @@ class KurlyBasePageParser:
     def _NoticeValueRequiresOcr(self, value: Optional[str]) -> bool:
         if value is None:
             return False
-        normalizedValue = NormalizeWhitespace(value)
+        normalizedValue = NormalizeWhiteSpace(value)
         compactValue = normalizedValue.replace(" ", "")
         return any(
             term in normalizedValue

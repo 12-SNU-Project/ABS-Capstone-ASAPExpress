@@ -11,7 +11,7 @@ from eu_export.core.context_retrieval.schema import (
     OntologyDocumentKind,
     OntologyRetrievalResult,
 )
-from eu_export.utils import FindContainedTerms, NormalizeWhitespace
+from eu_export.utils import FindContainedTerms, NormalizeWhiteSpace
 
 
 DEFAULT_MAX_CHUNK_CHARACTERS = 2200
@@ -61,7 +61,7 @@ class OntologyRetriever:
             return []
 
         results: List[OntologyRetrievalResult] = []
-        queryPhrase = NormalizeWhitespace(query).lower()
+        queryPhrase = NormalizeWhiteSpace(query).lower()
         queryTermSet = set(queryTerms)
 
         for chunk in chunks:
@@ -244,7 +244,7 @@ class OntologyRetriever:
                 if currentLines:
                     sections.append((currentHeadingPath, currentLines))
                 level = len(headingMatch.group(1))
-                headingText = NormalizeWhitespace(headingMatch.group(2))
+                headingText = NormalizeWhiteSpace(headingMatch.group(2))
                 headingStack = {
                     headingLevel: heading
                     for headingLevel, heading in headingStack.items()
@@ -309,7 +309,7 @@ class OntologyRetriever:
         text = chunk.text.lower()
         headingText = " ".join(chunk.headingPath).lower()
         metadataText = " ".join(
-            NormalizeWhitespace(str(value)).lower()
+            NormalizeWhiteSpace(str(value)).lower()
             for value in chunk.metadata.values()
         )
         pathText = chunk.relativePath.lower()

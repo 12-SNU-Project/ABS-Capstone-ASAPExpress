@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Mapping, Sequence
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from eu_export.bridge import TextEmbeddingAdapter, TextEmbeddingRequest
-from eu_export.utils import NormalizeWhitespace, NormalizeWhitespacePreservingLines
+from eu_export.utils import NormalizeWhiteSpace, NormalizeWhitespaceLines
 
 
 SEMANTIC_CHUNK_TYPE_HIERARCHY = "hierarchy"
@@ -208,7 +208,7 @@ class CnSemanticChunkBuilder:
         textLines: Sequence[str],
         sourceFields: Sequence[str],
     ) -> CnSemanticChunk | None:
-        text = NormalizeWhitespacePreservingLines(
+        text = NormalizeWhitespaceLines(
             "\n".join(line for line in textLines if line.strip())
         )
         if not text:
@@ -222,8 +222,8 @@ class CnSemanticChunkBuilder:
         )
 
     def _BuildCodeLine(self, label: str, code: str, description: str) -> str:
-        normalizedCode = NormalizeWhitespace(code)
-        normalizedDescription = NormalizeWhitespace(description)
+        normalizedCode = NormalizeWhiteSpace(code)
+        normalizedDescription = NormalizeWhiteSpace(description)
         if normalizedCode and normalizedDescription:
             return "{0}: {1} - {2}".format(
                 label,
@@ -237,7 +237,7 @@ class CnSemanticChunkBuilder:
         return ""
 
     def _BuildPlainLine(self, label: str, value: str) -> str:
-        normalizedValue = NormalizeWhitespace(value)
+        normalizedValue = NormalizeWhiteSpace(value)
         if not normalizedValue:
             return ""
         return "{0}: {1}".format(label, normalizedValue)
@@ -251,9 +251,9 @@ class CnSemanticChunkBuilder:
 
     def _SplitKeywordCell(self, value: str) -> List[str]:
         return [
-            NormalizeWhitespace(rawKeyword).lower()
+            NormalizeWhiteSpace(rawKeyword).lower()
             for rawKeyword in value.split(";")
-            if NormalizeWhitespace(rawKeyword)
+            if NormalizeWhiteSpace(rawKeyword)
         ]
 
 
@@ -304,7 +304,7 @@ class CnSemanticCandidateIndex:
         minScore: float = 0.0,
         maxMatchedChunksPerCandidate: int = 3,
     ) -> List[CnSemanticSearchHit]:
-        normalizedQueryText = NormalizeWhitespacePreservingLines(queryText)
+        normalizedQueryText = NormalizeWhitespaceLines(queryText)
         if not normalizedQueryText or topK <= 0 or not self.indexedChunks:
             return []
 

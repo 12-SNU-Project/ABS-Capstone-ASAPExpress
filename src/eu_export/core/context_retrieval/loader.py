@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from eu_export.core.context_retrieval.schema import OntologyDocument, OntologyDocumentKind
-from eu_export.utils import NormalizeWhitespace
+from eu_export.utils import NormalizeWhiteSpace
 
 
 DEFAULT_ONTOLOGY_EXTENSIONS = frozenset({".md", ".yaml", ".yml"})
@@ -128,12 +128,12 @@ class OntologyDocumentLoader:
     ) -> str:
         frontmatterTitle = frontmatter.get("title")
         if isinstance(frontmatterTitle, str) and frontmatterTitle.strip():
-            return NormalizeWhitespace(frontmatterTitle)
+            return NormalizeWhiteSpace(frontmatterTitle)
 
         for line in bodyText.splitlines():
             strippedLine = line.strip()
             if strippedLine.startswith("#"):
-                return NormalizeWhitespace(strippedLine.lstrip("#"))
+                return NormalizeWhiteSpace(strippedLine.lstrip("#"))
 
         return Path(relativePath).stem
 
@@ -144,7 +144,7 @@ class OntologyDocumentLoader:
     ) -> str:
         frontmatterId = frontmatter.get("doc_id")
         if isinstance(frontmatterId, str) and frontmatterId.strip():
-            return NormalizeWhitespace(frontmatterId)
+            return NormalizeWhiteSpace(frontmatterId)
 
         pathWithoutSuffix = str(Path(relativePath).with_suffix(""))
         return pathWithoutSuffix.replace("/", ".")

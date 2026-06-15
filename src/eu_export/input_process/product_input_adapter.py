@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Annotated, Any, List, Mapping, Optional, Sequence, Set, TypeAlias
+from typing import Annotated, Any, Dict, List, Mapping, Optional, Sequence, Set, TypeAlias
 
 from pydantic import (
     AliasChoices,
@@ -22,13 +22,13 @@ from eu_export.product.ocr.ocr_normalization import (
     PRODUCT_REFERENCE_PLACEHOLDER_PATTERN,
     ProductOcrFactNormalizer,
 )
-from eu_export.utils import NormalizeWhitespace, NormalizeWhitespacePreservingLines
+from eu_export.utils import NormalizeWhiteSpace, NormalizeWhitespaceLines
 
 
 def _NormalizeOptionalText(value: Any) -> Optional[str]:
     if not isinstance(value, str):
         return None
-    normalizedValue = NormalizeWhitespacePreservingLines(value)
+    normalizedValue = NormalizeWhitespaceLines(value)
     return normalizedValue or None
 
 
@@ -131,8 +131,52 @@ class OcrNormalizationData(_AdapterDataModel):
 class InputReconstructionData(_AdapterDataModel):
     normalizedFactTexts: TextList = Field(
         default_factory=list,
-        validation_alias=AliasChoices("normalized_fact_texts", "normalizedFactTexts"),
+        validation_alias=AliasChoices(
+            "classification_input_fact_texts",
+            "classification_fact_texts",
+            "normalized_fact_texts",
+            "normalizedFactTexts",
+        ),
     )
+    structuredProductFacts: List[Mapping[str, Any]] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices(
+            "classification_input_product_facts",
+            "structured_product_facts",
+            "product_facts",
+            "structuredProductFacts",
+        ),
+    )
+    unresolvedProductFacts: List[Mapping[str, Any]] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices(
+            "unresolved_product_facts",
+            "unresolved_facts",
+            "unresolvedProductFacts",
+        ),
+    )
+    productFactConflicts: List[Any] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices(
+            "product_fact_conflicts",
+            "conflicts",
+            "productFactConflicts",
+        ),
+    )
+
+    @field_validator("structuredProductFacts", "unresolvedProductFacts", mode="before")
+    @classmethod
+    def _NormalizeFactRecords(cls, value: Any) -> List[Mapping[str, Any]]:
+        return _NormalizeMappingList(value)
+
+    @field_validator("productFactConflicts", mode="before")
+    @classmethod
+    def _NormalizeConflicts(cls, value: Any) -> List[Any]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        return [value]
 
 
 class ParsedProductPageData(_AdapterDataModel):
@@ -204,7 +248,11 @@ class TopLevelParsedPageData(_AdapterDataModel):
     )
     parsedProductPage: ParsedProductPageData = Field(
         default_factory=ParsedProductPageData,
-        validation_alias=AliasChoices("parsed_product_page", "parsedProductPage"),
+        validation_alias=AliasChoices(
+            "parsed_product_page",
+            "source_product_page",
+            "parsedProductPage",
+        ),
     )
     combinedOcrText: OptionalText = Field(
         default=None,
@@ -280,118 +328,11 @@ class CollectionResultData(_AdapterDataModel):
     def _NormalizeNestedPayload(cls, value: Any) -> Mapping[str, Any]:
         return _NormalizeMapping(value)
 
-
-class SmokeProductData(_AdapterDataModel):
-    productName: OptionalText = Field(
-        default=None,
-        validation_alias=AliasChoices("product_name", "productName"),
-    )
-    productDomain: OptionalText = Field(
-        default=None,
-        validation_alias=AliasChoices("product_domain", "productDomain"),
-    )
-    shortDescription: OptionalText = Field(
-        default=None,
-        validation_alias=AliasChoices("short_description", "shortDescription"),
-    )
-    brandName: OptionalText = Field(
-        default=None,
-        validation_alias=AliasChoices("brand_name", "brandName"),
-    )
-    packageType: OptionalText = Field(
-        default=None,
-        validation_alias=AliasChoices("package_type", "packageType"),
-    )
-    saleUnit: OptionalText = Field(
-        default=None,
-        validation_alias=AliasChoices("sale_unit", "saleUnit"),
-    )
-
-
-class SmokeNoticeData(_AdapterDataModel):
-    optionNames: TextList = Field(
-        default_factory=list,
-        validation_alias=AliasChoices("option_names", "optionNames"),
-    )
-    fieldsPreview: List[NoticeFieldData] = Field(
-        default_factory=list,
-        validation_alias=AliasChoices("fields_preview", "fieldsPreview"),
-    )
-    optionsPreview: List[NoticeOptionData] = Field(
-        default_factory=list,
-        validation_alias=AliasChoices("options_preview", "optionsPreview"),
-    )
-
-    @field_validator("fieldsPreview", mode="before")
-    @classmethod
-    def _NormalizeFieldsPreview(cls, value: Any) -> List[Mapping[str, Any]]:
-        return _NormalizeMappingList(value)
-
-    @field_validator("optionsPreview", mode="before")
-    @classmethod
-    def _NormalizeOptionsPreview(cls, value: Any) -> List[Mapping[str, Any]]:
-        return _NormalizeMappingList(value)
-
-
-class SmokeOcrData(_AdapterDataModel):
-    combinedTextPreview: OptionalText = Field(
-        default=None,
-        validation_alias=AliasChoices("combined_text_preview", "combinedTextPreview"),
-    )
-
-
-class SmokeOcrSummaryData(_AdapterDataModel):
-    normalization: OcrNormalizationData = Field(default_factory=OcrNormalizationData)
-
-    @field_validator("normalization", mode="before")
-    @classmethod
-    def _NormalizeNormalizationPayload(cls, value: Any) -> Mapping[str, Any]:
-        return _NormalizeMapping(value)
-
-
-class SmokeSummaryData(_AdapterDataModel):
-    productPageUrl: OptionalText = Field(
-        default=None,
-        validation_alias=AliasChoices("product_page_url", "productPageUrl"),
-    )
-    combinedOcrText: OptionalText = Field(
-        default=None,
-        validation_alias=AliasChoices("combined_ocr_text", "combinedOcrText"),
-    )
-    product: SmokeProductData = Field(default_factory=SmokeProductData)
-    notice: SmokeNoticeData = Field(default_factory=SmokeNoticeData)
-    ocr: SmokeOcrData = Field(default_factory=SmokeOcrData)
-    ocrSummary: SmokeOcrSummaryData = Field(
-        default_factory=SmokeOcrSummaryData,
-        validation_alias=AliasChoices("ocr_summary", "ocrSummary"),
-    )
-    inputReconstruction: InputReconstructionData = Field(
-        default_factory=InputReconstructionData,
-        validation_alias=AliasChoices(
-            "input_reconstruction",
-            "inputReconstructionResult",
-        ),
-    )
-
-    @field_validator(
-        "product",
-        "notice",
-        "ocr",
-        "ocrSummary",
-        "inputReconstruction",
-        mode="before",
-    )
-    @classmethod
-    def _NormalizeNestedPayload(cls, value: Any) -> Mapping[str, Any]:
-        return _NormalizeMapping(value)
-
-
 class OcrImageResultData(_AdapterDataModel):
     ocrText: OptionalText = Field(
         default=None,
         validation_alias=AliasChoices("ocr_text", "ocrText"),
     )
-
 
 class FlatSmokeArtifactData(_AdapterDataModel):
     productPageUrl: OptionalText = Field(
@@ -411,7 +352,6 @@ class FlatSmokeArtifactData(_AdapterDataModel):
     @classmethod
     def _NormalizeOcrImageResults(cls, value: Any) -> List[Mapping[str, Any]]:
         return _NormalizeMappingList(value)
-
 
 class ProductInputAdapter:
     """수집 산출물을 Stage 1 후보 조회용 입력 스키마로 변환한다."""
@@ -460,7 +400,12 @@ class ProductInputAdapter:
         self,
         productData: Mapping[str, Any],
     ) -> ProductInputDataShape:
-        if self._HasAnyKey(productData, "parsed_product_page", "parsedProductPage"):
+        if self._HasAnyKey(
+            productData,
+            "parsed_product_page",
+            "source_product_page",
+            "parsedProductPage",
+        ):
             return ProductInputDataShape.TopLevelParsedPage
         if self._HasAnyKey(productData, "collection_result", "collectionResult"):
             return ProductInputDataShape.CollectionResult
@@ -496,31 +441,6 @@ class ProductInputAdapter:
             inputReconstructionData=sourceData.inputReconstruction,
         )
 
-    def _BuildFromSmokeSummaryData(
-        self,
-        productData: Mapping[str, Any],
-    ) -> ProductClassificationInput:
-        sourceData = SmokeSummaryData.model_validate(productData)
-        parsedProductPage = ParsedProductPageData(
-            productName=sourceData.product.productName,
-            productDomain=sourceData.product.productDomain,
-            shortDescription=sourceData.product.shortDescription,
-            brandName=sourceData.product.brandName,
-            packageType=sourceData.product.packageType,
-            saleUnit=sourceData.product.saleUnit,
-            productNoticeOptionNames=sourceData.notice.optionNames,
-            productNoticeFields=sourceData.notice.fieldsPreview,
-            productNoticeOptions=sourceData.notice.optionsPreview,
-        )
-        return self._BuildInput(
-            productPageUrl=sourceData.productPageUrl,
-            parsedProductPage=parsedProductPage,
-            combinedOcrText=sourceData.combinedOcrText
-            or sourceData.ocr.combinedTextPreview
-            or "",
-            ocrNormalizationData=sourceData.ocrSummary.normalization,
-            inputReconstructionData=sourceData.inputReconstruction,
-        )
 
     def _BuildFromFlatSmokeArtifactData(
         self,
@@ -561,8 +481,20 @@ class ProductInputAdapter:
         )
         normalizedOcrFactTexts: List[str] = []
         excludedOcrTextPreview = ""
+        structuredProductFacts: List[Dict[str, Any]] = []
+        unresolvedProductFacts: List[Dict[str, Any]] = []
+        productFactConflicts: List[Any] = []
         if inputReconstructionData is not None:
             normalizedOcrFactTexts = inputReconstructionData.normalizedFactTexts
+            structuredProductFacts = [
+                dict(item)
+                for item in inputReconstructionData.structuredProductFacts
+            ]
+            unresolvedProductFacts = [
+                dict(item)
+                for item in inputReconstructionData.unresolvedProductFacts
+            ]
+            productFactConflicts = list(inputReconstructionData.productFactConflicts)
         elif ocrNormalizationData is not None:
             normalizedOcrFactTexts = ocrNormalizationData.factTexts
             excludedOcrTextPreview = ocrNormalizationData.excludedTextPreview or ""
@@ -591,6 +523,9 @@ class ProductInputAdapter:
             noticeOptionNames=noticeOptionNames,
             productNoticeText=productNoticeText,
             normalizedOcrFactTexts=normalizedOcrFactTexts,
+            structuredProductFacts=structuredProductFacts,
+            unresolvedProductFacts=unresolvedProductFacts,
+            productFactConflicts=productFactConflicts,
             excludedOcrTextPreview=excludedOcrTextPreview,
             ocrText=combinedOcrText,
         )
@@ -649,10 +584,10 @@ class ProductInputAdapter:
             ]
         if not rawTexts:
             rawTexts = self._BuildNoticeFieldTexts(noticeFields)
-        return NormalizeWhitespacePreservingLines("\n".join(rawTexts))
+        return NormalizeWhitespaceLines("\n".join(rawTexts))
 
     def _ContainsPlaceholderReference(self, text: str) -> bool:
-        normalizedText = NormalizeWhitespace(text).lower()
+        normalizedText = NormalizeWhiteSpace(text).lower()
         return PRODUCT_REFERENCE_PLACEHOLDER_PATTERN.search(normalizedText) is not None
 
     def _ExtractNoticeOptionNames(
@@ -670,7 +605,7 @@ class ProductInputAdapter:
         return optionNames
 
     def _BuildDomainScopes(self, productDomain: str) -> List[str]:
-        normalizedProductDomain = NormalizeWhitespace(productDomain).lower()
+        normalizedProductDomain = NormalizeWhiteSpace(productDomain).lower()
         return list(
             PRODUCT_DOMAIN_SCOPE_MAP.get(
                 normalizedProductDomain,
@@ -685,7 +620,7 @@ class ProductInputAdapter:
         if sourceData.combinedOcrText is not None:
             return sourceData.combinedOcrText
 
-        return NormalizeWhitespacePreservingLines(
+        return NormalizeWhitespaceLines(
             "\n".join(
                 imageResult.ocrText
                 for imageResult in sourceData.ocrImageResults

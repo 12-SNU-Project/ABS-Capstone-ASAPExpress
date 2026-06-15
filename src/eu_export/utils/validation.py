@@ -1,6 +1,7 @@
 """외부 dict payload 검증에 사용하는 작은 helper 함수."""
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set, Annotated
+
 
 
 def ReadRequiredString(
@@ -14,7 +15,6 @@ def ReadRequiredString(
         return ""
 
     return value.strip()
-
 
 def ReadRequiredBool(
     data: Dict[str, Any],

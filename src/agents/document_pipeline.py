@@ -191,42 +191,45 @@ def collect_kurly_url_facts(
         )
     )
     product_input = ProductInputAdapter().BuildFromObject(result)
-    input_reconstruction = result.inputReconstructionResult
-    warnings.extend(input_reconstruction.warnings)
-    pipeline_steps = [
-        step.model_dump(mode="json", by_alias=True)
-        for step in result.steps
-    ]
-    reconstructed_product_facts = [
-        fact.model_dump(mode="json", by_alias=True)
-        for fact in input_reconstruction.productFacts
-    ]
-    unresolved_product_facts = [
-        fact.model_dump(mode="json", by_alias=True)
-        for fact in input_reconstruction.unresolvedFacts
-    ]
-    classification_fact_texts = list(input_reconstruction.normalizedFactTexts)
-    used_llm_reconstruction = input_reconstruction.usedLlmReconstruction
-    reconstruction_mode = (
-        "llm_reconstruction"
-        if used_llm_reconstruction
-        else "fallback_reconstruction"
-        if reconstructed_product_facts or classification_fact_texts
-        else "unavailable"
+    public_result = result.BuildPublicResult()
+    source_product_page = public_result.get("source_product_page") or {}
+    collection_summary = public_result.get("collection") or {}
+    ocr_summary = public_result.get("ocr") or {}
+    pipeline_steps = public_result.get("pipeline_steps") or []
+    input_reconstruction = public_result.get("input_reconstruction") or {}
+    if not isinstance(source_product_page, dict):
+        source_product_page = {}
+    if not isinstance(collection_summary, dict):
+        collection_summary = {}
+    if not isinstance(ocr_summary, dict):
+        ocr_summary = {}
+    if not isinstance(pipeline_steps, list):
+        pipeline_steps = []
+    if not isinstance(input_reconstruction, dict):
+        input_reconstruction = {}
+    warnings.extend(
+        str(warning)
+        for warning in public_result.get("warnings", [])
+        if str(warning).strip()
     )
-    reconstruction_error = (
-        input_reconstruction.fallbackReason
-        if input_reconstruction.fallbackReason
-        and input_reconstruction.fallbackReason not in {
-            "llm_reconstruction_not_used",
-        }
-        else None
+    warnings = list(dict.fromkeys(warnings))
+    reconstructed_product_facts = (
+        input_reconstruction.get("classification_input_product_facts") or []
     )
     llm_reconstructed_product_facts = (
-        reconstructed_product_facts if used_llm_reconstruction else []
+        input_reconstruction.get("llm_reconstructed_product_facts") or []
     )
     fallback_product_facts = (
-        [] if used_llm_reconstruction else reconstructed_product_facts
+        input_reconstruction.get("fallback_product_facts") or []
+    )
+    unresolved_product_facts = (
+        input_reconstruction.get("unresolved_product_facts") or []
+    )
+    product_fact_conflicts = (
+        input_reconstruction.get("product_fact_conflicts") or []
+    )
+    classification_fact_texts = (
+        input_reconstruction.get("classification_input_fact_texts") or []
     )
     facts = {
         "url": url,
@@ -235,6 +238,7 @@ def collect_kurly_url_facts(
         "description": product_input.shortDescription or product_input.productNoticeText or "",
         "short_description": product_input.shortDescription or "",
         "product_domain": product_input.productDomain or "unknown",
+        "source_product_page": source_product_page,
         "ocr_text": [product_input.ocrText] if product_input.ocrText else [],
         "ingredient_list": list(product_input.normalizedOcrFactTexts or []),
         "classification_input_product_facts": reconstructed_product_facts,
@@ -242,7 +246,7 @@ def collect_kurly_url_facts(
         "llm_reconstructed_product_facts": llm_reconstructed_product_facts,
         "fallback_product_facts": fallback_product_facts,
         "unresolved_product_facts": unresolved_product_facts,
-        "product_fact_conflicts": list(input_reconstruction.conflicts),
+        "product_fact_conflicts": product_fact_conflicts,
         "classification_input_fact_texts": classification_fact_texts,
         "classification_fact_texts": classification_fact_texts,
         "origin_country": "KR",
@@ -251,32 +255,13 @@ def collect_kurly_url_facts(
         "url_intake": {
             "artifact_root": str(artifact_root),
             "pipeline_steps": pipeline_steps,
-            "ocr_image_count": len(result.ocrImageResults),
-            "combined_ocr_text_length": len(result.combinedOcrText),
-            "parse_warning_count": len(result.collectionResult.warnings),
+            "collection": collection_summary,
+            "ocr": ocr_summary,
+            "ocr_image_count": ocr_summary.get("image_result_count", 0),
+            "combined_ocr_text_length": ocr_summary.get("combined_text_length", 0),
+            "parse_warning_count": collection_summary.get("warning_count", 0),
         },
-        "input_reconstruction": {
-            "mode": reconstruction_mode,
-            "used_llm_reconstruction": (
-                used_llm_reconstruction
-            ),
-            "fallback_reason": input_reconstruction.fallbackReason,
-            "error": reconstruction_error,
-            "fact_count": len(input_reconstruction.productFacts),
-            "unresolved_count": len(input_reconstruction.unresolvedFacts),
-            "conflict_count": len(input_reconstruction.conflicts),
-            "fact_text_count": len(input_reconstruction.normalizedFactTexts),
-            "product_facts": reconstructed_product_facts,
-            "classification_input_product_facts": reconstructed_product_facts,
-            "llm_reconstructed_product_facts": llm_reconstructed_product_facts,
-            "fallback_product_facts": fallback_product_facts,
-            "unresolved_facts": unresolved_product_facts,
-            "conflicts": list(input_reconstruction.conflicts),
-            "classification_input_fact_texts": classification_fact_texts,
-            "classification_fact_texts": classification_fact_texts,
-            "warnings": list(input_reconstruction.warnings),
-            "debug_artifacts": dict(input_reconstruction.debugArtifacts),
-        },
+        "input_reconstruction": input_reconstruction,
     }
     return facts
 
@@ -332,11 +317,13 @@ def build_raw_input_from_ui(
     )
     unresolved_product_facts = (
         facts.get("unresolved_product_facts")
+        or input_reconstruction.get("unresolved_product_facts")
         or input_reconstruction.get("unresolved_facts")
         or []
     )
     product_fact_conflicts = (
         facts.get("product_fact_conflicts")
+        or input_reconstruction.get("product_fact_conflicts")
         or input_reconstruction.get("conflicts")
         or []
     )
@@ -448,11 +435,12 @@ def _normalize_kurly_result_facts(facts: dict[str, Any]) -> dict[str, Any]:
     raw_collection = facts.get("raw_collection") or {}
     parsed = (
         facts.get("parsed_product_page")
+        or facts.get("source_product_page")
         or raw_collection.get("parsed_product_page")
         or {}
     )
     product = facts.get("product") or {}
-    ocr_summary = facts.get("ocr_summary") or {}
+    ocr_summary = facts.get("ocr_summary") or facts.get("ocr") or {}
     ocr_evidence = raw_collection.get("ocr_evidence") or {}
     llm_reconstruction = (
         facts.get("llm_reconstruction")
@@ -462,9 +450,39 @@ def _normalize_kurly_result_facts(facts: dict[str, Any]) -> dict[str, Any]:
     normalization = ocr_summary.get("normalization") or {}
 
     fact_texts = (
-        llm_reconstruction.get("fact_texts_for_classification")
+        llm_reconstruction.get("classification_input_fact_texts")
+        or llm_reconstruction.get("fact_texts_for_classification")
         or llm_reconstruction.get("normalized_fact_texts")
         or normalization.get("fact_texts")
+        or []
+    )
+    structured_product_facts = (
+        facts.get("classification_input_product_facts")
+        or llm_reconstruction.get("classification_input_product_facts")
+        or facts.get("structured_product_facts")
+        or llm_reconstruction.get("product_facts")
+        or []
+    )
+    llm_reconstructed_product_facts = (
+        facts.get("llm_reconstructed_product_facts")
+        or llm_reconstruction.get("llm_reconstructed_product_facts")
+        or []
+    )
+    fallback_product_facts = (
+        facts.get("fallback_product_facts")
+        or llm_reconstruction.get("fallback_product_facts")
+        or []
+    )
+    unresolved_product_facts = (
+        facts.get("unresolved_product_facts")
+        or llm_reconstruction.get("unresolved_product_facts")
+        or llm_reconstruction.get("unresolved_facts")
+        or []
+    )
+    product_fact_conflicts = (
+        facts.get("product_fact_conflicts")
+        or llm_reconstruction.get("product_fact_conflicts")
+        or llm_reconstruction.get("conflicts")
         or []
     )
     combined_ocr_text = (
@@ -513,6 +531,14 @@ def _normalize_kurly_result_facts(facts: dict[str, Any]) -> dict[str, Any]:
         "sale_unit": product.get("sale_unit") or parsed.get("sale_unit") or facts.get("sale_unit") or "",
         "ocr_text": ocr_text or facts.get("ocr_text") or [],
         "ingredient_list": fact_texts or facts.get("ingredient_list") or [],
+        "classification_input_product_facts": structured_product_facts,
+        "structured_product_facts": structured_product_facts,
+        "llm_reconstructed_product_facts": llm_reconstructed_product_facts,
+        "fallback_product_facts": fallback_product_facts,
+        "unresolved_product_facts": unresolved_product_facts,
+        "product_fact_conflicts": product_fact_conflicts,
+        "classification_input_fact_texts": fact_texts,
+        "classification_fact_texts": fact_texts,
     })
     return flattened
 

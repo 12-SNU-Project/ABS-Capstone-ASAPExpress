@@ -11,7 +11,7 @@ from eu_export.core.context_retrieval.schema import (
     OntologyDocument,
     PackagedOntologyContext,
 )
-from eu_export.utils import NormalizeWhitespace
+from eu_export.utils import NormalizeWhiteSpace
 
 
 ACTIVE_DOCUMENT_STATUS = "active"
@@ -186,20 +186,20 @@ class OntologyContextBuilder:
     def _ReadOptionalString(value: Any) -> Optional[str]:
         if not isinstance(value, str):
             return None
-        normalizedValue = NormalizeWhitespace(value).lower()
+        normalizedValue = NormalizeWhiteSpace(value).lower()
         return normalizedValue or None
 
     @staticmethod
     def _ReadStringList(value: Any) -> List[str]:
         if isinstance(value, str):
-            normalizedValue = NormalizeWhitespace(value)
+            normalizedValue = NormalizeWhiteSpace(value)
             return [normalizedValue] if normalizedValue else []
         if isinstance(value, list):
             values: List[str] = []
             for item in value:
                 if not isinstance(item, str):
                     continue
-                normalizedItem = NormalizeWhitespace(item)
+                normalizedItem = NormalizeWhiteSpace(item)
                 if normalizedItem:
                     values.append(normalizedItem)
             return values

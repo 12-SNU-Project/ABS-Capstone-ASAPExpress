@@ -30,7 +30,7 @@ from eu_export.core.context_retrieval.semantic_retrieval import (
     CnSemanticCandidateIndex,
     CnSemanticSearchHit,
 )
-from eu_export.utils import NormalizeWhitespace, NormalizeWhitespacePreservingLines
+from eu_export.utils import NormalizeWhiteSpace, NormalizeWhitespaceLines
 
 
 EVIDENCE_TIER_PRIMARY = "primary"
@@ -216,7 +216,7 @@ TERM_EXPANSION_MAP = {
     ],
     "새우": ["shrimp", "crustaceans"],
     "주꾸미": ["octopus", "molluscs", "aquatic invertebrates", "prepared", "preserved"],
-    "쭈꾸미": ["octopus", "molluscs", "aquatic invertebrates", "prepared", "preserved"],
+    "낙지": ["octopus", "molluscs", "aquatic invertebrates", "prepared", "preserved"],
     "문어": ["octopus", "molluscs", "aquatic invertebrates"],
     "오징어": ["squid", "cuttlefish", "molluscs", "aquatic invertebrates"],
     "게": ["crab", "crustaceans"],
@@ -227,6 +227,8 @@ TERM_EXPANSION_MAP = {
     "면류": ["noodle", "pasta"],
     "막국수": ["noodle", "buckwheat", "cereal"],
     "메밀": ["buckwheat", "cereal"],
+    "국": ["soups"],
+    "탕": ["soups"],
     "소스": ["sauce"],
     "초콜릿": ["chocolate"],
     "캔디": ["sugar", "confectionery"],
@@ -461,10 +463,10 @@ class ProductClassificationInput(BaseModel):
             for part in rawParts
             if isinstance(part, str) and part.strip() != ""
         ]
-        return NormalizeWhitespacePreservingLines("\n".join(parts))
+        return NormalizeWhitespaceLines("\n".join(parts))
 
     def _SplitSupplementalFactTexts(self, text: str) -> List[str]:
-        normalizedText = NormalizeWhitespacePreservingLines(text)
+        normalizedText = NormalizeWhitespaceLines(text)
         return [
             line
             for line in normalizedText.splitlines()
@@ -493,14 +495,14 @@ class ProductClassificationInput(BaseModel):
         )
 
     def _IsExcludedClassificationFactText(self, factText: str) -> bool:
-        normalizedText = NormalizeWhitespace(factText).lower()
+        normalizedText = NormalizeWhiteSpace(factText).lower()
         return any(
             marker in normalizedText
             for marker in EXCLUDED_CLASSIFICATION_FACT_MARKERS
         )
 
     def _IsWeakSupplementalFactText(self, factText: str) -> bool:
-        normalizedText = NormalizeWhitespace(factText).lower()
+        normalizedText = NormalizeWhiteSpace(factText).lower()
         return any(
             marker in normalizedText
             for marker in WEAK_SUPPLEMENTAL_FACT_MARKERS
@@ -754,7 +756,7 @@ class CnCandidate(BaseModel):
             if not isinstance(levelData, Mapping):
                 continue
             code = levelData.get("code")
-            description = NormalizeWhitespace(str(levelData.get("description") or ""))
+            description = NormalizeWhiteSpace(str(levelData.get("description") or ""))
             if isinstance(code, str) and code.strip() and description:
                 hierarchyPathParts.append("{0}: {1}".format(code, description))
             elif isinstance(code, str) and code.strip():
@@ -1110,7 +1112,7 @@ class Stage1EvidencePackageBuilder:
                     sourceName="product_ocr_normalized_facts",
                     sourceRef=productInput.productPageUrl or "product_input",
                     text=self._TrimEvidenceText(
-                        NormalizeWhitespacePreservingLines(
+                        NormalizeWhitespaceLines(
                             "\n".join(productInput.normalizedOcrFactTexts),
                         ),
                     ),
@@ -1343,7 +1345,7 @@ class Stage1EvidencePackageBuilder:
             ]
 
     def _TrimEvidenceText(self, text: str) -> str:
-        normalizedText = NormalizeWhitespacePreservingLines(text)
+        normalizedText = NormalizeWhitespaceLines(text)
         if len(normalizedText) <= self.maxEvidenceTextCharacters:
             return normalizedText
         return normalizedText[: self.maxEvidenceTextCharacters].rstrip() + "..."
@@ -1351,7 +1353,7 @@ class Stage1EvidencePackageBuilder:
     def _ReadString(self, value: Any) -> Optional[str]:
         if not isinstance(value, str):
             return None
-        normalizedValue = NormalizeWhitespace(value)
+        normalizedValue = NormalizeWhiteSpace(value)
         return normalizedValue or None
 
     def _NormalizeCode(self, code: str) -> str:
@@ -2321,7 +2323,7 @@ class CnCandidateRetriever:
         self,
         productInput: ProductClassificationInput,
     ) -> List[str]:
-        searchText = NormalizeWhitespace(
+        searchText = NormalizeWhiteSpace(
             "\n".join(
                 [
                     productInput.BuildPrimarySearchText(),
@@ -2379,8 +2381,8 @@ class CnCandidateRetriever:
         ]
         contextLines = []
         for label, code, description in parts:
-            normalizedCode = NormalizeWhitespace(code)
-            normalizedDescription = NormalizeWhitespace(description)
+            normalizedCode = NormalizeWhiteSpace(code)
+            normalizedDescription = NormalizeWhiteSpace(description)
             if not normalizedCode and not normalizedDescription:
                 continue
             if normalizedCode and normalizedDescription:
@@ -2393,7 +2395,7 @@ class CnCandidateRetriever:
                 )
                 continue
             contextLines.append("{0}: {1}".format(label, normalizedDescription))
-        return NormalizeWhitespacePreservingLines("\n".join(contextLines))
+        return NormalizeWhitespaceLines("\n".join(contextLines))
 
     def _ScoreHierarchyDescriptionMatches(
         self,
@@ -2605,7 +2607,7 @@ class CnCandidateRetriever:
             ]
             if not phraseTerms:
                 continue
-            normalizedPhrase = NormalizeWhitespace(phrase).lower()
+            normalizedPhrase = NormalizeWhiteSpace(phrase).lower()
             if normalizedPhrase and normalizedPhrase in normalizedSearchText:
                 matchedTerms.append(normalizedPhrase)
                 continue
@@ -2623,7 +2625,7 @@ class CnCandidateRetriever:
     def _SplitKeywordCell(self, cellValue: str) -> List[str]:
         values: List[str] = []
         for rawPart in re.split(r"[;\n]", cellValue or ""):
-            value = NormalizeWhitespace(rawPart).lower()
+            value = NormalizeWhiteSpace(rawPart).lower()
             if value:
                 values.append(value)
         return values
@@ -2704,7 +2706,7 @@ class Stage1RequestBuilder:
             for candidate in candidates
             if candidate.hs6Code is not None
         )
-        return NormalizeWhitespace(
+        return NormalizeWhiteSpace(
             " ".join(
                 [
                     "stage1_classification HS6 CN8 candidate review",
@@ -3586,7 +3588,7 @@ class Stage1ResponseValidator:
         return referencedCodes
 
     def _IsCandidateCoverageMissingClaim(self, text: str) -> bool:
-        normalizedText = NormalizeWhitespace(text).lower()
+        normalizedText = NormalizeWhiteSpace(text).lower()
         hasCoverageTerm = any(
             coverageTerm.lower() in normalizedText
             for coverageTerm in CANDIDATE_COVERAGE_TERMS
@@ -3649,7 +3651,7 @@ class Stage1ResponseValidator:
                     "Path review code must be string or null.",
                 )
             elif isinstance(code, str) and code.strip() != "":
-                normalizedCode = NormalizeWhitespace(code)
+                normalizedCode = NormalizeWhiteSpace(code)
                 reviewedCodes[level] = normalizedCode
                 expectedCode = expectedCodes.get(level)
                 if expectedCode is not None and normalizedCode != expectedCode:

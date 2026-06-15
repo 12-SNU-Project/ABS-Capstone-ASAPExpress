@@ -5,7 +5,7 @@ from typing import List, Optional, Sequence, Set
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from eu_export.utils import NormalizeWhitespace, NormalizeWhitespacePreservingLines
+from eu_export.utils import NormalizeWhiteSpace, NormalizeWhitespaceLines
 
 
 OCR_FACT_LABEL_KEYWORDS = [
@@ -152,12 +152,12 @@ PRODUCT_REFERENCE_PLACEHOLDER_KEYWORDS = [
 OCR_FACT_LABEL_MATCHERS = tuple(
     (
         fieldLabel,
-        NormalizeWhitespace(fieldLabel).lower(),
-        NormalizeWhitespace(fieldLabel).lower().replace(" ", ""),
+        NormalizeWhiteSpace(fieldLabel).lower(),
+        NormalizeWhiteSpace(fieldLabel).lower().replace(" ", ""),
     )
     for fieldLabel in sorted(
         OCR_FACT_LABEL_KEYWORDS,
-        key=lambda label: len(NormalizeWhitespace(label)),
+        key=lambda label: len(NormalizeWhiteSpace(label)),
         reverse=True,
     )
 )
@@ -217,8 +217,8 @@ class ProductOcrFactNormalizer:
         del productDomain
 
         rawLines = [
-            NormalizeWhitespace(line)
-            for line in NormalizeWhitespacePreservingLines(ocrText).splitlines()
+            NormalizeWhiteSpace(line)
+            for line in NormalizeWhitespaceLines(ocrText).splitlines()
         ]
         lines = [line for line in rawLines if line]
         factTexts: List[str] = []
@@ -268,7 +268,7 @@ class ProductOcrFactNormalizer:
                         fieldLabel in OCR_INGREDIENT_FIELD_LABELS
                         and nextFieldLabel in OCR_INGREDIENT_CAPTURE_WEAK_INTERRUPT_LABELS
                     ):
-                        normalizedNextFieldLabel = NormalizeWhitespace(
+                        normalizedNextFieldLabel = NormalizeWhiteSpace(
                             nextFieldLabel,
                         ).lower()
                         hasMergedValueText = (
@@ -304,7 +304,7 @@ class ProductOcrFactNormalizer:
 
         return ProductOcrFactNormalizationResult(
             factTexts=factTexts,
-            excludedTextPreview=NormalizeWhitespacePreservingLines(
+            excludedTextPreview=NormalizeWhitespaceLines(
                 "\n".join(excludedTexts),
             )[:1000],
             rawLineCount=len(lines),
@@ -358,7 +358,7 @@ class ProductOcrFactNormalizer:
     ) -> str:
         normalizedLines: List[str] = []
         for line in fieldLines:
-            normalizedLine = self._TrimFieldNoiseFromLine(NormalizeWhitespace(line))
+            normalizedLine = self._TrimFieldNoiseFromLine(NormalizeWhiteSpace(line))
             if normalizedLine != "":
                 normalizedLines.append(normalizedLine)
         if not normalizedLines:
@@ -366,15 +366,15 @@ class ProductOcrFactNormalizer:
         firstLine = normalizedLines[0]
         if len(normalizedLines) == 1:
             return firstLine
-        if NormalizeWhitespace(fieldLabel).lower() in firstLine.lower():
-            return NormalizeWhitespacePreservingLines(" ".join(normalizedLines))
+        if NormalizeWhiteSpace(fieldLabel).lower() in firstLine.lower():
+            return NormalizeWhitespaceLines(" ".join(normalizedLines))
         return "{0}: {1}".format(
             fieldLabel,
-            NormalizeWhitespacePreservingLines(" ".join(normalizedLines)),
+            NormalizeWhitespaceLines(" ".join(normalizedLines)),
         )
 
     def _BuildObservedQuantityFact(self, line: str) -> Optional[str]:
-        normalizedLine = NormalizeWhitespace(line)
+        normalizedLine = NormalizeWhiteSpace(line)
         normalizedLowerLine = normalizedLine.lower()
         if (
             OCR_OBSERVED_QUANTITY_NOISE_PATTERN.search(normalizedLowerLine)
@@ -396,7 +396,7 @@ class ProductOcrFactNormalizer:
         return "함량/용량 정보: {0}".format(normalizedLine)
 
     def _TrimFieldNoiseFromLine(self, line: str) -> str:
-        trimmedLine = NormalizeWhitespace(line)
+        trimmedLine = NormalizeWhiteSpace(line)
         normalizedLine = trimmedLine.lower()
         positiveCutPositions = [
             match.start()

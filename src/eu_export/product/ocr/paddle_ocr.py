@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from eu_export.product.ocr.ocr_image_tiling import ProductOcrImageTilePlanner
-from eu_export.utils import NormalizeWhitespace
+from eu_export.utils import NormalizeWhiteSpace
 
 
 class ProductOcrError(RuntimeError):
@@ -214,7 +214,7 @@ class PaddleOcrEngine(ProductOcrEngine):
     def _ExtractResultTexts(self, result: Any) -> List[str]:
         texts: List[str] = []
         self._CollectTextValues(result, texts)
-        return [NormalizeWhitespace(text) for text in texts if NormalizeWhitespace(text)]
+        return [NormalizeWhiteSpace(text) for text in texts if NormalizeWhiteSpace(text)]
 
     def _CollectTextValues(self, value: Any, texts: List[str]) -> None:
         if value is None:
@@ -448,7 +448,7 @@ class PaddleStructureOcrEngine(PaddleOcrEngine):
                     tableIndex=len(tables) + 1,
                     tileIndex=tileIndex,
                 )
-                normalizedPlainText = NormalizeWhitespace(tableResult.plainText)
+                normalizedPlainText = NormalizeWhiteSpace(tableResult.plainText)
                 if tableResult.plainText and normalizedPlainText not in seenPlainTexts:
                     tables.append(tableResult)
                     seenPlainTexts.add(normalizedPlainText)
@@ -546,9 +546,9 @@ class PaddleStructureOcrEngine(PaddleOcrEngine):
             rawCellTexts = tableOcrPayload.get("rec_texts")
             if isinstance(rawCellTexts, list):
                 cellTexts.extend(
-                    NormalizeWhitespace(cellText)
+                    NormalizeWhiteSpace(cellText)
                     for cellText in rawCellTexts
-                    if isinstance(cellText, str) and NormalizeWhitespace(cellText)
+                    if isinstance(cellText, str) and NormalizeWhiteSpace(cellText)
                 )
         if not cellTexts and html:
             cellTexts.extend(self._ExtractTextsFromHtml(html))
@@ -568,9 +568,9 @@ class PaddleStructureOcrEngine(PaddleOcrEngine):
         parser = _HtmlTextExtractor()
         parser.feed(html)
         return [
-            NormalizeWhitespace(text)
+            NormalizeWhiteSpace(text)
             for text in parser.texts
-            if NormalizeWhitespace(text)
+            if NormalizeWhiteSpace(text)
         ]
 
     def _BuildStructuredTableText(
@@ -596,6 +596,6 @@ class _HtmlTextExtractor(HTMLParser):
         self.texts: List[str] = []
 
     def handle_data(self, data: str) -> None:
-        normalizedText = NormalizeWhitespace(data)
+        normalizedText = NormalizeWhiteSpace(data)
         if normalizedText:
             self.texts.append(normalizedText)

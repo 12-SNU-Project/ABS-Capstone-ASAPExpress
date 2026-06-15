@@ -12,7 +12,7 @@ from eu_export.core.classification import (
 )
 from eu_export.core.decision_flow.decision_policy import ClassificationDecisionHandler
 from eu_export.core.decision_flow.traversal import Stage1TraversalReport
-from eu_export.utils import NormalizeWhitespace
+from eu_export.utils import NormalizeWhiteSpace
 
 
 class Stage1RecommendationReport(BaseModel):
@@ -329,7 +329,7 @@ class Stage1RecommendationReportBuilder:
             evidenceRecord = evidenceRecordById.get(evidenceRef)
             if evidenceRecord is None:
                 continue
-            text = NormalizeWhitespace(evidenceRecord.text)
+            text = NormalizeWhiteSpace(evidenceRecord.text)
             evidenceSummary.append(
                 {
                     "evidence_id": evidenceRecord.evidenceId,
@@ -382,7 +382,7 @@ class Stage1RecommendationReportBuilder:
         for value in values:
             if not isinstance(value, str):
                 continue
-            normalizedValue = NormalizeWhitespace(value)
+            normalizedValue = NormalizeWhiteSpace(value)
             if normalizedValue == "" or normalizedValue in seenValues:
                 continue
             uniqueValues.append(normalizedValue)

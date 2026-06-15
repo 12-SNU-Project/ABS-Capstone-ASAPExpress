@@ -10,7 +10,7 @@ from typing import Dict, List, Sequence, Tuple
 from pydantic import BaseModel, ConfigDict, Field
 from rapidfuzz import fuzz
 
-from eu_export.utils import NormalizeWhitespace
+from eu_export.utils import NormalizeWhiteSpace
 
 
 DEFAULT_PRODUCT_INPUT_DICTIONARY_PATH = (
@@ -75,9 +75,9 @@ class ProductDictionaryRepository:
                     canonical_name=row.get("canonical_name", "").strip(),
                     term_type=row.get("term_type", "").strip(),
                     aliases=[
-                        NormalizeWhitespace(alias)
+                        NormalizeWhiteSpace(alias)
                         for alias in row.get("aliases", "").split("|")
-                        if NormalizeWhitespace(alias)
+                        if NormalizeWhiteSpace(alias)
                     ],
                     source_name=row.get("source_name", "").strip(),
                     source_id=row.get("source_id", "").strip(),
@@ -130,7 +130,7 @@ class ProductDictionaryRetriever:
         return matches
 
     def FindMatchesForText(self, text: str) -> List[ProductDictionaryMatch]:
-        normalizedText = NormalizeWhitespace(text)
+        normalizedText = NormalizeWhiteSpace(text)
         if normalizedText == "":
             return []
 
@@ -219,7 +219,7 @@ class ProductDictionaryRetriever:
         value: str,
         matchType: str,
     ) -> None:
-        normalizedValue = NormalizeWhitespace(value).lower()
+        normalizedValue = NormalizeWhiteSpace(value).lower()
         compactValue = re.sub(r"[\s\W_]+", "", normalizedValue)
         if normalizedValue:
             self._lookup.setdefault(normalizedValue, (entry, matchType))
@@ -228,12 +228,12 @@ class ProductDictionaryRetriever:
             self._fuzzyChoices.append((compactValue, entry))
 
     def _BuildCandidateSpans(self, text: str) -> List[str]:
-        normalizedText = NormalizeWhitespace(text)
+        normalizedText = NormalizeWhiteSpace(text)
         if normalizedText == "":
             return []
         spans = [normalizedText]
         for span in re.split(r"[,/|;:：·()\[\]\n\r]+", normalizedText):
-            normalizedSpan = NormalizeWhitespace(span)
+            normalizedSpan = NormalizeWhiteSpace(span)
             if normalizedSpan:
                 spans.append(normalizedSpan)
         spans.extend(re.findall(r"[0-9A-Za-z가-힣_]+", normalizedText))

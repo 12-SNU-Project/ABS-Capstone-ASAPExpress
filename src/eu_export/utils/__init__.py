@@ -3,8 +3,8 @@
 from eu_export.utils.text import (
     FindContainedTerms,
     IsUrlLike,
-    NormalizeWhitespace,
-    NormalizeWhitespacePreservingLines,
+    NormalizeWhiteSpace,
+    NormalizeWhitespaceLines,
 )
 from eu_export.utils.validation import (
     ReadNumberInRange,
@@ -17,8 +17,8 @@ from eu_export.utils.validation import (
 __all__ = [
     "FindContainedTerms",
     "IsUrlLike",
-    "NormalizeWhitespace",
-    "NormalizeWhitespacePreservingLines",
+    "NormalizeWhiteSpace",
+    "NormalizeWhitespaceLines",
     "ReadNumberInRange",
     "ReadOptionalStringList",
     "ReadRequiredBool",

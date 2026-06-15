@@ -33,7 +33,7 @@ from eu_export.product.ocr.ocr_normalization import (
     OCR_FACT_LABEL_MATCHERS,
     ProductOcrFactNormalizer,
 )
-from eu_export.utils import NormalizeWhitespace, NormalizeWhitespacePreservingLines
+from eu_export.utils import NormalizeWhiteSpace, NormalizeWhitespaceLines
 
 
 DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS = 4096
@@ -181,8 +181,8 @@ class ProductFactRecord(BaseModel):
     validationStatus: str = Field(default="accepted", alias="validation_status")
 
     def ToFactText(self) -> str:
-        normalizedFieldName = NormalizeWhitespace(self.fieldName)
-        displayValue = NormalizeWhitespacePreservingLines(
+        normalizedFieldName = NormalizeWhiteSpace(self.fieldName)
+        displayValue = NormalizeWhitespaceLines(
             self.normalizedValue or self.rawValue
         )
         if normalizedFieldName == "":
@@ -201,16 +201,16 @@ def _StripOcrCollectionMarkers(text: str) -> str:
     )
     lines = [
         line
-        for line in NormalizeWhitespacePreservingLines(
+        for line in NormalizeWhitespaceLines(
             withoutInlineMarkers,
         ).splitlines()
         if OCR_COLLECTION_MARKER_PATTERN.fullmatch(line.strip()) is None
     ]
-    return NormalizeWhitespacePreservingLines("\n".join(lines))
+    return NormalizeWhitespaceLines("\n".join(lines))
 
 
 def _IsGenericOcrFieldName(fieldName: str) -> bool:
-    normalizedFieldName = NormalizeWhitespace(fieldName).lower()
+    normalizedFieldName = NormalizeWhiteSpace(fieldName).lower()
     if normalizedFieldName == "":
         return True
     compactFieldName = normalizedFieldName.replace(" ", "")
@@ -231,8 +231,8 @@ def _SplitFieldText(text: str) -> Optional[tuple[str, str]]:
     for separator in [":", "："]:
         if separator in normalizedText:
             fieldName, fieldValue = normalizedText.split(separator, 1)
-            fieldName = NormalizeWhitespace(fieldName)
-            fieldValue = NormalizeWhitespacePreservingLines(fieldValue)
+            fieldName = NormalizeWhiteSpace(fieldName)
+            fieldValue = NormalizeWhitespaceLines(fieldValue)
             if fieldName and fieldValue:
                 return fieldName, fieldValue
     return _SplitKnownFieldText(normalizedText)
@@ -242,7 +242,7 @@ def _SplitKnownFieldText(text: str) -> Optional[tuple[str, str]]:
     normalizedText = _StripOcrCollectionMarkers(text).strip(" :：·-*[]()")
     if normalizedText == "":
         return None
-    normalizedLowerText = NormalizeWhitespace(normalizedText).lower()
+    normalizedLowerText = NormalizeWhiteSpace(normalizedText).lower()
     compactLowerText = normalizedLowerText.replace(" ", "")
     for (
         fieldLabel,
@@ -252,11 +252,11 @@ def _SplitKnownFieldText(text: str) -> Optional[tuple[str, str]]:
         if normalizedLowerText.startswith(normalizedFieldLabel):
             fieldValue = normalizedText[len(fieldLabel) :].lstrip(" :：·-*[]()")
             if fieldValue:
-                return fieldLabel, NormalizeWhitespacePreservingLines(fieldValue)
+                return fieldLabel, NormalizeWhitespaceLines(fieldValue)
         if compactLowerText.startswith(compactFieldLabel):
             compactValue = compactLowerText[len(compactFieldLabel) :]
             if compactValue:
-                return fieldLabel, NormalizeWhitespacePreservingLines(
+                return fieldLabel, NormalizeWhitespaceLines(
                     normalizedText[len(fieldLabel) :].lstrip(" :：·-*[]()")
                     or compactValue,
                 )
@@ -302,14 +302,14 @@ class ProductFactReconstructionResult(BaseModel):
         if value is None:
             return []
         if isinstance(value, str):
-            return [value] if NormalizeWhitespace(value) else []
+            return [value] if NormalizeWhiteSpace(value) else []
         if isinstance(value, Mapping):
             return [json.dumps(value, ensure_ascii=False, sort_keys=True)]
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
             normalizedValues: List[str] = []
             for item in value:
                 if isinstance(item, str):
-                    normalizedItem = NormalizeWhitespacePreservingLines(item)
+                    normalizedItem = NormalizeWhitespaceLines(item)
                 elif isinstance(item, Mapping):
                     normalizedItem = json.dumps(
                         item,
@@ -317,11 +317,11 @@ class ProductFactReconstructionResult(BaseModel):
                         sort_keys=True,
                     )
                 else:
-                    normalizedItem = NormalizeWhitespace(str(item))
+                    normalizedItem = NormalizeWhiteSpace(str(item))
                 if normalizedItem:
                     normalizedValues.append(normalizedItem)
             return normalizedValues
-        normalizedValue = NormalizeWhitespace(str(value))
+        normalizedValue = NormalizeWhiteSpace(str(value))
         return [normalizedValue] if normalizedValue else []
 
 
@@ -616,9 +616,9 @@ class ProductFactReconstructionValidator:
             return None
         return factRecord.model_copy(
             update={
-                "fieldName": NormalizeWhitespace(fieldName),
-                "rawValue": NormalizeWhitespacePreservingLines(rawValue),
-                "normalizedValue": NormalizeWhitespacePreservingLines(
+                "fieldName": NormalizeWhiteSpace(fieldName),
+                "rawValue": NormalizeWhitespaceLines(rawValue),
+                "normalizedValue": NormalizeWhitespaceLines(
                     normalizedValue,
                 ),
             }
@@ -781,10 +781,10 @@ class DeterministicProductFactReconstructor:
         factText: str,
         evidencePackage: ProductInputEvidencePackage,
     ) -> List[str]:
-        normalizedFactText = NormalizeWhitespace(factText)
+        normalizedFactText = NormalizeWhiteSpace(factText)
         sourceRefs: List[str] = []
         for record in evidencePackage.records:
-            if normalizedFactText in NormalizeWhitespace(record.text):
+            if normalizedFactText in NormalizeWhiteSpace(record.text):
                 sourceRefs.append(record.evidenceId)
         return sourceRefs
 
