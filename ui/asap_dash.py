@@ -20,7 +20,7 @@ import traceback
 import uuid
 from pathlib import Path
 
-from dash import ALL, Dash, Input, Output, State, dcc, html, no_update
+from dash import ALL, MATCH, Dash, Input, Output, State, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
 ASAP_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parent.parent)).resolve()
@@ -260,6 +260,21 @@ def select_document_panel(_clicks):
     if isinstance(triggered, dict) and triggered.get("type") == "panel-btn":
         return triggered.get("panel") or "overview"
     return no_update
+
+
+@app.callback(
+    Output({"type": "scenario-result", "taric": MATCH}, "children"),
+    Input({"type": "scenario-checks", "taric": MATCH}, "value"),
+    State("package-store", "data"),
+    prevent_initial_call=True,
+)
+def update_document_scenario(selected_values, package_data):
+    if not package_data:
+        return no_update
+    cx = document_package_dash.package_context(package_data)
+    if cx.get("source") == "unresolved":
+        return no_update
+    return document_package_dash.render_scenario_decision(package_data, cx, selected_values or [])
 
 
 @app.callback(
