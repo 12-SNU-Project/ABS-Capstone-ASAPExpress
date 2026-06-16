@@ -235,3 +235,4 @@ data/processed/*
 # 4. .example 확장자를 가진 파일만 최종 예외로 설정하여 추적합니다.
 !data/processed/*.empty
 
+tmp
