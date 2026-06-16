@@ -12,6 +12,13 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.api_contract import (
+    PipelineEventPayload,
+    RunCompleteSsePayload,
+    RunNotFoundSsePayload,
+    RunSnapshotResponse,
+)
+
 
 PipelineCallable = Callable[..., dict[str, Any]]
 
@@ -125,7 +132,7 @@ class PipelineResultProjector:
             resultData["input_processing_view"] = inputProcessingView
         if snapshot.get("error"):
             resultData["error"] = str(snapshot.get("error") or "")
-        return resultData
+        return RunSnapshotResponse.model_validate(resultData).ToDict()
 
     def BuildPipelineResultProjection(
         self,
@@ -700,18 +707,17 @@ class RunRegistry:
             if runMissing:
                 yield self._FormatSse(
                     "error",
-                    {
-                        "error": "run_not_found",
-                        "message": "No run exists for the requested run_id.",
-                        "run_id": runId,
-                    },
+                    RunNotFoundSsePayload(
+                        message="No run exists for the requested run_id.",
+                        run_id=runId,
+                    ).ToDict(),
                 )
                 return
 
             while eventIndex < len(events):
                 yield self._FormatSse(
                     "pipeline_event",
-                    events[eventIndex],
+                    PipelineEventPayload.model_validate(events[eventIndex]).ToDict(),
                     eventId=str(eventIndex),
                 )
                 eventIndex += 1
@@ -719,7 +725,10 @@ class RunRegistry:
             if status in {"completed", "failed"} and eventIndex >= len(events):
                 yield self._FormatSse(
                     "run_complete",
-                    {"run_id": runId, "status": status},
+                    RunCompleteSsePayload(
+                        run_id=runId,
+                        status=status,
+                    ).ToDict(),
                 )
                 return
 

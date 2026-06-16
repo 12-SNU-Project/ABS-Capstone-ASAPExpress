@@ -12,7 +12,13 @@ from typing import Any
 
 from flask import Response, jsonify, request as flask_request
 from flask.typing import ResponseReturnValue
+from pydantic import ValidationError
 
+from backend.api_contract import (
+    ApiErrorResponse,
+    RunCreateAcceptedResponse,
+    RunCreateRequestPayload,
+)
 from backend.pipeline_service import PipelineRunRequest, PipelineRunService, RunRegistry
 
 
@@ -40,20 +46,20 @@ class PipelineApi:
                 flask_request.remote_addr or "unknown",
             )
             if not isAllowed:
-                return jsonify({
-                    "error": "rate_limited",
-                    "message": "Too many pipeline run create requests.",
-                    "hint": "Wait before creating another run.",
-                    "retry_after_seconds": retryAfterSeconds,
-                }), 429, {"Retry-After": str(retryAfterSeconds)}
+                return jsonify(ApiErrorResponse(
+                    error="rate_limited",
+                    message="Too many pipeline run create requests.",
+                    hint="Wait before creating another run.",
+                    retry_after_seconds=retryAfterSeconds,
+                ).ToDict()), 429, {"Retry-After": str(retryAfterSeconds)}
 
             payload = flask_request.get_json(silent=True) or {}
             if not isinstance(payload, dict):
-                return jsonify({
-                    "error": "invalid_json_payload",
-                    "message": "Request body must be a JSON object.",
-                    "hint": "Send Content-Type: application/json with an object payload.",
-                }), 400
+                return jsonify(ApiErrorResponse(
+                    error="invalid_json_payload",
+                    message="Request body must be a JSON object.",
+                    hint="Send Content-Type: application/json with an object payload.",
+                ).ToDict()), 400
             responsePayload, statusCode = self.StartRunFromPayload(payload)
             return jsonify(responsePayload), statusCode
 
@@ -61,12 +67,12 @@ class PipelineApi:
         def read_run_snapshot(job_id: str) -> ResponseReturnValue:
             snapshot = self._registry.BuildUiResult(job_id)
             if not snapshot:
-                return jsonify({
-                    "error": "run_not_found",
-                    "message": "No run exists for the requested job_id.",
-                    "field": "job_id",
-                    "job_id": job_id,
-                }), 404
+                return jsonify(ApiErrorResponse(
+                    error="run_not_found",
+                    message="No run exists for the requested job_id.",
+                    field="job_id",
+                    job_id=job_id,
+                ).ToDict()), 404
             return jsonify(snapshot)
 
         @server.route("/api/runs/<job_id>/events")
@@ -90,29 +96,38 @@ class PipelineApi:
             )
 
     def StartRunFromPayload(self, payload: Mapping[str, Any]) -> tuple[dict[str, Any], int]:
-        extraFacts = payload.get("facts") if isinstance(payload.get("facts"), dict) else {}
+        try:
+            requestPayload = RunCreateRequestPayload.model_validate(payload)
+        except ValidationError:
+            return ApiErrorResponse(
+                error="invalid_run_create_payload",
+                message="Run create payload failed validation.",
+                field="request",
+                hint="Send query/product_name/description/url as strings and facts as an object.",
+            ).ToDict(), 400
+        extraFacts = requestPayload.facts
         productName = str(
-            payload.get("product_name") or extraFacts.get("product_name") or ""
+            requestPayload.productName or extraFacts.get("product_name") or ""
         ).strip()
         description = str(
-            payload.get("description") or extraFacts.get("description") or ""
+            requestPayload.description or extraFacts.get("description") or ""
         ).strip()
         kurlyUrl = str(
-            payload.get("url")
-            or payload.get("kurly_url")
+            requestPayload.url
+            or requestPayload.kurlyUrl
             or extraFacts.get("url")
             or ""
         ).strip()
         query = str(
-            payload.get("query") or productName or description or kurlyUrl
+            requestPayload.query or productName or description or kurlyUrl
         ).strip()
         if not query:
-            return {
-                "error": "missing_query",
-                "message": "At least one of query, product_name, description, or url is required.",
-                "field": "query",
-                "hint": "Provide product_name for normal UI use or query for direct API use.",
-            }, 400
+            return ApiErrorResponse(
+                error="missing_query",
+                message="At least one of query, product_name, description, or url is required.",
+                field="query",
+                hint="Provide product_name for normal UI use or query for direct API use.",
+            ).ToDict(), 400
 
         facts = self.BuildRunFacts(
             productName=productName,
@@ -122,13 +137,13 @@ class PipelineApi:
         )
         jobId, reused = self.StartPipelineRun(query=query, facts=facts)
         snapshot = self._registry.BuildUiResult(jobId)
-        return {
-            "job_id": jobId,
-            "status": snapshot.get("job_status") or "queued",
-            "reused": reused,
-            "events_url": f"/api/runs/{jobId}/events",
-            "result_url": f"/api/runs/{jobId}",
-        }, 202
+        return RunCreateAcceptedResponse(
+            job_id=jobId,
+            status=snapshot.get("job_status") or "queued",
+            reused=reused,
+            events_url=f"/api/runs/{jobId}/events",
+            result_url=f"/api/runs/{jobId}",
+        ).ToDict(), 202
 
     def BuildRunFacts(
         self,
