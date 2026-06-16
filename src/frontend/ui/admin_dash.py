@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from dash import html
+from dash import dcc, html
 
 from bussiness_logic.app_config import LoadAppConfig
 from frontend.ui.classification_dash import (
@@ -189,7 +189,11 @@ def render_page(run_id: str | None = None, live_result: dict[str, Any] | None = 
                     html.Div("Blackboard / AgentRun / core read log", style={"fontSize": "12px", "color": "#64748b", "marginTop": "4px"}),
                     html.Div(
                         [
-                            html.A("Classification", href="/classification", style={"fontSize": "12px", "fontWeight": 850, "marginRight": "14px"}),
+                            dcc.Link(
+                                "Classification",
+                                href="/classification",
+                                style={"fontSize": "12px", "fontWeight": 850, "marginRight": "14px"},
+                            ),
                             html.Span(f"run_id: {effective_run_id or '-'}", style={"fontSize": "12px", "color": "#64748b"}),
                         ],
                         style={"marginTop": "8px"},

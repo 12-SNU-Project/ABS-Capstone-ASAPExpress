@@ -2119,7 +2119,7 @@ def render_detail_page(run_id: str | None, taric10: str, panel: str = "overview"
     except Exception as exc:  # noqa: BLE001
         return html.Div(
             [
-                html.A("← 분류 화면", href="/classification", className="subtle"),
+                dcc.Link("← 분류 화면", href="/classification", className="subtle"),
                 html.Div(f"서류 패키지 조회 오류: {exc}", className="error"),
             ],
             className="main",
@@ -2130,9 +2130,13 @@ def render_detail_page(run_id: str | None, taric10: str, panel: str = "overview"
             dcc.Store(id="package-store", data=package),
             html.Div(
                 [
-                    html.A("← 분류 화면", href="/classification", className="subtle"),
+                    dcc.Link("← 분류 화면", href="/classification", className="subtle"),
                     html.Span(" · ", className="subtle"),
-                    html.A("Admin log", href=f"/admin/{run_id}" if run_id else "/admin", className="subtle"),
+                    dcc.Link(
+                        "Admin log",
+                        href=f"/admin/{run_id}" if run_id else "/admin",
+                        className="subtle",
+                    ),
                 ],
                 style={"marginBottom": "12px"},
             ),

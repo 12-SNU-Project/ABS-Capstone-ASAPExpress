@@ -33,7 +33,7 @@ def CreateDashApp(
     app.layout = html.Div(
         [
             dcc.Location(id="url", refresh=False),
-            dcc.Store(id="store-run-id"),
+            dcc.Store(id="store-run-id", storage_type="session"),
             dcc.Store(id="store-result"),
             dcc.Store(id="document-panel-store", data="overview"),
             html.Div(id="sse-bridge", style={"display": "none"}),
@@ -305,7 +305,6 @@ def _RegisterClientsideCallbacks(app: Dash) -> None:
         """,
         Output("sse-bridge", "children"),
         Input("store-run-id", "data"),
-        prevent_initial_call=True,
     )
 
 

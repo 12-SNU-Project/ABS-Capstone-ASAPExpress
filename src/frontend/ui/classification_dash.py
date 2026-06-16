@@ -993,7 +993,7 @@ def render_candidate_cards(result: dict[str, Any]) -> html.Div:
                         style={"display": "flex", "gap": "10px", "flexWrap": "wrap"},
                     ),
                     html.Div(cand.get("selected_taric10_reason") or "", style={"fontSize": "12px", "color": "#64748b", "marginTop": "10px"}),
-                    html.A(
+                    dcc.Link(
                         "TARIC10 서류 상세 보기",
                         href=href,
                         style={
@@ -1064,7 +1064,11 @@ def render_page(result: dict[str, Any] | None = None) -> html.Div:
                     html.Div("URL / text / OCR evidence -> CN8/TARIC10 후보 -> 서류 상세 연결", style={"fontSize": "12px", "color": "#64748b", "marginTop": "4px"}),
                     html.Div(
                         [
-                            html.A("Admin log", href=f"/admin/{run_id}" if run_id else "/admin", style={"fontSize": "12px", "fontWeight": 850}),
+                            dcc.Link(
+                                "Admin log",
+                                href=f"/admin/{run_id}" if run_id else "/admin",
+                                style={"fontSize": "12px", "fontWeight": 850},
+                            ),
                         ],
                         style={"marginTop": "8px"},
                     ),
