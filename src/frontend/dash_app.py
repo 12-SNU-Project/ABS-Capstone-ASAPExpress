@@ -120,7 +120,7 @@ def _RegisterClientsideCallbacks(app: Dash) -> None:
                 });
                 const payload = await response.json();
                 if (!response.ok) {
-                    throw new Error(payload.error || "run_create_failed");
+                    throw new Error(payload.message || payload.error || "run_create_failed");
                 }
 
                 const queuedResult = {

@@ -151,10 +151,18 @@ def _fact_display_value(fact: dict[str, Any]) -> str:
     ).strip()
 
 
-def _fact_source_text(fact: dict[str, Any]) -> str:
+def _fact_source_text(
+    fact: dict[str, Any],
+    source_labels: dict[str, Any] | None = None,
+) -> str:
     refs = fact.get("source_refs") or fact.get("sourceRefs") or []
     if isinstance(refs, list):
-        return ", ".join(str(ref) for ref in refs[:3] if str(ref).strip())
+        labels = source_labels or {}
+        return ", ".join(
+            str(labels.get(str(ref), ref))
+            for ref in refs[:3]
+            if str(ref).strip()
+        )
     return str(refs or "")
 
 
@@ -192,6 +200,7 @@ def _reconstruction_fact_table(
     title: str,
     facts: list[dict[str, Any]],
     *,
+    source_labels: dict[str, Any] | None = None,
     max_rows: int = 12,
 ) -> html.Div | None:
     if not facts:
@@ -233,7 +242,13 @@ def _reconstruction_fact_table(
                 html.Div(_short_text(_fact_display_value(fact), max_length=220), style=cell),
                 html.Div(_short_text(fact.get("validation_status") or fact.get("validationStatus") or "-", max_length=48), style=cell),
                 html.Div(_short_text(fact.get("correction_type") or fact.get("correctionType") or "-", max_length=48), style=cell),
-                html.Div(_short_text(_fact_source_text(fact), max_length=100), style=cell),
+                html.Div(
+                    _short_text(
+                        _fact_source_text(fact, source_labels),
+                        max_length=120,
+                    ),
+                    style=cell,
+                ),
             ]
         )
 
@@ -292,8 +307,232 @@ def _classification_fact_text_table(
 
     return html.Div(
         [
-            html.Div("Classification fact text", style={"fontSize": "12px", "fontWeight": 900, "color": "#0f172a", "marginBottom": "8px"}),
+            html.Div("Candidate-search text lines", style={"fontSize": "12px", "fontWeight": 900, "color": "#0f172a", "marginBottom": "8px"}),
             html.Div(rows, style={"border": "1px solid #e5e7eb", "borderRadius": "8px", "overflow": "hidden"}),
+        ],
+        style={"marginTop": "10px"},
+    )
+
+
+def _product_page_basic_card(raw: dict[str, Any]) -> html.Div | None:
+    productName = raw.get("product_name") or ""
+    description = raw.get("description") or ""
+    sourceUrls = raw.get("source_urls") or []
+    if isinstance(sourceUrls, str):
+        sourceUrls = [sourceUrls] if sourceUrls.strip() else []
+    url = sourceUrls[0] if isinstance(sourceUrls, list) and sourceUrls else raw.get("url") or ""
+    if not any(str(value).strip() for value in [productName, description, url]):
+        return None
+
+    rowStyle = {
+        "display": "grid",
+        "gridTemplateColumns": "120px minmax(0, 1fr)",
+        "gap": "10px",
+        "padding": "8px 0",
+        "borderBottom": "1px solid #edf2f7",
+        "fontSize": "12px",
+    }
+    labelStyle = {"fontWeight": 900, "color": "#475569"}
+    valueStyle = {"color": "#334155", "overflowWrap": "anywhere"}
+    rows = [
+        ("상품명", productName),
+        ("설명", _short_text(description, max_length=260)),
+        ("URL", url),
+    ]
+    return html.Div(
+        [
+            html.Div("Product Page Basic Info", style={"fontSize": "13px", "fontWeight": 950, "color": "#0f172a"}),
+            html.Div(
+                "웹페이지 상단 영역에서 수집한 상품 기본 정보",
+                style={"fontSize": "12px", "color": "#64748b", "marginTop": "2px", "marginBottom": "8px"},
+            ),
+            *[
+                html.Div(
+                    [
+                        html.Div(label, style=labelStyle),
+                        html.Div(str(value or "-"), style=valueStyle),
+                    ],
+                    style=rowStyle,
+                )
+                for label, value in rows
+            ],
+        ],
+        style={
+            "marginTop": "10px",
+            "padding": "12px",
+            "border": "1px solid #e5e7eb",
+            "borderRadius": "8px",
+            "background": "#ffffff",
+        },
+    )
+
+
+def _source_evidence_table(
+    title: str,
+    records: list[Any],
+    *,
+    max_rows: int = 12,
+) -> html.Div | None:
+    cleaned = [record for record in records if isinstance(record, dict)]
+    if not cleaned:
+        return None
+
+    headerCell = {
+        "padding": "8px 10px",
+        "fontSize": "11px",
+        "fontWeight": 900,
+        "color": "#475569",
+        "background": "#f8fafc",
+        "borderBottom": "1px solid #e5e7eb",
+    }
+    cell = {
+        "padding": "9px 10px",
+        "fontSize": "12px",
+        "color": "#334155",
+        "borderBottom": "1px solid #edf2f7",
+        "overflowWrap": "anywhere",
+    }
+    rows: list[Any] = [
+        html.Div("Source", style=headerCell),
+        html.Div("Raw detail text before reconstruction", style=headerCell),
+    ]
+    for record in cleaned[:max_rows]:
+        sourceLabel = record.get("source_label") or record.get("source_type") or "-"
+        sourceType = record.get("source_type") or ""
+        rows.extend(
+            [
+                html.Div(
+                    [
+                        html.Div(_short_text(sourceLabel, max_length=80), style={"fontWeight": 850}),
+                        html.Div(_short_text(sourceType, max_length=40), style={**MONO, "color": "#64748b", "marginTop": "3px"}),
+                    ],
+                    style=cell,
+                ),
+                html.Div(_short_text(record.get("text"), max_length=360), style=cell),
+            ]
+        )
+
+    more = None
+    if len(cleaned) > max_rows:
+        more = html.Div(
+            f"+ {len(cleaned) - max_rows} more source evidence rows",
+            style={"fontSize": "12px", "color": "#64748b", "marginTop": "8px"},
+        )
+
+    return html.Div(
+        [
+            html.Div(title, style={"fontSize": "12px", "fontWeight": 900, "color": "#0f172a", "marginBottom": "8px"}),
+            html.Div(
+                html.Div(
+                    rows,
+                    style={
+                        "display": "grid",
+                        "gridTemplateColumns": "minmax(130px, 0.65fr) minmax(260px, 1.35fr)",
+                        "gap": "0",
+                        "minWidth": "520px",
+                    },
+                ),
+                style={"overflowX": "auto", "border": "1px solid #e5e7eb", "borderRadius": "8px"},
+            ),
+            more,
+        ],
+        style={"marginTop": "10px"},
+    )
+
+
+def _reconstructed_tables_widget(
+    title: str,
+    tables: list[Any],
+    *,
+    source_labels: dict[str, Any] | None = None,
+    max_rows_per_table: int = 18,
+) -> html.Div | None:
+    cleanedTables = [table for table in tables if isinstance(table, dict)]
+    if not cleanedTables:
+        return None
+
+    headerCell = {
+        "padding": "8px 10px",
+        "fontSize": "11px",
+        "fontWeight": 900,
+        "color": "#475569",
+        "background": "#f8fafc",
+        "borderBottom": "1px solid #e5e7eb",
+    }
+    cell = {
+        "padding": "9px 10px",
+        "fontSize": "12px",
+        "color": "#334155",
+        "borderBottom": "1px solid #edf2f7",
+        "overflowWrap": "anywhere",
+    }
+    labels = source_labels or {}
+    tableBlocks: list[Any] = []
+    for tableIndex, table in enumerate(cleanedTables, start=1):
+        rows = table.get("rows") or []
+        if not isinstance(rows, list) or not rows:
+            continue
+        tableName = table.get("table_name") or f"Table {tableIndex}"
+        gridRows: list[Any] = [
+            html.Div("Field", style=headerCell),
+            html.Div("Value", style=headerCell),
+            html.Div("Unit", style=headerCell),
+            html.Div("Daily %", style=headerCell),
+            html.Div("Source", style=headerCell),
+        ]
+        for row in [item for item in rows if isinstance(item, dict)][:max_rows_per_table]:
+            sourceRefs = row.get("source_refs") or []
+            if isinstance(sourceRefs, list):
+                sourceText = ", ".join(
+                    str(labels.get(str(ref), ref))
+                    for ref in sourceRefs[:3]
+                    if str(ref).strip()
+                )
+            else:
+                sourceText = str(sourceRefs or "")
+            gridRows.extend(
+                [
+                    html.Div(_short_text(row.get("field_name"), max_length=90), style={**cell, "fontWeight": 850}),
+                    html.Div(_short_text(row.get("normalized_value") or row.get("raw_value"), max_length=220), style=cell),
+                    html.Div(_short_text(row.get("unit"), max_length=32), style=cell),
+                    html.Div(_short_text(row.get("daily_value_percent"), max_length=32), style=cell),
+                    html.Div(_short_text(sourceText, max_length=110), style=cell),
+                ]
+            )
+        more = None
+        if len(rows) > max_rows_per_table:
+            more = html.Div(
+                f"+ {len(rows) - max_rows_per_table} more rows",
+                style={"fontSize": "12px", "color": "#64748b", "marginTop": "8px"},
+            )
+        tableBlocks.append(
+            html.Div(
+                [
+                    html.Div(_short_text(tableName, max_length=120), style={"fontSize": "12px", "fontWeight": 900, "color": "#0f172a", "marginBottom": "8px"}),
+                    html.Div(
+                        html.Div(
+                            gridRows,
+                            style={
+                                "display": "grid",
+                                "gridTemplateColumns": "minmax(110px, 0.8fr) minmax(180px, 1.4fr) minmax(58px, 0.45fr) minmax(70px, 0.5fr) minmax(120px, 0.9fr)",
+                                "gap": "0",
+                                "minWidth": "680px",
+                            },
+                        ),
+                        style={"overflowX": "auto", "border": "1px solid #e5e7eb", "borderRadius": "8px"},
+                    ),
+                    more,
+                ],
+                style={"marginTop": "10px"},
+            )
+        )
+
+    if not tableBlocks:
+        return None
+    return html.Div(
+        [
+            html.Div(title, style={"fontSize": "12px", "fontWeight": 900, "color": "#0f172a", "marginBottom": "8px"}),
+            *tableBlocks,
         ],
         style={"marginTop": "10px"},
     )
@@ -341,6 +580,15 @@ def input_reconstruction_card(
         conflicts = [str(conflicts)] if str(conflicts).strip() else []
     if not productFacts:
         productFacts = _BuildDisplayFactsFromFactTexts(factTexts)
+    reconstructedTables = input_reconstruction.get("reconstructed_tables") or []
+    if not isinstance(reconstructedTables, list):
+        reconstructedTables = []
+    sourceLabels = input_reconstruction.get("source_ref_labels") or {}
+    if not isinstance(sourceLabels, dict):
+        sourceLabels = {}
+    sourceEvidencePreview = input_reconstruction.get("source_evidence_preview") or []
+    if not isinstance(sourceEvidencePreview, list):
+        sourceEvidencePreview = []
     reconstructionMode = input_reconstruction.get("mode") or (
         "llm_reconstruction"
         if input_reconstruction.get("used_llm_reconstruction")
@@ -350,14 +598,54 @@ def input_reconstruction_card(
     )
     reconstructionError = input_reconstruction.get("error")
     fallbackReason = input_reconstruction.get("fallback_reason")
+    beforePanel = _source_evidence_table(
+        "Product detail image / OCR evidence",
+        sourceEvidencePreview,
+    )
+    afterPanel = (
+        _reconstructed_tables_widget(
+            "Reconstructed detail tables",
+            reconstructedTables,
+            source_labels=sourceLabels,
+        )
+        or _reconstruction_fact_table(
+            "Reconstructed detail facts",
+            productFacts,
+            source_labels=sourceLabels,
+        )
+    )
+    primaryFactPanels = [
+        panel
+        for panel in [
+            beforePanel,
+            afterPanel,
+        ]
+        if panel is not None
+    ]
+    primaryFactLayout = (
+        html.Div(
+            primaryFactPanels,
+            style={
+                "display": "grid",
+                "gridTemplateColumns": "repeat(auto-fit, minmax(min(100%, 460px), 1fr))",
+                "gap": "12px",
+                "alignItems": "start",
+                "marginTop": "10px",
+            },
+        )
+        if len(primaryFactPanels) > 1
+        else primaryFactPanels[0]
+        if primaryFactPanels
+        else None
+    )
 
     return html.Div(
         [
             html.Div(
                 [
-                    html.Div("Reconstructed Input", style={"fontSize": "13px", "fontWeight": 950, "color": "#0f172a"}),
+                    html.Div("Product Detail Reconstruction", style={"fontSize": "13px", "fontWeight": 950, "color": "#0f172a"}),
                     html.Div(
-                        "분류 후보 생성에 실제로 전달되는 상품 fact 요약",
+                        "웹페이지 하단 상세 이미지/PP table/OCR에서 복원한 정보",
                         style={"fontSize": "12px", "color": "#64748b", "marginTop": "2px"},
                     ),
                 ],
@@ -367,7 +655,8 @@ def input_reconstruction_card(
                 [
                     _small("LLM", "on" if input_reconstruction.get("used_llm_reconstruction") else "off"),
                     _small("mode", reconstructionMode),
-                    _small("input facts", input_reconstruction.get("fact_count") or len(productFacts)),
+                    _small("detail tables", input_reconstruction.get("reconstructed_table_count") or len(reconstructedTables)),
+                    _small("candidate facts", input_reconstruction.get("fact_count") or len(productFacts)),
                     _small("search text lines", input_reconstruction.get("fact_text_count") or len(factTexts)),
                 ],
                 style={"display": "flex", "gap": "8px", "flexWrap": "wrap"},
@@ -385,11 +674,29 @@ def input_reconstruction_card(
                 reconstructionMode == "fallback_reconstruction"
                 and not input_reconstruction.get("used_llm_reconstruction")
             ) else None,
-            _reconstruction_fact_table("Classification input product facts", productFacts),
-            _reconstruction_fact_table("LLM reconstructed product facts", llmFacts),
-            _reconstruction_fact_table("Fallback product facts", fallbackFacts),
+            primaryFactLayout,
+            _reconstruction_fact_table(
+                "Candidate-search input facts",
+                productFacts,
+                source_labels=sourceLabels,
+            ) if productFacts else None,
+            _reconstruction_fact_table(
+                "LLM candidate facts",
+                llmFacts,
+                source_labels=sourceLabels,
+            ) if llmFacts and llmFacts != productFacts else None,
+            _reconstruction_fact_table(
+                "Fallback candidate facts",
+                fallbackFacts,
+                source_labels=sourceLabels,
+            ) if fallbackFacts and fallbackFacts != productFacts else None,
             _classification_fact_text_table(factTexts),
-            _reconstruction_fact_table("Unresolved facts", unresolvedFacts, max_rows=6),
+            _reconstruction_fact_table(
+                "Unresolved facts",
+                unresolvedFacts,
+                source_labels=sourceLabels,
+                max_rows=6,
+            ),
             html.Div(
                 [
                     html.Div("Conflicts", style={"fontSize": "12px", "fontWeight": 900, "color": "#991b1b", "marginBottom": "6px"}),
@@ -407,6 +714,58 @@ def input_reconstruction_card(
             "border": "1px solid #dbeafe",
             "borderRadius": "8px",
             "background": "#fbfdff",
+        },
+    )
+
+
+def product_input_view_card(product_input_view: dict[str, Any] | None) -> html.Div | None:
+    if not isinstance(product_input_view, dict) or not product_input_view:
+        return None
+
+    basicInfo = product_input_view.get("product_page_basic_info") or {}
+    reconstruction = product_input_view.get("reconstruction") or {}
+    if not isinstance(basicInfo, dict):
+        basicInfo = {}
+    if not isinstance(reconstruction, dict):
+        reconstruction = {}
+
+    detailReconstruction = {
+        "mode": reconstruction.get("mode"),
+        "used_llm_reconstruction": reconstruction.get("used_llm_reconstruction"),
+        "fallback_reason": reconstruction.get("fallback_reason"),
+        "error": reconstruction.get("error"),
+        "reconstructed_table_count": reconstruction.get("detail_table_count"),
+        "fact_count": reconstruction.get("candidate_fact_count"),
+        "fact_text_count": reconstruction.get("candidate_text_line_count"),
+        "source_evidence_preview": product_input_view.get("detail_evidence_preview") or [],
+        "reconstructed_tables": product_input_view.get("reconstructed_detail_tables") or [],
+        "classification_input_product_facts": product_input_view.get("candidate_search_input_facts") or [],
+        "classification_input_fact_texts": product_input_view.get("candidate_search_text_lines") or [],
+        "unresolved_product_facts": product_input_view.get("unresolved_facts") or [],
+        "product_fact_conflicts": product_input_view.get("conflicts") or [],
+        "source_ref_labels": product_input_view.get("source_ref_labels") or {},
+    }
+    panels = [
+        panel
+        for panel in [
+            _product_page_basic_card(basicInfo),
+            input_reconstruction_card(
+                detailReconstruction,
+                product_input_view.get("candidate_search_text_lines") or [],
+            ),
+        ]
+        if panel is not None
+    ]
+    if not panels:
+        return None
+    return html.Div(
+        panels,
+        style={
+            "display": "grid",
+            "gridTemplateColumns": "repeat(auto-fit, minmax(min(100%, 460px), 1fr))",
+            "gap": "12px",
+            "alignItems": "start",
+            "marginBottom": "20px",
         },
     )
 
@@ -476,12 +835,10 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
         if not raw:
             return None
         url_intake = raw.get("url_intake") or {}
-        input_reconstruction = raw.get("input_reconstruction") or {}
         ocr_summary = url_intake.get("ocr") or {}
         return html.Div(
             [
-                html.Div(f"product_name: {raw.get('product_name') or '-'}"),
-                html.Div(f"description: {(raw.get('description') or '-')[:180]}"),
+                _product_page_basic_card(raw),
                 html.Div(
                     "ocr_text chunks: {0} / composition: {1}".format(
                         raw.get("ocr_text_count")
@@ -505,15 +862,11 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
                         "Input reconstruction: mode={0}, llm={1}, "
                         "search_text_lines={2}"
                     ).format(
-                        input_reconstruction.get("mode") or "-",
-                        input_reconstruction.get("used_llm_reconstruction"),
-                        input_reconstruction.get("fact_text_count"),
+                        raw.get("input_reconstruction_mode") or "-",
+                        "yes" if raw.get("input_reconstruction_available") else "no",
+                        raw.get("classification_input_fact_texts_count"),
                     )
-                ) if input_reconstruction else None,
-                input_reconstruction_card(
-                    input_reconstruction,
-                    raw.get("composition") or [],
-                ),
+                ) if raw.get("input_reconstruction_available") else None,
                 detail_block(
                     "URL collection pipeline steps",
                     url_intake.get("pipeline_steps") or [],
@@ -752,6 +1105,7 @@ def render_decision(result: dict[str, Any]) -> html.Div:
 def render_page(result: dict[str, Any] | None = None) -> html.Div:
     result = result or {}
     run_id = result.get("run_id")
+    productInputView = product_input_view_card(result.get("product_input_view"))
     return html.Div(
         [
             html.Div(
@@ -768,6 +1122,8 @@ def render_page(result: dict[str, Any] | None = None) -> html.Div:
                 style={"borderBottom": "2px solid #2563eb", "paddingBottom": "12px", "marginBottom": "22px"},
             ),
             render_input_form(result.get("facts")),
+            html.Div("입력 수집/복원 결과", style=LABEL) if productInputView else None,
+            productInputView,
             html.Div("진행 상태", style=LABEL),
             html.Div(render_progress(result) if result else html.Div("[Run] 버튼을 누르면 단계별 진행 상태가 표시됩니다.", style=PLACEHOLDER), id="out-progress"),
             html.Div("분류 결과", style={**LABEL, "marginTop": "22px"}),

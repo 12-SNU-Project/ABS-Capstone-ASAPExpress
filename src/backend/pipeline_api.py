@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections import defaultdict, deque
 from collections.abc import Mapping
+from math import ceil
+from threading import Lock
 from typing import Any
 
 from flask import Response, jsonify, request as flask_request
@@ -20,16 +23,37 @@ class PipelineApi:
         self,
         registry: RunRegistry,
         service: PipelineRunService,
+        *,
+        maxRunCreatesPerMinute: int = 12,
     ) -> None:
         self._registry = registry
         self._service = service
+        self._maxRunCreatesPerMinute = max(1, maxRunCreatesPerMinute)
+        self._rateLimitWindowSeconds = 60.0
+        self._rateLimitLock = Lock()
+        self._runCreateTimestamps: defaultdict[str, deque[float]] = defaultdict(deque)
 
     def RegisterRoutes(self, server: Any) -> None:
         @server.route("/api/runs", methods=["POST"])
         def create_run() -> ResponseReturnValue:
+            isAllowed, retryAfterSeconds = self._AllowRunCreate(
+                flask_request.remote_addr or "unknown",
+            )
+            if not isAllowed:
+                return jsonify({
+                    "error": "rate_limited",
+                    "message": "Too many pipeline run create requests.",
+                    "hint": "Wait before creating another run.",
+                    "retry_after_seconds": retryAfterSeconds,
+                }), 429, {"Retry-After": str(retryAfterSeconds)}
+
             payload = flask_request.get_json(silent=True) or {}
             if not isinstance(payload, dict):
-                return jsonify({"error": "invalid_json_payload"}), 400
+                return jsonify({
+                    "error": "invalid_json_payload",
+                    "message": "Request body must be a JSON object.",
+                    "hint": "Send Content-Type: application/json with an object payload.",
+                }), 400
             responsePayload, statusCode = self.StartRunFromPayload(payload)
             return jsonify(responsePayload), statusCode
 
@@ -37,7 +61,12 @@ class PipelineApi:
         def read_run_snapshot(job_id: str) -> ResponseReturnValue:
             snapshot = self._registry.BuildUiResult(job_id)
             if not snapshot:
-                return jsonify({"error": "run_not_found", "job_id": job_id}), 404
+                return jsonify({
+                    "error": "run_not_found",
+                    "message": "No run exists for the requested job_id.",
+                    "field": "job_id",
+                    "job_id": job_id,
+                }), 404
             return jsonify(snapshot)
 
         @server.route("/api/runs/<job_id>/events")
@@ -78,7 +107,12 @@ class PipelineApi:
             payload.get("query") or productName or description or kurlyUrl
         ).strip()
         if not query:
-            return {"error": "missing_query"}, 400
+            return {
+                "error": "missing_query",
+                "message": "At least one of query, product_name, description, or url is required.",
+                "field": "query",
+                "hint": "Provide product_name for normal UI use or query for direct API use.",
+            }, 400
 
         facts = self.BuildRunFacts(
             productName=productName,
@@ -145,3 +179,15 @@ class PipelineApi:
             PipelineRunRequest(query=query, facts=dict(facts)),
         )
         return jobId, False
+
+    def _AllowRunCreate(self, clientKey: str) -> tuple[bool, int]:
+        now = time.monotonic()
+        with self._rateLimitLock:
+            timestamps = self._runCreateTimestamps[clientKey]
+            while timestamps and now - timestamps[0] >= self._rateLimitWindowSeconds:
+                timestamps.popleft()
+            if len(timestamps) >= self._maxRunCreatesPerMinute:
+                retryAfter = self._rateLimitWindowSeconds - (now - timestamps[0])
+                return False, max(1, ceil(retryAfter))
+            timestamps.append(now)
+            return True, 0
