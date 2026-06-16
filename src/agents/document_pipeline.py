@@ -22,8 +22,8 @@ from agents.classification_agent import ClassificationAgent
 from agents.document_agent import DocumentAgent
 from agents.evidence_intake_agent import EvidenceIntakeAgent
 from agents.orchestrator_agent import OrchestratorAgent
-from blackboard import BlackboardStore
-from eu_export.app_config import LoadAppConfig
+from agents.blackboard import BlackboardStore
+from bussiness_logic.app_config import LoadAppConfig
 
 
 APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
@@ -64,7 +64,7 @@ def collect_kurly_url_facts(
     Evidence_Intake_Agent, so the Blackboard still starts from normalized
     product facts.
     """
-    from eu_export.product import (
+    from bussiness_logic.product import (
         KurlyGlobalPageParser,
         KurlyPageAdapter,
         KurlyPageCollector,
@@ -74,12 +74,12 @@ def collect_kurly_url_facts(
         PaddleOcrEngine,
         PaddleStructureOcrEngine,
     )
-    from eu_export.bridge import (
+    from bussiness_logic.bridge import (
         BuildLlmRuntimeConfigFromEnv,
         BuildRuntimeAdapter,
         RuntimeAdapterBuildError,
     )
-    from eu_export.input_process import (
+    from bussiness_logic.input_process import (
         ProductInputAdapter,
         ProductInputReconstructionService,
     )

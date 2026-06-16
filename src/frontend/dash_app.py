@@ -9,8 +9,7 @@ from dash import ALL, MATCH, Dash, Input, Output, State, dcc, html, no_update
 
 from agents.document_pipeline import run_document_pipeline
 from backend import PipelineApi, PipelineRunService, RunRegistry
-from ui import admin_dash, classification_dash, document_package_dash
-
+from frontend.ui import document_package_dash, admin_dash, classification_dash
 
 PipelineCallable = Callable[..., dict[str, Any]]
 

@@ -22,7 +22,7 @@ from agents._external_classifier import (
 )
 from agents.agent_base import BaseAgent
 from agents.tools import TaricBranchResolverTool
-from blackboard import BlackboardStore, now_iso
+from agents.blackboard import BlackboardStore, now_iso
 
 
 def _read_field(obj, *names, default=None):

@@ -13,7 +13,7 @@ SOURCE_ROOT_PATH = PROJECT_ROOT_PATH / "src"
 if str(SOURCE_ROOT_PATH) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT_PATH))
 
-from eu_export.product import (  # noqa: E402
+from bussiness_logic.product import (  # noqa: E402
     KurlyGlobalPageParser,
     KurlyPageAdapter,
     KurlyPageCollector,
@@ -23,13 +23,13 @@ from eu_export.product import (  # noqa: E402
     PaddleOcrEngine,
     PaddleStructureOcrEngine,
 )
-from eu_export.app_config import LoadAppConfig  # noqa: E402
-from eu_export.bridge import (  # noqa: E402
+from bussiness_logic.app_config import LoadAppConfig  # noqa: E402
+from bussiness_logic.bridge import (  # noqa: E402
     BuildLlmRuntimeConfigFromEnv,
     BuildRuntimeAdapter,
     RuntimeAdapterBuildError,
 )
-from eu_export.input_process import ProductInputReconstructionService  # noqa: E402
+from bussiness_logic.input_process import ProductInputReconstructionService  # noqa: E402
 
 
 class KurlyMarketSmokeRunner:

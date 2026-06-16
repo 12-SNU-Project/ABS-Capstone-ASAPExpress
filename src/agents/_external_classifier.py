@@ -1,7 +1,7 @@
 """
 agents/_external_classifier — adapter for the vendored Stage 1 classifier.
 
-The classifier runtime code lives in ``src/eu_export``. It reads our core
+The classifier runtime code lives in ``src/bussiness_logic``. It reads our core
 data from ``docs/ASAP_Ontology_v1`` and orchestrates
 its 7-step Stage 1 pipeline:
 
@@ -546,8 +546,8 @@ for _path in (ASAP_PROJECT_ROOT, ASAP_SRC_ROOT):
     if _path.exists() and str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from eu_export.app_config import LoadAppConfig
-from eu_export.bridge import (
+from bussiness_logic.app_config import LoadAppConfig
+from bussiness_logic.bridge import (
     BuildDefaultLlmRuntimeConfig,
     BuildLlmRuntimeConfigFromEnv,
     BuildRuntimeAdapter,
@@ -558,7 +558,7 @@ from eu_export.bridge import (
     TextEmbeddingAdapterBuildError,
     TextEmbeddingGenerationError,
 )
-from eu_export.core import (
+from bussiness_logic.core import (
     CnCandidateRetriever,
     CnSemanticCandidateIndex,
     OntologyContextBuilder,

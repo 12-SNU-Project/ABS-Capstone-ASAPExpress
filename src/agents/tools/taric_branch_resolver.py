@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from eu_export.app_config import LoadAppConfig
+from bussiness_logic.app_config import LoadAppConfig
 
 csv.field_size_limit(sys.maxsize)
 

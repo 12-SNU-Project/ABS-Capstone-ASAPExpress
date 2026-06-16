@@ -32,7 +32,7 @@ from typing import Any
 
 from agents.agent_base import BaseAgent
 from agents.tools import DocumentPackageTool, DomainRouterTool
-from blackboard import BlackboardStore, now_iso
+from agents.blackboard import BlackboardStore, now_iso
 
 
 # ---------------------------------------------------------------------------
