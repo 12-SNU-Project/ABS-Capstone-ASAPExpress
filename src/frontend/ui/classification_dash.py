@@ -188,36 +188,6 @@ def _fact_source_text(
     return str(refs or "")
 
 
-def _BuildDisplayFactsFromFactTexts(factTexts: list[Any]) -> list[dict[str, Any]]:
-    displayFacts: list[dict[str, Any]] = []
-    for factText in factTexts:
-        text = str(factText or "").strip()
-        if not text:
-            continue
-        splitText = None
-        for separator in (":", "："):
-            if separator in text:
-                fieldName, fieldValue = text.split(separator, 1)
-                fieldName = fieldName.strip()
-                fieldValue = fieldValue.strip()
-                if fieldName and fieldValue:
-                    splitText = (fieldName, fieldValue)
-                    break
-        if splitText is None:
-            continue
-        fieldName, fieldValue = splitText
-        displayFacts.append(
-            {
-                "field_name": fieldName,
-                "normalized_value": fieldValue,
-                "validation_status": "accepted",
-                "correction_type": "display_fallback",
-                "source_refs": [],
-            }
-        )
-    return displayFacts
-
-
 def _filter_static_classifier_input_facts(
     facts: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -309,7 +279,7 @@ def _reconstruction_fact_table(
 def _classification_fact_text_table(
     fact_texts: list[Any],
     *,
-    title: str = "Classifier text fallback",
+    title: str = "Classification input text lines",
     max_rows: int = 12,
 ) -> html.Div | None:
     cleaned = [str(text).strip() for text in fact_texts if str(text).strip()]
@@ -576,67 +546,40 @@ def _reconstructed_tables_widget(
     )
 
 
-def input_reconstruction_card(
-    input_reconstruction: dict[str, Any],
-    classification_facts: list[Any],
+def input_processing_detail_card(
+    input_processing_view: dict[str, Any],
 ) -> html.Div | None:
-    if not input_reconstruction and not classification_facts:
+    if not input_processing_view:
         return None
 
-    productFacts = (
-        input_reconstruction.get("classification_input_product_facts")
-        or input_reconstruction.get("product_facts")
-        or []
-    )
-    llmFacts = input_reconstruction.get("llm_reconstructed_product_facts") or []
-    fallbackFacts = input_reconstruction.get("fallback_product_facts") or []
-    unresolvedFacts = (
-        input_reconstruction.get("unresolved_product_facts")
-        or input_reconstruction.get("unresolved_facts")
-        or []
-    )
-    conflicts = (
-        input_reconstruction.get("product_fact_conflicts")
-        or input_reconstruction.get("conflicts")
-        or []
-    )
-    factTexts = (
-        input_reconstruction.get("classification_input_fact_texts")
-        or input_reconstruction.get("classification_fact_texts")
-        or classification_facts
-        or []
-    )
+    status = input_processing_view.get("reconstruction_status") or {}
+    if not isinstance(status, dict):
+        status = {}
+    productFacts = input_processing_view.get("classification_input_facts") or []
+    unresolvedFacts = input_processing_view.get("unresolved_input_facts") or []
+    conflicts = input_processing_view.get("input_fact_conflicts") or []
+    factTexts = input_processing_view.get("classification_input_text_lines") or []
     if not isinstance(productFacts, list):
         productFacts = []
     if not isinstance(unresolvedFacts, list):
         unresolvedFacts = []
-    if not isinstance(llmFacts, list):
-        llmFacts = []
-    if not isinstance(fallbackFacts, list):
-        fallbackFacts = []
     if not isinstance(conflicts, list):
         conflicts = [str(conflicts)] if str(conflicts).strip() else []
-    if not productFacts:
-        productFacts = _BuildDisplayFactsFromFactTexts(factTexts)
-    reconstructedTables = input_reconstruction.get("reconstructed_tables") or []
+    if not isinstance(factTexts, list):
+        factTexts = []
+    reconstructedTables = input_processing_view.get("reconstructed_detail_tables") or []
     if not isinstance(reconstructedTables, list):
         reconstructedTables = []
-    sourceLabels = input_reconstruction.get("source_ref_labels") or {}
+    sourceLabels = input_processing_view.get("evidence_source_labels") or {}
     if not isinstance(sourceLabels, dict):
         sourceLabels = {}
-    sourceEvidencePreview = input_reconstruction.get("source_evidence_preview") or []
+    sourceEvidencePreview = input_processing_view.get("detail_evidence_rows") or []
     if not isinstance(sourceEvidencePreview, list):
         sourceEvidencePreview = []
-    reconstructionMode = input_reconstruction.get("mode") or (
-        "llm_reconstruction"
-        if input_reconstruction.get("used_llm_reconstruction")
-        else "fallback_reconstruction"
-        if fallbackFacts
-        else "unknown"
-    )
+    reconstructionMode = status.get("mode") or "unknown"
     staticClassifierFacts = _filter_static_classifier_input_facts(productFacts)
-    reconstructionError = input_reconstruction.get("error")
-    fallbackReason = input_reconstruction.get("fallback_reason")
+    reconstructionError = status.get("error")
+    fallbackReason = status.get("fallback_reason")
     beforePanel = _source_evidence_table(
         "Before reconstruction: product detail OCR evidence",
         sourceEvidencePreview,
@@ -692,11 +635,11 @@ def input_reconstruction_card(
             ),
             html.Div(
                 [
-                    _small("LLM", "on" if input_reconstruction.get("used_llm_reconstruction") else "off"),
+                    _small("LLM", "on" if status.get("used_llm_reconstruction") else "off"),
                     _small("mode", reconstructionMode),
-                    _small("detail tables", input_reconstruction.get("reconstructed_table_count") or len(reconstructedTables)),
-                    _small("candidate facts", input_reconstruction.get("fact_count") or len(productFacts)),
-                    _small("search text lines", input_reconstruction.get("fact_text_count") or len(factTexts)),
+                    _small("detail tables", status.get("detail_table_count") or len(reconstructedTables)),
+                    _small("classification facts", status.get("classification_fact_count") or len(productFacts)),
+                    _small("classification text lines", status.get("classification_text_line_count") or len(factTexts)),
                 ],
                 style={"display": "flex", "gap": "8px", "flexWrap": "wrap"},
             ),
@@ -710,8 +653,8 @@ def input_reconstruction_card(
                 ],
                 style={"marginTop": "10px", "padding": "10px", "border": "1px solid #fcd34d", "borderRadius": "8px", "background": "#fffbeb"},
             ) if reconstructionError or (
-                reconstructionMode == "fallback_reconstruction"
-                and not input_reconstruction.get("used_llm_reconstruction")
+                fallbackReason
+                and not status.get("used_llm_reconstruction")
             ) else None,
             primaryFactLayout,
             _reconstruction_fact_table(
@@ -723,7 +666,7 @@ def input_reconstruction_card(
             html.Details(
                 [
                     html.Summary(
-                        "Classifier text fallback",
+                        "Classification input text lines",
                         style={"cursor": "pointer", "fontSize": "12px", "fontWeight": 850, "color": "#334155"},
                     ),
                     _classification_fact_text_table(factTexts, title=""),
@@ -758,38 +701,17 @@ def input_reconstruction_card(
     )
 
 
-def product_input_view_card(product_input_view: dict[str, Any] | None) -> html.Div | None:
-    if not isinstance(product_input_view, dict) or not product_input_view:
+def input_processing_view_card(
+    input_processing_view: dict[str, Any] | None,
+) -> html.Div | None:
+    if not isinstance(input_processing_view, dict) or not input_processing_view:
         return None
 
-    basicInfo = product_input_view.get("product_page_basic_info") or {}
-    reconstruction = product_input_view.get("reconstruction") or {}
+    basicInfo = input_processing_view.get("page_product_facts") or {}
     if not isinstance(basicInfo, dict):
         basicInfo = {}
-    if not isinstance(reconstruction, dict):
-        reconstruction = {}
-
-    detailReconstruction = {
-        "mode": reconstruction.get("mode"),
-        "used_llm_reconstruction": reconstruction.get("used_llm_reconstruction"),
-        "fallback_reason": reconstruction.get("fallback_reason"),
-        "error": reconstruction.get("error"),
-        "reconstructed_table_count": reconstruction.get("detail_table_count"),
-        "fact_count": reconstruction.get("candidate_fact_count"),
-        "fact_text_count": reconstruction.get("candidate_text_line_count"),
-        "source_evidence_preview": product_input_view.get("detail_evidence_preview") or [],
-        "reconstructed_tables": product_input_view.get("reconstructed_detail_tables") or [],
-        "classification_input_product_facts": product_input_view.get("candidate_search_input_facts") or [],
-        "classification_input_fact_texts": product_input_view.get("candidate_search_text_lines") or [],
-        "unresolved_product_facts": product_input_view.get("unresolved_facts") or [],
-        "product_fact_conflicts": product_input_view.get("conflicts") or [],
-        "source_ref_labels": product_input_view.get("source_ref_labels") or {},
-    }
     basicPanel = _product_page_basic_card(basicInfo)
-    reconstructionPanel = input_reconstruction_card(
-        detailReconstruction,
-        product_input_view.get("candidate_search_text_lines") or [],
-    )
+    reconstructionPanel = input_processing_detail_card(input_processing_view)
     panels = [panel for panel in [basicPanel, reconstructionPanel] if panel is not None]
     if not panels:
         return None
@@ -862,7 +784,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
     status = event.get("status") or ""
 
     if stage == "Input_Intake":
-        raw = event.get("raw_input") or {}
+        raw = event.get("collected_input_summary") or {}
         if not raw:
             return None
         url_intake = raw.get("url_intake") or {}
@@ -891,7 +813,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
                 html.Div(
                     (
                         "Input reconstruction: mode={0}, llm={1}, "
-                        "search_text_lines={2}"
+                        "classification_text_lines={2}"
                     ).format(
                         raw.get("input_reconstruction_mode") or "-",
                         "yes" if raw.get("input_reconstruction_available") else "no",
@@ -913,7 +835,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
                 "Product Evidence Builder 실행 전입니다. 완료 이벤트에서 실제 OCR/composition count를 표시합니다.",
                 style={"fontSize": "12px", "color": "#64748b", "marginTop": "6px"},
             )
-        pes = partial.get("product_evidence_summary") or {}
+        pes = partial.get("input_processing_summary") or {}
         if not pes:
             return html.Div(
                 "Product evidence 생성 완료. 상세 audit은 Admin log에서 확인할 수 있습니다.",
@@ -1100,14 +1022,7 @@ def render_decision(result: dict[str, Any]) -> html.Div:
     if not dec:
         return html.Div("최종 결정이 아직 없습니다.", style=PLACEHOLDER)
 
-    # User-facing 질문은 compact DTO 필드를 우선 사용하고, 과거 결과만 blackboard fallback을 허용한다.
     user_questions = result.get("user_questions") or []
-    if not user_questions:
-        bb = result.get("blackboard") or {}
-        user_questions = [
-            q for q in (bb.get("user_questions") or [])
-            if q.get("status") == "open" and q.get("question_id") in (dec.get("user_questions") or [])
-        ]
 
     return html.Div(
         [
@@ -1136,7 +1051,13 @@ def render_decision(result: dict[str, Any]) -> html.Div:
 def render_page(result: dict[str, Any] | None = None) -> html.Div:
     result = result or {}
     run_id = result.get("run_id")
-    productInputView = product_input_view_card(result.get("product_input_view"))
+    inputProcessingView = input_processing_view_card(
+        result.get("input_processing_view"),
+    )
+    requestFacts = (
+        (result.get("request") or {}).get("facts")
+        or {}
+    )
     return html.Div(
         [
             html.Div(
@@ -1152,9 +1073,9 @@ def render_page(result: dict[str, Any] | None = None) -> html.Div:
                 ],
                 style={"borderBottom": "2px solid #2563eb", "paddingBottom": "12px", "marginBottom": "22px"},
             ),
-            render_input_form(result.get("facts")),
-            html.Div("입력 수집/복원 결과", style=LABEL) if productInputView else None,
-            productInputView,
+            render_input_form(requestFacts),
+            html.Div("입력 수집/복원 결과", style=LABEL) if inputProcessingView else None,
+            inputProcessingView,
             html.Div("진행 상태", style=LABEL),
             html.Div(render_progress(result) if result else html.Div("[Run] 버튼을 누르면 단계별 진행 상태가 표시됩니다.", style=PLACEHOLDER), id="out-progress"),
             html.Div("분류 결과", style={**LABEL, "marginTop": "22px"}),

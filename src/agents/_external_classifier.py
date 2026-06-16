@@ -242,10 +242,12 @@ def _build_compact_decision_request(
     candidates: Sequence[Any],
 ) -> Any:
     candidate_contract = _build_candidate_contract(candidates)
-    structured_facts = list(getattr(product_input, "structuredProductFacts", []) or [])
+    classification_input_facts = list(
+        getattr(product_input, "structuredProductFacts", []) or []
+    )
     unresolved_facts = list(getattr(product_input, "unresolvedProductFacts", []) or [])
     fact_conflicts = list(getattr(product_input, "productFactConflicts", []) or [])
-    classification_fact_texts = list(
+    classification_input_text_lines = list(
         getattr(product_input, "normalizedOcrFactTexts", []) or []
     )
     compact_shape = {
@@ -274,27 +276,31 @@ def _build_compact_decision_request(
         "Do not select an ingredient-specific candidate unless that ingredient or condition is explicit in the product facts.",
         "For example, `Containing eggs` requires explicit egg/난/albumen/egg powder evidence; fish/meat/stuffed candidates require explicit matching evidence and percentage conditions.",
         "For instant ramen/noodle products described as 유탕면/라면/dried noodles with wheat flour and no explicit egg/stuffed/fish/meat percentage condition, prefer the dry/other noodle candidate over egg/stuffed/meat/fish candidates.",
-        "Use structured_product_facts_json as the primary product facts for candidate review.",
-        "classification_fact_texts_json is only a retrieval/search fallback view of the same input; do not prefer it over structured_product_facts_json.",
-        "Do not infer facts that are not explicitly present in structured_product_facts_json.",
+        "Use classification_input_facts_json as the primary product facts for candidate review.",
+        "classification_input_text_lines_json is OCR/detail-text evidence, not a substitute for structured facts.",
+        "Do not infer facts that are not explicitly present in classification_input_facts_json.",
         "Use product type, physical form, processing state, storage state, ingredients, composition ratios, content weight, and origin facts when they are explicit.",
         "If a fact line appears contradictory or looks like OCR/reconstruction noise, mark the affected candidate as possible_candidate or insufficient_information instead of forcing a strong_candidate.",
         "Allowed status values: strong_candidate, possible_candidate, unlikely_candidate, insufficient_information.",
         "Review the strongest few candidates; unreviewed candidates will be filled deterministically as unlikely/insufficient.",
         "product_name: {0}".format(product_input.productName or "unknown"),
         "product_domain: {0}".format(product_input.productDomain),
-        "classification_fact_count: {0}".format(
-            len(classification_fact_texts)
+        "classification_input_text_line_count: {0}".format(
+            len(classification_input_text_lines)
         ),
-        "structured_product_facts_json:",
-        json.dumps(structured_facts[:60], ensure_ascii=False, separators=(",", ":")),
+        "classification_input_facts_json:",
+        json.dumps(
+            classification_input_facts[:60],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
         "unresolved_product_facts_json:",
         json.dumps(unresolved_facts[:20], ensure_ascii=False, separators=(",", ":")),
         "product_fact_conflicts_json:",
         json.dumps(fact_conflicts[:20], ensure_ascii=False, separators=(",", ":")),
-        "classification_fact_texts_json:",
+        "classification_input_text_lines_json:",
         json.dumps(
-            classification_fact_texts[:80],
+            classification_input_text_lines[:80],
             ensure_ascii=False,
             separators=(",", ":"),
         ),
@@ -708,19 +714,17 @@ def pes_to_input(pes: dict, *, domain_scope: str = "food_16_21") -> ProductClass
         ocr_text = str(ocr_chunks)
     composition = (
         obs.get("classification_input_fact_texts")
-        or obs.get("classification_fact_texts")
         or obs.get("composition")
         or []
     )
     if not isinstance(composition, list):
         composition = [str(composition)] if str(composition).strip() else []
-    structured_product_facts = (
+    classification_input_facts = (
         obs.get("classification_input_product_facts")
-        or obs.get("structured_product_facts")
         or []
     )
-    if not isinstance(structured_product_facts, list):
-        structured_product_facts = []
+    if not isinstance(classification_input_facts, list):
+        classification_input_facts = []
     unresolved_product_facts = obs.get("unresolved_product_facts") or []
     if not isinstance(unresolved_product_facts, list):
         unresolved_product_facts = []
@@ -735,7 +739,7 @@ def pes_to_input(pes: dict, *, domain_scope: str = "food_16_21") -> ProductClass
         domainScopes=[domain_scope],
         normalizedOcrFactTexts=[str(t) for t in composition if str(t).strip()],
         structuredProductFacts=[
-            dict(item) for item in structured_product_facts if isinstance(item, dict)
+            dict(item) for item in classification_input_facts if isinstance(item, dict)
         ],
         unresolvedProductFacts=[
             dict(item) for item in unresolved_product_facts if isinstance(item, dict)

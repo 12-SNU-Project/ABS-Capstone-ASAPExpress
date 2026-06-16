@@ -34,28 +34,12 @@ class EvidenceIntakeAgent(BaseAgent):
                 "classification_input_product_facts",
                 [],
             ),
-            "structured_product_facts": self.raw_input.get(
-                "structured_product_facts",
-                [],
-            ),
-            "llm_reconstructed_product_facts": self.raw_input.get(
-                "llm_reconstructed_product_facts",
-                [],
-            ),
-            "fallback_product_facts": self.raw_input.get(
-                "fallback_product_facts",
-                [],
-            ),
             "unresolved_product_facts": self.raw_input.get(
                 "unresolved_product_facts",
                 [],
             ),
             "product_fact_conflicts": self.raw_input.get(
                 "product_fact_conflicts",
-                [],
-            ),
-            "classification_fact_texts": self.raw_input.get(
-                "classification_fact_texts",
                 [],
             ),
             "classification_input_fact_texts": self.raw_input.get(

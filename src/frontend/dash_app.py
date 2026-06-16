@@ -94,7 +94,7 @@ def _RegisterClientsideCallbacks(app: Dash) -> None:
                 setStore({
                     job_id: null,
                     job_status: "failed",
-                    facts: facts,
+                    request: {query: query, facts: facts},
                     error: "제품명, 설명, URL 중 하나는 입력해야 합니다.",
                     events: [{
                         stage: "Input",
@@ -125,7 +125,7 @@ def _RegisterClientsideCallbacks(app: Dash) -> None:
                 const queuedResult = {
                     job_id: payload.job_id,
                     job_status: payload.status || "queued",
-                    facts: facts,
+                    request: {query: query, facts: facts},
                     events: [{
                         stage: "Pipeline",
                         status: payload.status || "queued",
@@ -147,7 +147,7 @@ def _RegisterClientsideCallbacks(app: Dash) -> None:
                 setStore({
                     job_id: null,
                     job_status: "failed",
-                    facts: facts,
+                    request: {query: query, facts: facts},
                     error: String(error && error.message ? error.message : error),
                     events: [{
                         stage: "Pipeline",
