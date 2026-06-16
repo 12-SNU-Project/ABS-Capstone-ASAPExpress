@@ -62,6 +62,7 @@ class EvidenceIntakeAgent(BaseAgent):
                 "classification_input_fact_texts",
                 [],
             ),
+            "input_reconstruction": self.raw_input.get("input_reconstruction", {}),
             "ocr_text": self.raw_input.get("ocr_text", []),
             "source_urls": self.raw_input.get("source_urls", []),
             "origin_country": self.raw_input.get("origin_country", "KR"),

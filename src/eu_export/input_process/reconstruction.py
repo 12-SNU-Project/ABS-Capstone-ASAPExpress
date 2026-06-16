@@ -42,7 +42,13 @@ PRODUCT_FACT_RECONSTRUCTION_SYSTEM_PROMPT = """
 You reconstruct structured product input facts from Korean product notice, PP-Structure table OCR, and raw OCR text.
 Return strict JSON only.
 Return exactly one JSON object. Do not append markdown, commentary, or extra braces after the root object.
-Return only these top-level keys: product_facts, unresolved_facts, conflicts, warnings.
+Return only these top-level keys: reconstructed_tables, product_facts, unresolved_facts, conflicts, warnings.
+reconstructed_tables preserves PP-Structure table OCR contents for UI review. Do not summarize PP tables away.
+reconstructed_tables must be an array of objects with exactly these keys: table_name, source_refs, rows.
+Each reconstructed_tables row must have exactly these keys:
+field_name, raw_value, normalized_value, unit, daily_value_percent, source_refs.
+For nutrition tables, return each nutrient as its own row. For label/specification tables, return each label field as its own row.
+product_facts is only the compact classification input facts derived from the same evidence.
 product_facts and unresolved_facts must be arrays of objects with exactly these keys:
 field_name, raw_value, normalized_value, source_refs, correction_type, validation_status.
 conflicts and warnings must be arrays of strings.
@@ -51,7 +57,8 @@ Do not create product facts that are absent from the provided evidence.
 Correct OCR typos only when the surrounding evidence strongly supports the correction.
 If evidence is insufficient or conflicting, use unresolved_facts or conflicts.
 The application will generate normalized_fact_texts after validation.
-Prefer concise high-value product facts: product name, food/cosmetic type, net content, storage, ingredients, allergens, nutrition, manufacturer, seller, expiry, package material.
+Preserve table rows in reconstructed_tables even when they are not selected as product_facts.
+Prefer concise high-value product_facts: product name, food/cosmetic type, net content, storage, ingredients, allergens, manufacturer, seller, expiry, package material.
 Return atomic field_name/raw_value pairs. Do not put a whole OCR block under a generic field.
 Never use field names such as OCR observation, OCR 관찰, tile, raw OCR, table marker, or evidence id.
 [tile N], [table N], source_ref, source_type, and evidence_id are collection metadata, not product facts.
@@ -80,6 +87,38 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
             ],
         },
         "output": {
+            "reconstructed_tables": [
+                {
+                    "table_name": "영양성분",
+                    "source_refs": ["evidence-1"],
+                    "rows": [
+                        {
+                            "field_name": "나트륨",
+                            "raw_value": "나트류 320mg",
+                            "normalized_value": "나트륨 320mg",
+                            "unit": "mg",
+                            "daily_value_percent": "",
+                            "source_refs": ["evidence-1"],
+                        },
+                        {
+                            "field_name": "탄수화물",
+                            "raw_value": "탄수하물 40g",
+                            "normalized_value": "탄수화물 40g",
+                            "unit": "g",
+                            "daily_value_percent": "",
+                            "source_refs": ["evidence-1"],
+                        },
+                        {
+                            "field_name": "단백질",
+                            "raw_value": "단백질 8g",
+                            "normalized_value": "단백질 8g",
+                            "unit": "g",
+                            "daily_value_percent": "",
+                            "source_refs": ["evidence-1"],
+                        },
+                    ],
+                }
+            ],
             "product_facts": [
                 {
                     "field_name": "영양성분",
@@ -111,6 +150,7 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
             ],
         },
         "output": {
+            "reconstructed_tables": [],
             "product_facts": [
                 {
                     "field_name": "제품명",
@@ -194,6 +234,29 @@ class ProductFactRecord(BaseModel):
         return "{0}: {1}".format(normalizedFieldName, displayValue)
 
 
+class ProductReconstructedTableRow(BaseModel):
+    """PP table reconstruction row preserved for UI review."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    fieldName: str = Field(alias="field_name")
+    rawValue: str = Field(default="", alias="raw_value")
+    normalizedValue: str = Field(default="", alias="normalized_value")
+    unit: str = ""
+    dailyValuePercent: str = Field(default="", alias="daily_value_percent")
+    sourceRefs: List[str] = Field(default_factory=list, alias="source_refs")
+
+
+class ProductReconstructedTable(BaseModel):
+    """PP table reconstruction preserved separately from classification facts."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    tableName: str = Field(default="", alias="table_name")
+    sourceRefs: List[str] = Field(default_factory=list, alias="source_refs")
+    rows: List[ProductReconstructedTableRow] = Field(default_factory=list)
+
+
 def _StripOcrCollectionMarkers(text: str) -> str:
     withoutInlineMarkers = INLINE_OCR_COLLECTION_MARKER_PATTERN.sub(
         "",
@@ -268,6 +331,10 @@ class ProductFactReconstructionResult(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
+    reconstructedTables: List[ProductReconstructedTable] = Field(
+        default_factory=list,
+        alias="reconstructed_tables",
+    )
     productFacts: List[ProductFactRecord] = Field(
         default_factory=list,
         alias="product_facts",
@@ -294,6 +361,14 @@ class ProductFactReconstructionResult(BaseModel):
     debugArtifacts: Dict[str, str] = Field(
         default_factory=dict,
         alias="debug_artifacts",
+    )
+    sourceRefLabels: Dict[str, str] = Field(
+        default_factory=dict,
+        alias="source_ref_labels",
+    )
+    sourceEvidencePreview: List[Dict[str, str]] = Field(
+        default_factory=list,
+        alias="source_evidence_preview",
     )
 
     @field_validator("conflicts", "warnings", mode="before")
@@ -542,6 +617,11 @@ class ProductFactReconstructionValidator:
         productFacts: List[ProductFactRecord] = []
         unresolvedFacts: List[ProductFactRecord] = []
         warnings = list(result.warnings)
+        reconstructedTables = self._CleanReconstructedTables(
+            result.reconstructedTables,
+            validEvidenceIds=validEvidenceIds,
+            warnings=warnings,
+        )
         for factRecord in result.productFacts:
             cleanedFactRecord = self._CleanFactRecord(
                 factRecord,
@@ -578,12 +658,108 @@ class ProductFactReconstructionValidator:
         normalizedFactTexts = self._BuildNormalizedFactTexts(productFacts)
         return result.model_copy(
             update={
+                "reconstructedTables": reconstructedTables,
                 "productFacts": productFacts,
                 "unresolvedFacts": unresolvedFacts,
                 "normalizedFactTexts": normalizedFactTexts,
                 "warnings": warnings,
             }
         )
+
+    def _CleanReconstructedTables(
+        self,
+        tables: Sequence[ProductReconstructedTable],
+        *,
+        validEvidenceIds: set[str],
+        warnings: List[str],
+    ) -> List[ProductReconstructedTable]:
+        cleanedTables: List[ProductReconstructedTable] = []
+        for table in tables:
+            tableName = NormalizeWhiteSpace(table.tableName) or "Reconstructed table"
+            tableSourceRefs = self._CleanSourceRefs(
+                table.sourceRefs,
+                validEvidenceIds=validEvidenceIds,
+                warnings=warnings,
+                context="table={0}".format(tableName),
+            )
+            cleanedRows: List[ProductReconstructedTableRow] = []
+            for row in table.rows:
+                fieldName = NormalizeWhiteSpace(
+                    _StripOcrCollectionMarkers(row.fieldName)
+                )
+                rawValue = NormalizeWhitespaceLines(
+                    _StripOcrCollectionMarkers(row.rawValue)
+                )
+                normalizedValue = NormalizeWhitespaceLines(
+                    _StripOcrCollectionMarkers(row.normalizedValue)
+                )
+                if fieldName == "" or (rawValue == "" and normalizedValue == ""):
+                    warnings.append(
+                        "rejected_table_row_empty_field_or_value table={0} field={1}".format(
+                            tableName,
+                            row.fieldName,
+                        )
+                    )
+                    continue
+                rowSourceRefs = self._CleanSourceRefs(
+                    row.sourceRefs,
+                    validEvidenceIds=validEvidenceIds,
+                    warnings=warnings,
+                    context="table={0} field={1}".format(tableName, fieldName),
+                )
+                cleanedRows.append(
+                    row.model_copy(
+                        update={
+                            "fieldName": fieldName,
+                            "rawValue": rawValue,
+                            "normalizedValue": normalizedValue,
+                            "unit": NormalizeWhiteSpace(row.unit),
+                            "dailyValuePercent": NormalizeWhiteSpace(
+                                row.dailyValuePercent,
+                            ),
+                            "sourceRefs": rowSourceRefs or tableSourceRefs,
+                        }
+                    )
+                )
+            if cleanedRows:
+                cleanedTables.append(
+                    table.model_copy(
+                        update={
+                            "tableName": tableName,
+                            "sourceRefs": tableSourceRefs,
+                            "rows": cleanedRows,
+                        }
+                    )
+                )
+        return cleanedTables
+
+    def _CleanSourceRefs(
+        self,
+        sourceRefs: Sequence[str],
+        *,
+        validEvidenceIds: set[str],
+        warnings: List[str],
+        context: str,
+    ) -> List[str]:
+        cleanedRefs: List[str] = []
+        invalidRefs: List[str] = []
+        for sourceRef in sourceRefs:
+            sourceRefText = NormalizeWhiteSpace(str(sourceRef))
+            if sourceRefText == "":
+                continue
+            if sourceRefText not in validEvidenceIds:
+                invalidRefs.append(sourceRefText)
+                continue
+            if sourceRefText not in cleanedRefs:
+                cleanedRefs.append(sourceRefText)
+        if invalidRefs:
+            warnings.append(
+                "rejected_invalid_source_refs {0} refs={1}".format(
+                    context,
+                    ",".join(invalidRefs),
+                )
+            )
+        return cleanedRefs
 
     def _CleanFactRecord(
         self,
@@ -892,7 +1068,9 @@ class LlmProductFactReconstructor:
             userPrompt="\n".join(
                 [
                     "아래 evidence만 사용해 상품 입력 fact JSON을 작성하라.",
-                    "출력 key는 product_facts, unresolved_facts, conflicts, warnings만 사용하라.",
+                    "출력 key는 reconstructed_tables, product_facts, unresolved_facts, conflicts, warnings만 사용하라.",
+                    "reconstructed_tables에는 PP table/raw OCR에서 복원 가능한 표 행을 가능한 한 보존하라.",
+                    "product_facts에는 분류 후보 생성에 필요한 핵심 상품 fact만 넣어라.",
                     "normalized_fact_texts, dictionary_matches, used_llm_reconstruction, fallback_reason은 출력하지 마라.",
                     "source_refs에는 evidence_id만 사용하라.",
                     json.dumps(contextPayload, ensure_ascii=False, separators=(",", ":")),
@@ -1082,4 +1260,104 @@ class ProductInputReconstructionService:
             ocrImageResults=ocrImageResults,
             combinedOcrText=combinedOcrText,
         )
-        return self._reconstructor.Reconstruct(evidencePackage)
+        reconstructionResult = self._reconstructor.Reconstruct(evidencePackage)
+        sourceRefLabels = self._BuildSourceRefLabels(
+            evidencePackage,
+            reconstructionResult,
+        )
+        return reconstructionResult.model_copy(
+            update={
+                "sourceRefLabels": sourceRefLabels,
+                "sourceEvidencePreview": self._BuildSourceEvidencePreview(
+                    evidencePackage,
+                    reconstructionResult,
+                    sourceRefLabels,
+                )
+            }
+        )
+
+    def _BuildSourceRefLabels(
+        self,
+        evidencePackage: ProductInputEvidencePackage,
+        reconstructionResult: ProductFactReconstructionResult,
+    ) -> Dict[str, str]:
+        referencedEvidenceIds = self._CollectReferencedEvidenceIds(
+            reconstructionResult,
+        )
+        labels: Dict[str, str] = {}
+        for record in evidencePackage.records:
+            if referencedEvidenceIds and record.evidenceId not in referencedEvidenceIds:
+                continue
+            labels[record.evidenceId] = self._BuildRecordSourceLabel(record)
+        return labels
+
+    def _BuildSourceEvidencePreview(
+        self,
+        evidencePackage: ProductInputEvidencePackage,
+        reconstructionResult: ProductFactReconstructionResult,
+        sourceRefLabels: Mapping[str, str],
+    ) -> List[Dict[str, str]]:
+        referencedEvidenceIds = self._CollectReferencedEvidenceIds(
+            reconstructionResult,
+        )
+        previewRecords: List[Dict[str, str]] = []
+        for record in evidencePackage.records:
+            if referencedEvidenceIds and record.evidenceId not in referencedEvidenceIds:
+                continue
+            previewRecords.append(
+                {
+                    "evidence_id": record.evidenceId,
+                    "source_type": record.sourceType,
+                    "source_label": sourceRefLabels.get(
+                        record.evidenceId,
+                        self._BuildRecordSourceLabel(record),
+                    ),
+                    "text": record.text[:800],
+                }
+            )
+            if len(previewRecords) >= 16:
+                break
+        return previewRecords
+
+    def _CollectReferencedEvidenceIds(
+        self,
+        reconstructionResult: ProductFactReconstructionResult,
+    ) -> set[str]:
+        referencedEvidenceIds = {
+            sourceRef
+            for fact in [
+                *reconstructionResult.productFacts,
+                *reconstructionResult.unresolvedFacts,
+            ]
+            for sourceRef in fact.sourceRefs
+        }
+        for table in reconstructionResult.reconstructedTables:
+            referencedEvidenceIds.update(table.sourceRefs)
+            for row in table.rows:
+                referencedEvidenceIds.update(row.sourceRefs)
+        return referencedEvidenceIds
+
+    def _BuildRecordSourceLabel(self, record: ProductInputEvidenceRecord) -> str:
+        sourceRef = record.sourceRef or record.evidenceId
+        sourceParts = sourceRef.split("-")
+        if sourceRef.startswith("notice-option-") and "-field-" in sourceRef:
+            return "상품고시 옵션 {0} 항목 {1}".format(sourceParts[2], sourceParts[4])
+        if sourceRef.startswith("notice-option-"):
+            return "상품고시 옵션 {0}".format(sourceParts[2])
+        if sourceRef.startswith("notice-field-"):
+            return "상품고시 항목 {0}".format(sourceParts[2])
+        if (
+            len(sourceParts) >= 4
+            and sourceParts[0] == "image"
+            and sourceParts[2] == "table"
+        ):
+            return "PP table 이미지 {0} 표 {1}".format(sourceParts[1], sourceParts[3])
+        if (
+            len(sourceParts) >= 4
+            and sourceParts[0] == "image"
+            and sourceParts[2] == "tile"
+        ):
+            return "Raw OCR 이미지 {0} 타일 {1}".format(sourceParts[1], sourceParts[3])
+        if sourceRef == "combined_ocr_text":
+            return "통합 OCR 텍스트"
+        return sourceRef

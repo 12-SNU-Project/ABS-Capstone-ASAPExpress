@@ -77,15 +77,21 @@ class KurlyPipelineResult(BaseModel):
             by_alias=True,
             include={
                 "productFacts",
+                "reconstructedTables",
                 "unresolvedFacts",
                 "conflicts",
                 "normalizedFactTexts",
                 "warnings",
                 "usedLlmReconstruction",
                 "fallbackReason",
+                "sourceRefLabels",
+                "sourceEvidencePreview",
             },
         )
         productFacts = list(reconstructionData.get("product_facts", []))
+        reconstructedTables = list(
+            reconstructionData.get("reconstructed_tables", [])
+        )
         unresolvedFacts = list(reconstructionData.get("unresolved_facts", []))
         classificationFactTexts = list(
             reconstructionData.get("normalized_fact_texts", [])
@@ -153,10 +159,12 @@ class KurlyPipelineResult(BaseModel):
                     else None
                 ),
                 "fact_count": len(productFacts),
+                "reconstructed_table_count": len(reconstructedTables),
                 "unresolved_count": len(unresolvedFacts),
                 "conflict_count": len(reconstructionData.get("conflicts", [])),
                 "fact_text_count": len(classificationFactTexts),
                 "classification_input_product_facts": productFacts,
+                "reconstructed_tables": reconstructedTables,
                 "llm_reconstructed_product_facts": (
                     productFacts if usedLlmReconstruction else []
                 ),
@@ -168,6 +176,12 @@ class KurlyPipelineResult(BaseModel):
                     reconstructionData.get("conflicts", [])
                 ),
                 "classification_input_fact_texts": classificationFactTexts,
+                "source_ref_labels": dict(
+                    reconstructionData.get("source_ref_labels", {})
+                ),
+                "source_evidence_preview": list(
+                    reconstructionData.get("source_evidence_preview", [])
+                ),
                 "warnings": list(reconstructionData.get("warnings", [])),
                 "debug_artifact_count": len(
                     self.inputReconstructionResult.debugArtifacts

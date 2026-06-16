@@ -183,11 +183,20 @@ class RunRegistry:
         snapshot = self.ReadSnapshot(runId)
         if snapshot is None:
             return {}
-        resultData = dict(snapshot.get("result") or snapshot.get("partial_result") or {})
+        baseResult = snapshot.get("result") or snapshot.get("partial_result") or {}
+        resultData = self._CompactSnapshotResult(baseResult)
         resultData["job_id"] = runId
         resultData["job_status"] = snapshot.get("status")
         resultData["events"] = snapshot.get("events") or []
-        resultData["facts"] = snapshot.get("facts") or {}
+        requestFacts = snapshot.get("facts") or {}
+        resultData["facts"] = requestFacts
+        resultData["request_facts"] = requestFacts
+        productInputView = self._BuildSnapshotProductInputView(
+            snapshot,
+            resultData,
+        )
+        if productInputView:
+            resultData["product_input_view"] = productInputView
         if snapshot.get("error"):
             resultData["error"] = snapshot.get("error")
             resultData["traceback"] = snapshot.get("traceback")
@@ -217,7 +226,11 @@ class RunRegistry:
             if runMissing:
                 yield self._FormatSse(
                     "error",
-                    {"message": "run_not_found", "run_id": runId},
+                    {
+                        "error": "run_not_found",
+                        "message": "No run exists for the requested run_id.",
+                        "run_id": runId,
+                    },
                 )
                 return
 
@@ -280,12 +293,45 @@ class RunRegistry:
     def _CompactEvent(self, event: Mapping[str, Any]) -> dict[str, Any]:
         eventData = dict(event)
         rawInput = eventData.get("raw_input")
+        rawProductInputView = (
+            self._BuildProductInputViewFromFacts(rawInput)
+            if isinstance(rawInput, Mapping)
+            else {}
+        )
         if isinstance(rawInput, Mapping):
             eventData["raw_input"] = self._CompactRawInput(rawInput)
         partialResult = eventData.get("partial_result")
         if isinstance(partialResult, Mapping):
-            eventData["partial_result"] = self._CompactPipelineResult(partialResult)
+            compactPartialResult = self._CompactPipelineResult(partialResult)
+            if rawProductInputView and "product_input_view" not in compactPartialResult:
+                compactPartialResult["product_input_view"] = rawProductInputView
+            eventData["partial_result"] = compactPartialResult
+        elif rawProductInputView:
+            eventData["partial_result"] = {
+                "product_input_view": rawProductInputView,
+            }
         return eventData
+
+    def _CompactSnapshotResult(self, result: Any) -> dict[str, Any]:
+        if not isinstance(result, Mapping):
+            return {}
+        allowedKeys = {
+            "run_id",
+            "run_dir",
+            "audit_ref",
+            "candidate_code_set",
+            "document_package",
+            "decision",
+            "agent_results",
+            "user_questions",
+            "product_evidence_summary",
+            "product_input_view",
+        }
+        return {
+            key: value
+            for key, value in result.items()
+            if key in allowedKeys
+        }
 
     def _CompactRawInput(self, rawInput: Mapping[str, Any]) -> dict[str, Any]:
         compact = {
@@ -297,6 +343,13 @@ class RunRegistry:
                 "ingredient_list",
                 "classification_input_fact_texts",
                 "classification_fact_texts",
+                "classification_input_product_facts",
+                "structured_product_facts",
+                "llm_reconstructed_product_facts",
+                "fallback_product_facts",
+                "unresolved_product_facts",
+                "product_fact_conflicts",
+                "input_reconstruction",
             }
         }
         for textListKey in (
@@ -321,14 +374,34 @@ class RunRegistry:
                         str(item)[:500] for item in textList[:24]
                     ]
 
+        for recordListKey in (
+            "classification_input_product_facts",
+            "structured_product_facts",
+            "llm_reconstructed_product_facts",
+            "fallback_product_facts",
+            "unresolved_product_facts",
+            "product_fact_conflicts",
+        ):
+            recordList = rawInput.get(recordListKey)
+            if isinstance(recordList, list):
+                compact[f"{recordListKey}_count"] = len(recordList)
+
         composition = rawInput.get("composition")
         if isinstance(composition, list) and len(composition) > 24:
             compact["composition"] = composition[:24]
             compact["composition_count"] = len(composition)
         inputReconstruction = rawInput.get("input_reconstruction")
         if isinstance(inputReconstruction, Mapping):
-            compact["input_reconstruction"] = self._CompactInputReconstruction(
-                inputReconstruction,
+            compact["input_reconstruction_available"] = True
+            compact["input_reconstruction_mode"] = inputReconstruction.get("mode")
+            compact["input_reconstruction_error"] = inputReconstruction.get("error")
+            compact["reconstructed_table_count"] = (
+                inputReconstruction.get("reconstructed_table_count")
+                or len(inputReconstruction.get("reconstructed_tables") or [])
+            )
+            compact["reconstructed_fact_count"] = (
+                inputReconstruction.get("fact_count")
+                or len(inputReconstruction.get("classification_input_product_facts") or [])
             )
         return compact
 
@@ -350,6 +423,9 @@ class RunRegistry:
             productEvidenceSummary = self._BuildProductEvidenceSummary(blackboard)
             if productEvidenceSummary:
                 compact["product_evidence_summary"] = productEvidenceSummary
+            productInputView = self._BuildProductInputViewFromBlackboard(blackboard)
+            if productInputView:
+                compact["product_input_view"] = productInputView
             userQuestions = self._BuildOpenUserQuestions(
                 blackboard,
                 compact.get("decision"),
@@ -365,22 +441,289 @@ class RunRegistry:
             }
         return compact
 
-    def _CompactInputReconstruction(
+    def _BuildSnapshotProductInputView(
         self,
-        inputReconstruction: Mapping[str, Any],
+        snapshot: Mapping[str, Any],
+        resultData: Mapping[str, Any],
     ) -> dict[str, Any]:
-        compact = dict(inputReconstruction)
-        for textListKey in ("classification_input_fact_texts", "classification_fact_texts"):
-            if textListKey not in inputReconstruction:
+        existingView = resultData.get("product_input_view")
+        if isinstance(existingView, Mapping):
+            return self._CompactProductInputView(existingView)
+
+        events = snapshot.get("events") or []
+        if isinstance(events, list):
+            for event in reversed(events):
+                if not isinstance(event, Mapping):
+                    continue
+                partialResult = event.get("partial_result") or {}
+                if isinstance(partialResult, Mapping):
+                    eventView = partialResult.get("product_input_view")
+                    if isinstance(eventView, Mapping):
+                        return self._CompactProductInputView(eventView)
+                rawInput = event.get("raw_input")
+                if isinstance(rawInput, Mapping) and rawInput:
+                    productInputView = self._BuildProductInputViewFromFacts(rawInput)
+                    if productInputView:
+                        return productInputView
+
+        requestFacts = snapshot.get("facts") or {}
+        return (
+            self._BuildProductInputViewFromFacts(requestFacts)
+            if isinstance(requestFacts, Mapping)
+            else {}
+        )
+
+    def _BuildProductInputViewFromBlackboard(
+        self,
+        blackboard: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        productEvidenceState = blackboard.get("product_evidence_state") or {}
+        if not isinstance(productEvidenceState, Mapping):
+            return {}
+        observedFacts = productEvidenceState.get("observed_facts") or {}
+        if not isinstance(observedFacts, Mapping):
+            return {}
+        return self._BuildProductInputViewFromFacts(observedFacts)
+
+    def _BuildProductInputViewFromFacts(
+        self,
+        facts: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        if not isinstance(facts, Mapping):
+            return {}
+
+        sourceUrls = facts.get("source_urls") or []
+        if isinstance(sourceUrls, str):
+            sourceUrls = [sourceUrls] if sourceUrls.strip() else []
+        if not isinstance(sourceUrls, list):
+            sourceUrls = []
+        url = str(facts.get("url") or (sourceUrls[0] if sourceUrls else "") or "")
+        inputReconstruction = facts.get("input_reconstruction") or {}
+        if not isinstance(inputReconstruction, Mapping):
+            inputReconstruction = {}
+        hasBasicInfo = any(
+            str(value).strip()
+            for value in (
+                facts.get("product_name"),
+                facts.get("description"),
+                url,
+            )
+        )
+        hasReconstruction = any(
+            inputReconstruction.get(key)
+            for key in (
+                "source_evidence_preview",
+                "reconstructed_tables",
+                "classification_input_product_facts",
+                "product_facts",
+                "classification_input_fact_texts",
+                "classification_fact_texts",
+            )
+        )
+        hasStructuredFacts = any(
+            facts.get(key)
+            for key in (
+                "classification_input_product_facts",
+                "structured_product_facts",
+                "classification_input_fact_texts",
+                "classification_fact_texts",
+            )
+        )
+        if not (hasBasicInfo or hasReconstruction or hasStructuredFacts):
+            return {}
+
+        productInputView = {
+            "product_page_basic_info": {
+                "product_name": facts.get("product_name") or "",
+                "description": facts.get("description") or "",
+                "url": url,
+                "source_urls": [str(item) for item in sourceUrls if str(item).strip()],
+            },
+            "detail_evidence_preview": inputReconstruction.get(
+                "source_evidence_preview",
+                [],
+            ),
+            "reconstructed_detail_tables": inputReconstruction.get(
+                "reconstructed_tables",
+                [],
+            ),
+            "candidate_search_input_facts": (
+                inputReconstruction.get("classification_input_product_facts")
+                or inputReconstruction.get("product_facts")
+                or facts.get("classification_input_product_facts")
+                or facts.get("structured_product_facts")
+                or []
+            ),
+            "candidate_search_text_lines": (
+                inputReconstruction.get("classification_input_fact_texts")
+                or inputReconstruction.get("classification_fact_texts")
+                or facts.get("classification_input_fact_texts")
+                or facts.get("classification_fact_texts")
+                or []
+            ),
+            "unresolved_facts": (
+                inputReconstruction.get("unresolved_product_facts")
+                or inputReconstruction.get("unresolved_facts")
+                or facts.get("unresolved_product_facts")
+                or []
+            ),
+            "conflicts": (
+                inputReconstruction.get("product_fact_conflicts")
+                or inputReconstruction.get("conflicts")
+                or facts.get("product_fact_conflicts")
+                or []
+            ),
+            "source_ref_labels": inputReconstruction.get("source_ref_labels") or {},
+            "reconstruction": {
+                "mode": inputReconstruction.get("mode") or "",
+                "used_llm_reconstruction": bool(
+                    inputReconstruction.get("used_llm_reconstruction"),
+                ),
+                "fallback_reason": inputReconstruction.get("fallback_reason") or "",
+                "error": inputReconstruction.get("error") or "",
+                "detail_table_count": (
+                    inputReconstruction.get("reconstructed_table_count")
+                    or len(inputReconstruction.get("reconstructed_tables") or [])
+                ),
+                "candidate_fact_count": (
+                    inputReconstruction.get("fact_count")
+                    or len(inputReconstruction.get("classification_input_product_facts") or [])
+                ),
+                "candidate_text_line_count": (
+                    inputReconstruction.get("fact_text_count")
+                    or len(inputReconstruction.get("classification_input_fact_texts") or [])
+                ),
+            },
+        }
+        return self._CompactProductInputView(productInputView)
+
+    def _CompactProductInputView(
+        self,
+        productInputView: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        basicInfo = productInputView.get("product_page_basic_info") or {}
+        if not isinstance(basicInfo, Mapping):
+            basicInfo = {}
+        reconstruction = productInputView.get("reconstruction") or {}
+        if not isinstance(reconstruction, Mapping):
+            reconstruction = {}
+
+        return {
+            "product_page_basic_info": {
+                "product_name": str(basicInfo.get("product_name") or ""),
+                "description": str(basicInfo.get("description") or "")[:1000],
+                "url": str(basicInfo.get("url") or ""),
+                "source_urls": self._CompactTextList(
+                    basicInfo.get("source_urls"),
+                    limit=8,
+                    textLimit=700,
+                ),
+            },
+            "detail_evidence_preview": self._CompactMappingList(
+                productInputView.get("detail_evidence_preview"),
+                limit=12,
+                textLimit=700,
+            ),
+            "reconstructed_detail_tables": self._CompactReconstructedTables(
+                productInputView.get("reconstructed_detail_tables"),
+            ),
+            "candidate_search_input_facts": self._CompactMappingList(
+                productInputView.get("candidate_search_input_facts"),
+                limit=80,
+                textLimit=700,
+            ),
+            "candidate_search_text_lines": self._CompactTextList(
+                productInputView.get("candidate_search_text_lines"),
+                limit=80,
+                textLimit=700,
+            ),
+            "unresolved_facts": self._CompactMappingList(
+                productInputView.get("unresolved_facts"),
+                limit=40,
+                textLimit=700,
+            ),
+            "conflicts": self._CompactTextList(
+                productInputView.get("conflicts"),
+                limit=20,
+                textLimit=700,
+            ),
+            "source_ref_labels": self._CompactTextMapping(
+                productInputView.get("source_ref_labels"),
+                textLimit=200,
+            ),
+            "reconstruction": dict(reconstruction),
+        }
+
+    def _CompactTextList(
+        self,
+        records: Any,
+        *,
+        limit: int,
+        textLimit: int,
+    ) -> list[str]:
+        if isinstance(records, str):
+            records = [records]
+        if not isinstance(records, list):
+            return []
+        return [
+            str(item)[:textLimit]
+            for item in records[:limit]
+            if str(item).strip()
+        ]
+
+    def _CompactTextMapping(
+        self,
+        records: Any,
+        *,
+        textLimit: int,
+    ) -> dict[str, str]:
+        if not isinstance(records, Mapping):
+            return {}
+        return {
+            str(key): str(value)[:textLimit]
+            for key, value in records.items()
+        }
+
+    def _CompactMappingList(
+        self,
+        records: Any,
+        *,
+        limit: int,
+        textLimit: int,
+    ) -> list[dict[str, Any]]:
+        if not isinstance(records, list):
+            return []
+        return [
+            {
+                str(key): str(value)[:textLimit]
+                if isinstance(value, str)
+                else value
+                for key, value in record.items()
+            }
+            for record in records[:limit]
+            if isinstance(record, Mapping)
+        ]
+
+    def _CompactReconstructedTables(self, tables: Any) -> list[dict[str, Any]]:
+        if not isinstance(tables, list):
+            return []
+        compactTables: list[dict[str, Any]] = []
+        for table in tables[:8]:
+            if not isinstance(table, Mapping):
                 continue
-            textList = inputReconstruction.get(textListKey) or []
-            if isinstance(textList, list):
-                compact[textListKey] = [str(item)[:500] for item in textList[:24]]
-                compact[f"{textListKey}_count"] = len(textList)
-                compact[f"{textListKey}_char_count"] = sum(
-                    len(str(item)) for item in textList
-                )
-        return compact
+            rows = table.get("rows") or []
+            compactTable = {
+                key: value
+                for key, value in table.items()
+                if key != "rows"
+            }
+            compactTable["rows"] = self._CompactMappingList(
+                rows,
+                limit=80,
+                textLimit=700,
+            )
+            compactTables.append(compactTable)
+        return compactTables
 
     def _BuildProductEvidenceSummary(
         self,
@@ -395,7 +738,7 @@ class RunRegistry:
         ocrText = observedFacts.get("ocr_text") or []
         composition = observedFacts.get("composition") or []
         inferredFacts = productEvidenceState.get("inferred_facts") or []
-        return {
+        summary = {
             "product_id": productEvidenceState.get("product_id"),
             "product_name": observedFacts.get("product_name"),
             "ocr_text_count": len(ocrText) if isinstance(ocrText, list) else 0,
@@ -405,6 +748,19 @@ class RunRegistry:
             ),
             "unknowns": productEvidenceState.get("unknowns") or [],
         }
+        inputReconstruction = observedFacts.get("input_reconstruction")
+        if isinstance(inputReconstruction, Mapping):
+            summary["input_reconstruction_available"] = True
+            summary["input_reconstruction_mode"] = inputReconstruction.get("mode")
+            summary["reconstructed_table_count"] = (
+                inputReconstruction.get("reconstructed_table_count")
+                or len(inputReconstruction.get("reconstructed_tables") or [])
+            )
+            summary["reconstructed_fact_count"] = (
+                inputReconstruction.get("fact_count")
+                or len(inputReconstruction.get("classification_input_product_facts") or [])
+            )
+        return summary
 
     def _BuildOpenUserQuestions(
         self,
