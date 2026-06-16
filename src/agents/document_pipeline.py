@@ -234,7 +234,6 @@ def collect_kurly_url_facts(
         "product_domain": product_input.productDomain or "unknown",
         "source_product_page": source_product_page,
         "ocr_text": [product_input.ocrText] if product_input.ocrText else [],
-        "ingredient_list": list(product_input.normalizedOcrFactTexts or []),
         "classification_input_product_facts": classification_input_product_facts,
         "unresolved_product_facts": unresolved_product_facts,
         "product_fact_conflicts": product_fact_conflicts,
@@ -280,14 +279,16 @@ def build_raw_input_from_ui(
             facts.setdefault("warnings", [])
             facts["warnings"].append(f"kurly_url_intake_failed: {exc}")
 
-    source_urls = facts.get("source_urls") or facts.get("source_url") or facts.get("url") or []
+    source_urls = facts.get("source_urls") or facts.get("url") or []
     if isinstance(source_urls, str):
         source_urls = [source_urls] if source_urls.strip() else []
 
-    ocr_text = facts.get("ocr_text") or facts.get("coi_text") or facts.get("coi") or []
+    ocr_text = facts.get("ocr_text") or []
     if isinstance(ocr_text, str):
         ocr_text = [ocr_text] if ocr_text.strip() else []
     input_reconstruction = facts.get("input_reconstruction") or {}
+    if not isinstance(input_reconstruction, dict):
+        input_reconstruction = {}
     classification_input_product_facts = (
         facts.get("classification_input_product_facts")
         or input_reconstruction.get("classification_input_product_facts")
@@ -296,19 +297,16 @@ def build_raw_input_from_ui(
     unresolved_product_facts = (
         facts.get("unresolved_product_facts")
         or input_reconstruction.get("unresolved_product_facts")
-        or input_reconstruction.get("unresolved_facts")
         or []
     )
     product_fact_conflicts = (
         facts.get("product_fact_conflicts")
         or input_reconstruction.get("product_fact_conflicts")
-        or input_reconstruction.get("conflicts")
         or []
     )
     classification_input_text_lines = (
         facts.get("classification_input_fact_texts")
         or input_reconstruction.get("classification_input_fact_texts")
-        or facts.get("ingredient_list")
         or []
     )
 
@@ -338,59 +336,39 @@ def _normalize_product_facts(facts: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_kurly_result_facts(facts: dict[str, Any]) -> dict[str, Any]:
-    """Flatten the Kurly collector/OCR result shape into Product facts.
-
-    Accepts the object shape emitted by ABS-Capstone-ASAPExpress, e.g.
-    parsed_product_page/product/ocr_summary/combined_ocr_text.
-    """
+    """Flatten current Kurly URL intake result shape into Product facts."""
     if not isinstance(facts, dict):
         return {}
-    raw_collection = facts.get("raw_collection") or {}
-    parsed = (
-        facts.get("parsed_product_page")
-        or facts.get("source_product_page")
-        or raw_collection.get("parsed_product_page")
-        or {}
-    )
-    product = facts.get("product") or {}
-    ocr_summary = facts.get("ocr_summary") or facts.get("ocr") or {}
-    ocr_evidence = raw_collection.get("ocr_evidence") or {}
-    llm_reconstruction = (
-        facts.get("llm_reconstruction")
-        or facts.get("input_reconstruction")
-        or {}
-    )
-    normalization = ocr_summary.get("normalization") or {}
+    parsed = facts.get("source_product_page") or {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    input_reconstruction = facts.get("input_reconstruction") or {}
+    if not isinstance(input_reconstruction, dict):
+        input_reconstruction = {}
 
     fact_texts = (
-        llm_reconstruction.get("classification_input_fact_texts")
-        or llm_reconstruction.get("fact_texts_for_classification")
-        or llm_reconstruction.get("normalized_fact_texts")
-        or normalization.get("fact_texts")
+        facts.get("classification_input_fact_texts")
+        or input_reconstruction.get("classification_input_fact_texts")
         or []
     )
+    if not isinstance(fact_texts, list):
+        fact_texts = []
     classification_input_product_facts = (
         facts.get("classification_input_product_facts")
-        or llm_reconstruction.get("classification_input_product_facts")
+        or input_reconstruction.get("classification_input_product_facts")
         or []
     )
     unresolved_product_facts = (
         facts.get("unresolved_product_facts")
-        or llm_reconstruction.get("unresolved_product_facts")
-        or llm_reconstruction.get("unresolved_facts")
+        or input_reconstruction.get("unresolved_product_facts")
         or []
     )
     product_fact_conflicts = (
         facts.get("product_fact_conflicts")
-        or llm_reconstruction.get("product_fact_conflicts")
-        or llm_reconstruction.get("conflicts")
+        or input_reconstruction.get("product_fact_conflicts")
         or []
     )
-    combined_ocr_text = (
-        facts.get("combined_ocr_text")
-        or ocr_evidence.get("combined_ocr_text")
-        or ""
-    )
+    combined_ocr_text = facts.get("combined_ocr_text") or ""
     ocr_text: list[str] = []
     if isinstance(combined_ocr_text, str) and combined_ocr_text.strip():
         ocr_text.append(combined_ocr_text)
@@ -403,20 +381,17 @@ def _normalize_kurly_result_facts(facts: dict[str, Any]) -> dict[str, Any]:
         or facts.get("url")
     )
     product_name = (
-        product.get("product_name")
+        facts.get("product_name")
         or parsed.get("product_name")
-        or facts.get("product_name")
     )
     short_description = (
-        product.get("short_description")
+        facts.get("short_description")
         or parsed.get("short_description")
-        or facts.get("short_description")
         or facts.get("description")
     )
     product_domain = (
-        product.get("product_domain")
+        facts.get("product_domain")
         or parsed.get("product_domain")
-        or facts.get("product_domain")
     )
 
     flattened = dict(facts)
@@ -427,11 +402,10 @@ def _normalize_kurly_result_facts(facts: dict[str, Any]) -> dict[str, Any]:
         "short_description": short_description or "",
         "product_domain": product_domain or facts.get("product_domain") or "unknown",
         "product_category": facts.get("product_category") or product_domain or "unknown",
-        "brand_name": product.get("brand_name") or parsed.get("brand_name") or facts.get("brand_name") or "",
-        "package_type": product.get("package_type") or parsed.get("package_type") or facts.get("package_type") or "",
-        "sale_unit": product.get("sale_unit") or parsed.get("sale_unit") or facts.get("sale_unit") or "",
+        "brand_name": facts.get("brand_name") or parsed.get("brand_name") or "",
+        "package_type": facts.get("package_type") or parsed.get("package_type") or "",
+        "sale_unit": facts.get("sale_unit") or parsed.get("sale_unit") or "",
         "ocr_text": ocr_text or facts.get("ocr_text") or [],
-        "ingredient_list": fact_texts or facts.get("ingredient_list") or [],
         "classification_input_product_facts": classification_input_product_facts,
         "unresolved_product_facts": unresolved_product_facts,
         "product_fact_conflicts": product_fact_conflicts,

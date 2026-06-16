@@ -106,83 +106,14 @@ class PipelineRunResult(BaseModel):
         return self.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
-class RunRegistry:
-    """Thread-safe run state and event buffer."""
+class PipelineResultProjector:
+    """Internal pipeline output을 UI/API용 compact projection으로 변환한다."""
 
-    def __init__(self) -> None:
-        self._runs: dict[str, dict[str, Any]] = {}
-        self._condition = threading.Condition(threading.Lock())
-
-    def CreateRun(
+    def BuildUiResult(
         self,
+        snapshot: Mapping[str, Any],
         runId: str,
-        *,
-        query: str,
-        facts: Mapping[str, Any],
-        status: str = "queued",
-        events: list[dict[str, Any]] | None = None,
-        reuseActive: bool = False,
-    ) -> str:
-        requestSignature = self._BuildRequestSignature(query, facts)
-        with self._condition:
-            if reuseActive:
-                activeRunId = self._FindActiveRunBySignatureLocked(requestSignature)
-                if activeRunId:
-                    return activeRunId
-            self._runs[runId] = {
-                "status": status,
-                "query": query,
-                "request_signature": requestSignature,
-                "facts": self._CompactInputFacts(facts),
-                "events": [],
-            }
-            for event in events or []:
-                self._AppendEventLocked(runId, event)
-            self._condition.notify_all()
-            return runId
-
-    def UpdateRun(self, runId: str, **updates: Any) -> None:
-        with self._condition:
-            run = self._runs.setdefault(runId, {"events": []})
-            if isinstance(updates.get("facts"), Mapping):
-                updates["facts"] = self._CompactInputFacts(updates["facts"])
-            run.update(updates)
-            self._condition.notify_all()
-
-    def FindActiveRun(
-        self,
-        *,
-        query: str,
-        facts: Mapping[str, Any],
-    ) -> str | None:
-        requestSignature = self._BuildRequestSignature(query, facts)
-        with self._condition:
-            return self._FindActiveRunBySignatureLocked(requestSignature)
-
-    def AppendEvent(self, runId: str, event: Mapping[str, Any]) -> None:
-        with self._condition:
-            self._AppendEventLocked(runId, event)
-            self._condition.notify_all()
-
-    def ReadSnapshot(self, runId: str) -> dict[str, Any] | None:
-        with self._condition:
-            run = self._runs.get(runId)
-            if run is None:
-                return None
-            snapshot = dict(run)
-            snapshot["events"] = list(run.get("events") or [])
-            partialResult = run.get("partial_result")
-            if isinstance(partialResult, dict):
-                snapshot["partial_result"] = dict(partialResult)
-            result = run.get("result")
-            if isinstance(result, dict):
-                snapshot["result"] = dict(result)
-            return snapshot
-
-    def BuildUiResult(self, runId: str) -> dict[str, Any]:
-        snapshot = self.ReadSnapshot(runId)
-        if snapshot is None:
-            return {}
+    ) -> dict[str, Any]:
         baseResult = snapshot.get("result") or snapshot.get("partial_result") or {}
         resultData = self._CompactSnapshotResult(baseResult)
         resultData["job_id"] = runId
@@ -193,8 +124,7 @@ class RunRegistry:
         if inputProcessingView:
             resultData["input_processing_view"] = inputProcessingView
         if snapshot.get("error"):
-            resultData["error"] = snapshot.get("error")
-            resultData["traceback"] = snapshot.get("traceback")
+            resultData["error"] = str(snapshot.get("error") or "")
         return resultData
 
     def BuildPipelineResultProjection(
@@ -205,95 +135,7 @@ class RunRegistry:
         result.update(self._CompactPipelineResult(pipelineOutput))
         return result
 
-    def StreamEvents(
-        self,
-        runId: str,
-        *,
-        startIndex: int = 0,
-        heartbeatSeconds: float = 15.0,
-    ) -> Iterator[str]:
-        eventIndex = max(0, startIndex)
-        while True:
-            with self._condition:
-                self._condition.wait_for(
-                    lambda: runId not in self._runs
-                    or self._HasPendingEvent(runId, eventIndex)
-                    or self._IsTerminal(runId),
-                    timeout=heartbeatSeconds,
-                )
-                run = self._runs.get(runId)
-                runMissing = run is None
-                events = [] if runMissing else list(run.get("events") or [])
-                status = "" if runMissing else str(run.get("status") or "")
-
-            if runMissing:
-                yield self._FormatSse(
-                    "error",
-                    {
-                        "error": "run_not_found",
-                        "message": "No run exists for the requested run_id.",
-                        "run_id": runId,
-                    },
-                )
-                return
-
-            while eventIndex < len(events):
-                yield self._FormatSse(
-                    "pipeline_event",
-                    events[eventIndex],
-                    eventId=str(eventIndex),
-                )
-                eventIndex += 1
-
-            if status in {"completed", "failed"} and eventIndex >= len(events):
-                yield self._FormatSse(
-                    "run_complete",
-                    {"run_id": runId, "status": status},
-                )
-                return
-
-            yield ": heartbeat\n\n"
-
-    def _AppendEventLocked(self, runId: str, event: Mapping[str, Any]) -> None:
-        run = self._runs.setdefault(runId, {"events": []})
-        eventData = self._CompactEvent(event)
-        eventData.setdefault("ts", time.strftime("%H:%M:%S"))
-        run.setdefault("events", []).append(eventData)
-        partialResult = eventData.get("partial_result")
-        if isinstance(partialResult, dict):
-            run["partial_result"] = partialResult
-
-    def _HasPendingEvent(self, runId: str, eventIndex: int) -> bool:
-        run = self._runs.get(runId)
-        return bool(run is not None and len(run.get("events") or []) > eventIndex)
-
-    def _IsTerminal(self, runId: str) -> bool:
-        run = self._runs.get(runId)
-        return bool(run is not None and run.get("status") in {"completed", "failed"})
-
-    def _BuildRequestSignature(self, query: str, facts: Mapping[str, Any]) -> str:
-        payload = {
-            "query": query,
-            "facts": dict(facts),
-        }
-        encoded = json.dumps(
-            payload,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            default=str,
-        ).encode("utf-8")
-        return hashlib.sha256(encoded).hexdigest()
-
-    def _FindActiveRunBySignatureLocked(self, requestSignature: str) -> str | None:
-        for runId, run in self._runs.items():
-            if run.get("status") not in {"queued", "running"}:
-                continue
-            if run.get("request_signature") == requestSignature:
-                return runId
-        return None
-
-    def _CompactEvent(self, event: Mapping[str, Any]) -> dict[str, Any]:
+    def CompactEvent(self, event: Mapping[str, Any]) -> dict[str, Any]:
         eventData = dict(event)
         rawInput = eventData.pop("raw_input", None)
         inputProcessingView = (
@@ -302,7 +144,7 @@ class RunRegistry:
             else {}
         )
         if isinstance(rawInput, Mapping):
-            eventData["collected_input_summary"] = self._CompactInputFacts(rawInput)
+            eventData["collected_input_summary"] = self.CompactInputFacts(rawInput)
         partialResult = eventData.get("partial_result")
         if isinstance(partialResult, Mapping):
             compactPartialResult = self._CompactPipelineResult(partialResult)
@@ -315,35 +157,7 @@ class RunRegistry:
             }
         return eventData
 
-    def _CompactSnapshotResult(self, result: Any) -> dict[str, Any]:
-        if not isinstance(result, Mapping):
-            return {}
-        allowedKeys = {
-            "run_id",
-            "run_dir",
-            "audit_ref",
-            "candidate_code_set",
-            "document_package",
-            "decision",
-            "agent_results",
-            "user_questions",
-            "input_processing_summary",
-            "input_processing_view",
-        }
-        return {
-            key: value
-            for key, value in result.items()
-            if key in allowedKeys
-        }
-
-    def _BuildRequestView(self, snapshot: Mapping[str, Any]) -> dict[str, Any]:
-        facts = snapshot.get("facts")
-        return {
-            "query": str(snapshot.get("query") or ""),
-            "facts": dict(facts) if isinstance(facts, Mapping) else {},
-        }
-
-    def _CompactInputFacts(self, rawInput: Mapping[str, Any]) -> dict[str, Any]:
+    def CompactInputFacts(self, rawInput: Mapping[str, Any]) -> dict[str, Any]:
         compact = {
             key: value
             for key, value in rawInput.items()
@@ -371,9 +185,7 @@ class RunRegistry:
                 compact[f"{textListKey}_char_count"] = sum(
                     len(str(item)) for item in textList
                 )
-                if textListKey in {
-                    "classification_input_fact_texts",
-                }:
+                if textListKey == "classification_input_fact_texts":
                     compact[textListKey] = [
                         str(item)[:500] for item in textList[:24]
                     ]
@@ -405,6 +217,34 @@ class RunRegistry:
                 or len(inputReconstruction.get("classification_input_product_facts") or [])
             )
         return compact
+
+    def _CompactSnapshotResult(self, result: Any) -> dict[str, Any]:
+        if not isinstance(result, Mapping):
+            return {}
+        allowedKeys = {
+            "run_id",
+            "run_dir",
+            "audit_ref",
+            "candidate_code_set",
+            "document_package",
+            "decision",
+            "agent_results",
+            "user_questions",
+            "input_processing_summary",
+            "input_processing_view",
+        }
+        return {
+            key: value
+            for key, value in result.items()
+            if key in allowedKeys
+        }
+
+    def _BuildRequestView(self, snapshot: Mapping[str, Any]) -> dict[str, Any]:
+        facts = snapshot.get("facts")
+        return {
+            "query": str(snapshot.get("query") or ""),
+            "facts": dict(facts) if isinstance(facts, Mapping) else {},
+        }
 
     def _CompactPipelineResult(self, pipelineResult: Mapping[str, Any]) -> dict[str, Any]:
         blackboard = pipelineResult.get("blackboard")
@@ -533,13 +373,11 @@ class RunRegistry:
             ),
             "unresolved_input_facts": (
                 inputReconstruction.get("unresolved_product_facts")
-                or inputReconstruction.get("unresolved_facts")
                 or facts.get("unresolved_product_facts")
                 or []
             ),
             "input_fact_conflicts": (
                 inputReconstruction.get("product_fact_conflicts")
-                or inputReconstruction.get("conflicts")
                 or facts.get("product_fact_conflicts")
                 or []
             ),
@@ -750,6 +588,181 @@ class RunRegistry:
                 or question.get("question_id") in userQuestionIds
             )
         ]
+
+
+class RunRegistry:
+    """Thread-safe run state and event buffer."""
+
+    def __init__(self) -> None:
+        self._runs: dict[str, dict[str, Any]] = {}
+        self._condition = threading.Condition(threading.Lock())
+        self._projector = PipelineResultProjector()
+
+    def CreateRun(
+        self,
+        runId: str,
+        *,
+        query: str,
+        facts: Mapping[str, Any],
+        status: str = "queued",
+        events: list[dict[str, Any]] | None = None,
+        reuseActive: bool = False,
+    ) -> str:
+        requestSignature = self._BuildRequestSignature(query, facts)
+        with self._condition:
+            if reuseActive:
+                activeRunId = self._FindActiveRunBySignatureLocked(requestSignature)
+                if activeRunId:
+                    return activeRunId
+            self._runs[runId] = {
+                "status": status,
+                "query": query,
+                "request_signature": requestSignature,
+                "facts": self._projector.CompactInputFacts(facts),
+                "events": [],
+            }
+            for event in events or []:
+                self._AppendEventLocked(runId, event)
+            self._condition.notify_all()
+            return runId
+
+    def UpdateRun(self, runId: str, **updates: Any) -> None:
+        with self._condition:
+            run = self._runs.setdefault(runId, {"events": []})
+            if isinstance(updates.get("facts"), Mapping):
+                updates["facts"] = self._projector.CompactInputFacts(updates["facts"])
+            run.update(updates)
+            self._condition.notify_all()
+
+    def FindActiveRun(
+        self,
+        *,
+        query: str,
+        facts: Mapping[str, Any],
+    ) -> str | None:
+        requestSignature = self._BuildRequestSignature(query, facts)
+        with self._condition:
+            return self._FindActiveRunBySignatureLocked(requestSignature)
+
+    def AppendEvent(self, runId: str, event: Mapping[str, Any]) -> None:
+        with self._condition:
+            self._AppendEventLocked(runId, event)
+            self._condition.notify_all()
+
+    def ReadSnapshot(self, runId: str) -> dict[str, Any] | None:
+        with self._condition:
+            run = self._runs.get(runId)
+            if run is None:
+                return None
+            snapshot = dict(run)
+            snapshot["events"] = list(run.get("events") or [])
+            partialResult = run.get("partial_result")
+            if isinstance(partialResult, dict):
+                snapshot["partial_result"] = dict(partialResult)
+            result = run.get("result")
+            if isinstance(result, dict):
+                snapshot["result"] = dict(result)
+            return snapshot
+
+    def BuildUiResult(self, runId: str) -> dict[str, Any]:
+        snapshot = self.ReadSnapshot(runId)
+        if snapshot is None:
+            return {}
+        return self._projector.BuildUiResult(snapshot, runId)
+
+    def BuildPipelineResultProjection(
+        self,
+        pipelineOutput: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return self._projector.BuildPipelineResultProjection(pipelineOutput)
+
+    def StreamEvents(
+        self,
+        runId: str,
+        *,
+        startIndex: int = 0,
+        heartbeatSeconds: float = 15.0,
+    ) -> Iterator[str]:
+        eventIndex = max(0, startIndex)
+        while True:
+            with self._condition:
+                self._condition.wait_for(
+                    lambda: runId not in self._runs
+                    or self._HasPendingEvent(runId, eventIndex)
+                    or self._IsTerminal(runId),
+                    timeout=heartbeatSeconds,
+                )
+                run = self._runs.get(runId)
+                runMissing = run is None
+                events = [] if runMissing else list(run.get("events") or [])
+                status = "" if runMissing else str(run.get("status") or "")
+
+            if runMissing:
+                yield self._FormatSse(
+                    "error",
+                    {
+                        "error": "run_not_found",
+                        "message": "No run exists for the requested run_id.",
+                        "run_id": runId,
+                    },
+                )
+                return
+
+            while eventIndex < len(events):
+                yield self._FormatSse(
+                    "pipeline_event",
+                    events[eventIndex],
+                    eventId=str(eventIndex),
+                )
+                eventIndex += 1
+
+            if status in {"completed", "failed"} and eventIndex >= len(events):
+                yield self._FormatSse(
+                    "run_complete",
+                    {"run_id": runId, "status": status},
+                )
+                return
+
+            yield ": heartbeat\n\n"
+
+    def _AppendEventLocked(self, runId: str, event: Mapping[str, Any]) -> None:
+        run = self._runs.setdefault(runId, {"events": []})
+        eventData = self._projector.CompactEvent(event)
+        eventData.setdefault("ts", time.strftime("%H:%M:%S"))
+        run.setdefault("events", []).append(eventData)
+        partialResult = eventData.get("partial_result")
+        if isinstance(partialResult, dict):
+            run["partial_result"] = partialResult
+
+    def _HasPendingEvent(self, runId: str, eventIndex: int) -> bool:
+        run = self._runs.get(runId)
+        return bool(run is not None and len(run.get("events") or []) > eventIndex)
+
+    def _IsTerminal(self, runId: str) -> bool:
+        run = self._runs.get(runId)
+        return bool(run is not None and run.get("status") in {"completed", "failed"})
+
+    def _BuildRequestSignature(self, query: str, facts: Mapping[str, Any]) -> str:
+        payload = {
+            "query": query,
+            "facts": dict(facts),
+        }
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _FindActiveRunBySignatureLocked(self, requestSignature: str) -> str | None:
+        for runId, run in self._runs.items():
+            if run.get("status") not in {"queued", "running"}:
+                continue
+            if run.get("request_signature") == requestSignature:
+                return runId
+        return None
 
     def _FormatSse(
         self,

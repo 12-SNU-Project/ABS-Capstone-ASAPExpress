@@ -165,12 +165,6 @@ class KurlyPipelineResult(BaseModel):
                 "fact_text_count": len(classificationFactTexts),
                 "classification_input_product_facts": productFacts,
                 "reconstructed_tables": reconstructedTables,
-                "llm_reconstructed_product_facts": (
-                    productFacts if usedLlmReconstruction else []
-                ),
-                "fallback_product_facts": (
-                    [] if usedLlmReconstruction else productFacts
-                ),
                 "unresolved_product_facts": unresolvedFacts,
                 "product_fact_conflicts": list(
                     reconstructionData.get("conflicts", [])

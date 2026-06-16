@@ -166,9 +166,7 @@ def _short_text(value: Any, *, max_length: int = 160) -> str:
 def _fact_display_value(fact: dict[str, Any]) -> str:
     return str(
         fact.get("normalized_value")
-        or fact.get("normalizedValue")
         or fact.get("raw_value")
-        or fact.get("rawValue")
         or ""
     ).strip()
 
@@ -177,7 +175,7 @@ def _fact_source_text(
     fact: dict[str, Any],
     source_labels: dict[str, Any] | None = None,
 ) -> str:
-    refs = fact.get("source_refs") or fact.get("sourceRefs") or []
+    refs = fact.get("source_refs") or []
     if isinstance(refs, list):
         labels = source_labels or {}
         return ", ".join(
@@ -195,7 +193,7 @@ def _filter_static_classifier_input_facts(
     for fact in facts:
         if not isinstance(fact, dict):
             continue
-        fieldName = str(fact.get("field_name") or fact.get("fieldName") or "")
+        fieldName = str(fact.get("field_name") or "")
         factText = "{0} {1}".format(fieldName, _fact_display_value(fact)).lower()
         if any(marker in factText for marker in CLASSIFIER_INPUT_EXCLUDED_FACT_MARKERS):
             continue
@@ -242,13 +240,13 @@ def _reconstruction_fact_table(
         html.Div("Source", style=headerCell),
     ]
     for fact in facts[:max_rows]:
-        fieldName = fact.get("field_name") or fact.get("fieldName") or "-"
+        fieldName = fact.get("field_name") or "-"
         rows.extend(
             [
                 html.Div(_short_text(fieldName, max_length=72), style={**cell, "fontWeight": 850}),
                 html.Div(_short_text(_fact_display_value(fact), max_length=220), style=cell),
-                html.Div(_short_text(fact.get("validation_status") or fact.get("validationStatus") or "-", max_length=48), style=cell),
-                html.Div(_short_text(fact.get("correction_type") or fact.get("correctionType") or "-", max_length=48), style=cell),
+                html.Div(_short_text(fact.get("validation_status") or "-", max_length=48), style=cell),
+                html.Div(_short_text(fact.get("correction_type") or "-", max_length=48), style=cell),
                 html.Div(
                     _short_text(
                         _fact_source_text(fact, source_labels),
@@ -739,7 +737,7 @@ def render_input_form(facts: dict | None = None) -> html.Div:
                     ),
                     dcc.Textarea(
                         id="ipt-description",
-                        placeholder="제품 설명 / 원재료 / OCR text / COI text",
+                        placeholder="제품 설명 / 원재료 / OCR text",
                         value=facts.get("description") or "",
                         style=TEXTAREA,
                     ),
@@ -1063,7 +1061,7 @@ def render_page(result: dict[str, Any] | None = None) -> html.Div:
             html.Div(
                 [
                     html.H1("ASAP 수출 분류", style={"fontSize": "24px", "margin": 0}),
-                    html.Div("URL / text / COI evidence -> CN8/TARIC10 후보 -> 서류 상세 연결", style={"fontSize": "12px", "color": "#64748b", "marginTop": "4px"}),
+                    html.Div("URL / text / OCR evidence -> CN8/TARIC10 후보 -> 서류 상세 연결", style={"fontSize": "12px", "color": "#64748b", "marginTop": "4px"}),
                     html.Div(
                         [
                             html.A("Admin log", href=f"/admin/{run_id}" if run_id else "/admin", style={"fontSize": "12px", "fontWeight": 850}),

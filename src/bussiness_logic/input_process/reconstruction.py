@@ -1090,12 +1090,27 @@ class LlmProductFactReconstructor:
             raise ValueError("empty LLM response")
         try:
             payload = json.loads(strippedText)
-        except json.JSONDecodeError:
-            startIndex = strippedText.find("{")
-            endIndex = strippedText.rfind("}")
-            if startIndex < 0 or endIndex <= startIndex:
-                raise
-            payload = json.loads(strippedText[startIndex : endIndex + 1])
+        except json.JSONDecodeError as jsonError:
+            decoder = json.JSONDecoder()
+            searchIndex = 0
+            payload = None
+            while searchIndex < len(strippedText):
+                startIndex = strippedText.find("{", searchIndex)
+                if startIndex < 0:
+                    raise jsonError
+                try:
+                    parsedValue, objectEndIndex = decoder.raw_decode(
+                        strippedText[startIndex:],
+                    )
+                except json.JSONDecodeError:
+                    searchIndex = startIndex + 1
+                    continue
+                if isinstance(parsedValue, dict):
+                    payload = parsedValue
+                    break
+                searchIndex = startIndex + objectEndIndex
+            if payload is None:
+                raise jsonError
         if not isinstance(payload, dict):
             raise ValueError("LLM reconstruction response must be a JSON object.")
         return payload
