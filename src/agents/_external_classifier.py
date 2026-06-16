@@ -278,7 +278,6 @@ def _build_compact_decision_request(
         "classification_fact_texts_json is only a retrieval/search fallback view of the same input; do not prefer it over structured_product_facts_json.",
         "Do not infer facts that are not explicitly present in structured_product_facts_json.",
         "Use product type, physical form, processing state, storage state, ingredients, composition ratios, content weight, and origin facts when they are explicit.",
-        "Do not treat allergen warnings, cross-contamination warnings, or same-facility statements as proof that the allergen is a main ingredient or satisfies an ingredient-specific CN condition.",
         "If a fact line appears contradictory or looks like OCR/reconstruction noise, mark the affected candidate as possible_candidate or insufficient_information instead of forcing a strong_candidate.",
         "Allowed status values: strong_candidate, possible_candidate, unlikely_candidate, insufficient_information.",
         "Review the strongest few candidates; unreviewed candidates will be filled deterministically as unlikely/insufficient.",

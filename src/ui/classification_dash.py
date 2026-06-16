@@ -63,6 +63,28 @@ MONO = {
     "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
     "fontSize": "12px",
 }
+CLASSIFIER_INPUT_EXCLUDED_FACT_MARKERS = {
+    "알레르기",
+    "혼입",
+    "같은 제조시설",
+    "같은 제조 시설",
+    "판매처",
+    "판매원",
+    "판매자",
+    "유통전문판매원",
+    "판매업소",
+    "제조원",
+    "제조사",
+    "제조업소",
+    "제조업체",
+    "allergen",
+    "allergy",
+    "may contain",
+    "same facility",
+    "seller",
+    "vendor",
+    "manufacturer",
+}
 STAGE_DISPLAY_NAMES = {
     "Input": "Input",
     "Pipeline": "Pipeline",
@@ -196,6 +218,21 @@ def _BuildDisplayFactsFromFactTexts(factTexts: list[Any]) -> list[dict[str, Any]
     return displayFacts
 
 
+def _filter_static_classifier_input_facts(
+    facts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+    for fact in facts:
+        if not isinstance(fact, dict):
+            continue
+        fieldName = str(fact.get("field_name") or fact.get("fieldName") or "")
+        factText = "{0} {1}".format(fieldName, _fact_display_value(fact)).lower()
+        if any(marker in factText for marker in CLASSIFIER_INPUT_EXCLUDED_FACT_MARKERS):
+            continue
+        filtered.append(fact)
+    return filtered
+
+
 def _reconstruction_fact_table(
     title: str,
     facts: list[dict[str, Any]],
@@ -272,6 +309,7 @@ def _reconstruction_fact_table(
 def _classification_fact_text_table(
     fact_texts: list[Any],
     *,
+    title: str = "Classifier text fallback",
     max_rows: int = 12,
 ) -> html.Div | None:
     cleaned = [str(text).strip() for text in fact_texts if str(text).strip()]
@@ -307,7 +345,7 @@ def _classification_fact_text_table(
 
     return html.Div(
         [
-            html.Div("Candidate-search text lines", style={"fontSize": "12px", "fontWeight": 900, "color": "#0f172a", "marginBottom": "8px"}),
+            html.Div(title, style={"fontSize": "12px", "fontWeight": 900, "color": "#0f172a", "marginBottom": "8px"}) if title else None,
             html.Div(rows, style={"border": "1px solid #e5e7eb", "borderRadius": "8px", "overflow": "hidden"}),
         ],
         style={"marginTop": "10px"},
@@ -341,7 +379,7 @@ def _product_page_basic_card(raw: dict[str, Any]) -> html.Div | None:
     ]
     return html.Div(
         [
-            html.Div("Product Page Basic Info", style={"fontSize": "13px", "fontWeight": 950, "color": "#0f172a"}),
+            html.Div("Product Facts", style={"fontSize": "13px", "fontWeight": 950, "color": "#0f172a"}),
             html.Div(
                 "웹페이지 상단 영역에서 수집한 상품 기본 정보",
                 style={"fontSize": "12px", "color": "#64748b", "marginTop": "2px", "marginBottom": "8px"},
@@ -596,20 +634,21 @@ def input_reconstruction_card(
         if fallbackFacts
         else "unknown"
     )
+    staticClassifierFacts = _filter_static_classifier_input_facts(productFacts)
     reconstructionError = input_reconstruction.get("error")
     fallbackReason = input_reconstruction.get("fallback_reason")
     beforePanel = _source_evidence_table(
-        "Product detail image / OCR evidence",
+        "Before reconstruction: product detail OCR evidence",
         sourceEvidencePreview,
     )
     afterPanel = (
         _reconstructed_tables_widget(
-            "Reconstructed detail tables",
+            "After reconstruction: reconstructed detail tables",
             reconstructedTables,
             source_labels=sourceLabels,
         )
         or _reconstruction_fact_table(
-            "Reconstructed detail facts",
+            "After reconstruction: reconstructed detail facts",
             productFacts,
             source_labels=sourceLabels,
         )
@@ -676,21 +715,22 @@ def input_reconstruction_card(
             ) else None,
             primaryFactLayout,
             _reconstruction_fact_table(
-                "Candidate-search input facts",
-                productFacts,
+                "Static classifier input facts",
+                staticClassifierFacts,
                 source_labels=sourceLabels,
-            ) if productFacts else None,
-            _reconstruction_fact_table(
-                "LLM candidate facts",
-                llmFacts,
-                source_labels=sourceLabels,
-            ) if llmFacts and llmFacts != productFacts else None,
-            _reconstruction_fact_table(
-                "Fallback candidate facts",
-                fallbackFacts,
-                source_labels=sourceLabels,
-            ) if fallbackFacts and fallbackFacts != productFacts else None,
-            _classification_fact_text_table(factTexts),
+                max_rows=16,
+            ) if staticClassifierFacts else None,
+            html.Details(
+                [
+                    html.Summary(
+                        "Classifier text fallback",
+                        style={"cursor": "pointer", "fontSize": "12px", "fontWeight": 850, "color": "#334155"},
+                    ),
+                    _classification_fact_text_table(factTexts, title=""),
+                ],
+                open=False,
+                style={"marginTop": "10px"},
+            ) if factTexts else None,
             _reconstruction_fact_table(
                 "Unresolved facts",
                 unresolvedFacts,
@@ -745,26 +785,17 @@ def product_input_view_card(product_input_view: dict[str, Any] | None) -> html.D
         "product_fact_conflicts": product_input_view.get("conflicts") or [],
         "source_ref_labels": product_input_view.get("source_ref_labels") or {},
     }
-    panels = [
-        panel
-        for panel in [
-            _product_page_basic_card(basicInfo),
-            input_reconstruction_card(
-                detailReconstruction,
-                product_input_view.get("candidate_search_text_lines") or [],
-            ),
-        ]
-        if panel is not None
-    ]
+    basicPanel = _product_page_basic_card(basicInfo)
+    reconstructionPanel = input_reconstruction_card(
+        detailReconstruction,
+        product_input_view.get("candidate_search_text_lines") or [],
+    )
+    panels = [panel for panel in [basicPanel, reconstructionPanel] if panel is not None]
     if not panels:
         return None
     return html.Div(
         panels,
         style={
-            "display": "grid",
-            "gridTemplateColumns": "repeat(auto-fit, minmax(min(100%, 460px), 1fr))",
-            "gap": "12px",
-            "alignItems": "start",
             "marginBottom": "20px",
         },
     )

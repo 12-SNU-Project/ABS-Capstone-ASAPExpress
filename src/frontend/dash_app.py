@@ -41,7 +41,7 @@ def CreateDashApp(
             html.Div(id="page-root"),
         ],
         style={
-            "maxWidth": "1200px",
+            "maxWidth": "1440px",
             "margin": "0 auto",
             "padding": "24px",
             "fontFamily": "-apple-system, BlinkMacSystemFont, 'SF Pro', 'Apple SD Gothic Neo', sans-serif",

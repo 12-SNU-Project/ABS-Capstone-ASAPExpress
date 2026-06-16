@@ -58,7 +58,8 @@ Correct OCR typos only when the surrounding evidence strongly supports the corre
 If evidence is insufficient or conflicting, use unresolved_facts or conflicts.
 The application will generate normalized_fact_texts after validation.
 Preserve table rows in reconstructed_tables even when they are not selected as product_facts.
-Prefer concise high-value product_facts: product name, food/cosmetic type, net content, storage, ingredients, allergens, manufacturer, seller, expiry, package material.
+Prefer concise product_facts for classification: product name, food/cosmetic type, physical form, processing state, preparation/use, storage state, ingredients, composition ratios, net content, and origin/manufacture country when explicit.
+Do not include allergen warnings, same-facility/cross-contamination warnings, seller/vendor/manufacturer business-party names, expiry, package material, or marketing copy as product_facts unless they directly change customs classification.
 Return atomic field_name/raw_value pairs. Do not put a whole OCR block under a generic field.
 Never use field names such as OCR observation, OCR 관찰, tile, raw OCR, table marker, or evidence id.
 [tile N], [table N], source_ref, source_type, and evidence_id are collection metadata, not product facts.
