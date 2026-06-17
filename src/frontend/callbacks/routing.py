@@ -1,0 +1,72 @@
+"""Page routing callback for the Dash shell."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from dash import Dash, Input, Output
+
+from backend import PipelineApi
+from frontend.callbacks.navigation import SplitPath
+from frontend.ui import admin_dash, classification_dash, document_package_view
+
+
+def RegisterRoutingCallbacks(app: Dash, pipelineApi: PipelineApi) -> None:
+    @app.callback(
+        Output("page-root", "children"),
+        Input("url", "pathname"),
+        Input("store-result", "data"),
+        Input("document-panel-store", "data"),
+        Input("input-detail-drawer-store", "data"),
+        Input("candidate-tree-drawer-store", "data"),
+        Input("classification-result-drawer-store", "data"),
+    )
+    def render_page(
+        pathname: str | None,
+        result_data: dict[str, Any] | None,
+        document_panel: str | None,
+        input_detail_drawer_open: bool | None,
+        candidate_tree_drawer_open: bool | None,
+        classification_result_drawer_open: bool | None,
+    ) -> Any:
+        parts = SplitPath(pathname)
+        if not parts:
+            return classification_dash.render_page(
+                result_data,
+                input_detail_drawer_open=bool(input_detail_drawer_open),
+                candidate_tree_drawer_open=bool(candidate_tree_drawer_open),
+                classification_result_drawer_open=bool(classification_result_drawer_open),
+            )
+
+        page = parts[0]
+        if page == "document":
+            runId = parts[1] if len(parts) > 1 else ""
+            taric10 = parts[2] if len(parts) > 2 else ""
+            documentPackagePayload = pipelineApi.ReadDocumentPackageDetail(runId, taric10)
+            return document_package_view.render_detail_page(
+                runId,
+                taric10,
+                document_panel or "overview",
+                documentPackage=documentPackagePayload.get("document_package"),
+            )
+
+        if page == "admin":
+            runId = parts[1] if len(parts) > 1 else None
+            debugResult = pipelineApi.ReadAdminRunDebug(runId or "")
+            live = (
+                result_data
+                if result_data and (not runId or result_data.get("run_id") == runId)
+                else None
+            )
+            return admin_dash.render_page(
+                run_id=runId,
+                debug_result=debugResult,
+                live_result=live,
+            )
+
+        return classification_dash.render_page(
+            result_data,
+            input_detail_drawer_open=bool(input_detail_drawer_open),
+            candidate_tree_drawer_open=bool(candidate_tree_drawer_open),
+            classification_result_drawer_open=bool(classification_result_drawer_open),
+        )
