@@ -71,7 +71,7 @@ def CreateDashApp(
     )
 
     _RegisterClientsideCallbacks(app)
-    _RegisterServerCallbacks(app)
+    _RegisterServerCallbacks(app, pipelineApi)
     return app
 
 
@@ -96,7 +96,7 @@ def _RegisterClientsideCallbacks(app: Dash) -> None:
     )
 
 
-def _RegisterServerCallbacks(app: Dash) -> None:
+def _RegisterServerCallbacks(app: Dash, pipelineApi: PipelineApi) -> None:
     @app.callback(
         Output("app-sidebar", "children"),
         Input("url", "pathname"),
