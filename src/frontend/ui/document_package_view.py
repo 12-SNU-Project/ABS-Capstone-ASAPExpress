@@ -36,7 +36,7 @@ def _render_missing_document_package(runId: str | None, taric10: str) -> html.Di
                 style={"marginTop": "8px"},
             ),
             html.Div(
-                f"run_id {runId or '-'} · TARIC10 {CleanCode(taric10) or '-'}",
+                f"run/job {runId or '-'} · TARIC10 {CleanCode(taric10) or '-'}",
                 className="caption",
                 style={"marginTop": "8px"},
             ),
@@ -63,7 +63,7 @@ def render_detail_page(
                 [
                     html.H2("EU 수출 서류 패키지", className="title"),
                     html.Div(
-                        f"run_id {runId or '-'} · TARIC10 {CleanCode(taric10) or '-'}",
+                        f"run/job {runId or '-'} · TARIC10 {CleanCode(taric10) or '-'}",
                         className="caption",
                     ),
                 ],

@@ -6,6 +6,7 @@ import json
 import re
 from typing import Any
 
+import dash_mantine_components as dmc
 from dash import dcc, html
 
 from frontend.ui.document_package_debug import render_debug_pipeline_log
@@ -17,6 +18,9 @@ STATUS = {
     "pending": ("판단보류", "#475569", "#f8fafc"),
     "exempted": ("면제", "#166534", "#f0fdf4"),
 }
+
+OVERVIEW_PANEL_ID = "overview"
+DRAWER_PANEL_IDS = {"scenario", "bundles"}
 
 
 def CleanCode(value: str) -> str:
@@ -246,6 +250,43 @@ def _unresolved_context(pkg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _documents_from_checklist(checklist: dict[str, Any]) -> list[dict[str, Any]]:
+    documents = checklist.get("documents") or []
+    if isinstance(documents, list):
+        return [
+            document
+            for document in documents
+            if isinstance(document, dict)
+        ]
+    if not isinstance(documents, dict):
+        return []
+
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for status, names in documents.items():
+        if not isinstance(names, list):
+            continue
+        for name in names:
+            text = _compact_text(name)
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            out.append({
+                "document_code": re.sub(r"[^A-Z0-9]+", "_", text.upper()).strip("_") or text,
+                "document_name_ko": text,
+                "decision_status": str(status or "conditional"),
+                "required_level": str(status or "conditional"),
+                "prepared_by": "exporter / seller / logistics party",
+                "submitted_to": "EU importer / customs broker",
+                "fields": [],
+                "pre_checks": [],
+                "post_requirements": [],
+                "missing_facts": [],
+                "taric_certificates": [],
+            })
+    return out
+
+
 def document_view_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
     """Use DocumentAgent's view model when a pipeline package provides it.
 
@@ -267,7 +308,9 @@ def document_view_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
     preferential = sections.get("preferential_evidence") or {}
     required_docs = sections.get("required_documents") or {}
     product = sections.get("product_regulations") or {}
-    checklist = sections.get("document_checklist") or {}
+    checklist = sections.get("document_checklist") or pkg.get("checklist_summary") or {}
+    if not isinstance(checklist, dict):
+        checklist = {}
     pre_taric_checks = sections.get("pre_taric_checks") or {}
 
     reqs = pkg.get("requirements") or []
@@ -291,7 +334,7 @@ def document_view_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
         "additional_duty": overview.get("additional_duty"),
         "groups": groups,
         "document_checklist": checklist,
-        "baseline_documents": checklist.get("documents") or [],
+        "baseline_documents": _documents_from_checklist(checklist),
         "pre_taric_checks": pre_taric_checks.get("checks") or checklist.get("pre_taric_checks") or [],
         "counts": overview.get("counts") or {},
         "metrics": metrics,
@@ -326,18 +369,14 @@ def render_result(pkg, panel, options):
     controls = cx["controls"]
     duties = cx["duties"]
     product_reqs = cx["product_reqs"]
-    selected = panel or "overview"
+    selected = panel or OVERVIEW_PANEL_ID
     product_count = (
         len(cx.get("product_pre") or [])
         + len(cx.get("product_post") or [])
         or sum(len(r.get("detailed_requirements") or []) for r in product_reqs)
     )
 
-    panel_defs = [
-        ("overview", "전체 결론", "요약"),
-        ("scenario", "시나리오", "기본/우대"),
-        ("bundles", "추가 상세서류", f"{len(additional_documents) or len(groups)}개"),
-    ]
+    panel_defs = _document_panel_defs(len(baseline_documents) or len(additional_documents) or len(groups))
 
     children = [
         html.Div(
@@ -359,23 +398,103 @@ def render_result(pkg, panel, options):
                         node("통관 조건", f"{len(controls)} control / {len(duties)} duty", "node-red"),
                         node("기본 관세", duty_rate(third_country), "node-amber"),
                         node("FTA 우대 가능 시", duty_rate(fta_pref), "node-green"),
-                        node("추가 상세서류", f"{len(additional_documents) or len(groups)} docs", "node-blue"),
+                        node("추천 서류", f"{len(baseline_documents) or len(additional_documents) or len(groups)} docs", "node-blue"),
                     ],
                     className="flow-grid",
                 )
             ],
             className="flow",
         ),
-        html.Div(
-            [
-                html.Button([html.Div(title), html.Div(sub, style={"fontSize": "11px", "fontWeight": 700, "marginTop": "3px"})], id={"type": "panel-btn", "panel": pid}, className=f"panel-btn {'active' if selected == pid else ''}")
-                for pid, title, sub in panel_defs
-            ],
-            className="panel-buttons",
-        ),
-        html.Div(render_panel(pkg, selected, cx, options or []), className="panel"),
+        _render_drawer_toolbar(panel_defs, selected),
+        html.Div(render_panel(pkg, OVERVIEW_PANEL_ID, cx, options or []), className="panel"),
+        _render_detail_drawer(pkg, selected, cx, options or [], panel_defs),
     ]
     return children
+
+
+def _document_panel_defs(additionalDocumentCount: int) -> list[tuple[str, str, str]]:
+    return [
+        (OVERVIEW_PANEL_ID, "전체 결론", "기본 화면"),
+        ("scenario", "시나리오", "기본/우대"),
+        ("bundles", "서류 추천", f"{additionalDocumentCount}개"),
+    ]
+
+
+def _render_drawer_toolbar(
+    panelDefs: list[tuple[str, str, str]],
+    selected: str,
+) -> dmc.Group:
+    return dmc.Group(
+        [
+            dmc.Button(
+                [html.Div(title), html.Div(sub, style={"fontSize": "11px", "fontWeight": 750})],
+                id={"type": "panel-btn", "panel": panelId},
+                variant="filled" if selected == panelId else "light",
+                color="blue" if panelId in DRAWER_PANEL_IDS else "gray",
+                radius="sm",
+                size="sm",
+                className="drawer-action-btn",
+                style={"height": "auto", "minHeight": "54px", "lineHeight": 1.2},
+            )
+            for panelId, title, sub in panelDefs
+        ],
+        gap="xs",
+        wrap="wrap",
+        className="drawer-toolbar",
+    )
+
+
+def _render_detail_drawer(
+    pkg: dict[str, Any],
+    selected: str,
+    cx: dict[str, Any],
+    options: list[str],
+    panelDefs: list[tuple[str, str, str]],
+) -> dmc.Drawer:
+    panelInfo = {panelId: (title, sub) for panelId, title, sub in panelDefs}
+    drawerPanel = selected if selected in DRAWER_PANEL_IDS else ""
+    title, sub = panelInfo.get(drawerPanel, ("상세 보기", ""))
+    return dmc.Drawer(
+        id="document-detail-drawer",
+        opened=bool(drawerPanel),
+        position="right",
+        size="min(1040px, 92vw)",
+        padding="lg",
+        title=_render_drawer_title(title, sub),
+        withCloseButton=False,
+        closeOnClickOutside=False,
+        closeOnEscape=False,
+        lockScroll=True,
+        keepMounted=False,
+        overlayProps={"backgroundOpacity": 0.42, "blur": 2},
+        zIndex=3000,
+        children=html.Div(
+            render_panel(pkg, drawerPanel, cx, options) if drawerPanel else [],
+            className="drawer-panel-body",
+        ),
+    )
+
+
+def _render_drawer_title(title: str, sub: str) -> html.Div:
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Div(title, className="drawer-title-main"),
+                    html.Div(sub, className="drawer-title-sub") if sub else None,
+                ]
+            ),
+            dmc.Button(
+                "닫기",
+                id={"type": "drawer-close-btn", "target": "document-package"},
+                variant="subtle",
+                color="gray",
+                size="xs",
+                radius="sm",
+            ),
+        ],
+        className="drawer-title",
+    )
 
 
 def render_unresolved(pkg: dict[str, Any], options: list[str]):
@@ -424,9 +543,10 @@ def render_panel(pkg: dict[str, Any], panel: str, cx: dict[str, Any], options: l
         return render_preferential(cx["preferential_measures"])
     if panel == "bundles":
         if cx.get("baseline_documents"):
-            return render_additional_documents(
-                _additional_detail_documents(cx.get("baseline_documents") or []),
+            return render_document_checklist(
+                cx.get("baseline_documents") or [],
                 cx.get("pre_taric_checks") or [],
+                cx.get("document_checklist") or {},
                 cx.get("groups") or [],
             )
         return render_bundles(cx["groups"])
@@ -911,7 +1031,7 @@ def render_overview(cx: dict[str, Any], options: list[str], pkg: dict[str, Any])
     items = [
         ("TARIC 확인 코드", f"{len(cx['controls'])}개 control measure"),
         ("관세 시나리오", f"{len(cx['duties'])}개 duty/preference measure"),
-        ("추가 상세서류", f"{len(_additional_detail_documents(cx.get('baseline_documents') or []) or cx['groups'])}개 chapter/domain document"),
+        ("추천 서류", f"{len(cx.get('baseline_documents') or []) or len(_additional_detail_documents(cx.get('baseline_documents') or []) or cx['groups'])}개 document"),
     ]
     left = html.Div(
         [

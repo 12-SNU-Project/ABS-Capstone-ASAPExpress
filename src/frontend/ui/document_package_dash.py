@@ -26,6 +26,7 @@ for _path in (PROJECT_ROOT, PROJECT_ROOT / "src"):
     if _path.exists() and str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
+import dash_mantine_components as dmc
 from dash import ALL, MATCH, Dash, Input, Output, State, ctx, dcc, html, no_update
 
 from agents.document_package import _dc_to_dict, get_document_package
@@ -62,7 +63,11 @@ EXAMPLE_FACTS = {
     for code, _, facts in EXAMPLES
 }
 
-app = Dash(__name__, suppress_callback_exceptions=True)
+app = Dash(
+    __name__,
+    suppress_callback_exceptions=True,
+    assets_folder=str(Path(__file__).resolve().parent / "assets"),
+)
 server = app.server
 
 
@@ -532,66 +537,69 @@ def parse_facts_json(facts_text: str) -> dict[str, Any]:
     return parsed
 
 
-def render_shell() -> html.Div:
-    return html.Div(
-        [
-            dcc.Store(id="package-store"),
-            dcc.Store(id="panel-store", data="overview"),
-            html.Aside(
-                [
-                    html.H1("ASAP 서류 패키지", className="brand"),
-                    html.Div("TARIC10 기준 EU 수입 관세/서류/제품규제 확인", className="subtle"),
-                    html.Div(className="divider"),
-                    html.Div("예제", className="label"),
-                    html.Div(
-                        [
-                            html.Button(
-                                [html.Div(code, className="example-code"), html.Div(label, className="example-label")],
-                                id={"type": "example-btn", "code": code},
-                                className="example-btn",
-                            )
-                            for code, label, _ in EXAMPLES
-                        ]
-                    ),
-                    html.Div(className="divider"),
-                    html.Details(
-                        [
-                            html.Summary("Product facts JSON"),
-                            dcc.Textarea(id="facts-input", value=fmt_json(DEFAULT_FACTS), className="textarea"),
-                        ]
-                    ),
-                    html.Div(className="divider"),
-                    dcc.Checklist(
-                        id="options",
-                        options=[
-                            {"label": " CELEX 본문 발췌 포함", "value": "celex"},
-                            {"label": " 한국 무관 measure 표시", "value": "nonkr"},
-                            {"label": " Raw JSON 표시", "value": "raw"},
-                            {"label": " Debug pipeline log 표시", "value": "debug"},
-                        ],
-                        value=[],
-                        className="subtle",
-                    ),
-                ],
-                className="sidebar",
-            ),
-            html.Main(
-                [
-                    html.Div([html.H2("EU 수출 서류 패키지", className="title"), html.Div("기본 화면은 결론만, 세부 설명은 카드 클릭으로 확인합니다.", className="caption")]),
-                    html.Div(
-                        [
-                            dcc.Input(id="code-input", value="", placeholder="TARIC 코드 입력", className="input"),
-                            html.Button("조회", id="search-btn", className="primary-btn"),
-                        ],
-                        className="topbar",
-                    ),
-                    html.Div(id="error-box"),
-                    html.Div(id="result-root", className="empty", children="TARIC 코드를 입력하거나 좌측 예제를 선택하세요."),
-                ],
-                className="main",
-            ),
-        ],
-        className="shell",
+def render_shell() -> dmc.MantineProvider:
+    return dmc.MantineProvider(
+        children=html.Div(
+            [
+                dcc.Store(id="package-store"),
+                dcc.Store(id="panel-store", data="overview"),
+                html.Aside(
+                    [
+                        html.H1("ASAP 서류 패키지", className="brand"),
+                        html.Div("TARIC10 기준 EU 수입 관세/서류/제품규제 확인", className="subtle"),
+                        html.Div(className="divider"),
+                        html.Div("예제", className="label"),
+                        html.Div(
+                            [
+                                html.Button(
+                                    [html.Div(code, className="example-code"), html.Div(label, className="example-label")],
+                                    id={"type": "example-btn", "code": code},
+                                    className="example-btn",
+                                )
+                                for code, label, _ in EXAMPLES
+                            ]
+                        ),
+                        html.Div(className="divider"),
+                        html.Details(
+                            [
+                                html.Summary("Product facts JSON"),
+                                dcc.Textarea(id="facts-input", value=fmt_json(DEFAULT_FACTS), className="textarea"),
+                            ]
+                        ),
+                        html.Div(className="divider"),
+                        dcc.Checklist(
+                            id="options",
+                            options=[
+                                {"label": " CELEX 본문 발췌 포함", "value": "celex"},
+                                {"label": " 한국 무관 measure 표시", "value": "nonkr"},
+                                {"label": " Raw JSON 표시", "value": "raw"},
+                                {"label": " Debug pipeline log 표시", "value": "debug"},
+                            ],
+                            value=[],
+                            className="subtle",
+                        ),
+                    ],
+                    className="sidebar",
+                ),
+                html.Main(
+                    [
+                        html.Div([html.H2("EU 수출 서류 패키지", className="title"), html.Div("기본 화면은 결론만, 세부 설명은 Drawer에서 확인합니다.", className="caption")]),
+                        html.Div(
+                            [
+                                dcc.Input(id="code-input", value="", placeholder="TARIC 코드 입력", className="input"),
+                                html.Button("조회", id="search-btn", className="primary-btn"),
+                            ],
+                            className="topbar",
+                        ),
+                        html.Div(id="error-box"),
+                        html.Div(id="result-root", className="empty", children="TARIC 코드를 입력하거나 좌측 예제를 선택하세요."),
+                    ],
+                    className="main",
+                ),
+            ],
+            className="shell",
+        ),
+        defaultColorScheme="light",
     )
 
 
@@ -643,12 +651,15 @@ def load_package(_search_clicks, _example_clicks, code_value, facts_text, option
 @app.callback(
     Output("panel-store", "data", allow_duplicate=True),
     Input({"type": "panel-btn", "panel": ALL}, "n_clicks"),
+    Input({"type": "drawer-close-btn", "target": ALL}, "n_clicks"),
     prevent_initial_call=True,
 )
-def select_panel(_clicks):
+def select_panel(_panel_clicks, _close_clicks):
     triggered = ctx.triggered_id
     if isinstance(triggered, dict) and triggered.get("type") == "panel-btn":
         return triggered.get("panel") or "overview"
+    if isinstance(triggered, dict) and triggered.get("type") == "drawer-close-btn":
+        return "overview"
     return no_update
 
 

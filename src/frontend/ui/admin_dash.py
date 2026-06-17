@@ -12,7 +12,7 @@ from frontend.ui.classification_dash import (
     detail_block,
     display_stage_name,
     json_pre,
-    render_progress,
+    render_stage_events,
 )
 
 
@@ -167,7 +167,7 @@ def render_page(
                 style={"borderBottom": "2px solid #0f172a", "paddingBottom": "12px", "marginBottom": "22px"},
             ),
             html.Div("Stage events", style=LABEL),
-            render_progress(data) if events else html.Div(
+            render_stage_events(data) if events else html.Div(
                 "현재 브라우저 세션의 live stage event가 없습니다. 저장된 run에서는 debug payload를 확인하세요.",
                 style=PLACEHOLDER,
             ),
