@@ -752,19 +752,23 @@ def _fetch_product_domain_requirements(
     cur.execute(
         f"""
         SELECT {", ".join(POST_REQ_FIELDS)}
-        FROM post_taric_requirement_master
+        FROM post_taric_requirement_master AS prm
         WHERE source_layer IN ('chapter_route_seed', 'product_domain_seed')
           AND (
-            %s = ANY(string_to_array(replace(coalesce(chapter_scope, ''), ' ', ''), ';'))
-            OR %s = ANY(string_to_array(replace(coalesce(applies_to_cn_scope, ''), ' ', ''), ';'))
-            OR %s = ANY(string_to_array(replace(coalesce(applies_to_cn_scope, ''), ' ', ''), ';'))
+            'all' = ANY(string_to_array(replace(lower(coalesce(chapter_scope, '')), ' ', ''), ';'))
+            OR 'all' = ANY(string_to_array(replace(lower(coalesce(applies_to_cn_scope, '')), ' ', ''), ';'))
+            OR 'all' = ANY(string_to_array(replace(lower(coalesce(to_jsonb(prm)->>'applies_chapter_note', '')), ' ', ''), ';'))
+            OR %s = ANY(string_to_array(replace(lower(coalesce(chapter_scope, '')), ' ', ''), ';'))
+            OR %s = ANY(string_to_array(replace(lower(coalesce(to_jsonb(prm)->>'applies_chapter_note', '')), ' ', ''), ';'))
+            OR %s = ANY(string_to_array(replace(lower(coalesce(applies_to_cn_scope, '')), ' ', ''), ';'))
+            OR %s = ANY(string_to_array(replace(lower(coalesce(applies_to_cn_scope, '')), ' ', ''), ';'))
           )
         ORDER BY
           CASE source_layer WHEN 'chapter_route_seed' THEN 0 ELSE 1 END,
           CASE required_level WHEN 'mandatory' THEN 0 WHEN 'mandatory_check' THEN 1 ELSE 2 END,
           required_document
         """,
-        (chapter, heading, cn8),
+        (chapter, chapter, heading, cn8),
     )
     cols = [d[0] for d in cur.description]
     rows = [dict(zip(cols, row)) for row in cur.fetchall()]

@@ -492,6 +492,7 @@ class DocumentAgent(BaseAgent):
                     "agent_bucket": required_documents,
                     "document_groups": document_groups,
                 },
+                "document_checklist": checklist,
                 "product_regulations": {
                     "agent_bucket": product_regulations,
                     "requirements": product_reqs,
