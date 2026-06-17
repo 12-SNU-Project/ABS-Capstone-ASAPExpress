@@ -2,7 +2,7 @@
 Blackboard storage — one JSON document + one append-only jsonl per run.
 
 Layout:
-  data/runs/run_<NNN>/
+  artifacts/runs/run_<NNN>/
     blackboard.json     full Blackboard root (mutable)
     agent_runs.jsonl    AgentRun records (append-only)
 
@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover - optional runtime validation dependency
     jsonschema = None
 
 
-PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
+PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[3])).resolve()
 APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
 DEFAULT_RUNS_DIR = APP_CONFIG.paths.ResolvePath(
     PROJECT_ROOT,
