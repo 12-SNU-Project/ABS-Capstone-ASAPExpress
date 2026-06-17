@@ -757,27 +757,30 @@ def run_external_classifier(
     *,
     domain_scope: str = "food_16_21",
     runtime_adapter=None,
-    top_k_candidates: int = 8,
+    top_k_candidates: int = 5,
 ) -> ExternalClassificationResult:
     productInput = pes_to_input(pes, domain_scope=domain_scope)
+    candidateLimit = max(1, min(int(top_k_candidates), 5))
 
     # 2. Retrieval
     retriever = CnCandidateRetriever(ASAP_ONTOLOGY_ROOT, ASAP_PROJECT_ROOT)
     semanticIndex, semanticStatus = build_semantic_candidate_index(retriever)
     if semanticIndex is None:
-        candidates = retriever.FindCandidates(productInput, topK=top_k_candidates)
+        candidates = retriever.FindCandidates(productInput, topK=candidateLimit)
     else:
         candidates = retriever.FindCandidatesWithSemanticIndex(
             productInput,
             semanticIndex,
-            heuristicTopK=top_k_candidates,
+            heuristicTopK=candidateLimit,
             semanticTopK=APP_CONFIG.classification.semantic_candidate_top_k,
             finalCandidateLimit=(
-                APP_CONFIG.classification.hybrid_candidate_limit
-                or top_k_candidates
+                min(APP_CONFIG.classification.hybrid_candidate_limit, candidateLimit)
+                if APP_CONFIG.classification.hybrid_candidate_limit
+                else candidateLimit
             ),
             minSemanticScore=APP_CONFIG.classification.semantic_min_score,
         )
+    candidates = list(candidates)[:candidateLimit]
     if not candidates:
         return ExternalClassificationResult(
             candidates=[],

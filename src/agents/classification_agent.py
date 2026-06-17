@@ -110,21 +110,36 @@ class ClassificationAgent(BaseAgent):
         retained = _read_field(recommendation, "retainedCandidates") or []
 
         emitted: list[dict] = []
-        if recommended:
+        recommendedCn8 = str(_read_field(recommended, "hs8", default="") or "")[:8]
+        retainedByCn8 = {
+            str(_read_field(candidate, "hs8", default="") or "")[:8]: candidate
+            for candidate in retained
+            if str(_read_field(candidate, "hs8", default="") or "")[:8]
+        }
+        for candidate in result.candidates[:5]:
+            if len(emitted) >= 5:
+                break
+            candidateHs8 = str(_read_field(candidate, "hs8", default="") or "")
+            candidateCn8 = candidateHs8[:8]
+            isRecommended = bool(recommendedCn8 and candidateCn8 == recommendedCn8)
+            retainedCandidate = retainedByCn8.get(candidateCn8)
+            reason = (
+                _read_field(recommended, "reason", "rationale", default="")
+                if isRecommended
+                else _read_field(retainedCandidate, "reason", "rationale", default="")
+            )
             emitted.append({
-                "hs8": _read_field(recommended, "hs8", default="") or "",
-                "reason": _read_field(recommended, "reason", "rationale", default="") or "Recommended by ASAPExpress Stage 1.",
-                "rank": 1,
-                "confidence": 0.7,
+                "hs8": candidateHs8,
+                "reason": reason or (
+                    "LLM-recommended candidate."
+                    if isRecommended
+                    else "Static CN retrieval top5 candidate retained for comparison."
+                ),
+                "rank": len(emitted) + 1,
+                "confidence": 0.7 if isRecommended else 0.5,
                 "status": "proposed",
-            })
-        for i, r in enumerate(retained, start=2):
-            emitted.append({
-                "hs8": _read_field(r, "hs8", default="") or "",
-                "reason": _read_field(r, "reason", "rationale", default="") or "Retained candidate.",
-                "rank": i,
-                "confidence": 0.5,
-                "status": "proposed",
+                "llm_recommended": isRecommended,
+                "candidate_static_tree": self._build_candidate_static_tree(candidate),
             })
 
         decision_status = _read_field(result.decision_report, "decisionStatus", default="unknown")
@@ -176,10 +191,12 @@ class ClassificationAgent(BaseAgent):
                     selected_branch.get("selection_reason")
                     if taric10 else "No TARIC10 branch resolved from current master table."
                 ),
-                "rank": c["rank"],
+                "rank": len(ccs_candidates) + 1,
                 "confidence": c["confidence"],
                 "status": c["status"],
                 "candidate_source": "classifier",
+                "llm_recommended": bool(c.get("llm_recommended")),
+                "candidate_static_tree": c.get("candidate_static_tree") or {},
                 "classification_basis": [str(c["reason"])[:300]],
                 "classification_citations": list(self._ontology_reads),
                 "required_facts": [],
@@ -201,6 +218,78 @@ class ClassificationAgent(BaseAgent):
         self.wrote(ccs_id)
         for c in ccs_candidates:
             self.wrote(c["candidate_id"])
+
+    def _build_candidate_static_tree(self, candidate) -> dict:
+        codeHierarchy = _read_field(candidate, "codeHierarchy", "code_hierarchy", default={}) or {}
+        if not isinstance(codeHierarchy, dict):
+            codeHierarchy = {}
+        scoreBreakdown = _read_field(candidate, "scoreBreakdown", "score_breakdown", default={}) or {}
+        if not isinstance(scoreBreakdown, dict):
+            scoreBreakdown = {}
+        hierarchyPoints = scoreBreakdown.get("hierarchy_level_points") or {}
+        hierarchyMatches = scoreBreakdown.get("hierarchy_level_matches") or {}
+        if not isinstance(hierarchyPoints, dict):
+            hierarchyPoints = {}
+        if not isinstance(hierarchyMatches, dict):
+            hierarchyMatches = {}
+
+        nodes: list[dict] = []
+        for level, label in (
+            ("hs2", "HS2"),
+            ("hs4", "HS4"),
+            ("hs6", "HS6"),
+            ("cn8", "CN8"),
+        ):
+            levelData = codeHierarchy.get(level) or {}
+            if not isinstance(levelData, dict):
+                levelData = {}
+            code = str(levelData.get("code") or "").strip()
+            if not code:
+                continue
+            nodes.append({
+                "level": level,
+                "label": label,
+                "code": code,
+                "description": str(levelData.get("description") or "").strip(),
+                "score": hierarchyPoints.get(level) or (
+                    _read_field(candidate, "score", default=0.0)
+                    if level == "cn8"
+                    else 0.0
+                ),
+                "matched_keywords": self._read_text_list(
+                    hierarchyMatches.get(level),
+                    limit=8,
+                ),
+            })
+
+        return {
+            "total_score": _read_field(candidate, "score", default=0.0) or 0.0,
+            "retrieval_sources": self._read_text_list(
+                _read_field(candidate, "retrievalSources", "retrieval_sources", default=[]),
+                limit=4,
+            ),
+            "matched_keywords": self._read_text_list(
+                _read_field(candidate, "matchedTerms", "matched_terms", default=[]),
+                limit=12,
+            ),
+            "score_breakdown": {
+                "include_rule_points": scoreBreakdown.get("include_rule_points") or 0.0,
+                "search_keyword_points": scoreBreakdown.get("search_keyword_points") or 0.0,
+                "description_points": scoreBreakdown.get("description_points") or 0.0,
+                "semantic_score": scoreBreakdown.get("semantic_score"),
+            },
+            "nodes": nodes,
+        }
+
+    @staticmethod
+    def _read_text_list(value, *, limit: int) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [
+            str(item).strip()
+            for item in value[:limit]
+            if str(item).strip()
+        ]
 
     def _resolve_taric_branches(self, cn8: str) -> list[dict]:
         if not cn8 or cn8 == "99999999":
@@ -231,7 +320,7 @@ class ClassificationAgent(BaseAgent):
         pes: dict,
         *,
         why: str,
-        limit: int = 10,
+        limit: int = 5,
     ) -> bool:
         """Keep Blackboard moving when the LLM review fails.
 
