@@ -836,7 +836,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
         pes = partial.get("input_processing_summary") or {}
         if not pes:
             return html.Div(
-                "Product evidence 생성 완료. 상세 audit은 Admin log에서 확인할 수 있습니다.",
+                "Product evidence 생성 완료. 상세 audit은 좌측 관리/디버그 메뉴에서 확인할 수 있습니다.",
                 style={"fontSize": "12px", "color": "#64748b", "marginTop": "6px"},
             )
         return html.Div(
@@ -893,7 +893,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
                 ),
                 detail_block(
                     "DocumentPackage compact JSON",
-                    {k: v for k, v in dp.items() if k != "raw_document_package"},
+                    dp,
                     max_height=360,
                 ),
             ],
@@ -962,7 +962,7 @@ def render_progress(result: dict[str, Any]) -> html.Div:
 def render_candidate_cards(result: dict[str, Any]) -> html.Div:
     ccs = result.get("candidate_code_set") or {}
     candidates = ccs.get("candidates") or []
-    run_id = result.get("run_id") or "current"
+    detailRunId = result.get("job_id") or result.get("run_id") or "current"
     if not candidates:
         return html.Div("분류 후보가 없습니다.", style=PLACEHOLDER)
 
@@ -970,7 +970,7 @@ def render_candidate_cards(result: dict[str, Any]) -> html.Div:
     for cand in candidates:
         taric10 = cand.get("taric10") or ""
         branches = cand.get("taric10_branch_candidates") or []
-        href = f"/document/{run_id}/{taric10}" if taric10 else "#"
+        href = f"/document/{detailRunId}/{taric10}" if taric10 else "#"
         cards.append(
             html.Div(
                 [
@@ -1048,7 +1048,6 @@ def render_decision(result: dict[str, Any]) -> html.Div:
 
 def render_page(result: dict[str, Any] | None = None) -> html.Div:
     result = result or {}
-    run_id = result.get("run_id")
     inputProcessingView = input_processing_view_card(
         result.get("input_processing_view"),
     )
@@ -1062,16 +1061,6 @@ def render_page(result: dict[str, Any] | None = None) -> html.Div:
                 [
                     html.H1("ASAP 수출 분류", style={"fontSize": "24px", "margin": 0}),
                     html.Div("URL / text / OCR evidence -> CN8/TARIC10 후보 -> 서류 상세 연결", style={"fontSize": "12px", "color": "#64748b", "marginTop": "4px"}),
-                    html.Div(
-                        [
-                            dcc.Link(
-                                "Admin log",
-                                href=f"/admin/{run_id}" if run_id else "/admin",
-                                style={"fontSize": "12px", "fontWeight": 850},
-                            ),
-                        ],
-                        style={"marginTop": "8px"},
-                    ),
                 ],
                 style={"borderBottom": "2px solid #2563eb", "paddingBottom": "12px", "marginBottom": "22px"},
             ),

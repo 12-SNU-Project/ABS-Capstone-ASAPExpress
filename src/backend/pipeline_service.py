@@ -13,6 +13,9 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.api_contract import (
+    AdminRunDebugResponse,
+    DocumentPackageCollectionResponse,
+    DocumentPackageDetailResponse,
     PipelineEventPayload,
     RunCompleteSsePayload,
     RunNotFoundSsePayload,
@@ -96,11 +99,7 @@ class PipelineRunResult(BaseModel):
             },
             candidate_code_set=pipelineOutput.get("candidate_code_set"),
             document_package=(
-                {
-                    key: value
-                    for key, value in documentPackage.items()
-                    if key != "raw_document_package"
-                }
+                PipelineResultProjector.PublicDocumentPackage(documentPackage)
                 if isinstance(documentPackage, Mapping)
                 else documentPackage
             ),
@@ -282,12 +281,49 @@ class PipelineResultProjector:
                 compact["user_questions"] = userQuestions
         documentPackage = compact.get("document_package")
         if isinstance(documentPackage, Mapping):
-            compact["document_package"] = {
-                key: value
-                for key, value in documentPackage.items()
-                if key != "raw_document_package"
-            }
+            compact["document_package"] = self.PublicDocumentPackage(documentPackage)
+        if isinstance(blackboard, Mapping):
+            documentPackages = self.PublicDocumentPackagesFromBlackboard(blackboard)
+            if documentPackages:
+                compact["document_packages"] = documentPackages
         return compact
+
+    @staticmethod
+    def PublicDocumentPackage(documentPackage: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in documentPackage.items()
+            if key != "raw_document_package"
+        }
+
+    def PublicDocumentPackagesFromBlackboard(
+        self,
+        blackboard: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        packages = blackboard.get("document_packages") or []
+        if not isinstance(packages, list):
+            return []
+        return [
+            self.PublicDocumentPackage(package)
+            for package in packages
+            if isinstance(package, Mapping)
+        ]
+
+    def ExtractDocumentPackages(
+        self,
+        resultData: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        packages = resultData.get("document_packages")
+        if isinstance(packages, list):
+            return [
+                self.PublicDocumentPackage(package)
+                for package in packages
+                if isinstance(package, Mapping)
+            ]
+        package = resultData.get("document_package")
+        if isinstance(package, Mapping):
+            return [self.PublicDocumentPackage(package)]
+        return []
 
     def _BuildSnapshotInputProcessingView(
         self,
@@ -661,21 +697,92 @@ class RunRegistry:
             run = self._runs.get(runId)
             if run is None:
                 return None
-            snapshot = dict(run)
-            snapshot["events"] = list(run.get("events") or [])
-            partialResult = run.get("partial_result")
-            if isinstance(partialResult, dict):
-                snapshot["partial_result"] = dict(partialResult)
-            result = run.get("result")
-            if isinstance(result, dict):
-                snapshot["result"] = dict(result)
-            return snapshot
+            return self._SnapshotCopyLocked(run)
+
+    def ReadSnapshotByIdentifier(self, identifier: str) -> tuple[str, dict[str, Any]] | None:
+        with self._condition:
+            if identifier in self._runs:
+                return identifier, self._SnapshotCopyLocked(self._runs[identifier])
+            for jobId, run in self._runs.items():
+                resultData = self._RunResultData(run)
+                if str(resultData.get("run_id") or "") == identifier:
+                    return jobId, self._SnapshotCopyLocked(run)
+        return None
 
     def BuildUiResult(self, runId: str) -> dict[str, Any]:
         snapshot = self.ReadSnapshot(runId)
         if snapshot is None:
             return {}
         return self._projector.BuildUiResult(snapshot, runId)
+
+    def BuildDocumentPackageCollection(self, runId: str) -> dict[str, Any]:
+        snapshotEntry = self.ReadSnapshotByIdentifier(runId)
+        if snapshotEntry is None:
+            return {}
+        jobId, snapshot = snapshotEntry
+        resultData = self._SnapshotResultData(snapshot)
+        packages = self._DocumentPackagesFromSnapshot(snapshot, resultData)
+        return DocumentPackageCollectionResponse(
+            job_id=jobId,
+            run_id=resultData.get("run_id"),
+            total=len(packages),
+            packages=packages,
+        ).ToDict()
+
+    def BuildDocumentPackageDetail(
+        self,
+        runId: str,
+        packageId: str,
+    ) -> dict[str, Any]:
+        snapshotEntry = self.ReadSnapshotByIdentifier(runId)
+        if snapshotEntry is None:
+            return {}
+        jobId, snapshot = snapshotEntry
+        resultData = self._SnapshotResultData(snapshot)
+        packages = self._DocumentPackagesFromSnapshot(snapshot, resultData)
+        for package in packages:
+            if packageId in {
+                str(package.get("document_package_id") or ""),
+                str(package.get("taric10") or ""),
+            }:
+                return DocumentPackageDetailResponse(
+                    job_id=jobId,
+                    run_id=resultData.get("run_id"),
+                    document_package=package,
+                ).ToDict()
+        return {}
+
+    def _DocumentPackagesFromSnapshot(
+        self,
+        snapshot: Mapping[str, Any],
+        resultData: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        packages = self._projector.ExtractDocumentPackages(resultData)
+        if packages:
+            return packages
+        snapshotPackages = snapshot.get("document_packages")
+        if not isinstance(snapshotPackages, list):
+            return []
+        return [
+            self._projector.PublicDocumentPackage(package)
+            for package in snapshotPackages
+            if isinstance(package, Mapping)
+        ]
+
+    def BuildAdminDebugResult(self, runId: str) -> dict[str, Any]:
+        snapshotEntry = self.ReadSnapshotByIdentifier(runId)
+        if snapshotEntry is None:
+            return {}
+        jobId, snapshot = snapshotEntry
+        resultData = self._SnapshotResultData(snapshot)
+        return AdminRunDebugResponse(
+            job_id=jobId,
+            job_status=snapshot.get("status"),
+            run_id=resultData.get("run_id"),
+            run_dir=resultData.get("run_dir"),
+            events=snapshot.get("events") or [],
+            public_result=self._projector.BuildUiResult(snapshot, jobId),
+        ).ToDict()
 
     def BuildPipelineResultProjection(
         self,
@@ -741,7 +848,39 @@ class RunRegistry:
         run.setdefault("events", []).append(eventData)
         partialResult = eventData.get("partial_result")
         if isinstance(partialResult, dict):
+            documentPackages = partialResult.pop("document_packages", None)
+            if isinstance(documentPackages, list):
+                run["document_packages"] = documentPackages
             run["partial_result"] = partialResult
+
+    def _SnapshotCopyLocked(self, run: Mapping[str, Any]) -> dict[str, Any]:
+        snapshot = dict(run)
+        snapshot["events"] = list(run.get("events") or [])
+        partialResult = run.get("partial_result")
+        if isinstance(partialResult, dict):
+            snapshot["partial_result"] = dict(partialResult)
+        result = run.get("result")
+        if isinstance(result, dict):
+            snapshot["result"] = dict(result)
+        return snapshot
+
+    def _RunResultData(self, run: Mapping[str, Any]) -> dict[str, Any]:
+        result = run.get("result")
+        if isinstance(result, dict):
+            return result
+        partialResult = run.get("partial_result")
+        if isinstance(partialResult, dict):
+            return partialResult
+        return {}
+
+    def _SnapshotResultData(self, snapshot: Mapping[str, Any]) -> dict[str, Any]:
+        result = snapshot.get("result")
+        if isinstance(result, Mapping):
+            return dict(result)
+        partialResult = snapshot.get("partial_result")
+        if isinstance(partialResult, Mapping):
+            return dict(partialResult)
+        return {}
 
     def _HasPendingEvent(self, runId: str, eventIndex: int) -> bool:
         run = self._runs.get(runId)

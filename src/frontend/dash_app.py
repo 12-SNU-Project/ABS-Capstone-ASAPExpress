@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from dash import ALL, MATCH, Dash, Input, Output, State, dcc, html, no_update
 
 from agents.document_pipeline import run_document_pipeline
 from backend import PipelineApi, PipelineRunService, RunRegistry
-from frontend.ui import document_package_dash, admin_dash, classification_dash
+from bussiness_logic.app_config import LoadAppConfig
+from frontend.client_scripts import RUN_CREATE_CALLBACK, RUN_EVENT_STREAM_CALLBACK
+from frontend.ui import (
+    admin_dash,
+    classification_dash,
+    document_package_dash,
+    document_package_renderer,
+    document_package_view,
+)
 
 PipelineCallable = Callable[..., dict[str, Any]]
 
@@ -20,7 +29,16 @@ def CreateDashApp(
 ) -> Dash:
     registry = RunRegistry()
     service = PipelineRunService(registry=registry, pipelineCallable=pipelineCallable)
-    pipelineApi = PipelineApi(registry=registry, service=service)
+    projectRoot = Path(__file__).resolve().parents[2]
+    appConfig = LoadAppConfig(projectRoot)
+    pipelineApi = PipelineApi(
+        registry=registry,
+        service=service,
+        debugRunsRoot=appConfig.paths.ResolvePath(
+            projectRoot,
+            appConfig.paths.blackboard_runs_root,
+        ),
+    )
 
     app = Dash(
         __name__,
@@ -37,12 +55,17 @@ def CreateDashApp(
             dcc.Store(id="store-result"),
             dcc.Store(id="document-panel-store", data="overview"),
             html.Div(id="sse-bridge", style={"display": "none"}),
-            html.Div(id="page-root"),
+            html.Div(
+                [
+                    html.Aside(id="app-sidebar", style=_SIDEBAR_STYLE),
+                    html.Main(html.Div(id="page-root"), style=_MAIN_STYLE),
+                ],
+                style=_APP_SHELL_STYLE,
+            ),
         ],
         style={
-            "maxWidth": "1440px",
-            "margin": "0 auto",
-            "padding": "24px",
+            "minHeight": "100vh",
+            "background": "#f8fafc",
             "fontFamily": "-apple-system, BlinkMacSystemFont, 'SF Pro', 'Apple SD Gothic Neo', sans-serif",
         },
     )
@@ -54,111 +77,7 @@ def CreateDashApp(
 
 def _RegisterClientsideCallbacks(app: Dash) -> None:
     app.clientside_callback(
-        """
-        async function(nClicks, productName, description, kurlyUrl, currentRunId, resultData) {
-            const dc = window.dash_clientside || dash_clientside;
-            if (!nClicks) {
-                return [dc.no_update, dc.no_update];
-            }
-            if (
-                currentRunId &&
-                resultData &&
-                resultData.job_id === currentRunId &&
-                ["queued", "running"].includes(resultData.job_status)
-            ) {
-                return [currentRunId, "/classification"];
-            }
-
-            const clean = function(value) {
-                return (value || "").toString().trim();
-            };
-            const nextProductName = clean(productName);
-            const nextDescription = clean(description);
-            const nextKurlyUrl = clean(kurlyUrl);
-            const query = nextProductName || nextDescription || nextKurlyUrl;
-            const facts = {
-                product_name: nextProductName,
-                description: nextDescription,
-                url: nextKurlyUrl,
-                source_urls: nextKurlyUrl ? [nextKurlyUrl] : [],
-                origin_country: "KR",
-                intended_use: "human consumption"
-            };
-            const setStore = function(data) {
-                if (dc.set_props) {
-                    dc.set_props("store-result", {data: data});
-                }
-            };
-
-            if (!query) {
-                setStore({
-                    job_id: null,
-                    job_status: "failed",
-                    request: {query: query, facts: facts},
-                    error: "제품명, 설명, URL 중 하나는 입력해야 합니다.",
-                    events: [{
-                        stage: "Input",
-                        status: "failed",
-                        message: "제품명, 설명, URL 중 하나는 입력해야 합니다."
-                    }]
-                });
-                return [dc.no_update, "/classification"];
-            }
-
-            try {
-                const response = await fetch("/api/runs", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({
-                        query: query,
-                        product_name: nextProductName,
-                        description: nextDescription,
-                        url: nextKurlyUrl,
-                        facts: facts
-                    })
-                });
-                const payload = await response.json();
-                if (!response.ok) {
-                    throw new Error(payload.message || payload.error || "run_create_failed");
-                }
-
-                const queuedResult = {
-                    job_id: payload.job_id,
-                    job_status: payload.status || "queued",
-                    request: {query: query, facts: facts},
-                    events: [{
-                        stage: "Pipeline",
-                        status: payload.status || "queued",
-                        message: payload.reused ? "기존 실행 중인 작업에 연결했습니다." : "작업이 등록되었습니다."
-                    }]
-                };
-                setStore(queuedResult);
-
-                try {
-                    const snapshotResponse = await fetch(payload.result_url);
-                    if (snapshotResponse.ok) {
-                        setStore(await snapshotResponse.json());
-                    }
-                } catch (snapshotError) {
-                    // queuedResult is already enough to render initial progress.
-                }
-                return [payload.job_id, "/classification"];
-            } catch (error) {
-                setStore({
-                    job_id: null,
-                    job_status: "failed",
-                    request: {query: query, facts: facts},
-                    error: String(error && error.message ? error.message : error),
-                    events: [{
-                        stage: "Pipeline",
-                        status: "failed",
-                        message: String(error && error.message ? error.message : error)
-                    }]
-                });
-                return [dc.no_update, "/classification"];
-            }
-        }
-        """,
+        RUN_CREATE_CALLBACK,
         Output("store-run-id", "data"),
         Output("url", "pathname"),
         Input("btn-run", "n_clicks"),
@@ -171,144 +90,22 @@ def _RegisterClientsideCallbacks(app: Dash) -> None:
     )
 
     app.clientside_callback(
-        """
-        function(jobId) {
-            const dc = window.dash_clientside || dash_clientside;
-            const noUpdate = dc.no_update;
-            const setStore = function(data) {
-                if (dc.set_props) {
-                    dc.set_props("store-result", {data: data});
-                }
-            };
-            const closeCurrent = function() {
-                if (window.asapPipelineSse && window.asapPipelineSse.source) {
-                    window.asapPipelineSse.source.close();
-                }
-                window.asapPipelineSse = null;
-            };
-            const isTerminal = function(status) {
-                return ["completed", "failed"].includes(status);
-            };
-
-            closeCurrent();
-            if (!jobId) {
-                return noUpdate;
-            }
-
-            fetch(`/api/runs/${jobId}`)
-                .then(function(response) {
-                    if (!response.ok) {
-                        throw new Error("run_not_found");
-                    }
-                    return response.json();
-                })
-                .then(function(snapshot) {
-                    let state = Object.assign({}, snapshot);
-                    setStore(state);
-                    if (isTerminal(state.job_status)) {
-                        return;
-                    }
-
-                    const eventStart = Array.isArray(state.events) ? state.events.length : 0;
-                    const source = new EventSource(`/api/runs/${jobId}/events?start=${eventStart}`);
-                    window.asapPipelineSse = {jobId: jobId, source: source};
-
-                    const pushState = function(nextState) {
-                        state = Object.assign({}, nextState, {job_id: jobId});
-                        setStore(state);
-                    };
-                    const applyPipelineEvent = function(eventPayload) {
-                        const events = Array.isArray(state.events) ? state.events.slice() : [];
-                        events.push(eventPayload);
-                        const partial = (
-                            eventPayload.partial_result &&
-                            typeof eventPayload.partial_result === "object"
-                        ) ? eventPayload.partial_result : {};
-                        const nextStatus = (
-                            eventPayload.stage === "Pipeline" &&
-                            isTerminal(eventPayload.status)
-                        ) ? eventPayload.status : "running";
-                        pushState(Object.assign({}, state, partial, {
-                            events: events,
-                            job_status: isTerminal(state.job_status) ? state.job_status : nextStatus
-                        }));
-                    };
-
-                    source.addEventListener("pipeline_event", function(event) {
-                        try {
-                            applyPipelineEvent(JSON.parse(event.data));
-                        } catch (parseError) {
-                            pushState(Object.assign({}, state, {
-                                job_status: "failed",
-                                error: String(parseError)
-                            }));
-                        }
-                    });
-
-                    source.addEventListener("run_complete", function(event) {
-                        let payload = {};
-                        try {
-                            payload = JSON.parse(event.data || "{}");
-                        } catch (parseError) {
-                            payload = {};
-                        }
-                        source.close();
-                        fetch(`/api/runs/${jobId}`)
-                            .then(function(response) {
-                                return response.ok ? response.json() : null;
-                            })
-                            .then(function(finalSnapshot) {
-                                pushState(finalSnapshot || Object.assign({}, state, {
-                                    job_status: payload.status || state.job_status || "completed"
-                                }));
-                            })
-                            .catch(function() {
-                                pushState(Object.assign({}, state, {
-                                    job_status: payload.status || state.job_status || "completed"
-                                }));
-                            });
-                    });
-
-                    source.addEventListener("error", function(event) {
-                        if (event && event.data) {
-                            try {
-                                const payload = JSON.parse(event.data);
-                                pushState(Object.assign({}, state, {
-                                    job_status: "failed",
-                                    error: payload.message || "sse_error"
-                                }));
-                            } catch (parseError) {
-                                pushState(Object.assign({}, state, {
-                                    job_status: "failed",
-                                    error: String(parseError)
-                                }));
-                            }
-                            source.close();
-                        }
-                    });
-                })
-                .catch(function(error) {
-                    setStore({
-                        job_id: jobId,
-                        job_status: "failed",
-                        error: String(error && error.message ? error.message : error),
-                        events: [{
-                            stage: "Pipeline",
-                            status: "failed",
-                            message: String(error && error.message ? error.message : error)
-                        }]
-                    });
-                });
-
-            return noUpdate;
-        }
-        """,
+        RUN_EVENT_STREAM_CALLBACK,
         Output("sse-bridge", "children"),
         Input("store-run-id", "data"),
     )
 
 
 def _RegisterServerCallbacks(app: Dash) -> None:
+    @app.callback(
+        Output("app-sidebar", "children"),
+        Input("url", "pathname"),
+        Input("store-run-id", "data"),
+        Input("store-result", "data"),
+    )
+    def render_sidebar(pathname, job_id, result_data):
+        return _RenderSidebar(pathname, job_id, result_data)
+
     @app.callback(
         Output("btn-run", "disabled"),
         Input("store-run-id", "data"),
@@ -343,10 +140,10 @@ def _RegisterServerCallbacks(app: Dash) -> None:
     def update_document_scenario(selected_values, package_data):
         if not package_data:
             return no_update
-        cx = document_package_dash.package_context(package_data)
+        cx = document_package_renderer.BuildDocumentPackageContext(package_data)
         if cx.get("source") == "unresolved":
             return no_update
-        return document_package_dash.render_scenario_decision(
+        return document_package_renderer.RenderScenarioDecision(
             package_data,
             cx,
             selected_values or [],
@@ -365,25 +162,153 @@ def _RegisterServerCallbacks(app: Dash) -> None:
 
         page = parts[0]
         if page == "document":
-            runId = parts[1] if len(parts) > 1 else None
+            runId = parts[1] if len(parts) > 1 else ""
             taric10 = parts[2] if len(parts) > 2 else ""
-            return document_package_dash.render_detail_page(
+            documentPackagePayload = pipelineApi.ReadDocumentPackageDetail(
+                runId,
+                taric10,
+            )
+            return document_package_view.render_detail_page(
                 runId,
                 taric10,
                 document_panel or "overview",
+                documentPackage=documentPackagePayload.get("document_package"),
             )
 
         if page == "admin":
             runId = parts[1] if len(parts) > 1 else None
+            debugResult = pipelineApi.ReadAdminRunDebug(runId or "")
             live = (
                 result_data
                 if result_data and (not runId or result_data.get("run_id") == runId)
                 else None
             )
-            return admin_dash.render_page(run_id=runId, live_result=live)
+            return admin_dash.render_page(
+                run_id=runId,
+                debug_result=debugResult,
+                live_result=live,
+            )
 
         return classification_dash.render_page(result_data)
 
 
 def _SplitPath(pathname: str | None) -> list[str]:
     return [part for part in (pathname or "/classification").split("/") if part]
+
+
+_APP_SHELL_STYLE = {
+    "display": "grid",
+    "gridTemplateColumns": "230px minmax(0, 1fr)",
+    "minHeight": "100vh",
+}
+
+_SIDEBAR_STYLE = {
+    "position": "sticky",
+    "top": 0,
+    "height": "100vh",
+    "boxSizing": "border-box",
+    "padding": "22px 16px",
+    "borderRight": "1px solid #e5e7eb",
+    "background": "#ffffff",
+    "overflowY": "auto",
+}
+
+_MAIN_STYLE = {
+    "boxSizing": "border-box",
+    "minWidth": 0,
+    "width": "100%",
+    "maxWidth": "1280px",
+    "padding": "24px 28px",
+}
+
+
+def _RenderSidebar(
+    pathname: str | None,
+    jobId: str | None,
+    resultData: dict[str, Any] | None,
+) -> list[Any]:
+    parts = _SplitPath(pathname)
+    page = parts[0] if parts else "classification"
+    result = resultData if isinstance(resultData, dict) else {}
+    runId = result.get("run_id") or ""
+    adminHref = f"/admin/{runId}" if runId else "/admin"
+    documentLinks = (
+        [_NavLink("서류 상세", f"/{'/'.join(parts)}", True, "TARIC 문서 패키지")]
+        if page == "document"
+        else []
+    )
+
+    return [
+        html.Div("ASAP", style={"fontSize": "22px", "fontWeight": 950, "color": "#0f172a"}),
+        html.Div(
+            "EU export workspace",
+            style={"fontSize": "11px", "fontWeight": 750, "color": "#64748b", "marginTop": "4px"},
+        ),
+        html.Div("Workspace", style=_SIDEBAR_SECTION_STYLE),
+        _NavLink("분류", "/classification", page in {"classification", ""}, "입력·후보·서류 연결"),
+        *documentLinks,
+        _NavLink("관리/디버그", adminHref, page == "admin", "Debug payload·Agent log"),
+        html.Div("Run", style=_SIDEBAR_SECTION_STYLE),
+        html.Div(
+            [
+                html.Div("job_id", style=_SIDEBAR_META_LABEL_STYLE),
+                html.Div(jobId or "-", style=_SIDEBAR_META_VALUE_STYLE),
+                html.Div("run_id", style={**_SIDEBAR_META_LABEL_STYLE, "marginTop": "10px"}),
+                html.Div(runId or "-", style=_SIDEBAR_META_VALUE_STYLE),
+            ],
+            style=_SIDEBAR_META_BOX_STYLE,
+        ),
+    ]
+
+
+def _NavLink(label: str, href: str, active: bool, detail: str) -> dcc.Link:
+    return dcc.Link(
+        [
+            html.Div(label, style={"fontSize": "13px", "fontWeight": 900}),
+            html.Div(detail, style={"fontSize": "11px", "marginTop": "2px", "opacity": 0.78}),
+        ],
+        href=href,
+        style={
+            "display": "block",
+            "padding": "10px 11px",
+            "marginBottom": "6px",
+            "borderRadius": "8px",
+            "background": "#eff6ff" if active else "transparent",
+            "border": "1px solid #bfdbfe" if active else "1px solid transparent",
+            "color": "#1d4ed8" if active else "#334155",
+            "textDecoration": "none",
+        },
+    )
+
+
+_SIDEBAR_SECTION_STYLE = {
+    "marginTop": "24px",
+    "marginBottom": "8px",
+    "fontSize": "10px",
+    "fontWeight": 950,
+    "letterSpacing": "0.08em",
+    "textTransform": "uppercase",
+    "color": "#94a3b8",
+}
+
+_SIDEBAR_META_BOX_STYLE = {
+    "padding": "10px",
+    "border": "1px solid #e5e7eb",
+    "borderRadius": "8px",
+    "background": "#f8fafc",
+}
+
+_SIDEBAR_META_LABEL_STYLE = {
+    "fontSize": "10px",
+    "fontWeight": 900,
+    "color": "#64748b",
+}
+
+_SIDEBAR_META_VALUE_STYLE = {
+    "marginTop": "3px",
+    "fontSize": "11px",
+    "fontWeight": 750,
+    "color": "#0f172a",
+    "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+    "overflowWrap": "anywhere",
+}

@@ -7,6 +7,7 @@ import uuid
 from collections import defaultdict, deque
 from collections.abc import Mapping
 from math import ceil
+from pathlib import Path
 from threading import Lock
 from typing import Any
 
@@ -15,11 +16,13 @@ from flask.typing import ResponseReturnValue
 from pydantic import ValidationError
 
 from backend.api_contract import (
+    AdminRunDebugResponse,
     ApiErrorResponse,
     RunCreateAcceptedResponse,
     RunCreateRequestPayload,
 )
 from backend.pipeline_service import PipelineRunRequest, PipelineRunService, RunRegistry
+from backend.run_debug_store import RunDebugStore
 
 
 class PipelineApi:
@@ -31,10 +34,15 @@ class PipelineApi:
         service: PipelineRunService,
         *,
         maxRunCreatesPerMinute: int = 12,
+        debugRunsRoot: Path | None = None,
+        debugStore: RunDebugStore | None = None,
     ) -> None:
         self._registry = registry
         self._service = service
         self._maxRunCreatesPerMinute = max(1, maxRunCreatesPerMinute)
+        self._debugStore = debugStore or (
+            RunDebugStore(debugRunsRoot) if debugRunsRoot is not None else None
+        )
         self._rateLimitWindowSeconds = 60.0
         self._rateLimitLock = Lock()
         self._runCreateTimestamps: defaultdict[str, deque[float]] = defaultdict(deque)
@@ -75,6 +83,50 @@ class PipelineApi:
                 ).ToDict()), 404
             return jsonify(snapshot)
 
+        @server.route("/api/runs/<job_id>/document-packages")
+        def list_document_packages(job_id: str) -> ResponseReturnValue:
+            payload = self.ReadDocumentPackageCollection(job_id)
+            if not payload:
+                return jsonify(ApiErrorResponse(
+                    error="run_not_found",
+                    message="No run exists for the requested job_id.",
+                    field="job_id",
+                    job_id=job_id,
+                ).ToDict()), 404
+            return jsonify(payload)
+
+        @server.route("/api/runs/<job_id>/document-packages/<package_id>")
+        def read_document_package(job_id: str, package_id: str) -> ResponseReturnValue:
+            runPayload = self.ReadDocumentPackageCollection(job_id)
+            if not runPayload:
+                return jsonify(ApiErrorResponse(
+                    error="run_not_found",
+                    message="No run exists for the requested job_id.",
+                    field="job_id",
+                    job_id=job_id,
+                ).ToDict()), 404
+            packagePayload = self.ReadDocumentPackageDetail(job_id, package_id)
+            if not packagePayload:
+                return jsonify(ApiErrorResponse(
+                    error="document_package_not_found",
+                    message="No document package matches the requested package_id or TARIC10.",
+                    field="package_id",
+                    job_id=job_id,
+                ).ToDict()), 404
+            return jsonify(packagePayload)
+
+        @server.route("/api/admin/runs/<run_id>")
+        def read_admin_run_debug(run_id: str) -> ResponseReturnValue:
+            payload = self.ReadAdminRunDebug(run_id)
+            if not payload:
+                return jsonify(ApiErrorResponse(
+                    error="admin_run_not_found",
+                    message="No live or stored debug run exists for the requested run_id.",
+                    field="run_id",
+                    job_id=run_id,
+                ).ToDict()), 404
+            return jsonify(payload)
+
         @server.route("/api/runs/<job_id>/events")
         def stream_run_events(job_id: str) -> Response:
             lastEventId = flask_request.headers.get("Last-Event-ID")
@@ -94,6 +146,36 @@ class PipelineApi:
                     "X-Accel-Buffering": "no",
                 },
             )
+
+    def ReadDocumentPackageCollection(self, jobId: str) -> dict[str, Any]:
+        return self._registry.BuildDocumentPackageCollection(jobId)
+
+    def ReadDocumentPackageDetail(
+        self,
+        jobId: str,
+        packageId: str,
+    ) -> dict[str, Any]:
+        return self._registry.BuildDocumentPackageDetail(jobId, packageId)
+
+    def ReadAdminRunDebug(self, runId: str) -> dict[str, Any]:
+        registryPayload = self._registry.BuildAdminDebugResult(runId)
+        storedRunId = str(registryPayload.get("run_id") or runId)
+        storedPayload = (
+            self._debugStore.ReadRunDebug(storedRunId)
+            if self._debugStore is not None
+            else {}
+        )
+        if not registryPayload and not storedPayload:
+            return {}
+        payload = {
+            **registryPayload,
+            **{
+                key: value
+                for key, value in storedPayload.items()
+                if value not in ({}, [], None, "")
+            },
+        }
+        return AdminRunDebugResponse.model_validate(payload).ToDict()
 
     def StartRunFromPayload(self, payload: Mapping[str, Any]) -> tuple[dict[str, Any], int]:
         try:

@@ -137,6 +137,19 @@ class DocumentPackageView(ApiContractModel):
         return value
 
 
+class DocumentPackageCollectionResponse(ApiContractModel):
+    jobId: str = Field(alias="job_id")
+    runId: str | None = Field(default=None, alias="run_id")
+    total: int
+    packages: list[DocumentPackageView] = Field(default_factory=list)
+
+
+class DocumentPackageDetailResponse(ApiContractModel):
+    jobId: str = Field(alias="job_id")
+    runId: str | None = Field(default=None, alias="run_id")
+    documentPackage: DocumentPackageView = Field(alias="document_package")
+
+
 class PipelineEventPayload(ApiContractModel):
     model_config = ConfigDict(populate_by_name=True, frozen=True, extra="allow")
 
@@ -152,6 +165,17 @@ class PipelineEventPayload(ApiContractModel):
         default=None,
         alias="collected_input_summary",
     )
+
+
+class AdminRunDebugResponse(ApiContractModel):
+    jobId: str | None = Field(default=None, alias="job_id")
+    jobStatus: RunStatus | None = Field(default=None, alias="job_status")
+    runId: str | None = Field(default=None, alias="run_id")
+    runDir: str | None = Field(default=None, alias="run_dir")
+    events: list[PipelineEventPayload] = Field(default_factory=list)
+    publicResult: dict[str, Any] = Field(default_factory=dict, alias="public_result")
+    blackboard: dict[str, Any] = Field(default_factory=dict)
+    agentRuns: list[dict[str, Any]] = Field(default_factory=list, alias="agent_runs")
 
 
 class RunSnapshotResponse(ApiContractModel):

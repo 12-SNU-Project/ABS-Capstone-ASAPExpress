@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import json
-import os
-from pathlib import Path
 from typing import Any
 
-from dash import dcc, html
+from dash import html
 
-from bussiness_logic.app_config import LoadAppConfig
 from frontend.ui.classification_dash import (
     CARD,
     LABEL,
@@ -18,37 +14,6 @@ from frontend.ui.classification_dash import (
     json_pre,
     render_progress,
 )
-
-
-PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
-APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
-RUNS_ROOT = APP_CONFIG.paths.ResolvePath(
-    PROJECT_ROOT,
-    APP_CONFIG.paths.blackboard_runs_root,
-)
-
-
-def load_run(run_id: str | None) -> dict[str, Any]:
-    if not run_id:
-        return {}
-    run_dir = RUNS_ROOT / run_id
-    blackboard_path = run_dir / "blackboard.json"
-    agent_runs_path = run_dir / "agent_runs.jsonl"
-    data: dict[str, Any] = {"run_id": run_id, "run_dir": str(run_dir)}
-    if blackboard_path.exists():
-        data["blackboard"] = json.loads(blackboard_path.read_text(encoding="utf-8"))
-    if agent_runs_path.exists():
-        runs = []
-        for line in agent_runs_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                runs.append(json.loads(line))
-            except json.JSONDecodeError:
-                runs.append({"raw": line})
-        data["agent_runs"] = runs
-    return data
 
 
 def _agent_run_cards(agent_runs: list[dict[str, Any]]) -> html.Div:
@@ -174,36 +139,36 @@ def _evidence_detail_panel(pes: dict[str, Any] | None) -> html.Div:
     )
 
 
-def render_page(run_id: str | None = None, live_result: dict[str, Any] | None = None) -> html.Div:
-    data = live_result or load_run(run_id)
+def render_page(
+    run_id: str | None = None,
+    *,
+    debug_result: dict[str, Any] | None = None,
+    live_result: dict[str, Any] | None = None,
+) -> html.Div:
+    data = debug_result or {}
+    publicResult = data.get("public_result") or live_result or {}
     blackboard = data.get("blackboard") or {}
+    debugPayload = blackboard or data or publicResult
     agent_runs = data.get("agent_runs") or []
     pes = blackboard.get("product_evidence_state") or {}
-    events = data.get("events") or []
-    effective_run_id = data.get("run_id") or run_id
+    events = data.get("events") or publicResult.get("events") or []
+    effective_run_id = data.get("run_id") or publicResult.get("run_id") or run_id
     return html.Div(
         [
             html.Div(
                 [
                     html.H1("ASAP Admin", style={"fontSize": "24px", "margin": 0}),
-                    html.Div("Blackboard / AgentRun / core read log", style={"fontSize": "12px", "color": "#64748b", "marginTop": "4px"}),
+                    html.Div("Stored run debug payload / AgentRun / core read log", style={"fontSize": "12px", "color": "#64748b", "marginTop": "4px"}),
                     html.Div(
-                        [
-                            dcc.Link(
-                                "Classification",
-                                href="/classification",
-                                style={"fontSize": "12px", "fontWeight": 850, "marginRight": "14px"},
-                            ),
-                            html.Span(f"run_id: {effective_run_id or '-'}", style={"fontSize": "12px", "color": "#64748b"}),
-                        ],
-                        style={"marginTop": "8px"},
+                        f"run_id: {effective_run_id or '-'}",
+                        style={"fontSize": "12px", "color": "#64748b", "marginTop": "8px"},
                     ),
                 ],
                 style={"borderBottom": "2px solid #0f172a", "paddingBottom": "12px", "marginBottom": "22px"},
             ),
             html.Div("Stage events", style=LABEL),
             render_progress(data) if events else html.Div(
-                "현재 브라우저 세션의 live stage event가 없습니다. 저장된 run에서는 AgentRun/Blackboard를 확인하세요.",
+                "현재 브라우저 세션의 live stage event가 없습니다. 저장된 run에서는 debug payload를 확인하세요.",
                 style=PLACEHOLDER,
             ),
             html.Div("Product evidence", style={**LABEL, "marginTop": "22px"}),
@@ -214,9 +179,9 @@ def render_page(run_id: str | None = None, live_result: dict[str, Any] | None = 
                 ],
                 style=CARD,
             ),
-            html.Div("Blackboard JSON", style=LABEL),
-            json_pre(blackboard or data, max_height=560),
-            detail_block("Blackboard JSON 크게 보기", blackboard or data, max_height=760),
+            html.Div("Debug payload JSON", style=LABEL),
+            json_pre(debugPayload, max_height=560),
+            detail_block("Debug payload JSON 크게 보기", debugPayload, max_height=760),
             html.Div("AgentRun timeline", style={**LABEL, "marginTop": "22px"}),
             _agent_run_cards(agent_runs),
             html.Div("Ontology reads / citations", style={**LABEL, "marginTop": "22px"}),

@@ -29,15 +29,8 @@ for _path in (PROJECT_ROOT, PROJECT_ROOT / "src"):
 from dash import ALL, MATCH, Dash, Input, Output, State, ctx, dcc, html, no_update
 
 from agents.document_package import _dc_to_dict, get_document_package
-from bussiness_logic.app_config import LoadAppConfig
-from frontend.ui.classification_dash import display_stage_name
-
-
-APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
-RUNS_ROOT = APP_CONFIG.paths.ResolvePath(
-    PROJECT_ROOT,
-    APP_CONFIG.paths.blackboard_runs_root,
-)
+from frontend.ui.document_package_debug import render_debug_pipeline_log
+from frontend.ui.document_package_renderer import CleanCode
 
 
 EXAMPLES: list[tuple[str, str, dict[str, Any]]] = [
@@ -534,15 +527,11 @@ app.index_string = """
 """
 
 
-def clean_code(value: str) -> str:
-    return re.sub(r"\D", "", value or "")
-
-
 def is_taric_like(value: str) -> bool:
     text = (value or "").strip()
     if re.match(r"^(https?://|www\.)", text, flags=re.IGNORECASE):
         return False
-    return bool(re.fullmatch(r"[\d\s.\-]+", text)) and len(clean_code(text)) >= 8
+    return bool(re.fullmatch(r"[\d\s.\-]+", text)) and len(CleanCode(text)) >= 8
 
 
 def fmt_json(value: dict[str, Any]) -> str:
@@ -769,6 +758,7 @@ def _unresolved_context(pkg: dict[str, Any]) -> dict[str, Any]:
         "additional_duty": None,
         "groups": [],
         "counts": {},
+        "metrics": {},
         "missing": [],
         "product_reqs": [],
         "product_pre": [],
@@ -782,8 +772,7 @@ def _unresolved_context(pkg: dict[str, Any]) -> dict[str, Any]:
 def document_view_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
     """Use DocumentAgent's view model when a pipeline package provides it.
 
-    Direct TARIC lookup still falls back to raw package splitting. Pipeline
-    detail pages should be display-only consumers of Document_Agent output.
+    Pipeline detail pages are display-only consumers of Document_Agent output.
     """
     view = pkg.get("_document_view") or pkg.get("document_view")
     if not isinstance(view, dict):
@@ -791,6 +780,9 @@ def document_view_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
     sections = view.get("sections") or {}
     if not isinstance(sections, dict):
         return None
+    metrics = view.get("metrics") or {}
+    if not isinstance(metrics, dict):
+        metrics = {}
 
     overview = sections.get("overview") or {}
     customs = sections.get("customs_check_items") or {}
@@ -825,6 +817,7 @@ def document_view_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
         "baseline_documents": checklist.get("documents") or [],
         "pre_taric_checks": pre_taric_checks.get("checks") or checklist.get("pre_taric_checks") or [],
         "counts": overview.get("counts") or {},
+        "metrics": metrics,
         "missing": overview.get("missing_facts") or [],
         "product_reqs": product_reqs,
         "product_pre": product.get("pre") or [],
@@ -870,7 +863,7 @@ def render_shell() -> html.Div:
                             {"label": " CELEX 본문 발췌 포함", "value": "celex"},
                             {"label": " 한국 무관 measure 표시", "value": "nonkr"},
                             {"label": " Raw JSON 표시", "value": "raw"},
-                            {"label": " Blackboard log 표시", "value": "blackboard"},
+                            {"label": " Debug pipeline log 표시", "value": "debug"},
                         ],
                         value=[],
                         className="subtle",
@@ -964,7 +957,8 @@ def select_panel(_clicks):
 def render_result(pkg, panel, options):
     if not pkg:
         return "TARIC 코드를 입력하거나 좌측 예제를 선택하세요."
-    if not pkg.get("has_data"):
+    hasDocumentView = isinstance(pkg.get("document_view") or pkg.get("_document_view"), dict)
+    if not hasDocumentView and not pkg.get("has_data"):
         return html.Div("이 코드에 대한 현재 적용 measure가 없습니다.", className="empty")
 
     cx = package_context(pkg)
@@ -974,6 +968,7 @@ def render_result(pkg, panel, options):
     fta_pref = cx["fta_pref"]
     final_duty = fta_pref or third_country
     counts = cx["counts"]
+    metricsData = cx.get("metrics") or {}
     groups = cx["groups"]
     baseline_documents = cx.get("baseline_documents") or []
     additional_documents = _additional_detail_documents(baseline_documents)
@@ -999,7 +994,7 @@ def render_result(pkg, panel, options):
                 metric("TARIC10", pkg.get("taric10"), "#1d4ed8", True),
                 metric("CN8", pkg.get("cn8"), "#1d4ed8", True),
                 metric("최종 관세율 후보", duty_rate(final_duty), "#166534"),
-                metric("KR measure", len(cx["kr"])),
+                metric("KR measure", metricsData.get("kr_measure_count", len(cx["kr"]))),
                 metric("필요 / 조건부", f"{counts.get('required', 0)} / {counts.get('conditional', 0)}", "#9a3412"),
                 metric("판단보류", counts.get("pending", 0), "#475569"),
             ],
@@ -1051,11 +1046,11 @@ def render_unresolved(pkg: dict[str, Any], options: list[str]):
             style={"borderLeft": "4px solid #b91c1c", "padding": "16px"},
         ),
     ]
-    if "admin" in (options or []) or "debug" in (options or []):
+    if "debug" in (options or []) or "blackboard" in (options or []):
         children.append(
             html.Details(
                 [
-                    html.Summary("raw_document_package (admin debug)"),
+                    html.Summary("document_package payload (debug)"),
                     html.Pre(
                         str(pkg)[:4000],
                         style={"fontSize": "11px", "color": "#334155", "whiteSpace": "pre-wrap"},
@@ -1513,7 +1508,7 @@ def render_trade_scenario(pkg: dict[str, Any], cx: dict[str, Any]) -> html.Div:
     has_control_requirements = parts["has_control_requirements"]
     fta_pref = parts["fta_pref"]
     checklist_values = _default_scenario_values(cx)
-    taric_key = clean_code(str(pkg.get("taric10") or "unknown")) or "unknown"
+    taric_key = CleanCode(str(pkg.get("taric10") or "unknown")) or "unknown"
 
     return html.Div(
         [
@@ -1604,85 +1599,9 @@ def render_overview(cx: dict[str, Any], options: list[str], pkg: dict[str, Any])
     )
     raw = None
     if "raw" in options:
-        raw = html.Details([html.Summary("Raw JSON"), html.Pre(json.dumps(pkg, ensure_ascii=False, indent=2), className="textarea")])
-    blackboard = render_blackboard_log(pkg) if "blackboard" in options else None
-    return html.Div([render_trade_scenario(pkg, cx), html.Div([left, right], className="two-col"), blackboard, raw])
-
-
-def render_blackboard_log(pkg: dict[str, Any]) -> html.Div | None:
-    pipeline = pkg.get("_pipeline") or {}
-    if not pipeline:
-        return html.Details(
-            [
-                html.Summary("Blackboard log"),
-                html.Div("TARIC 직접조회 모드입니다. Agent pipeline log가 없습니다.", className="card-meta"),
-            ]
-        )
-
-    summary = {
-        "run_id": pipeline.get("run_id"),
-        "run_dir": pipeline.get("run_dir"),
-        "agent_results": pipeline.get("agent_results") or [],
-        "decision": pipeline.get("decision") or {},
-    }
-    agent_runs = pipeline.get("agent_runs") or []
-    candidate_set = pipeline.get("candidate_code_set") or {}
-    document_package = pipeline.get("document_package") or {}
-    compact_document_package = {
-        key: value
-        for key, value in document_package.items()
-        if key != "raw_document_package"
-    } if isinstance(document_package, dict) else document_package
-
-    payload = {
-        "summary": summary,
-        "candidate_code_set": candidate_set,
-        "document_package": compact_document_package,
-        "agent_runs": agent_runs,
-    }
-    cards = []
-    for run in agent_runs:
-        cards.append(
-            html.Div(
-                [
-                    html.Div(
-                        (
-                            f"{display_stage_name(run.get('agent_name'))} · "
-                            f"{display_stage_name(run.get('stage'))}"
-                        ),
-                        className="card-title",
-                    ),
-                    html.Div(
-                        f"outputs: {', '.join(run.get('outputs_written') or []) or '-'}",
-                        className="card-meta",
-                    ),
-                    html.Div(
-                        run.get("reasoning_summary") or "reasoning 없음",
-                        className="card-meta",
-                    ),
-                ],
-                className="card",
-            )
-        )
-    return html.Details(
-        [
-            html.Summary("Blackboard log"),
-            html.Div(
-                [
-                    html.Div(f"run_id: {pipeline.get('run_id')}", className="card-meta"),
-                    html.Div(f"run_dir: {pipeline.get('run_dir')}", className="card-meta"),
-                ],
-                className="card",
-            ),
-            html.Div(cards, className="two-col") if cards else html.Div("AgentRun log 없음", className="card-meta"),
-            html.Details(
-                [
-                    html.Summary("Blackboard JSON"),
-                    html.Pre(json.dumps(payload, ensure_ascii=False, indent=2), className="textarea"),
-                ]
-            ),
-        ]
-    )
+        raw = html.Details([html.Summary("Public document_package JSON"), html.Pre(json.dumps(pkg, ensure_ascii=False, indent=2), className="textarea")])
+    debug = render_debug_pipeline_log(pkg) if "debug" in (options or []) or "blackboard" in (options or []) else None
+    return html.Div([render_trade_scenario(pkg, cx), html.Div([left, right], className="two-col"), debug, raw])
 
 
 def render_customs(pkg: dict[str, Any], controls: list[dict[str, Any]]):
@@ -2056,104 +1975,6 @@ def render_product_rules_from_view(
         ]
     )
     return html.Div([html.Div("상세 규제/선언 체크리스트", className="section-title"), html.Div([pre_col, post_col], className="two-col")])
-
-
-def _load_pipeline_payload(run_id: str | None) -> dict[str, Any]:
-    if not run_id:
-        return {}
-    run_dir = RUNS_ROOT / run_id
-    blackboard_path = run_dir / "blackboard.json"
-    agent_runs_path = run_dir / "agent_runs.jsonl"
-    payload: dict[str, Any] = {"run_id": run_id, "run_dir": str(run_dir)}
-    if blackboard_path.exists():
-        payload["blackboard"] = json.loads(blackboard_path.read_text(encoding="utf-8"))
-    if agent_runs_path.exists():
-        agent_runs = []
-        for line in agent_runs_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                agent_runs.append(json.loads(line))
-            except json.JSONDecodeError:
-                agent_runs.append({"raw": line})
-        payload["agent_runs"] = agent_runs
-    return payload
-
-
-def load_package_for_detail(run_id: str | None, taric10: str, *, include_celex_excerpt: bool = False) -> dict[str, Any]:
-    """Read the precomputed package from blackboard; resolve directly only as fallback."""
-    code = clean_code(taric10)
-    pipeline = _load_pipeline_payload(run_id)
-    blackboard = pipeline.get("blackboard") or {}
-    document_packages = blackboard.get("document_packages") or []
-    for dp in document_packages:
-        if clean_code(dp.get("taric10") or "") != code:
-            continue
-        raw = dp.get("raw_document_package")
-        if isinstance(raw, dict):
-            package = dict(raw)
-            if isinstance(dp.get("document_view"), dict):
-                package["_document_view"] = dp.get("document_view")
-            package["_pipeline"] = {
-                "run_id": pipeline.get("run_id"),
-                "run_dir": pipeline.get("run_dir"),
-                "agent_results": [],
-                "agent_runs": pipeline.get("agent_runs") or [],
-                "candidate_code_set": (blackboard.get("candidate_code_sets") or [None])[-1],
-                "document_package": {k: v for k, v in dp.items() if k != "raw_document_package"},
-                "decision": (blackboard.get("orchestrator_decisions") or [None])[-1],
-            }
-            return package
-
-    package = get_document_package(code, include_celex_excerpt=include_celex_excerpt)
-    package_data = _dc_to_dict(package)
-    package_data["_pipeline"] = pipeline
-    return package_data
-
-
-def render_detail_page(run_id: str | None, taric10: str, panel: str = "overview", options: list[str] | None = None) -> html.Div:
-    options = options or ["blackboard"]
-    try:
-        package = load_package_for_detail(run_id, taric10, include_celex_excerpt="celex" in options)
-    except Exception as exc:  # noqa: BLE001
-        return html.Div(
-            [
-                dcc.Link("← 분류 화면", href="/classification", className="subtle"),
-                html.Div(f"서류 패키지 조회 오류: {exc}", className="error"),
-            ],
-            className="main",
-        )
-
-    return html.Div(
-        [
-            dcc.Store(id="package-store", data=package),
-            html.Div(
-                [
-                    dcc.Link("← 분류 화면", href="/classification", className="subtle"),
-                    html.Span(" · ", className="subtle"),
-                    dcc.Link(
-                        "Admin log",
-                        href=f"/admin/{run_id}" if run_id else "/admin",
-                        className="subtle",
-                    ),
-                ],
-                style={"marginBottom": "12px"},
-            ),
-            html.Div(
-                [
-                    html.H2("EU 수출 서류 패키지", className="title"),
-                    html.Div(
-                        f"run_id {run_id or '-'} · TARIC10 {clean_code(taric10) or '-'}",
-                        className="caption",
-                    ),
-                ],
-                style={"marginBottom": "14px"},
-            ),
-            html.Div(render_result(package, panel or "overview", options), id="document-result-root"),
-        ],
-        className="main",
-    )
 
 
 if __name__ == "__main__":
