@@ -2,36 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import dash_mantine_components as dmc
 from dash import Dash, dcc, html
 
-from agents.document_pipeline import run_document_pipeline
-from backend import PipelineApi, PipelineRunService, RunRegistry
-from bussiness_logic.app_config import LoadAppConfig
 from frontend.callbacks import RegisterFrontendCallbacks
-
-PipelineCallable = Callable[..., dict[str, Any]]
+from frontend.pipeline_api_client import PipelineApiClient
 
 
 def CreateDashApp(
     *,
-    pipelineCallable: PipelineCallable = run_document_pipeline,
+    apiBaseUrl: str,
+    apiRequestTimeoutSeconds: float = 15.0,
 ) -> Dash:
-    registry = RunRegistry()
-    service = PipelineRunService(registry=registry, pipelineCallable=pipelineCallable)
-    projectRoot = Path(__file__).resolve().parents[2]
-    appConfig = LoadAppConfig(projectRoot)
-    pipelineApi = PipelineApi(
-        registry=registry,
-        service=service,
-        debugRunsRoot=appConfig.paths.ResolvePath(
-            projectRoot,
-            appConfig.paths.blackboard_runs_root,
-        ),
+    pipelineApiClient = PipelineApiClient(
+        apiBaseUrl,
+        timeoutSeconds=apiRequestTimeoutSeconds,
     )
 
     app = Dash(
@@ -40,12 +27,12 @@ def CreateDashApp(
         suppress_callback_exceptions=True,
         assets_folder=str(Path(__file__).resolve().parent / "ui" / "assets"),
     )
-    pipelineApi.RegisterRoutes(app.server)
 
     app.layout = dmc.MantineProvider(
         children=html.Div(
             [
                 dcc.Location(id="url", refresh=False),
+                dcc.Store(id="api-base-url", data=apiBaseUrl),
                 dcc.Store(id="store-run-id", storage_type="session"),
                 dcc.Store(id="store-result"),
                 dcc.Store(id="document-panel-store", data="overview"),
@@ -70,7 +57,7 @@ def CreateDashApp(
         defaultColorScheme="light",
     )
 
-    RegisterFrontendCallbacks(app, pipelineApi)
+    RegisterFrontendCallbacks(app, pipelineApiClient)
     return app
 
 

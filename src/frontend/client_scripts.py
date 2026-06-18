@@ -1,7 +1,7 @@
 """Clientside Dash callback scripts."""
 
 RUN_CREATE_CALLBACK = """
-async function(nClicks, productName, description, kurlyUrl, currentRunId, resultData) {
+async function(nClicks, productName, description, kurlyUrl, currentRunId, resultData, apiBaseUrl) {
     const dc = window.dash_clientside || dash_clientside;
     if (!nClicks) {
         return [dc.no_update, dc.no_update];
@@ -22,6 +22,7 @@ async function(nClicks, productName, description, kurlyUrl, currentRunId, result
     const nextDescription = clean(description);
     const nextKurlyUrl = clean(kurlyUrl);
     const query = nextProductName || nextDescription || nextKurlyUrl;
+    const backendBaseUrl = clean(apiBaseUrl).replace(/\\/+$/, "");
     const facts = {
         product_name: nextProductName,
         description: nextDescription,
@@ -65,6 +66,20 @@ async function(nClicks, productName, description, kurlyUrl, currentRunId, result
         });
         return [dc.no_update, "/classification"];
     }
+    if (!backendBaseUrl) {
+        setStore({
+            job_id: null,
+            job_status: "failed",
+            request: {query: query, facts: facts},
+            error: "Backend API URL이 설정되지 않았습니다.",
+            events: [{
+                stage: "Pipeline",
+                status: "failed",
+                message: "Backend API URL이 설정되지 않았습니다."
+            }]
+        });
+        return [dc.no_update, "/classification"];
+    }
 
     if (dc.set_props) {
         dc.set_props("btn-run", {disabled: true});
@@ -81,7 +96,7 @@ async function(nClicks, productName, description, kurlyUrl, currentRunId, result
     });
 
     try {
-        const response = await fetch("/api/runs", {
+        const response = await fetch(`${backendBaseUrl}/api/runs`, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({
@@ -110,7 +125,8 @@ async function(nClicks, productName, description, kurlyUrl, currentRunId, result
         setStore(queuedResult);
 
         try {
-            const snapshotResponse = await fetch(payload.result_url);
+            const snapshotUrl = new URL(payload.result_url, `${backendBaseUrl}/`).toString();
+            const snapshotResponse = await fetch(snapshotUrl);
             if (snapshotResponse.ok) {
                 setStore(await snapshotResponse.json());
             }
@@ -137,7 +153,7 @@ async function(nClicks, productName, description, kurlyUrl, currentRunId, result
 
 
 RUN_EVENT_STREAM_CALLBACK = """
-function(jobId) {
+function(jobId, apiBaseUrl) {
     const dc = window.dash_clientside || dash_clientside;
     const noUpdate = dc.no_update;
     const setStore = function(data) {
@@ -159,8 +175,18 @@ function(jobId) {
     if (!jobId) {
         return noUpdate;
     }
+    const backendBaseUrl = (apiBaseUrl || "").toString().trim().replace(/\\/+$/, "");
+    if (!backendBaseUrl) {
+        setStore({
+            job_id: jobId,
+            job_status: "failed",
+            error: "Backend API URL이 설정되지 않았습니다.",
+            events: []
+        });
+        return noUpdate;
+    }
 
-    fetch(`/api/runs/${jobId}`)
+    fetch(`${backendBaseUrl}/api/runs/${jobId}`)
         .then(function(response) {
             if (!response.ok) {
                 throw new Error("run_not_found");
@@ -175,7 +201,7 @@ function(jobId) {
             }
 
             const eventStart = Array.isArray(state.events) ? state.events.length : 0;
-            const source = new EventSource(`/api/runs/${jobId}/events?start=${eventStart}`);
+            const source = new EventSource(`${backendBaseUrl}/api/runs/${jobId}/events?start=${eventStart}`);
             window.asapPipelineSse = {jobId: jobId, source: source};
 
             const pushState = function(nextState) {
@@ -218,7 +244,7 @@ function(jobId) {
                     payload = {};
                 }
                 source.close();
-                fetch(`/api/runs/${jobId}`)
+                fetch(`${backendBaseUrl}/api/runs/${jobId}`)
                     .then(function(response) {
                         return response.ok ? response.json() : null;
                     })

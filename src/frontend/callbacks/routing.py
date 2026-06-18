@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from dash import Dash, Input, Output
+import requests
+from dash import Dash, Input, Output, html
 
-from backend import PipelineApi
 from frontend.callbacks.navigation import SplitPath
+from frontend.pipeline_api_client import PipelineApiClient
 from frontend.ui import admin_dash, classification_dash, document_package_view
 
 
-def RegisterRoutingCallbacks(app: Dash, pipelineApi: PipelineApi) -> None:
+def RegisterRoutingCallbacks(
+    app: Dash,
+    pipelineApiClient: PipelineApiClient,
+) -> None:
     @app.callback(
         Output("page-root", "children"),
         Input("url", "pathname"),
@@ -42,7 +46,13 @@ def RegisterRoutingCallbacks(app: Dash, pipelineApi: PipelineApi) -> None:
         if page == "document":
             runId = parts[1] if len(parts) > 1 else ""
             taric10 = parts[2] if len(parts) > 2 else ""
-            documentPackagePayload = pipelineApi.ReadDocumentPackageDetail(runId, taric10)
+            try:
+                documentPackagePayload = pipelineApiClient.ReadDocumentPackageDetail(
+                    runId,
+                    taric10,
+                )
+            except (requests.RequestException, ValueError) as exc:
+                return _RenderBackendError(exc)
             return document_package_view.render_detail_page(
                 runId,
                 taric10,
@@ -52,7 +62,10 @@ def RegisterRoutingCallbacks(app: Dash, pipelineApi: PipelineApi) -> None:
 
         if page == "admin":
             runId = parts[1] if len(parts) > 1 else None
-            debugResult = pipelineApi.ReadAdminRunDebug(runId or "")
+            try:
+                debugResult = pipelineApiClient.ReadAdminRunDebug(runId or "")
+            except (requests.RequestException, ValueError) as exc:
+                return _RenderBackendError(exc)
             live = (
                 result_data
                 if result_data and (not runId or result_data.get("run_id") == runId)
@@ -70,3 +83,18 @@ def RegisterRoutingCallbacks(app: Dash, pipelineApi: PipelineApi) -> None:
             candidate_tree_drawer_open=bool(candidate_tree_drawer_open),
             classification_result_drawer_open=bool(classification_result_drawer_open),
         )
+
+
+def _RenderBackendError(error: Exception) -> html.Div:
+    return html.Div(
+        [
+            html.H2("Backend API 연결 실패"),
+            html.P(str(error)),
+        ],
+        style={
+            "padding": "24px",
+            "border": "1px solid #fecaca",
+            "background": "#fef2f2",
+            "color": "#991b1b",
+        },
+    )

@@ -18,6 +18,7 @@ def RegisterRuntimeCallbacks(app: Dash) -> None:
         State("ipt-kurly-url", "value"),
         State("store-run-id", "data"),
         State("store-result", "data"),
+        State("api-base-url", "data"),
         prevent_initial_call=True,
     )
 
@@ -25,6 +26,7 @@ def RegisterRuntimeCallbacks(app: Dash) -> None:
         RUN_EVENT_STREAM_CALLBACK,
         Output("sse-bridge", "children"),
         Input("store-run-id", "data"),
+        State("api-base-url", "data"),
     )
 
     @app.callback(

@@ -11,11 +11,13 @@ dependencies:
   - pandas
   - pydantic
   - pyyaml
+  - requests
   - loguru
   - pytest
   - pip:
       # UI
       - dash
+      - dash-mantine-components
       - PySide6
 
       # Runtime validation / optional admin tooling
