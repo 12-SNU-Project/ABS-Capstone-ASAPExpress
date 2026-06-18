@@ -520,9 +520,48 @@ def _reconstructed_tables_widget(
 
 def input_processing_detail_card(
     input_processing_view: dict[str, Any],
+    drawerMode: str,
 ) -> html.Div | None:
     if not input_processing_view:
         return None
+
+    sourceEvidencePreview = input_processing_view.get("detail_evidence_rows") or []
+    if not isinstance(sourceEvidencePreview, list):
+        sourceEvidencePreview = []
+    if drawerMode == "raw":
+        basicInfo = input_processing_view.get("page_product_facts") or {}
+        if not isinstance(basicInfo, dict):
+            basicInfo = {}
+        rawPanels = [
+            panel
+            for panel in [
+                _product_page_basic_card(basicInfo),
+                _source_evidence_table(
+                    "가공 전 OCR/PP Table 원문",
+                    sourceEvidencePreview,
+                    max_rows=12,
+                ),
+            ]
+            if panel is not None
+        ]
+        if not rawPanels:
+            return None
+        return html.Div(
+            [
+                html.Div(
+                    [
+                        html.Div("웹스크롤링 & OCR 원문", className="input-card-title"),
+                        html.Div(
+                            "웹페이지와 상세 이미지에서 수집한 가공 전 관찰값",
+                            className="input-card-count",
+                        ),
+                    ],
+                    className="input-card-head",
+                ),
+                *rawPanels,
+            ],
+            className="input-detail-result",
+        )
 
     status = input_processing_view.get("reconstruction_status") or {}
     if not isinstance(status, dict):
@@ -545,52 +584,30 @@ def input_processing_detail_card(
     sourceLabels = input_processing_view.get("evidence_source_labels") or {}
     if not isinstance(sourceLabels, dict):
         sourceLabels = {}
-    sourceEvidencePreview = input_processing_view.get("detail_evidence_rows") or []
-    if not isinstance(sourceEvidencePreview, list):
-        sourceEvidencePreview = []
     reconstructionMode = status.get("mode") or "unknown"
     staticClassifierFacts = _filter_static_classifier_input_facts(productFacts)
     reconstructionError = status.get("error")
     fallbackReason = status.get("fallback_reason")
-    beforePanel = _source_evidence_table(
-        "복원 전 상세 OCR/PP Table 관찰값",
-        sourceEvidencePreview,
-    )
     afterPanel = (
         _reconstructed_tables_widget(
-            "복원 후 구조화된 상세 표",
+            "LLM 복원 후 구조화된 상세 표",
             reconstructedTables,
             source_labels=sourceLabels,
         )
         or _reconstruction_fact_table(
-            "복원 후 구조화된 상세 facts",
+            "LLM 복원 후 구조화된 상세 facts",
             productFacts,
             source_labels=sourceLabels,
         )
-    )
-    primaryFactPanels = [
-        panel
-        for panel in [
-            beforePanel,
-            afterPanel,
-        ]
-        if panel is not None
-    ]
-    primaryFactLayout = (
-        html.Div(primaryFactPanels, className="input-reconstruction-compare-grid")
-        if len(primaryFactPanels) > 1
-        else primaryFactPanels[0]
-        if primaryFactPanels
-        else None
     )
 
     return html.Div(
         [
             html.Div(
                 [
-                    html.Div("Product Detail Reconstruction", style={"fontSize": "13px", "fontWeight": 950, "color": "#0f172a"}),
+                    html.Div("LLM Reconstruction 결과", style={"fontSize": "13px", "fontWeight": 950, "color": "#0f172a"}),
                     html.Div(
-                        "웹페이지 하단 상세 이미지, PP table, OCR에서 추출·복원한 정보",
+                        "OCR/PP Table 원문을 구조화하고 교정한 후속 결과",
                         style={"fontSize": "12px", "color": "#64748b", "marginTop": "2px"},
                     ),
                 ],
@@ -619,7 +636,7 @@ def input_processing_detail_card(
                 fallbackReason
                 and not status.get("used_llm_reconstruction")
             ) else None,
-            primaryFactLayout,
+            afterPanel,
             _reconstruction_fact_table(
                 "최종 분류 입력 facts",
                 staticClassifierFacts,
@@ -667,7 +684,7 @@ def input_processing_detail_card(
 def input_processing_view_card(
     input_processing_view: dict[str, Any] | None,
     *,
-    drawerOpened: bool = False,
+    drawerMode: str | bool | None = None,
 ) -> html.Div | None:
     if not isinstance(input_processing_view, dict) or not input_processing_view:
         return None
@@ -676,7 +693,7 @@ def input_processing_view_card(
     if not isinstance(basicInfo, dict):
         basicInfo = {}
     basicPanel = _product_page_basic_card(basicInfo)
-    detailDrawer = input_processing_detail_drawer(input_processing_view, drawerOpened)
+    detailDrawer = input_processing_detail_drawer(input_processing_view, drawerMode)
     panels = [panel for panel in [basicPanel, detailDrawer] if panel is not None]
     if not panels:
         return None
@@ -690,14 +707,20 @@ def input_processing_view_card(
 
 def input_processing_detail_drawer(
     input_processing_view: dict[str, Any],
-    drawerOpened: bool,
+    drawerMode: str | bool | None,
 ) -> dmc.Drawer | None:
-    detailCard = input_processing_detail_card(input_processing_view)
+    activeMode = drawerMode if drawerMode in {"raw", "reconstructed"} else ""
+    detailCard = (
+        input_processing_detail_card(input_processing_view, activeMode)
+        if activeMode
+        else None
+    )
     if detailCard is None:
         return None
+    isRaw = activeMode == "raw"
     return dmc.Drawer(
         id="input-detail-drawer",
-        opened=drawerOpened,
+        opened=True,
         position="right",
         size="min(980px, 92vw)",
         padding="lg",
@@ -716,8 +739,14 @@ def input_processing_detail_drawer(
             [
                 html.Div(
                     [
-                        html.Div("상품 상세 OCR/표 복원", className="drawer-title-main"),
-                        html.Div("웹페이지 하단 상세 이미지 기준", className="drawer-title-sub"),
+                        html.Div(
+                            "웹스크롤링 & OCR 원문" if isRaw else "LLM Reconstruction 결과",
+                            className="drawer-title-main",
+                        ),
+                        html.Div(
+                            "가공 전 수집 데이터" if isRaw else "가공 후 구조화 데이터",
+                            className="drawer-title-sub",
+                        ),
                     ]
                 ),
                 dmc.Button(
@@ -738,7 +767,11 @@ def input_processing_detail_drawer(
     )
 
 
-def render_input_form(facts: dict | None = None) -> html.Div:
+def render_input_form(
+    facts: dict[str, Any] | None = None,
+    *,
+    runDisabled: bool = False,
+) -> html.Div:
     facts = facts or {}
     return html.Div(
         [
@@ -771,6 +804,8 @@ def render_input_form(facts: dict | None = None) -> html.Div:
                                 "Run pipeline",
                                 id="btn-run",
                                 n_clicks=0,
+                                disabled=runDisabled,
+                                className="run-pipeline-button",
                                 style={
                                     "padding": "10px 24px",
                                     "fontSize": "14px",
@@ -1655,14 +1690,14 @@ def render_decision(result: dict[str, Any]) -> html.Div:
 def render_page(
     result: dict[str, Any] | None = None,
     *,
-    input_detail_drawer_open: bool = False,
+    input_detail_drawer_mode: str | bool | None = None,
     candidate_tree_drawer_open: bool = False,
     classification_result_drawer_open: bool = False,
 ) -> html.Div:
     result = result or {}
     inputProcessingView = input_processing_view_card(
         result.get("input_processing_view"),
-        drawerOpened=input_detail_drawer_open,
+        drawerMode=input_detail_drawer_mode,
     )
     candidateTreeDrawer = candidate_tree_drawer(result, candidate_tree_drawer_open)
     classificationResultDrawer = classification_result_drawer(
@@ -1673,6 +1708,7 @@ def render_page(
         (result.get("request") or {}).get("facts")
         or {}
     )
+    runDisabled = result.get("job_status") in {"submitting", "queued", "running"}
     return html.Div(
         [
             html.Div(
@@ -1682,7 +1718,7 @@ def render_page(
                 ],
                 style={"borderBottom": "2px solid #2563eb", "paddingBottom": "12px", "marginBottom": "22px"},
             ),
-            render_input_form(requestFacts),
+            render_input_form(requestFacts, runDisabled=runDisabled),
             html.Div("입력 수집/복원 결과", style=LABEL) if inputProcessingView else None,
             inputProcessingView,
             html.Div("진행 상태", style=LABEL),

@@ -39,7 +39,7 @@ def _toggle_input_detail_drawer(
     _stepClicks: list[int | None],
     _closeClicks: list[int | None],
     resultData: dict[str, Any] | None,
-) -> bool | Any:
+) -> str | bool | Any:
     triggered = ctx.triggered_id
     if isinstance(triggered, dict) and triggered.get("type") == "input-detail-drawer-close":
         return False
@@ -51,8 +51,10 @@ def _toggle_input_detail_drawer(
     if isinstance(triggered, dict) and triggered.get("type") == "pipeline-step-card":
         step = triggered.get("step")
         stepStates = classification_dash.pipeline_step_statuses(resultData)
-        if step in {"collect", "reconstruct"} and stepStates.get(step, {}).get("status") == "completed":
-            return True
+        if step == "collect" and stepStates.get(step, {}).get("status") == "completed":
+            return "raw"
+        if step == "reconstruct" and stepStates.get(step, {}).get("status") == "completed":
+            return "reconstructed"
     return no_update
 
 

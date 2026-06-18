@@ -25,7 +25,7 @@ def RegisterRoutingCallbacks(app: Dash, pipelineApi: PipelineApi) -> None:
         pathname: str | None,
         result_data: dict[str, Any] | None,
         document_panel: str | None,
-        input_detail_drawer_open: bool | None,
+        input_detail_drawer_mode: str | bool | None,
         candidate_tree_drawer_open: bool | None,
         classification_result_drawer_open: bool | None,
     ) -> Any:
@@ -33,7 +33,7 @@ def RegisterRoutingCallbacks(app: Dash, pipelineApi: PipelineApi) -> None:
         if not parts:
             return classification_dash.render_page(
                 result_data,
-                input_detail_drawer_open=bool(input_detail_drawer_open),
+                input_detail_drawer_mode=input_detail_drawer_mode,
                 candidate_tree_drawer_open=bool(candidate_tree_drawer_open),
                 classification_result_drawer_open=bool(classification_result_drawer_open),
             )
@@ -66,7 +66,7 @@ def RegisterRoutingCallbacks(app: Dash, pipelineApi: PipelineApi) -> None:
 
         return classification_dash.render_page(
             result_data,
-            input_detail_drawer_open=bool(input_detail_drawer_open),
+            input_detail_drawer_mode=input_detail_drawer_mode,
             candidate_tree_drawer_open=bool(candidate_tree_drawer_open),
             classification_result_drawer_open=bool(classification_result_drawer_open),
         )

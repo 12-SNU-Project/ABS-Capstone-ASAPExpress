@@ -2,12 +2,10 @@
   margin-top: 10px;
 }
 
-.input-reconstruction-compare-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));
-  gap: 12px;
-  align-items: start;
-  margin-top: 10px;
+.run-pipeline-button:disabled {
+  background: #94a3b8 !important;
+  cursor: not-allowed !important;
+  opacity: 0.78;
 }
 
 .input-card-head {

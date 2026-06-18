@@ -35,6 +35,21 @@ async function(nClicks, productName, description, kurlyUrl, currentRunId, result
             dc.set_props("store-result", {data: data});
         }
     };
+    const resetRunViews = function() {
+        if (!dc.set_props) {
+            return;
+        }
+        dc.set_props("document-panel-store", {data: "overview"});
+        dc.set_props("input-detail-drawer-store", {data: false});
+        dc.set_props("candidate-tree-drawer-store", {data: false});
+        dc.set_props("classification-result-drawer-store", {data: false});
+    };
+
+    if (window.asapPipelineSse && window.asapPipelineSse.source) {
+        window.asapPipelineSse.source.close();
+        window.asapPipelineSse = null;
+    }
+    resetRunViews();
 
     if (!query) {
         setStore({
@@ -50,6 +65,20 @@ async function(nClicks, productName, description, kurlyUrl, currentRunId, result
         });
         return [dc.no_update, "/classification"];
     }
+
+    if (dc.set_props) {
+        dc.set_props("btn-run", {disabled: true});
+    }
+    setStore({
+        job_id: null,
+        job_status: "submitting",
+        request: {query: query, facts: facts},
+        events: [{
+            stage: "Pipeline",
+            status: "submitting",
+            message: "작업 등록을 요청하고 있습니다."
+        }]
+    });
 
     try {
         const response = await fetch("/api/runs", {

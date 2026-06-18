@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from dash import Dash, Input, Output, State
 
 from frontend.client_scripts import RUN_CREATE_CALLBACK, RUN_EVENT_STREAM_CALLBACK
@@ -31,12 +29,10 @@ def RegisterRuntimeCallbacks(app: Dash) -> None:
 
     @app.callback(
         Output("btn-run", "disabled"),
-        Input("store-run-id", "data"),
         Input("store-result", "data"),
     )
-    def toggle_run_button(job_id: str | None, result_data: dict[str, Any] | None) -> bool:
-        if not job_id or not isinstance(result_data, dict):
-            return False
-        if result_data.get("job_id") != job_id:
-            return False
-        return result_data.get("job_status") in {"queued", "running"}
+    def toggle_run_button(result_data: dict[str, object] | None) -> bool:
+        return bool(
+            isinstance(result_data, dict)
+            and result_data.get("job_status") in {"submitting", "queued", "running"}
+        )
