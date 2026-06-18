@@ -8,6 +8,7 @@ from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from bussiness_logic.artifact_paths import ExtractProductIdFromUrl
 from bussiness_logic.product.ocr.paddle_ocr import (
     ProductOcrEngine,
     ProductStructuredOcrResult,
@@ -213,22 +214,7 @@ class ProductOcrArtifactStore:
         artifactRootPath: Path,
         productPageUrl: str,
     ) -> Path:
-        return artifactRootPath / self._ExtractProductId(productPageUrl)
-
-    def _ExtractProductId(self, productPageUrl: str) -> str:
-        parsedUrl = urlparse(productPageUrl)
-        pathParts = [pathPart for pathPart in parsedUrl.path.split("/") if pathPart]
-        if len(pathParts) >= 2 and pathParts[0] == "goods":
-            return pathParts[1]
-        if len(pathParts) >= 2 and pathParts[0] == "products":
-            return "global-{0}".format(self._BuildSafePathName(pathParts[1]))
-        if (
-            len(pathParts) >= 3
-            and pathParts[0] == "en"
-            and pathParts[1] == "products"
-        ):
-            return "global-{0}".format(self._BuildSafePathName(pathParts[2]))
-        return "unknown"
+        return artifactRootPath / ExtractProductIdFromUrl(productPageUrl)
 
     def _BuildImageFileName(self, imageIndex: int, imageUrl: str) -> str:
         parsedUrl = urlparse(imageUrl)

@@ -119,10 +119,11 @@ class AppPathsConfig(BaseModel):
         "artifacts/kurly-market-smoke/runtime-smoke-summary.json",
     )
     blackboard_runs_root: Path = Path("artifacts/runs")
+    pipeline_outputs_root: Path = Path("artifacts/outputs")
+    product_input_artifact_root: Path = Path("artifacts/product_input")
     blackboard_schema: Path = Path(
         "docs/ASAP_Ontology_v1/linkml/generated/asap_runtime.schema.json",
     )
-    dash_url_intake_artifact_root: Path = Path("artifacts/asap_dash_url_intake")
     taric_master_table: Path = Path(
         "data/processed/TARIC/taric_master_table.csv",
     )

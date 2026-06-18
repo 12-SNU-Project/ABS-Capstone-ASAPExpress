@@ -6,7 +6,6 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
-from urllib.parse import urlparse
 
 from pydantic import (
     AliasChoices,
@@ -23,6 +22,7 @@ from bussiness_logic.bridge import (
     LlmResponseFormat,
     RuntimeAdapter,
 )
+from bussiness_logic.artifact_paths import ExtractProductIdFromUrl
 from bussiness_logic.input_process.dictionary import (
     DEFAULT_PRODUCT_INPUT_DICTIONARY_PATH,
     ProductDictionaryMatch,
@@ -1197,36 +1197,9 @@ class ProductInputReconstructionDebugStore:
         self,
         evidencePackage: ProductInputEvidencePackage,
     ) -> Path:
-        return self._artifactRootPath / self._ExtractProductId(
+        return self._artifactRootPath / ExtractProductIdFromUrl(
             evidencePackage.productPageUrl,
         )
-
-    def _ExtractProductId(self, productPageUrl: Optional[str]) -> str:
-        if productPageUrl is None:
-            return "unknown"
-        parsedUrl = urlparse(productPageUrl)
-        pathParts = [pathPart for pathPart in parsedUrl.path.split("/") if pathPart]
-        if len(pathParts) >= 2 and pathParts[0] == "goods":
-            return self._BuildSafePathName(pathParts[1])
-        if len(pathParts) >= 2 and pathParts[0] == "products":
-            return "global-{0}".format(self._BuildSafePathName(pathParts[1]))
-        if (
-            len(pathParts) >= 3
-            and pathParts[0] == "en"
-            and pathParts[1] == "products"
-        ):
-            return "global-{0}".format(self._BuildSafePathName(pathParts[2]))
-        return self._BuildSafePathName(parsedUrl.path.strip("/") or "unknown")
-
-    @staticmethod
-    def _BuildSafePathName(value: str) -> str:
-        safeName = "".join(
-            character
-            if character.isalnum() or character in {"-", "_"}
-            else "-"
-            for character in value
-        ).strip("-")
-        return safeName or "unknown"
 
 
 class ProductInputReconstructionService:
