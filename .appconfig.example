@@ -59,6 +59,19 @@ blackboard_schema = "docs/ASAP_Ontology_v1/linkml/generated/asap_runtime.schema.
 dash_url_intake_artifact_root = "tmp/asap_dash_url_intake"
 taric_master_table = "data/processed/TARIC/taric_master_table.csv"
 
+[web]
+# Dash presentation server와 pipeline backend는 별도 프로세스로 실행합니다.
+frontend_host = "127.0.0.1"
+frontend_port = 8050
+backend_host = "127.0.0.1"
+backend_port = 8060
+backend_api_base_url = "http://127.0.0.1:8060"
+backend_request_timeout_seconds = 15
+allowed_frontend_origins = [
+  "http://127.0.0.1:8050",
+  "http://localhost:8050",
+]
+
 [classification]
 use_semantic_candidate_retrieval = true
 semantic_candidate_top_k = 8
