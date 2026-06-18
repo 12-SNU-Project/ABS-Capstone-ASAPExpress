@@ -88,8 +88,7 @@ class ClassificationAgent(BaseAgent):
 
         if result.error:
             self.reason(f"ASAPExpress classifier returned error: {result.error}")
-            if not self._emit_retriever_fallback(store, pes, why=result.error):
-                self._emit_unresolved(store, pes, why=result.error)
+            self._emit_unresolved(store, pes, why=result.error)
             return
 
         # Preserve the LLM response excerpt in reasoning_summary so the admin
@@ -101,8 +100,7 @@ class ClassificationAgent(BaseAgent):
         recommendation = result.recommendation
         if recommendation is None:
             self.reason("No Stage1RecommendationReport produced; emitting needs_more_facts.")
-            if not self._emit_retriever_fallback(store, pes, why="no_recommendation"):
-                self._emit_unresolved(store, pes, why="no_recommendation")
+            self._emit_unresolved(store, pes, why="no_recommendation")
             return
 
         # Extract candidate dicts from the Stage1 recommendation
@@ -136,7 +134,6 @@ class ClassificationAgent(BaseAgent):
                     else "Static CN retrieval top5 candidate retained for comparison."
                 ),
                 "rank": len(emitted) + 1,
-                "confidence": 0.7 if isRecommended else 0.5,
                 "status": "proposed",
                 "llm_recommended": isRecommended,
                 "candidate_static_tree": self._build_candidate_static_tree(candidate),
@@ -152,8 +149,7 @@ class ClassificationAgent(BaseAgent):
         if not emitted:
             self.reason("ASAPExpress returned no recommended/retained candidates.")
             why = f"no_recommendation_or_retained ({decision_status})"
-            if not self._emit_retriever_fallback(store, pes, why=why):
-                self._emit_unresolved(store, pes, why=why)
+            self._emit_unresolved(store, pes, why=why)
             return
 
         ccs_id = store.next_id("ccs")
@@ -192,7 +188,6 @@ class ClassificationAgent(BaseAgent):
                     if taric10 else "No TARIC10 branch resolved from current master table."
                 ),
                 "rank": len(ccs_candidates) + 1,
-                "confidence": c["confidence"],
                 "status": c["status"],
                 "candidate_source": "classifier",
                 "llm_recommended": bool(c.get("llm_recommended")),
@@ -204,8 +199,7 @@ class ClassificationAgent(BaseAgent):
             })
         if not ccs_candidates:
             self.reason("No valid emitted CN8 candidates remained after validation.")
-            if not self._emit_retriever_fallback(store, pes, why="no_valid_emitted_cn8"):
-                self._emit_unresolved(store, pes, why="no_valid_emitted_cn8")
+            self._emit_unresolved(store, pes, why="no_valid_emitted_cn8")
             return
         store.append("candidate_code_sets", {
             "object_type": "CandidateCodeSet",
@@ -313,99 +307,6 @@ class ClassificationAgent(BaseAgent):
                 reason="TaricBranchResolverTool branch retrieval.",
             )
         return out
-
-    def _emit_retriever_fallback(
-        self,
-        store: BlackboardStore,
-        pes: dict,
-        *,
-        why: str,
-        limit: int = 5,
-    ) -> bool:
-        """Keep Blackboard moving when the LLM review fails.
-
-        The retriever shortlist is not a final classification. It is still a
-        useful candidate set for downstream TARIC/document smoke tests, so we
-        publish it with low confidence and an explicit retriever_fallback tag.
-        """
-        shortlist: list[dict] = []
-        seen: set[str] = set()
-        for citation in self._ontology_reads:
-            if citation.get("source_table") not in {"cn_table", "cn_hs8_pair_rows"}:
-                continue
-            cn8 = str(citation.get("source_id") or "")[:8]
-            if not cn8.isdigit() or len(cn8) != 8 or cn8 in seen:
-                continue
-            seen.add(cn8)
-            shortlist.append(dict(citation))
-            if len(shortlist) >= limit:
-                break
-
-        if not shortlist:
-            self.reason("No retriever shortlist available for fallback candidates.")
-            return False
-
-        ccs_id = store.next_id("ccs")
-        candidates: list[dict] = []
-        for rank, citation in enumerate(shortlist, start=1):
-            cn8 = str(citation.get("source_id") or "")[:8]
-            taric_branches = self._resolve_taric_branches(cn8)
-            selected_branch = self._select_taric_branch(taric_branches)
-            taric10 = selected_branch.get("taric10") or ""
-            if not taric10:
-                self.reason(f"Retriever fallback CN8={cn8} has no TARIC10 branch.")
-            cand_id = store.next_id("cand")
-            candidates.append({
-                "candidate_id": cand_id,
-                "hs6": cn8[:6],
-                "cn8": cn8,
-                "taric10": taric10,
-                "taric10_branch_candidates": taric_branches,
-                "taric10_resolution_mode": (
-                    "enumerate_all_under_cn8" if taric_branches else "no_taric_branch_found"
-                ),
-                "taric10_is_recommended": False,
-                "taric10_branch_count": len(taric_branches),
-                "selected_taric10_reason": (
-                    selected_branch.get("selection_reason")
-                    if taric10 else "No TARIC10 branch resolved from current master table."
-                ),
-                "primary_taric10_reason": (
-                    selected_branch.get("selection_reason")
-                    if taric10 else "No TARIC10 branch resolved from current master table."
-                ),
-                "rank": rank,
-                "confidence": max(0.15, round(0.45 - ((rank - 1) * 0.03), 2)),
-                "status": "proposed",
-                "candidate_source": "retriever_fallback",
-                "classification_basis": [
-                    f"Retriever shortlist fallback because LLM classification failed: {why}",
-                    f"Retriever evidence: {citation.get('snippet') or cn8}",
-                ],
-                "classification_citations": [citation],
-                "required_facts": ["llm_classification_retry"],
-                "unknowns": [why],
-            })
-
-        store.append("candidate_code_sets", {
-            "object_type": "CandidateCodeSet",
-            "created_by": self.agent_name,
-            "created_at": now_iso(),
-            "candidate_set_id": ccs_id,
-            "product_id": pes["product_id"],
-            "classification_status": "retriever_fallback",
-            "failure_reason": why,
-            "shortlisted_candidates": shortlist,
-            "candidates": candidates,
-        })
-        self.wrote(ccs_id)
-        for candidate in candidates:
-            self.wrote(candidate["candidate_id"])
-        self.reason(
-            f"LLM classification unresolved ({why}); wrote {len(candidates)} "
-            "retriever fallback candidate(s) for downstream TARIC/document checks."
-        )
-        return True
 
     # ------------------------------------------------------------------ challenges
     def _collect_my_candidate_ids(self, bb: dict) -> set[str]:

@@ -917,7 +917,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
                     [
                         html.Li(
                             f"#{c.get('rank')} CN8 {c.get('cn8')} -> TARIC10 {c.get('taric10') or '-'} "
-                            f"({c.get('candidate_source') or 'classifier'}, conf={c.get('confidence')})"
+                            f"({c.get('candidate_source') or 'classifier'})"
                         )
                         for c in candidates[:6]
                     ],
@@ -1281,7 +1281,6 @@ def render_candidate_cards(result: dict[str, Any]) -> html.Div:
                             _small("CN8", cand.get("cn8")),
                             _small("TARIC10", cand.get("taric10")),
                             _small("HS6", cand.get("hs6")),
-                            _small("confidence", cand.get("confidence")),
                             _small("branches", len(branches)),
                         ],
                         style={"display": "flex", "gap": "10px", "flexWrap": "wrap"},
@@ -1431,7 +1430,6 @@ def _candidate_tree_panel(candidate: dict[str, Any], displayRank: int) -> html.D
             html.Div(
                 [
                     _small("total score", tree.get("total_score") or "-"),
-                    _small("confidence", candidate.get("confidence")),
                     _small("TARIC10", candidate.get("taric10")),
                     _small("source", candidate.get("candidate_source")),
                 ],
@@ -1640,7 +1638,6 @@ def _classification_candidate_result(
                 [
                     _small("TARIC10", candidate.get("taric10")),
                     _small("status", candidate.get("status")),
-                    _small("confidence", candidate.get("confidence")),
                 ],
                 className="classification-result-metrics",
             ),
