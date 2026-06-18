@@ -119,6 +119,7 @@ class ClassificationAgent(BaseAgent):
                 break
             candidateHs8 = str(_read_field(candidate, "hs8", default="") or "")
             candidateCn8 = candidateHs8[:8]
+            hardCondition = self._build_hard_condition_projection(candidate)
             isRecommended = bool(recommendedCn8 and candidateCn8 == recommendedCn8)
             retainedCandidate = retainedByCn8.get(candidateCn8)
             reason = (
@@ -137,6 +138,9 @@ class ClassificationAgent(BaseAgent):
                 "status": "proposed",
                 "llm_recommended": isRecommended,
                 "candidate_static_tree": self._build_candidate_static_tree(candidate),
+                "hard_conditions": hardCondition["conditions"],
+                "hard_condition_status": hardCondition["status"],
+                "hard_condition_evidence": hardCondition["evidence"],
             })
 
         decision_status = _read_field(result.decision_report, "decisionStatus", default="unknown")
@@ -192,6 +196,13 @@ class ClassificationAgent(BaseAgent):
                 "candidate_source": "classifier",
                 "llm_recommended": bool(c.get("llm_recommended")),
                 "candidate_static_tree": c.get("candidate_static_tree") or {},
+                "hard_conditions": c.get("hard_conditions") or "",
+                "hard_condition_status": (
+                    c.get("hard_condition_status") or "not_applicable"
+                ),
+                "hard_condition_evidence": list(
+                    c.get("hard_condition_evidence") or [],
+                ),
                 "classification_basis": [str(c["reason"])[:300]],
                 "classification_citations": list(self._ontology_reads),
                 "required_facts": [],
@@ -220,6 +231,7 @@ class ClassificationAgent(BaseAgent):
         scoreBreakdown = _read_field(candidate, "scoreBreakdown", "score_breakdown", default={}) or {}
         if not isinstance(scoreBreakdown, dict):
             scoreBreakdown = {}
+        hardCondition = self._build_hard_condition_projection(candidate)
         hierarchyPoints = scoreBreakdown.get("hierarchy_level_points") or {}
         hierarchyMatches = scoreBreakdown.get("hierarchy_level_matches") or {}
         if not isinstance(hierarchyPoints, dict):
@@ -272,12 +284,54 @@ class ClassificationAgent(BaseAgent):
                 "description_points": scoreBreakdown.get("description_points") or 0.0,
                 "semantic_score": scoreBreakdown.get("semantic_score"),
             },
+            "hard_condition": hardCondition,
             "nodes": nodes,
+        }
+
+    def _build_hard_condition_projection(self, candidate) -> dict:
+        scoreBreakdown = _read_field(
+            candidate,
+            "scoreBreakdown",
+            "score_breakdown",
+            default={},
+        ) or {}
+        if not isinstance(scoreBreakdown, dict):
+            scoreBreakdown = {}
+        status = str(
+            _read_field(
+                candidate,
+                "hardConditionStatus",
+                "hard_condition_status",
+                default=None,
+            )
+            or scoreBreakdown.get("hard_condition_status")
+            or "not_applicable"
+        ).strip() or "not_applicable"
+        evidenceValue = _read_field(
+            candidate,
+            "hardConditionEvidence",
+            "hard_condition_evidence",
+            default=None,
+        )
+        if evidenceValue is None:
+            evidenceValue = scoreBreakdown.get("hard_condition_evidence")
+        return {
+            "conditions": str(
+                _read_field(
+                    candidate,
+                    "hardConditions",
+                    "hard_conditions",
+                    default="",
+                )
+                or ""
+            ).strip(),
+            "status": status,
+            "evidence": self._read_text_list(evidenceValue, limit=8),
         }
 
     @staticmethod
     def _read_text_list(value, *, limit: int) -> list[str]:
-        if not isinstance(value, list):
+        if not isinstance(value, (list, tuple)):
             return []
         return [
             str(item).strip()

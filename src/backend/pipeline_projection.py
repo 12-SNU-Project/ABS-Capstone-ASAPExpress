@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.api_contract import RunSnapshotResponse
+from backend.api_contract import CandidateCodeSetView, RunSnapshotResponse
 
 
 class PipelineRunResult(BaseModel):
@@ -18,7 +18,7 @@ class PipelineRunResult(BaseModel):
     runId: str = Field(alias="run_id")
     runDir: str = Field(default="", alias="run_dir")
     auditRef: dict[str, Any] = Field(default_factory=dict, alias="audit_ref")
-    candidateCodeSet: Optional[dict[str, Any]] = Field(
+    candidateCodeSet: Optional[CandidateCodeSetView] = Field(
         default=None,
         alias="candidate_code_set",
     )

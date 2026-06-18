@@ -114,12 +114,81 @@ class InputProcessingView(ApiContractModel):
     )
 
 
+class CandidateCodeView(ApiContractModel):
+    model_config = ConfigDict(populate_by_name=True, frozen=True, extra="allow")
+
+    candidateId: str | None = Field(default=None, alias="candidate_id")
+    hs6: str | None = None
+    cn8: str | None = None
+    taric10: str | None = None
+    taric10BranchCandidates: list[dict[str, Any]] = Field(
+        default_factory=list,
+        alias="taric10_branch_candidates",
+    )
+    taric10ResolutionMode: str | None = Field(
+        default=None,
+        alias="taric10_resolution_mode",
+    )
+    taric10IsRecommended: bool | None = Field(
+        default=None,
+        alias="taric10_is_recommended",
+    )
+    taric10BranchCount: int | None = Field(
+        default=None,
+        alias="taric10_branch_count",
+    )
+    selectedTaric10Reason: str | None = Field(
+        default=None,
+        alias="selected_taric10_reason",
+    )
+    primaryTaric10Reason: str | None = Field(
+        default=None,
+        alias="primary_taric10_reason",
+    )
+    rank: int | None = None
+    status: str | None = None
+    candidateSource: str | None = Field(default=None, alias="candidate_source")
+    llmRecommended: bool | None = Field(default=None, alias="llm_recommended")
+    candidateStaticTree: dict[str, Any] | None = Field(
+        default=None,
+        alias="candidate_static_tree",
+    )
+    hardConditions: str | None = Field(default=None, alias="hard_conditions")
+    hardConditionStatus: str | None = Field(
+        default=None,
+        alias="hard_condition_status",
+    )
+    hardConditionEvidence: list[str] | None = Field(
+        default=None,
+        alias="hard_condition_evidence",
+    )
+    classificationBasis: list[str] = Field(
+        default_factory=list,
+        alias="classification_basis",
+    )
+    classificationCitations: list[dict[str, Any]] = Field(
+        default_factory=list,
+        alias="classification_citations",
+    )
+    requiredFacts: list[str] = Field(default_factory=list, alias="required_facts")
+    unknowns: list[str] = Field(default_factory=list)
+
+
 class CandidateCodeSetView(ApiContractModel):
     model_config = ConfigDict(populate_by_name=True, frozen=True, extra="allow")
 
     candidateSetId: str | None = Field(default=None, alias="candidate_set_id")
     productId: str | None = Field(default=None, alias="product_id")
-    candidates: list[dict[str, Any]] = Field(default_factory=list)
+    classificationStatus: str | None = Field(
+        default=None,
+        alias="classification_status",
+    )
+    failureReason: str | None = Field(default=None, alias="failure_reason")
+    shortlistedCandidates: list[dict[str, Any]] = Field(
+        default_factory=list,
+        alias="shortlisted_candidates",
+    )
+    candidates: list[CandidateCodeView] = Field(default_factory=list)
 
 
 class DocumentPackageView(ApiContractModel):
