@@ -205,20 +205,6 @@ def detail_card(detail: dict[str, Any], label: str, related_declarations: list[s
     )
 
 
-def metric(label: str, value: Any, color: str = "#111827", mono: bool = False) -> html.Div:
-    return html.Div(
-        [
-            html.Div(label, className="metric-label"),
-            html.Div(str(value), className="metric-value", style={"color": color, "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" if mono else "inherit"}),
-        ],
-        className="metric",
-    )
-
-
-def node(kicker: str, value: Any, cls: str = "node-blue") -> html.Div:
-    return html.Div([html.Div(kicker, className="node-kicker"), html.Div(str(value), className="node-main")], className=f"node {cls}")
-
-
 def package_context(pkg: dict[str, Any]) -> dict[str, Any]:
     view_context = document_view_context(pkg)
     if view_context:
@@ -378,32 +364,58 @@ def render_result(pkg, panel, options):
 
     panel_defs = _document_panel_defs(len(baseline_documents) or len(additional_documents) or len(groups))
 
+    documentCount = len(baseline_documents) or len(additional_documents) or len(groups)
+    summaryItems = [
+        ("관세율 후보", duty_rate(final_duty)),
+        ("KR measure", metricsData.get("kr_measure_count", len(cx["kr"]))),
+        ("필요 / 조건부", f"{counts.get('required', 0)} / {counts.get('conditional', 0)}"),
+        ("판단보류", counts.get("pending", 0)),
+    ]
+    routeItems = [
+        ("CODE", pkg.get("taric10") or "-"),
+        ("통관조건", f"{len(controls)} control"),
+        ("관세", f"{len(duties)} measure"),
+        ("서류", f"{documentCount} documents"),
+    ]
+
     children = [
-        html.Div(
-            [
-                metric("TARIC10", pkg.get("taric10"), "#1d4ed8", True),
-                metric("CN8", pkg.get("cn8"), "#1d4ed8", True),
-                metric("최종 관세율 후보", duty_rate(final_duty), "#166534"),
-                metric("KR measure", metricsData.get("kr_measure_count", len(cx["kr"]))),
-                metric("필요 / 조건부", f"{counts.get('required', 0)} / {counts.get('conditional', 0)}", "#9a3412"),
-                metric("판단보류", counts.get("pending", 0), "#475569"),
-            ],
-            className="metric-grid",
-        ),
         html.Div(
             [
                 html.Div(
                     [
-                        node("CODE", pkg.get("taric10"), "node-blue"),
-                        node("통관 조건", f"{len(controls)} control / {len(duties)} duty", "node-red"),
-                        node("기본 관세", duty_rate(third_country), "node-amber"),
-                        node("FTA 우대 가능 시", duty_rate(fta_pref), "node-green"),
-                        node("추천 서류", f"{len(baseline_documents) or len(additional_documents) or len(groups)} docs", "node-blue"),
+                        html.Div("EU IMPORT CLASSIFICATION", className="document-result-eyebrow"),
+                        html.Div(pkg.get("taric10") or "-", className="document-result-code"),
+                        html.Div(f"CN8 {pkg.get('cn8') or '-'}", className="document-result-cn"),
                     ],
-                    className="flow-grid",
-                )
+                    className="document-result-identity",
+                ),
+                html.Div(
+                    [
+                        html.Div(
+                            [
+                                html.Div(label, className="document-summary-label"),
+                                html.Div(str(value), className="document-summary-value"),
+                            ],
+                            className="document-summary-item",
+                        )
+                        for label, value in summaryItems
+                    ],
+                    className="document-summary-rail",
+                ),
             ],
-            className="flow",
+            className="document-result-masthead",
+        ),
+        html.Ol(
+            [
+                html.Li(
+                    [
+                        html.Span(label, className="document-route-label"),
+                        html.Strong(str(value), className="document-route-value"),
+                    ]
+                )
+                for label, value in routeItems
+            ],
+            className="document-result-route",
         ),
         _render_drawer_toolbar(panel_defs, selected),
         html.Div(render_panel(pkg, OVERVIEW_PANEL_ID, cx, options or []), className="panel"),
@@ -1029,35 +1041,60 @@ def render_trade_scenario(pkg: dict[str, Any], cx: dict[str, Any]) -> html.Div:
 def render_overview(cx: dict[str, Any], options: list[str], pkg: dict[str, Any]):
     missing = cx["missing"]
     items = [
-        ("TARIC 확인 코드", f"{len(cx['controls'])}개 control measure"),
-        ("관세 시나리오", f"{len(cx['duties'])}개 duty/preference measure"),
-        ("추천 서류", f"{len(cx.get('baseline_documents') or []) or len(_additional_detail_documents(cx.get('baseline_documents') or []) or cx['groups'])}개 document"),
+        ("통관 조건", f"{len(cx['controls'])}개 control measure", "TARIC certificate/declaration 조건 확인"),
+        ("관세 시나리오", f"{len(cx['duties'])}개 duty/preference measure", "기본관세와 적용 가능한 우대세율 비교"),
+        (
+            "제출 서류",
+            f"{len(cx.get('baseline_documents') or []) or len(_additional_detail_documents(cx.get('baseline_documents') or []) or cx['groups'])}개 document",
+            "기본 제출물과 조건부 증빙을 분리해 검토",
+        ),
     ]
-    left = html.Div(
+    reviewTable = html.Div(
         [
-            html.Div("오늘 봐야 할 것", className="section-title"),
-            *[
-                html.Div([html.Div(title, className="card-title"), html.Div(body, className="card-meta")], className="card")
-                for title, body in items
-            ],
-        ]
-    )
-    right = html.Div(
-        [
-            html.Div("남은 판단 facts", className="section-title"),
+            html.Div("검토 요약", className="document-overview-title"),
             html.Div(
-                [html.Span(fact, className="chip") for fact in missing[:22]]
-                if missing
-                else html.Div("현재 상세 row 기준 추가 missing facts가 없습니다.", className="card-meta"),
-                className="card",
+                html.Table(
+                    [
+                        html.Tbody(
+                            [
+                                html.Tr(
+                                    [
+                                        html.Th(title),
+                                        html.Td(body, className="document-overview-count"),
+                                        html.Td(description),
+                                    ]
+                                )
+                                for title, body, description in items
+                            ]
+                        )
+                    ],
+                    className="document-overview-table",
+                ),
+                className="document-table-wrap",
             ),
-        ]
+            html.Div(
+                [
+                    html.Div("추가 확인 facts", className="document-overview-facts-label"),
+                    html.Div(
+                        [html.Span(fact, className="chip") for fact in missing[:22]]
+                        if missing
+                        else html.Span(
+                            "현재 상세 row 기준 추가 missing facts가 없습니다.",
+                            className="document-overview-clear",
+                        ),
+                        className="document-overview-facts",
+                    ),
+                ],
+                className="document-overview-facts-row",
+            ),
+        ],
+        className="document-overview-brief",
     )
     raw = None
     if "raw" in options:
         raw = html.Details([html.Summary("Public document_package JSON"), html.Pre(json.dumps(pkg, ensure_ascii=False, indent=2), className="textarea")])
     debug = render_debug_pipeline_log(pkg) if "debug" in (options or []) or "blackboard" in (options or []) else None
-    return html.Div([render_trade_scenario(pkg, cx), html.Div([left, right], className="two-col"), debug, raw])
+    return html.Div([render_trade_scenario(pkg, cx), reviewTable, debug, raw])
 
 
 def render_customs(pkg: dict[str, Any], controls: list[dict[str, Any]]):
@@ -1292,106 +1329,131 @@ def render_document_checklist(
     counts = checklist.get("counts") or {}
     intro = html.Div(
         [
-            html.Div("제출서류", className="section-title"),
-            html.Div(
-                [
-                    metric("전체 서류", counts.get("total", len(documents))),
-                    metric("필수", counts.get("required", 0), "#b91c1c"),
-                    metric("조건부", counts.get("conditional", 0), "#9a3412"),
-                    metric("판단보류", counts.get("pending", 0), "#475569"),
-                    metric("사전 연결", counts.get("with_pre_links", 0), "#1d4ed8"),
-                    metric("상세 연결", counts.get("with_post_links", 0), "#166534"),
-                ],
-                className="metric-grid",
-            ),
-            html.Div(
-                "상업송장, 포장명세서, 운송서류 같은 기본 제출서류를 먼저 보여주고, 각 문서에 연결된 사전 확인사항과 TARIC 상세 규제를 붙였습니다.",
-                className="card-meta",
-                style={"marginTop": "8px"},
-            ),
-        ]
-    )
-
-    pre_cards = []
-    for check in pre_checks[:8]:
-        pre_cards.append(
             html.Div(
                 [
                     html.Div(
                         [
-                            html.Span(check.get("pre_gate_family") or "pre gate", className="card-title"),
-                            status_badge(check.get("decision_status") or check.get("required_level") or "conditional"),
-                        ]
+                            html.Span(label, className="document-checklist-count-label"),
+                            html.Strong(str(value), className=f"document-checklist-count-value {tone}"),
+                        ],
+                        className="document-checklist-count",
+                    )
+                    for label, value, tone in [
+                        ("전체", counts.get("total", len(documents)), "neutral"),
+                        ("필수", counts.get("required", 0), "required"),
+                        ("조건부", counts.get("conditional", 0), "conditional"),
+                        ("판단보류", counts.get("pending", 0), "pending"),
+                        ("사전 연결", counts.get("with_pre_links", 0), "linked"),
+                        ("상세 연결", counts.get("with_post_links", 0), "linked"),
+                    ]
+                ],
+                className="document-checklist-summary",
+            ),
+            html.Div(
+                "상업송장, 포장명세서, 운송서류 같은 기본 제출서류를 먼저 보여주고, 각 문서에 연결된 사전 확인사항과 TARIC 상세 규제를 붙였습니다.",
+                className="document-checklist-description",
+            ),
+        ],
+        className="document-checklist-intro",
+    )
+
+    preRows: list[Any] = []
+    for check in pre_checks[:8]:
+        preRows.append(
+            html.Tr(
+                [
+                    html.Td(
+                        status_badge(check.get("decision_status") or check.get("required_level") or "conditional"),
                     ),
-                    html.Div(f"domain: {check.get('domain') or '-'} · type: {check.get('requirement_type') or '-'}", className="card-meta"),
-                    html.Div(check.get("required_action") or "", className="card-meta", style={"color": "#334155"}),
-                    html.Div(
-                        "missing: " + (", ".join((check.get("missing_facts") or [])[:6]) or "없음"),
-                        className="card-meta",
-                        style={"color": "#9a3412"},
+                    html.Td(
+                        [
+                            html.Div(check.get("pre_gate_family") or "pre gate", className="document-cell-title"),
+                            html.Div(
+                                f"{check.get('domain') or '-'} · {check.get('requirement_type') or '-'}",
+                                className="document-cell-meta",
+                            ),
+                        ],
+                    ),
+                    html.Td(check.get("required_action") or "-"),
+                    html.Td(
+                        ", ".join((check.get("missing_facts") or [])[:6]) or "없음",
+                        className="document-cell-missing",
                     ),
                 ],
-                className="card",
             )
         )
     pre_block = html.Details(
         [
             html.Summary(f"사전 확인사항 {len(pre_checks)}개"),
-            html.Div(pre_cards or html.Div("사전 확인사항 없음", className="card-meta"), className="two-col"),
+            html.Div(
+                html.Table(
+                    [
+                        html.Thead(html.Tr([html.Th("상태"), html.Th("확인사항"), html.Th("조치"), html.Th("추가 확인")])),
+                        html.Tbody(preRows),
+                    ],
+                    className="document-checklist-table document-precheck-table",
+                )
+                if preRows
+                else html.Div("사전 확인사항 없음", className="card-meta"),
+                className="document-table-wrap",
+            ),
         ],
-        style={"margin": "14px 0"},
+        className="document-checklist-details",
     )
 
-    doc_cards = []
+    documentRows: list[Any] = []
     for doc in documents:
         fields = doc.get("fields") or []
         pre_count = len(doc.get("pre_checks") or [])
         post_count = len(doc.get("post_requirements") or [])
         certs = ", ".join((doc.get("taric_certificates") or [])[:8]) or "-"
-        field_rows = [
-            html.Div(
+        documentRows.append(
+            html.Tr(
                 [
-                    html.Div(
+                    html.Td(
+                        status_badge(doc.get("decision_status") or doc.get("required_level") or "conditional"),
+                    ),
+                    html.Td(
                         [
-                            html.Span(field.get("label") or field.get("field_key"), style={"fontWeight": 800}),
-                            html.Span(" · "),
-                            status_badge(field.get("status") or "conditional"),
+                            html.Div(
+                                doc.get("document_name_ko") or doc.get("document_name") or doc.get("document_code"),
+                                className="document-cell-title",
+                            ),
+                            html.Div(doc.get("document_code") or "", className="document-cell-code"),
                         ],
-                        className="card-meta",
                     ),
-                    html.Div("required_by: " + (", ".join(field.get("required_by") or []) or "baseline"), className="card-meta"),
-                    html.Div(
-                        "missing: " + (", ".join((field.get("missing_facts") or [])[:5]) or "없음"),
-                        className="card-meta",
-                        style={"color": "#9a3412"},
-                    ),
-                ],
-                style={"borderTop": "1px solid #e5e7eb", "paddingTop": "7px", "marginTop": "7px"},
-            )
-            for field in fields[:8]
-        ]
-        doc_cards.append(
-            html.Div(
-                [
-                    html.Div(
+                    html.Td(
                         [
-                            html.Span(doc.get("document_name_ko") or doc.get("document_name") or doc.get("document_code"), className="card-title"),
-                            status_badge(doc.get("decision_status") or doc.get("required_level") or "conditional"),
+                            html.Div(doc.get("prepared_by") or "-", className="document-party"),
+                            html.Div("→", className="document-party-arrow"),
+                            html.Div(doc.get("submitted_to") or "-", className="document-party"),
+                        ],
+                        className="document-party-route",
+                    ),
+                    html.Td(
+                        [
+                            html.Div(f"사전 {pre_count} · 상세 {post_count}", className="document-cell-meta"),
+                            html.Div(f"TARIC {certs}", className="document-cell-link"),
                         ]
                     ),
-                    html.Div(doc.get("document_code") or "", className="card-meta", style={"fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"}),
-                    html.Div(f"작성/제공: {doc.get('prepared_by') or '-'} → {doc.get('submitted_to') or '-'}", className="card-meta"),
-                    html.Div(f"연결된 확인사항: 사전 {pre_count} · 상세 {post_count} · TARIC 코드 {certs}", className="card-meta", style={"color": "#1d4ed8"}),
-                    html.Div("추가 확인 필요: " + (", ".join((doc.get("missing_facts") or [])[:6]) or "없음"), className="card-meta", style={"color": "#9a3412"}),
-                    html.Details(
-                        [
-                            html.Summary(f"작성 항목 {len(fields)}개 보기"),
-                            html.Div(field_rows or html.Div("필드 정의 없음", className="card-meta")),
-                        ],
-                        style={"marginTop": "9px"},
+                    html.Td(
+                        ", ".join((doc.get("missing_facts") or [])[:6]) or "없음",
+                        className="document-cell-missing",
+                    ),
+                    html.Td(
+                        html.Details(
+                            [
+                                html.Summary(f"{len(fields)}개 항목"),
+                                html.Div(
+                                    _scenario_field_rows(fields)
+                                    or html.Div("필드 정의 없음", className="card-meta"),
+                                    className="document-field-list",
+                                ),
+                            ],
+                            className="document-row-details",
+                        )
                     ),
                 ],
-                className="card",
             )
         )
 
@@ -1404,7 +1466,31 @@ def render_document_checklist(
             ],
             style={"marginTop": "16px"},
         )
-    return html.Div([intro, pre_block, html.Div(doc_cards, className="two-col"), legacy])
+    documentTable = html.Div(
+        html.Table(
+            [
+                html.Thead(
+                    html.Tr(
+                        [
+                            html.Th("상태"),
+                            html.Th("문서"),
+                            html.Th("작성 → 제출"),
+                            html.Th("연결 근거"),
+                            html.Th("추가 확인"),
+                            html.Th("작성 항목"),
+                        ]
+                    )
+                ),
+                html.Tbody(documentRows),
+            ],
+            className="document-checklist-table",
+        ),
+        className="document-table-wrap",
+    )
+    return html.Div(
+        [intro, pre_block, documentTable, legacy],
+        className="document-checklist-layout",
+    )
 
 
 def render_product_rules_from_view(

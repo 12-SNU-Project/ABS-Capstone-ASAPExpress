@@ -232,24 +232,43 @@ def _reconstruction_fact_table(
 
     rows: list[Any] = []
     for fact in facts[:max_rows]:
-        fieldName = fact.get("field_name") or "-"
-        meta = " · ".join(
-            text
-            for text in [
-                str(fact.get("validation_status") or "").strip(),
-                str(fact.get("correction_type") or "").strip(),
-                _fact_source_text(fact, source_labels),
-            ]
-            if text
-        )
+        validationStatus = str(fact.get("validation_status") or "-").strip()
+        correctionType = str(fact.get("correction_type") or "").strip()
         rows.append(
-            html.Div(
+            html.Tr(
                 [
-                    html.Div(_short_text(fieldName, max_length=76), className="input-fact-name"),
-                    html.Div(_short_text(_fact_display_value(fact), max_length=220), className="input-fact-value"),
-                    html.Div(_short_text(meta, max_length=120), className="input-fact-meta") if meta else None,
-                ],
-                className="input-fact-card",
+                    html.Td(
+                        _short_text(fact.get("field_name"), max_length=90),
+                        className="input-reconstruction-primary",
+                    ),
+                    html.Td(_short_text(fact.get("raw_value"), max_length=220)),
+                    html.Td(
+                        _short_text(
+                            fact.get("normalized_value") or fact.get("raw_value"),
+                            max_length=220,
+                        ),
+                    ),
+                    html.Td(
+                        [
+                            html.Div(
+                                validationStatus,
+                                className="input-reconstruction-status",
+                            ),
+                            html.Div(
+                                correctionType,
+                                className="input-reconstruction-secondary",
+                            )
+                            if correctionType
+                            else None,
+                        ],
+                    ),
+                    html.Td(
+                        _short_text(
+                            _fact_source_text(fact, source_labels),
+                            max_length=160,
+                        ),
+                    ),
+                ]
             )
         )
 
@@ -257,7 +276,7 @@ def _reconstruction_fact_table(
     if len(facts) > max_rows:
         more = html.Div(
             f"+ {len(facts) - max_rows} more reconstructed facts",
-            style={"fontSize": "12px", "color": "#64748b", "marginTop": "8px"},
+            className="input-reconstruction-more",
         )
 
     return html.Div(
@@ -267,12 +286,31 @@ def _reconstruction_fact_table(
                     html.Div(title, className="input-card-title"),
                     html.Div(f"{len(facts)} rows", className="input-card-count"),
                 ],
-                className="input-card-head",
+                className="input-reconstruction-section-head",
             ),
-            html.Div(rows, className="input-fact-grid"),
+            html.Div(
+                html.Table(
+                    [
+                        html.Thead(
+                            html.Tr(
+                                [
+                                    html.Th("필드"),
+                                    html.Th("원문 값"),
+                                    html.Th("정규화 값"),
+                                    html.Th("검증 / 교정"),
+                                    html.Th("출처"),
+                                ]
+                            )
+                        ),
+                        html.Tbody(rows),
+                    ],
+                    className="input-reconstruction-table",
+                ),
+                className="input-reconstruction-table-wrap",
+            ),
             more,
         ],
-        className="input-card-section",
+        className="input-reconstruction-section",
     )
 
 
@@ -286,39 +324,43 @@ def _classification_fact_text_table(
     if not cleaned:
         return None
 
-    rows = []
+    rows: list[Any] = []
     for index, text in enumerate(cleaned[:max_rows], start=1):
         rows.append(
-            html.Div(
+            html.Tr(
                 [
-                    html.Div(str(index), style={**MONO, "color": "#64748b", "fontWeight": 850}),
-                    html.Div(_short_text(text, max_length=260), style={"overflowWrap": "anywhere"}),
-                ],
-                style={
-                    "display": "grid",
-                    "gridTemplateColumns": "42px minmax(0, 1fr)",
-                    "gap": "10px",
-                    "padding": "8px 10px",
-                    "borderBottom": "1px solid #edf2f7",
-                    "fontSize": "12px",
-                    "color": "#334155",
-                },
-            )
-        )
-    if len(cleaned) > max_rows:
-        rows.append(
-            html.Div(
-                f"+ {len(cleaned) - max_rows} more classification fact lines",
-                style={"fontSize": "12px", "color": "#64748b", "padding": "8px 10px"},
+                    html.Td(str(index), className="input-reconstruction-index"),
+                    html.Td(_short_text(text, max_length=360)),
+                ]
             )
         )
 
     return html.Div(
         [
-            html.Div(title, style={"fontSize": "12px", "fontWeight": 900, "color": "#0f172a", "marginBottom": "8px"}) if title else None,
-            html.Div(rows, style={"border": "1px solid #e5e7eb", "borderRadius": "8px", "overflow": "hidden"}),
+            html.Div(title, className="input-card-title") if title else None,
+            html.Div(
+                html.Table(
+                    [
+                        html.Thead(
+                            html.Tr([html.Th("No."), html.Th("분류 입력 텍스트")])
+                        ),
+                        html.Tbody(rows),
+                    ],
+                    className=(
+                        "input-reconstruction-table "
+                        "input-reconstruction-text-table"
+                    ),
+                ),
+                className="input-reconstruction-table-wrap",
+            ),
+            html.Div(
+                f"+ {len(cleaned) - max_rows} more classification fact lines",
+                className="input-reconstruction-more",
+            )
+            if len(cleaned) > max_rows
+            else None,
         ],
-        style={"marginTop": "10px"},
+        className="input-reconstruction-section",
     )
 
 
@@ -446,7 +488,7 @@ def _reconstructed_tables_widget(
         if not isinstance(rows, list) or not rows:
             continue
         tableName = table.get("table_name") or f"Table {tableIndex}"
-        gridRows: list[Any] = []
+        tableRows: list[Any] = []
         for row in [item for item in rows if isinstance(item, dict)][:max_rows_per_table]:
             sourceRefs = row.get("source_refs") or []
             if isinstance(sourceRefs, list):
@@ -457,32 +499,36 @@ def _reconstructed_tables_widget(
                 )
             else:
                 sourceText = str(sourceRefs or "")
-            unit = str(row.get("unit") or "").strip()
-            dailyValue = str(row.get("daily_value_percent") or "").strip()
-            meta = " · ".join(
-                text
-                for text in [
-                    f"unit {unit}" if unit else "",
-                    f"daily {dailyValue}" if dailyValue else "",
-                    sourceText,
-                ]
-                if text
-            )
-            gridRows.append(
-                html.Div(
+            tableRows.append(
+                html.Tr(
                     [
-                        html.Div(_short_text(row.get("field_name"), max_length=90), className="input-fact-name"),
-                        html.Div(_short_text(row.get("normalized_value") or row.get("raw_value"), max_length=220), className="input-fact-value"),
-                        html.Div(_short_text(meta, max_length=120), className="input-fact-meta") if meta else None,
-                    ],
-                    className="input-fact-card",
+                        html.Td(
+                            _short_text(row.get("field_name"), max_length=90),
+                            className="input-reconstruction-primary",
+                        ),
+                        html.Td(_short_text(row.get("raw_value"), max_length=220)),
+                        html.Td(
+                            _short_text(
+                                row.get("normalized_value") or row.get("raw_value"),
+                                max_length=220,
+                            ),
+                        ),
+                        html.Td(_short_text(row.get("unit"), max_length=50)),
+                        html.Td(
+                            _short_text(
+                                row.get("daily_value_percent"),
+                                max_length=60,
+                            ),
+                        ),
+                        html.Td(_short_text(sourceText, max_length=160)),
+                    ]
                 )
             )
         more = None
         if len(rows) > max_rows_per_table:
             more = html.Div(
                 f"+ {len(rows) - max_rows_per_table} more rows",
-                style={"fontSize": "12px", "color": "#64748b", "marginTop": "8px"},
+                className="input-reconstruction-more",
             )
         tableBlocks.append(
             html.Div(
@@ -492,12 +538,32 @@ def _reconstructed_tables_widget(
                             html.Div(_short_text(tableName, max_length=120), className="input-card-title"),
                             html.Div(f"{len(rows)} rows", className="input-card-count"),
                         ],
-                        className="input-card-head",
+                        className="input-reconstruction-section-head",
                     ),
-                    html.Div(gridRows, className="input-fact-grid"),
+                    html.Div(
+                        html.Table(
+                            [
+                                html.Thead(
+                                    html.Tr(
+                                        [
+                                            html.Th("항목"),
+                                            html.Th("원문 값"),
+                                            html.Th("정규화 값"),
+                                            html.Th("단위"),
+                                            html.Th("일일 기준"),
+                                            html.Th("출처"),
+                                        ]
+                                    )
+                                ),
+                                html.Tbody(tableRows),
+                            ],
+                            className="input-reconstruction-table",
+                        ),
+                        className="input-reconstruction-table-wrap",
+                    ),
                     more,
                 ],
-                className="input-card-section",
+                className="input-reconstruction-table-block",
             )
         )
 
@@ -510,11 +576,11 @@ def _reconstructed_tables_widget(
                     html.Div(title, className="input-card-title"),
                     html.Div(f"{len(cleanedTables)} tables", className="input-card-count"),
                 ],
-                className="input-card-head",
+                className="input-reconstruction-section-head",
             ),
             *tableBlocks,
         ],
-        className="input-card-section",
+        className="input-reconstruction-section",
     )
 
 
@@ -605,23 +671,62 @@ def input_processing_detail_card(
         [
             html.Div(
                 [
-                    html.Div("LLM Reconstruction 결과", style={"fontSize": "13px", "fontWeight": 950, "color": "#0f172a"}),
+                    html.Div(
+                        "LLM Reconstruction 결과",
+                        className="input-reconstruction-result-title",
+                    ),
                     html.Div(
                         "OCR/PP Table 원문을 구조화하고 교정한 후속 결과",
-                        style={"fontSize": "12px", "color": "#64748b", "marginTop": "2px"},
+                        className="input-reconstruction-result-subtitle",
                     ),
                 ],
-                style={"marginBottom": "10px"},
+                className="input-reconstruction-result-head",
             ),
             html.Div(
-                [
-                    _small("LLM", "on" if status.get("used_llm_reconstruction") else "off"),
-                    _small("mode", reconstructionMode),
-                    _small("detail tables", status.get("detail_table_count") or len(reconstructedTables)),
-                    _small("classification facts", status.get("classification_fact_count") or len(productFacts)),
-                    _small("classification text lines", status.get("classification_text_line_count") or len(factTexts)),
-                ],
-                style={"display": "flex", "gap": "8px", "flexWrap": "wrap"},
+                html.Table(
+                    [
+                        html.Thead(
+                            html.Tr(
+                                [
+                                    html.Th("LLM"),
+                                    html.Th("Mode"),
+                                    html.Th("상세 표"),
+                                    html.Th("분류 facts"),
+                                    html.Th("텍스트 라인"),
+                                ]
+                            )
+                        ),
+                        html.Tbody(
+                            html.Tr(
+                                [
+                                    html.Td(
+                                        "on"
+                                        if status.get("used_llm_reconstruction")
+                                        else "off"
+                                    ),
+                                    html.Td(reconstructionMode),
+                                    html.Td(
+                                        status.get("detail_table_count")
+                                        or len(reconstructedTables)
+                                    ),
+                                    html.Td(
+                                        status.get("classification_fact_count")
+                                        or len(productFacts)
+                                    ),
+                                    html.Td(
+                                        status.get("classification_text_line_count")
+                                        or len(factTexts)
+                                    ),
+                                ]
+                            )
+                        ),
+                    ],
+                    className=(
+                        "input-reconstruction-table "
+                        "input-reconstruction-status-table"
+                    ),
+                ),
+                className="input-reconstruction-table-wrap",
             ),
             html.Div(
                 [
@@ -671,13 +776,7 @@ def input_processing_detail_card(
                 style={"marginTop": "10px", "padding": "10px", "border": "1px solid #fecaca", "borderRadius": "8px", "background": "#fef2f2"},
             ) if conflicts else None,
         ],
-        style={
-            "marginTop": "10px",
-            "padding": "12px",
-            "border": "1px solid #dbeafe",
-            "borderRadius": "8px",
-            "background": "#fbfdff",
-        },
+        className="input-reconstruction-result",
     )
 
 
@@ -1063,10 +1162,13 @@ def _pipeline_step_statuses(result: dict[str, Any]) -> dict[str, dict[str, str]]
     if candidateStatus == "idle" and reconstructStatus == "completed" and jobStatus in {"queued", "running"}:
         candidateStatus = "running"
 
+    hasClassificationStatus = bool(candidateSet.get("classification_status"))
     validationStatus = "idle"
     if candidateEventStatus == "failed":
         validationStatus = "failed"
     elif candidateEventStatus == "completed" and candidates:
+        validationStatus = "completed"
+    elif candidateEventStatus == "completed" and hasClassificationStatus:
         validationStatus = "completed"
     elif candidateEventStatus == "running":
         validationStatus = "running"
@@ -1199,9 +1301,11 @@ def render_candidate_cards(result: dict[str, Any]) -> html.Div:
     if isinstance(primaryDocumentPackage, dict):
         documentPackages.append(primaryDocumentPackage)
     if not candidates:
+        if isinstance(ccs, dict) and ccs.get("classification_status"):
+            return _classification_unresolved_card(ccs)
         return html.Div("분류 후보가 없습니다.", style=PLACEHOLDER)
 
-    cards = []
+    rows: list[Any] = []
     for displayRank, cand in enumerate(candidates, start=1):
         taric10 = cand.get("taric10") or ""
         branches = cand.get("taric10_branch_candidates") or []
@@ -1240,58 +1344,129 @@ def render_candidate_cards(result: dict[str, Any]) -> html.Div:
                 linkedPackages.append(package)
         linkNodes = [
             dcc.Link(
-                f"TARIC10 {package.get('taric10')} 서류 상세",
+                [
+                    html.Span(str(package.get("taric10") or ""), className="candidate-document-code"),
+                    html.Span("서류 보기", className="candidate-document-label"),
+                ],
                 href=f"/document/{detailRunId}/{package.get('taric10')}",
-                style={
-                    "display": "inline-block",
-                    "marginTop": "12px",
-                    "marginRight": "8px",
-                    "padding": "8px 12px",
-                    "borderRadius": "8px",
-                    "background": "#2563eb",
-                    "color": "white",
-                    "fontWeight": 850,
-                    "textDecoration": "none",
-                    "fontSize": "12px",
-                },
+                className="candidate-document-link",
             )
             for package in linkedPackages
             if package.get("taric10")
         ]
-        packageStatus = None
+        packageStatus: Any = None
         if not linkNodes:
-            packageStatus = html.Div(
+            packageStatus = html.Span(
                 "서류 패키지 생성 중" if result.get("job_status") in {"queued", "running"} else "연결된 서류 패키지 없음",
-                style={"fontSize": "12px", "color": "#64748b", "marginTop": "12px"},
+                className="candidate-document-empty",
             )
-        cards.append(
-            html.Div(
+        rows.append(
+            html.Tr(
                 [
-                    html.Div(
+                    html.Td(
                         [
-                            html.Span(f"rank {displayRank}", style=PILL),
+                            html.Span(f"{displayRank:02d}", className="candidate-rank"),
                             html.Span(_candidate_theme_label(cand), className=f"candidate-card-badge {themeClass}"),
-                            html.Span(cand.get("candidate_source") or "classifier", style={**PILL, "background": "#f8fafc", "color": "#334155"}),
-                            html.Span(cand.get("status") or "-", style={**PILL, "background": "#f0fdf4", "color": "#166534"}),
                         ],
-                        style={"marginBottom": "8px"},
+                        className="candidate-table-rank",
                     ),
-                    html.Div(
+                    html.Td(
                         [
-                            _small("CN8", cand.get("cn8")),
-                            _small("TARIC10", cand.get("taric10")),
-                            _small("HS6", cand.get("hs6")),
-                            _small("branches", len(branches)),
+                            html.Div(cand.get("cn8") or "-", className="candidate-primary-code"),
+                            html.Div(
+                                f"HS6 {cand.get('hs6') or '-'} · TARIC10 {cand.get('taric10') or '-'}",
+                                className="candidate-code-hierarchy",
+                            ),
                         ],
-                        style={"display": "flex", "gap": "10px", "flexWrap": "wrap"},
                     ),
-                    html.Div(cand.get("selected_taric10_reason") or "", style={"fontSize": "12px", "color": "#64748b", "marginTop": "10px"}),
-                    html.Div(linkNodes) if linkNodes else packageStatus,
+                    html.Td(
+                        [
+                            html.Div(cand.get("status") or "-", className="candidate-status"),
+                            html.Div(
+                                f"{cand.get('candidate_source') or 'classifier'} · branch {len(branches)}",
+                                className="candidate-source",
+                            ),
+                        ]
+                    ),
+                    html.Td(
+                        cand.get("selected_taric10_reason")
+                        or _candidate_reason_text(cand)
+                        or "별도 사유 없음",
+                        className="candidate-table-reason",
+                    ),
+                    html.Td(
+                        html.Div(linkNodes, className="candidate-document-links")
+                        if linkNodes
+                        else packageStatus,
+                        className="candidate-table-action",
+                    ),
                 ],
-                className=f"candidate-result-card {themeClass}",
+                className=f"candidate-table-row {themeClass}",
             )
         )
-    return html.Div(cards)
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Div("CN8 / TARIC 후보 비교", className="candidate-result-title"),
+                    html.Div(
+                        f"{len(rows)}개 후보 · LLM 추천과 정적 Top5를 한 화면에서 비교",
+                        className="candidate-result-subtitle",
+                    ),
+                ],
+                className="candidate-result-heading",
+            ),
+            html.Div(
+                html.Table(
+                    [
+                        html.Thead(
+                            html.Tr(
+                                [
+                                    html.Th("순위"),
+                                    html.Th("분류 코드"),
+                                    html.Th("상태"),
+                                    html.Th("선정 근거"),
+                                    html.Th("TARIC 서류"),
+                                ]
+                            )
+                        ),
+                        html.Tbody(rows),
+                    ],
+                    className="candidate-result-table",
+                ),
+                className="candidate-result-table-wrap",
+            ),
+        ],
+        className="candidate-result-shell",
+    )
+
+
+def _classification_unresolved_card(candidateSet: dict[str, Any]) -> html.Div:
+    shortlisted = candidateSet.get("shortlisted_candidates") or []
+    if not isinstance(shortlisted, list):
+        shortlisted = []
+    return html.Div(
+        [
+            html.Div("분류 후보 산출 보류", style={"fontSize": "14px", "fontWeight": 950, "color": "#92400e"}),
+            html.Div(
+                "정적 후보 또는 LLM 검증 결과를 후보로 확정하지 않았습니다. 추가 상품 정보나 검토가 필요합니다.",
+                style={"fontSize": "12px", "color": "#78350f", "marginTop": "6px"},
+            ),
+            html.Div(
+                [
+                    _small("status", candidateSet.get("classification_status")),
+                    _small("reason", candidateSet.get("failure_reason")),
+                    _small("shortlisted", len(shortlisted)),
+                ],
+                style={"display": "flex", "gap": "8px", "flexWrap": "wrap", "marginTop": "10px"},
+            ),
+        ],
+        style={
+            **CARD,
+            "borderColor": "#fcd34d",
+            "background": "#fffbeb",
+        },
+    )
 
 
 def _candidate_theme_class(candidate: dict[str, Any]) -> str:
@@ -1302,36 +1477,50 @@ def _candidate_theme_label(candidate: dict[str, Any]) -> str:
     return "LLM 추천" if candidate.get("llm_recommended") else "Top5 후보"
 
 
+def has_candidate_scope_tree(result: dict[str, Any] | None) -> bool:
+    if not isinstance(result, dict):
+        return False
+    candidateSet = result.get("candidate_code_set") or {}
+    return bool(_initial_candidate_scope(candidateSet))
+
+
+def _classification_trace(candidateSet: dict[str, Any]) -> dict[str, Any]:
+    trace = candidateSet.get("classification_trace") if isinstance(candidateSet, dict) else {}
+    return trace if isinstance(trace, dict) else {}
+
+
+def _trace_history(candidateSet: dict[str, Any]) -> list[dict[str, Any]]:
+    history = _classification_trace(candidateSet).get("traversal_history") or []
+    if not isinstance(history, list):
+        return []
+    return [entry for entry in history if isinstance(entry, dict)]
+
+
+def _history_candidate_scope(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    scope = entry.get("candidate_scope") or []
+    if not isinstance(scope, list):
+        return []
+    return [candidate for candidate in scope if isinstance(candidate, dict)]
+
+
+def _initial_candidate_scope(candidateSet: dict[str, Any]) -> list[dict[str, Any]]:
+    for entry in _trace_history(candidateSet):
+        scope = _history_candidate_scope(entry)
+        if scope:
+            return scope
+    candidates = candidateSet.get("candidates") if isinstance(candidateSet, dict) else []
+    if not isinstance(candidates, list):
+        return []
+    return [candidate for candidate in candidates[:5] if isinstance(candidate, dict)]
+
+
 def candidate_tree_drawer(
     result: dict[str, Any],
     drawerOpened: bool,
 ) -> dmc.Drawer | None:
     candidateSet = result.get("candidate_code_set") or {}
-    candidates = candidateSet.get("candidates") if isinstance(candidateSet, dict) else []
-    if not isinstance(candidates, list) or not candidates:
-        return None
-
-    tabCandidates = [
-        (index, candidate, str(candidate.get("candidate_id") or index))
-        for index, candidate in enumerate(candidates[:5], start=1)
-        if isinstance(candidate, dict)
-    ]
-    tabs = [
-        dmc.TabsTab(
-            f"{index}. {candidate.get('cn8') or '-'}",
-            value=tabValue,
-            className=f"candidate-tab {_candidate_theme_class(candidate)}",
-        )
-        for index, candidate, tabValue in tabCandidates
-    ]
-    panels = [
-        dmc.TabsPanel(
-            _candidate_tree_panel(candidate, index),
-            value=tabValue,
-        )
-        for index, candidate, tabValue in tabCandidates
-    ]
-    if not tabs:
+    initialCandidates = _initial_candidate_scope(candidateSet)
+    if not initialCandidates:
         return None
 
     return dmc.Drawer(
@@ -1355,8 +1544,8 @@ def candidate_tree_drawer(
             [
                 html.Div(
                     [
-                        html.Div("CN8 후보 산출 계층", className="drawer-title-main"),
-                        html.Div("정적 검색 점수, 매칭 키워드, 계층 설명", className="drawer-title-sub"),
+                        html.Div("1차 후보군 통합 탐색 트리", className="drawer-title-main"),
+                        html.Div("백트래킹 이전 정적 후보 산출 경로", className="drawer-title-sub"),
                     ]
                 ),
                 dmc.Button(
@@ -1374,24 +1563,36 @@ def candidate_tree_drawer(
             className="drawer-title",
         ),
         children=html.Div(
-            dmc.Tabs(
-                [dmc.TabsList(tabs), *panels],
-                value=tabCandidates[0][2],
-                variant="outline",
-                radius="sm",
+            _candidate_merged_tree_panel(
+                initialCandidates,
+                title="",
             ),
             className="drawer-panel-body",
         ),
     )
 
 
-def _candidate_tree_panel(candidate: dict[str, Any], displayRank: int) -> html.Div:
+def _classification_unresolved_panel(candidateSet: dict[str, Any]) -> html.Div:
+    return html.Div(
+        [
+            _classification_unresolved_card(candidateSet),
+            (
+                _classification_backtracking_route_panel(candidateSet, [])
+                if _classification_trace(candidateSet).get("backtracking_occurred")
+                else None
+            ),
+        ],
+        className="candidate-tree-panel",
+    )
+
+
+def _candidate_nodes(candidate: dict[str, Any]) -> list[dict[str, Any]]:
     tree = candidate.get("candidate_static_tree") or {}
     if not isinstance(tree, dict):
         tree = {}
     nodes = tree.get("nodes") or []
     if not isinstance(nodes, list) or not nodes:
-        nodes = [
+        return [
             {
                 "level": "cn8",
                 "label": "CN8",
@@ -1401,6 +1602,14 @@ def _candidate_tree_panel(candidate: dict[str, Any], displayRank: int) -> html.D
                 "matched_keywords": [],
             }
         ]
+    return [node for node in nodes if isinstance(node, dict)]
+
+
+def _candidate_static_tree_panel(candidate: dict[str, Any], displayRank: int) -> html.Div:
+    tree = candidate.get("candidate_static_tree") or {}
+    if not isinstance(tree, dict):
+        tree = {}
+    nodes = _candidate_nodes(candidate)
     scoreBreakdown = tree.get("score_breakdown") or {}
     if not isinstance(scoreBreakdown, dict):
         scoreBreakdown = {}
@@ -1410,7 +1619,6 @@ def _candidate_tree_panel(candidate: dict[str, Any], displayRank: int) -> html.D
         if isinstance(classificationBasis, list) and classificationBasis
         else ""
     )
-
     return html.Div(
         [
             html.Div(
@@ -1452,12 +1660,11 @@ def _candidate_tree_panel(candidate: dict[str, Any], displayRank: int) -> html.D
             ),
             html.Div(
                 [
-                    html.Div("Hierarchy", className="candidate-tree-section-title"),
+                    html.Div("정적 계층 결과", className="candidate-tree-section-title"),
                     html.Div(
                         [
-                            _candidate_tree_node(node, index == len(nodes))
+                            _candidate_static_tree_node(node, index == len(nodes))
                             for index, node in enumerate(nodes, start=1)
-                            if isinstance(node, dict)
                         ],
                         className="candidate-tree",
                     ),
@@ -1470,14 +1677,8 @@ def _candidate_tree_panel(candidate: dict[str, Any], displayRank: int) -> html.D
     )
 
 
-def _candidate_score_chip(label: str, value: Any) -> html.Span:
-    return html.Span(f"{label}: {value if value not in [None, ''] else '-'}", className="candidate-score-chip")
-
-
-def _candidate_tree_node(node: dict[str, Any], isLeaf: bool) -> html.Div:
-    keywords = node.get("matched_keywords") or []
-    if not isinstance(keywords, list):
-        keywords = []
+def _candidate_static_tree_node(node: dict[str, Any], isLeaf: bool) -> html.Div:
+    keywords = node.get("matched_keywords") if isinstance(node.get("matched_keywords"), list) else []
     level = str(node.get("level") or "").strip().lower()
     return html.Div(
         [
@@ -1499,6 +1700,415 @@ def _candidate_tree_node(node: dict[str, Any], isLeaf: bool) -> html.Div:
         ],
         className=f"candidate-tree-node level-{level} {'leaf' if isLeaf else ''}",
     )
+
+
+def _candidate_merged_tree_panel(
+    candidates: list[Any],
+    *,
+    title: str = "통합 탐색 트리",
+    nodeStates: dict[tuple[str, str], set[str]] | None = None,
+) -> html.Div:
+    cleanCandidates = [candidate for candidate in candidates if isinstance(candidate, dict)]
+    recommended = next(
+        (candidate for candidate in cleanCandidates if candidate.get("llm_recommended")),
+        cleanCandidates[0] if cleanCandidates else {},
+    )
+    return html.Div(
+        [
+            html.Div(
+                [
+                    _small("candidates", len(cleanCandidates)),
+                    _small(
+                        "recommended CN8"
+                        if recommended.get("llm_recommended")
+                        else "top CN8",
+                        recommended.get("cn8"),
+                    ),
+                    _small(
+                        "selected path"
+                        if recommended.get("llm_recommended")
+                        else "top path",
+                        "LLM validation"
+                        if recommended.get("llm_recommended")
+                        else "static ranking",
+                    ),
+                ],
+                className="candidate-tree-metrics",
+            ),
+            html.Div(
+                [
+                    html.Div(title, className="candidate-tree-section-title")
+                    if title
+                    else None,
+                    html.Ul(
+                        [
+                            _candidate_merged_branch(node)
+                            for node in _build_merged_candidate_tree(
+                                cleanCandidates,
+                                nodeStates=nodeStates,
+                            )
+                        ],
+                        className="candidate-outline-tree",
+                    ),
+                ],
+                className="candidate-tree-section",
+            ),
+        ],
+        className="candidate-tree-panel",
+    )
+
+
+def _classification_backtracking_route_panel(
+    candidateSet: dict[str, Any],
+    finalCandidates: list[dict[str, Any]],
+) -> html.Div:
+    trace = _classification_trace(candidateSet)
+    history = _trace_history(candidateSet)
+    initialCandidates = (
+        _history_candidate_scope(history[0])
+        if history
+        else []
+    )
+    lastEntry = history[-1] if history else {}
+    finalScope = (
+        _history_candidate_scope(lastEntry)
+        if "candidate_scope" in lastEntry
+        else finalCandidates
+    )
+    backtrackingOccurred = bool(trace.get("backtracking_occurred"))
+
+    if not backtrackingOccurred:
+        return html.Div(
+            [
+                html.Div("최종 후보군 탐색 경로", className="classification-result-title"),
+                _candidate_merged_tree_panel(
+                    finalCandidates,
+                    title="",
+                ),
+            ],
+            className="classification-result-summary",
+        )
+
+    sourceCandidates = _backtracking_source_candidates(
+        history[0] if history else {},
+    )
+    targetLevel = str(trace.get("backtracking_target_level") or "").lower()
+    combinedCandidates = _combine_candidate_scopes(
+        initialCandidates or finalCandidates,
+        [*finalScope, *finalCandidates],
+    )
+    nodeStates = _build_backtracking_node_states(sourceCandidates, targetLevel)
+    sourceCodes = [
+        str(candidate.get("cn8") or candidate.get("hs8") or "")
+        for candidate in sourceCandidates
+        if str(candidate.get("cn8") or candidate.get("hs8") or "").strip()
+    ]
+    reason = trace.get("backtracking_reason") or (
+        history[0].get("backtracking_reason") if history else ""
+    )
+    if not reason:
+        reason = next(
+            (
+                str(entry.get("error") or "").strip()
+                for entry in reversed(history)
+                if str(entry.get("error") or "").strip()
+            ),
+            str(candidateSet.get("failure_reason") or "").strip(),
+        )
+    retryCount = int(trace.get("retry_count") or max(0, len(history) - 1))
+    sourceLabel = ", ".join(sourceCodes[:3]) or "초기 CN8 후보"
+    targetLabel = targetLevel.upper() or "상위"
+    basisText = (
+        f"{sourceLabel} 검증 과정에서 {reason or '후보 범위 재검토 필요'} 신호가 발생해 "
+        f"{targetLabel} 계층부터 후보 범위를 다시 탐색했습니다."
+    )
+
+    return html.Div(
+        [
+            html.Div("통합 탐색 트리 / 백트래킹 경로", className="classification-result-title"),
+            html.Div(
+                [
+                    html.Div("백트래킹 근거", className="classification-backtracking-basis-title"),
+                    html.Div(basisText, className="classification-backtracking-basis-text"),
+                    html.Div(
+                        [
+                            html.Span(
+                                f"재탐색 경계 {targetLabel}",
+                                className="classification-backtracking-basis-tag",
+                            ),
+                            html.Span(
+                                f"재검증 {retryCount}회",
+                                className="classification-backtracking-basis-tag",
+                            ),
+                        ],
+                        className="classification-backtracking-basis-tags",
+                    ),
+                ],
+                className="classification-backtracking-basis",
+            ),
+            html.Div(
+                [
+                    html.Span("기본 탐색", className="candidate-tree-legend-item normal"),
+                    html.Span("역방향 백트래킹 경로", className="candidate-tree-legend-item backtracking"),
+                    html.Span("재탐색 추가 경로", className="candidate-tree-legend-item retry"),
+                ],
+                className="candidate-tree-legend",
+            ),
+            _candidate_merged_tree_panel(
+                combinedCandidates,
+                title="",
+                nodeStates=nodeStates,
+            ),
+            html.Div(
+                "재탐색 후보군이 없습니다.",
+                className="classification-route-empty",
+            )
+            if not finalScope
+            else None,
+        ],
+        className="classification-backtracking-route-panel",
+    )
+
+
+def _backtracking_source_candidates(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates = _history_candidate_scope(entry)
+    sourceCodes = entry.get("rejected_candidate_hs8_codes") or entry.get("candidate_hs8_codes") or []
+    if not isinstance(sourceCodes, list) or not sourceCodes:
+        return candidates
+    sourceCodeSet = {str(code)[:8] for code in sourceCodes if str(code).strip()}
+    matched = [
+        candidate
+        for candidate in candidates
+        if (str(candidate.get("cn8") or candidate.get("hs8") or "")[:8] in sourceCodeSet)
+    ]
+    return matched or candidates
+
+
+def _combine_candidate_scopes(
+    initialCandidates: list[dict[str, Any]],
+    retryCandidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    combined: dict[str, dict[str, Any]] = {}
+    for origin, candidates in (
+        ("initial", initialCandidates),
+        ("retry", retryCandidates),
+    ):
+        for candidate in candidates:
+            code = str(candidate.get("cn8") or candidate.get("hs8") or "").strip()
+            pathKey = code or "|".join(
+                "{0}:{1}".format(node.get("level"), node.get("code"))
+                for node in _candidate_nodes(candidate)
+            )
+            if pathKey not in combined:
+                combined[pathKey] = {**candidate, "_tree_origins": [origin]}
+                continue
+            existing = combined[pathKey]
+            origins = existing.setdefault("_tree_origins", [])
+            if origin not in origins:
+                origins.append(origin)
+            if origin == "retry":
+                existing.update({
+                    key: value
+                    for key, value in candidate.items()
+                    if key != "_tree_origins"
+                })
+                existing["_tree_origins"] = origins
+    return list(combined.values())
+
+
+def _build_backtracking_node_states(
+    sourceCandidates: list[dict[str, Any]],
+    targetLevel: str,
+) -> dict[tuple[str, str], set[str]]:
+    nodeStates: dict[tuple[str, str], set[str]] = {}
+    for candidate in sourceCandidates:
+        nodes = _candidate_nodes(candidate)
+        targetIndex = next(
+            (
+                index
+                for index, node in enumerate(nodes)
+                if str(node.get("level") or "").lower() == targetLevel
+            ),
+            0,
+        )
+        routeNodes = nodes[targetIndex:]
+        for index, node in enumerate(routeNodes):
+            key = (
+                str(node.get("level") or "").lower(),
+                str(node.get("code") or ""),
+            )
+            states = nodeStates.setdefault(key, set())
+            states.add("backtracking")
+            if index == 0:
+                states.add("backtracking-target")
+            if index == len(routeNodes) - 1:
+                states.add("backtracking-source")
+    return nodeStates
+
+
+def _build_merged_candidate_tree(
+    candidates: list[dict[str, Any]],
+    *,
+    nodeStates: dict[tuple[str, str], set[str]] | None = None,
+) -> list[dict[str, Any]]:
+    roots: list[dict[str, Any]] = []
+    rootIndex: dict[str, dict[str, Any]] = {}
+    for rank, candidate in enumerate(candidates, start=1):
+        candidateRef = {
+            "rank": rank,
+            "cn8": candidate.get("cn8") or "",
+            "recommended": bool(candidate.get("llm_recommended")),
+            "origins": list(candidate.get("_tree_origins") or []),
+        }
+        siblings = roots
+        siblingIndex = rootIndex
+        lastMergedNode: dict[str, Any] | None = None
+        for node in _candidate_nodes(candidate):
+            level = str(node.get("level") or "").strip().lower()
+            code = str(node.get("code") or "").strip()
+            key = f"{level}:{code}"
+            if key not in siblingIndex:
+                mergedNode = {
+                    "level": level,
+                    "label": node.get("label") or node.get("level") or "-",
+                    "code": code,
+                    "description": node.get("description") or "",
+                    "score": node.get("score"),
+                    "matched_keywords": [],
+                    "candidate_refs": [],
+                    "leaf_candidates": [],
+                    "route_states": set(),
+                    "children": [],
+                    "_children_index": {},
+                }
+                siblings.append(mergedNode)
+                siblingIndex[key] = mergedNode
+            mergedNode = siblingIndex[key]
+            mergedNode["candidate_refs"].append(candidateRef)
+            mergedNode["route_states"].update(
+                (nodeStates or {}).get((level, code), set()),
+            )
+            for keyword in node.get("matched_keywords") or []:
+                keywordText = str(keyword).strip()
+                if keywordText and keywordText not in mergedNode["matched_keywords"]:
+                    mergedNode["matched_keywords"].append(keywordText)
+            siblings = mergedNode["children"]
+            siblingIndex = mergedNode["_children_index"]
+            lastMergedNode = mergedNode
+        if lastMergedNode is not None:
+            lastMergedNode["leaf_candidates"].append(candidateRef)
+    return roots
+
+
+def _candidate_merged_branch(node: dict[str, Any]) -> html.Li:
+    children = node.get("children") or []
+    candidateRefs = [
+        ref
+        for ref in node.get("candidate_refs") or []
+        if isinstance(ref, dict)
+    ]
+    origins = {
+        str(origin)
+        for ref in candidateRefs
+        for origin in ref.get("origins") or []
+    }
+    stateClasses = set(node.get("route_states") or [])
+    if origins == {"retry"}:
+        stateClasses.add("retry")
+    if any(ref.get("recommended") for ref in candidateRefs):
+        stateClasses.add("selected")
+    return html.Li(
+        [
+            _candidate_merged_node(node),
+            html.Ul(
+                [
+                    _candidate_merged_branch(child)
+                    for child in children
+                    if isinstance(child, dict)
+                ],
+            ) if children else None,
+        ],
+        className=" ".join(sorted(stateClasses)),
+    )
+
+
+def _candidate_merged_node(node: dict[str, Any]) -> html.Div:
+    level = str(node.get("level") or "").strip().lower()
+    candidateRefs = node.get("candidate_refs") or []
+    leafCandidates = node.get("leaf_candidates") or []
+    routeStates = set(node.get("route_states") or [])
+    annotations: list[Any] = []
+    if "backtracking-source" in routeStates:
+        annotations.append(
+            html.Span("역방향 시작 ↑", className="candidate-tree-route-note backtracking"),
+        )
+    if "backtracking-target" in routeStates:
+        annotations.append(
+            html.Span("재탐색 경계", className="candidate-tree-route-note backtracking"),
+        )
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Span(
+                        node.get("label") or level.upper() or "-",
+                        className="candidate-path-level",
+                    ),
+                    html.Span(node.get("code") or "-", className="candidate-path-code"),
+                    html.Span(
+                        node.get("description") or "-",
+                        className="candidate-path-description",
+                    ),
+                    *annotations,
+                ],
+                className="candidate-path-head",
+            ),
+            html.Div(
+                [
+                    html.Span(
+                        f"경로 {len(candidateRefs)}",
+                        className="candidate-tree-node-detail",
+                    ),
+                    html.Span(
+                        f"점수 {node.get('score')}",
+                        className="candidate-tree-node-detail",
+                    )
+                    if node.get("score") not in (None, "")
+                    else None,
+                    html.Span(
+                        "키워드 " + ", ".join(
+                            str(keyword)
+                            for keyword in (node.get("matched_keywords") or [])[:5]
+                        ),
+                        className="candidate-tree-node-detail",
+                    )
+                    if node.get("matched_keywords")
+                    else None,
+                ],
+                className="candidate-tree-node-meta",
+            ),
+            html.Div(
+                [
+                    html.Span(
+                        "후보 #{0} · CN8 {1}{2}".format(
+                            ref.get("rank"),
+                            ref.get("cn8"),
+                            " · 최종 선택" if ref.get("recommended") else "",
+                        ),
+                        className="candidate-tree-leaf-reference",
+                    )
+                    for ref in leafCandidates
+                    if isinstance(ref, dict)
+                ],
+                className="candidate-tree-leaf-references",
+            ) if leafCandidates else None,
+        ],
+        className="candidate-outline-node",
+    )
+
+
+def _candidate_score_chip(label: str, value: Any) -> html.Span:
+    return html.Span(f"{label}: {value if value not in [None, ''] else '-'}", className="candidate-score-chip")
 
 
 def _keyword_chips(keywords: list[Any]) -> list[html.Span]:
@@ -1527,8 +2137,17 @@ def classification_result_drawer(
 ) -> dmc.Drawer | None:
     candidateSet = result.get("candidate_code_set") or {}
     candidates = candidateSet.get("candidates") if isinstance(candidateSet, dict) else []
-    if not isinstance(candidates, list) or not candidates:
+    if not isinstance(candidates, list):
+        candidates = []
+    if not candidates and not (
+        isinstance(candidateSet, dict) and candidateSet.get("classification_status")
+    ):
         return None
+    drawerBody = (
+        _classification_result_panel(candidateSet, candidates[:5])
+        if candidates
+        else _classification_unresolved_panel(candidateSet)
+    )
     return dmc.Drawer(
         id="classification-result-drawer",
         opened=drawerOpened,
@@ -1550,8 +2169,8 @@ def classification_result_drawer(
             [
                 html.Div(
                     [
-                        html.Div("Classification LLM Result", className="drawer-title-main"),
-                        html.Div("정적 top5 후보에 대한 LLM 검증 요약", className="drawer-title-sub"),
+                        html.Div("Classification 검증 결과", className="drawer-title-main"),
+                        html.Div("선택 결론 · 탐색 이력 · 백트래킹 경로", className="drawer-title-sub"),
                     ]
                 ),
                 dmc.Button(
@@ -1569,13 +2188,16 @@ def classification_result_drawer(
             className="drawer-title",
         ),
         children=html.Div(
-            _classification_result_panel(candidates[:5]),
+            drawerBody,
             className="drawer-panel-body",
         ),
     )
 
 
-def _classification_result_panel(candidates: list[Any]) -> html.Div:
+def _classification_result_panel(
+    candidateSet: dict[str, Any],
+    candidates: list[Any],
+) -> html.Div:
     cleanCandidates = [candidate for candidate in candidates if isinstance(candidate, dict)]
     recommended = next(
         (candidate for candidate in cleanCandidates if candidate.get("llm_recommended")),
@@ -1584,13 +2206,7 @@ def _classification_result_panel(candidates: list[Any]) -> html.Div:
     return html.Div(
         [
             _classification_result_summary(recommended, len(cleanCandidates)),
-            html.Div(
-                [
-                    _classification_candidate_result(candidate, index)
-                    for index, candidate in enumerate(cleanCandidates, start=1)
-                ],
-                className="classification-result-list",
-            ),
+            _classification_backtracking_route_panel(candidateSet, cleanCandidates),
         ],
         className="classification-result-panel",
     )
@@ -1602,47 +2218,36 @@ def _classification_result_summary(
 ) -> html.Div:
     reason = _candidate_reason_text(recommended)
     cn8 = recommended.get("cn8") or "-"
+    taric10 = recommended.get("taric10") or "-"
     return html.Div(
         [
-            html.Div("LLM 검증 결론", className="classification-result-title"),
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Div("우선 검토 후보", className="classification-result-kicker"),
+                            html.Div(cn8, className="classification-result-primary-code"),
+                            html.Div(f"TARIC10 {taric10}", className="classification-result-secondary-code"),
+                        ],
+                        className="classification-result-selection",
+                    ),
+                    html.Div(
+                        [
+                            html.Span(str(candidateCount), className="classification-result-count"),
+                            html.Span("정적 후보 검증", className="classification-result-count-label"),
+                        ],
+                        className="classification-result-count-block",
+                    ),
+                ],
+                className="classification-result-lead",
+            ),
             html.P(
-                (
-                    f"LLM은 정적 후보 {candidateCount}개 중 CN8 {cn8}를 가장 우선 검토할 후보로 표시했습니다. "
-                    "이 결과는 최종 법적 분류가 아니라, 수집 증거와 후보 설명 사이의 정합성 검증 결과입니다."
-                ),
+                "수집 증거와 후보 설명의 정합성을 기준으로 우선 검토 후보를 표시한 결과이며, 최종 법적 분류를 의미하지 않습니다.",
                 className="classification-result-text",
             ),
             html.P(reason or "별도 자연어 사유가 제공되지 않았습니다.", className="classification-result-text"),
         ],
         className="classification-result-summary",
-    )
-
-
-def _classification_candidate_result(
-    candidate: dict[str, Any],
-    displayRank: int,
-) -> html.Div:
-    themeClass = _candidate_theme_class(candidate)
-    return html.Div(
-        [
-            html.Div(
-                [
-                    html.Span(f"rank {displayRank}", className="candidate-tree-pill"),
-                    html.Span(_candidate_theme_label(candidate), className=f"candidate-tree-pill {themeClass}"),
-                    html.Span(candidate.get("cn8") or "-", className="classification-result-code"),
-                ],
-                className="classification-result-head",
-            ),
-            html.Div(_candidate_reason_text(candidate), className="classification-result-text"),
-            html.Div(
-                [
-                    _small("TARIC10", candidate.get("taric10")),
-                    _small("status", candidate.get("status")),
-                ],
-                className="classification-result-metrics",
-            ),
-        ],
-        className=f"classification-result-card {themeClass}",
     )
 
 
@@ -1659,6 +2264,7 @@ def render_decision(result: dict[str, Any]) -> html.Div:
         return html.Div("최종 결정이 아직 없습니다.", style=PLACEHOLDER)
 
     user_questions = result.get("user_questions") or []
+    warningTexts = _decision_warning_texts(result, dec)
 
     return html.Div(
         [
@@ -1672,6 +2278,16 @@ def render_decision(result: dict[str, Any]) -> html.Div:
             ),
             html.Div(
                 [
+                    html.Div("검토 경고 / 재탐색 신호", style={"fontSize": "13px", "fontWeight": 800, "marginBottom": "6px", "color": "#92400e"}),
+                    html.Ul(
+                        [html.Li(_short_text(warning, max_length=220)) for warning in warningTexts[:6]],
+                        style={"fontSize": "13px", "color": "#78350f", "margin": "0 0 0 18px", "padding": 0},
+                    ),
+                ],
+                style={"padding": "10px", "border": "1px solid #fcd34d", "borderRadius": "8px", "background": "#fffbeb", "marginBottom": "10px"},
+            ) if warningTexts else None,
+            html.Div(
+                [
                     html.Div("추가 확인 필요", style={"fontSize": "13px", "fontWeight": 700, "marginBottom": "6px"}),
                     html.Ul(
                         [html.Li(q.get("question") or q.get("fact_key") or "") for q in user_questions],
@@ -1682,6 +2298,31 @@ def render_decision(result: dict[str, Any]) -> html.Div:
         ],
         style=CARD,
     )
+
+
+def _decision_warning_texts(result: dict[str, Any], decision: dict[str, Any]) -> list[str]:
+    warnings = [
+        str(item).strip()
+        for item in (decision.get("visible_warnings") or [])
+        if str(item).strip()
+    ]
+    documentPackages = list(result.get("document_packages") or [])
+    primaryPackage = result.get("document_package")
+    if isinstance(primaryPackage, dict):
+        documentPackages.append(primaryPackage)
+    for package in documentPackages:
+        if not isinstance(package, dict):
+            continue
+        for signal in package.get("backtracking_signals") or []:
+            if not isinstance(signal, dict):
+                continue
+            signalText = "document backtracking: {0} - {1}".format(
+                signal.get("type") or "unknown",
+                signal.get("reason") or "",
+            ).strip()
+            if signalText and signalText not in warnings:
+                warnings.append(signalText)
+    return warnings
 
 
 def render_page(
