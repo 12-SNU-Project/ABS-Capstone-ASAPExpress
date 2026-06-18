@@ -222,6 +222,47 @@ class ClassificationAppConfig(BaseModel):
     semantic_candidate_top_k: StrictInt = 8
     semantic_min_score: StrictFloat = 0.0
     hybrid_candidate_limit: Optional[StrictInt] = None
+    beam_hs2_per_parent: StrictInt = 3
+    beam_hs4_per_parent: StrictInt = 3
+    beam_hs6_per_parent: StrictInt = 3
+    beam_hs2_global_limit: StrictInt = 3
+    beam_hs4_global_limit: StrictInt = 9
+    beam_hs6_global_limit: StrictInt = 18
+    beam_semantic_slots_per_parent: StrictInt = 1
+    backtracking_max_retry_count: StrictInt = 1
+
+    @field_validator(
+        "semantic_candidate_top_k",
+        "beam_hs2_per_parent",
+        "beam_hs4_per_parent",
+        "beam_hs6_per_parent",
+        "beam_hs2_global_limit",
+        "beam_hs4_global_limit",
+        "beam_hs6_global_limit",
+    )
+    @classmethod
+    def ValidatePositiveClassificationLimit(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("classification candidate limits must be positive.")
+        return value
+
+    @field_validator(
+        "beam_semantic_slots_per_parent",
+    )
+    @classmethod
+    def ValidateNonNegativeClassificationLimit(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("classification semantic limits must be non-negative.")
+        return value
+
+    @field_validator("backtracking_max_retry_count")
+    @classmethod
+    def ValidateBacktrackingRetryCount(cls, value: int) -> int:
+        if value not in {0, 1}:
+            raise ValueError(
+                "classification backtracking_max_retry_count must be 0 or 1."
+            )
+        return value
 
 
 class WebAppConfig(BaseModel):

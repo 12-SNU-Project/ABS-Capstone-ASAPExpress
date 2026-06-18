@@ -15,6 +15,9 @@ from bussiness_logic.core.decision_flow.decision_policy import (
     Stage1DecisionPolicy,
     ClassificationDecisionHandler,
 )
+from bussiness_logic.core.context_retrieval.semantic_retrieval import (
+    CnSemanticCandidateIndex,
+)
 
 
 DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT = 1
@@ -140,6 +143,9 @@ class Stage1TraversalController:
         visitedHs8Codes: Sequence[str] = (),
         completedRetryCount: int = 0,
         maxRetryCount: int = DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT,
+        semanticIndex: Optional[CnSemanticCandidateIndex] = None,
+        semanticTopK: int = DEFAULT_CN_CANDIDATE_TOP_K,
+        minSemanticScore: float = 0.0,
     ) -> List[CnCandidate]:
         if completedRetryCount >= maxRetryCount:
             return []
@@ -153,19 +159,15 @@ class Stage1TraversalController:
             traversalReport.rejectedCandidateHs8Codes
             or traversalReport.currentCandidateHs8Codes
         )
-        alternativeCandidates = candidateRetriever.FindAlternativeCandidates(
+        return candidateRetriever.FindBacktrackingCandidates(
             productInput=productInput,
             currentCandidates=currentCandidates,
+            targetLevel=traversalReport.backtrackingTargetLevel,
             excludedHs8Codes=sorted(excludedHs8Codes),
             topK=topK,
-        )
-        if alternativeCandidates:
-            return alternativeCandidates
-        return candidateRetriever.FindSiblingCandidates(
-            productInput=productInput,
-            currentCandidates=currentCandidates,
-            excludedHs8Codes=sorted(excludedHs8Codes),
-            topK=topK,
+            semanticIndex=semanticIndex,
+            semanticTopK=semanticTopK,
+            minSemanticScore=minSemanticScore,
         )
 
     def _BuildUniqueCandidateCodes(

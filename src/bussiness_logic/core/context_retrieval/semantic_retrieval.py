@@ -8,6 +8,15 @@ from typing import Any, Dict, List, Mapping, Sequence
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from bussiness_logic.bridge import TextEmbeddingAdapter, TextEmbeddingRequest
+from bussiness_logic.core.classification.hierarchical_beam import (
+    CnHierarchyIndex,
+    CnHierarchyNode,
+    HIERARCHY_LEVEL_CN8,
+    HIERARCHY_LEVEL_HS2,
+    HIERARCHY_LEVEL_HS4,
+    HIERARCHY_LEVEL_HS6,
+    HIERARCHY_LEVELS,
+)
 from bussiness_logic.utils import NormalizeWhiteSpace, NormalizeWhitespaceLines
 
 
@@ -26,11 +35,24 @@ class CnSemanticChunk(BaseModel):
     chunkType: str = Field(alias="chunk_type")
     text: str
     sourceFields: List[str] = Field(default_factory=list, alias="source_fields")
+    hierarchyLevel: str = Field(
+        default=HIERARCHY_LEVEL_CN8,
+        alias="hierarchy_level",
+        exclude=True,
+    )
+    parentCode: str = Field(default="", alias="parent_code", exclude=True)
 
     @computed_field(alias="chunk_id")
     @property
     def chunkId(self) -> str:
-        return "{0}:{1}".format(self.candidateCode, self.chunkType)
+        if self.hierarchyLevel == HIERARCHY_LEVEL_CN8:
+            return "{0}:{1}".format(self.candidateCode, self.chunkType)
+        return "{0}:{1}:{2}:{3}".format(
+            self.domainScope,
+            self.hierarchyLevel,
+            self.candidateCode,
+            self.chunkType,
+        )
 
     @computed_field(alias="text_length")
     @property
@@ -73,23 +95,86 @@ class CnSemanticChunkBuilder:
         domainScope: str,
     ) -> List[CnSemanticChunk]:
         chunks: List[CnSemanticChunk] = []
-        for row in rows:
-            chunks.extend(self.BuildChunksForRow(row, domainScope))
+        hierarchyIndex = CnHierarchyIndex({domainScope: rows})
+        for level in HIERARCHY_LEVELS:
+            for node in hierarchyIndex.GetNodes(domainScope, level):
+                if level == HIERARCHY_LEVEL_CN8:
+                    chunks.extend(
+                        self.BuildChunksForRow(
+                            node.row,
+                            domainScope,
+                            parentCode=node.parentCode,
+                        )
+                    )
+                    continue
+                chunks.extend(self._BuildChunksForHierarchyNode(node))
         return chunks
 
     def BuildChunksForRow(
         self,
         row: Mapping[str, str],
         domainScope: str,
+        *,
+        parentCode: str = "",
     ) -> List[CnSemanticChunk]:
         candidateCode = self._Read(row, "cn", "hs8")
         if not candidateCode:
             return []
 
         chunks = [
-            self._BuildHierarchyChunk(row, domainScope, candidateCode),
-            self._BuildKeywordChunk(row, domainScope, candidateCode),
-            self._BuildExplanatoryNoteChunk(row, domainScope, candidateCode),
+            self._BuildHierarchyChunk(
+                row,
+                domainScope,
+                candidateCode,
+                parentCode,
+            ),
+            self._BuildKeywordChunk(
+                row,
+                domainScope,
+                candidateCode,
+                parentCode,
+            ),
+            self._BuildExplanatoryNoteChunk(
+                row,
+                domainScope,
+                candidateCode,
+                parentCode,
+            ),
+        ]
+        return [chunk for chunk in chunks if chunk is not None]
+
+    def _BuildChunksForHierarchyNode(
+        self,
+        node: CnHierarchyNode,
+    ) -> List[CnSemanticChunk]:
+        descriptionField, keywordField = self._ReadNodeFieldNames(node.level)
+        descriptionText = self._JoinValues(
+            self._Read(node.row, descriptionField),
+            node.childDescriptionText,
+        )
+        keywordText = self._JoinValues(
+            self._Read(node.row, keywordField),
+            node.childKeywordText,
+        )
+        chunks = [
+            self._BuildChunk(
+                candidateCode=node.code,
+                domainScope=node.domainScope,
+                chunkType=SEMANTIC_CHUNK_TYPE_HIERARCHY,
+                textLines=[descriptionText],
+                sourceFields=[descriptionField, "immediate_child_descriptions"],
+                hierarchyLevel=node.level,
+                parentCode=node.parentCode,
+            ),
+            self._BuildChunk(
+                candidateCode=node.code,
+                domainScope=node.domainScope,
+                chunkType=SEMANTIC_CHUNK_TYPE_KEYWORD,
+                textLines=[keywordText],
+                sourceFields=[keywordField, "immediate_child_keywords"],
+                hierarchyLevel=node.level,
+                parentCode=node.parentCode,
+            ),
         ]
         return [chunk for chunk in chunks if chunk is not None]
 
@@ -98,6 +183,7 @@ class CnSemanticChunkBuilder:
         row: Mapping[str, str],
         domainScope: str,
         candidateCode: str,
+        parentCode: str,
     ) -> CnSemanticChunk | None:
         subheadingDescription = self._Read(row, "subheading_description", "hs6_description")
         if not subheadingDescription and self._Read(row, "cn_part") == "00":
@@ -143,6 +229,8 @@ class CnSemanticChunkBuilder:
                 "combined_description",
                 "branch_context",
             ],
+            hierarchyLevel=HIERARCHY_LEVEL_CN8,
+            parentCode=parentCode,
         )
 
     def _BuildKeywordChunk(
@@ -150,6 +238,7 @@ class CnSemanticChunkBuilder:
         row: Mapping[str, str],
         domainScope: str,
         candidateCode: str,
+        parentCode: str,
     ) -> CnSemanticChunk | None:
         keywordFields = [
             "search_keywords",
@@ -177,6 +266,8 @@ class CnSemanticChunkBuilder:
             chunkType=SEMANTIC_CHUNK_TYPE_KEYWORD,
             textLines=["; ".join(deduplicatedKeywords)],
             sourceFields=keywordFields,
+            hierarchyLevel=HIERARCHY_LEVEL_CN8,
+            parentCode=parentCode,
         )
 
     def _BuildExplanatoryNoteChunk(
@@ -184,6 +275,7 @@ class CnSemanticChunkBuilder:
         row: Mapping[str, str],
         domainScope: str,
         candidateCode: str,
+        parentCode: str,
     ) -> CnSemanticChunk | None:
         lines = [
             self._BuildPlainLine(
@@ -198,6 +290,8 @@ class CnSemanticChunkBuilder:
             chunkType=SEMANTIC_CHUNK_TYPE_EXPLANATORY_NOTE,
             textLines=lines,
             sourceFields=["cn_explanatory_note", "cn_note_keywords"],
+            hierarchyLevel=HIERARCHY_LEVEL_CN8,
+            parentCode=parentCode,
         )
 
     def _BuildChunk(
@@ -207,6 +301,8 @@ class CnSemanticChunkBuilder:
         chunkType: str,
         textLines: Sequence[str],
         sourceFields: Sequence[str],
+        hierarchyLevel: str,
+        parentCode: str,
     ) -> CnSemanticChunk | None:
         text = NormalizeWhitespaceLines(
             "\n".join(line for line in textLines if line.strip())
@@ -219,6 +315,24 @@ class CnSemanticChunkBuilder:
             chunkType=chunkType,
             text=text,
             sourceFields=list(sourceFields),
+            hierarchyLevel=hierarchyLevel,
+            parentCode=parentCode,
+        )
+
+    def _ReadNodeFieldNames(self, level: str) -> tuple[str, str]:
+        if level == HIERARCHY_LEVEL_HS2:
+            return "chapter_description", "chapter_keywords"
+        if level == HIERARCHY_LEVEL_HS4:
+            return "heading_description", "heading_keywords"
+        if level == HIERARCHY_LEVEL_HS6:
+            return "subheading_description", "subheading_keywords"
+        raise ValueError(f"Unsupported semantic hierarchy level: {level}")
+
+    def _JoinValues(self, *values: str) -> str:
+        return "; ".join(
+            NormalizeWhiteSpace(value)
+            for value in values
+            if NormalizeWhiteSpace(value)
         )
 
     def _BuildCodeLine(self, label: str, code: str, description: str) -> str:
@@ -304,28 +418,26 @@ class CnSemanticCandidateIndex:
         minScore: float = 0.0,
         maxMatchedChunksPerCandidate: int = 3,
     ) -> List[CnSemanticSearchHit]:
-        normalizedQueryText = NormalizeWhitespaceLines(queryText)
-        if not normalizedQueryText or topK <= 0 or not self.indexedChunks:
-            return []
-
-        response = self.embeddingAdapter.EmbedTexts(
-            TextEmbeddingRequest(texts=[normalizedQueryText])
-        )
-        if not response.embeddings:
+        queryEmbedding = self._BuildQueryEmbedding(queryText)
+        if queryEmbedding is None or topK <= 0:
             return []
 
         domainScopeSet = set(domainScopes)
-        queryEmbedding = response.embeddings[0]
-        matchesByCandidate: Dict[str, List[CnSemanticChunkMatch]] = {}
-        candidateDomainScope: Dict[str, str] = {}
+        matchesByCandidate: Dict[
+            tuple[str, str],
+            List[CnSemanticChunkMatch],
+        ] = {}
 
         for chunk, embedding in zip(self.indexedChunks, self.indexedEmbeddings):
             if domainScopeSet and chunk.domainScope not in domainScopeSet:
                 continue
+            if chunk.hierarchyLevel != HIERARCHY_LEVEL_CN8:
+                continue
             score = _ComputeCosineSimilarity(queryEmbedding, embedding)
             if score < minScore:
                 continue
-            matchesByCandidate.setdefault(chunk.candidateCode, []).append(
+            candidateKey = (chunk.domainScope, chunk.candidateCode)
+            matchesByCandidate.setdefault(candidateKey, []).append(
                 CnSemanticChunkMatch(
                     chunkId=chunk.chunkId,
                     chunkType=chunk.chunkType,
@@ -333,10 +445,10 @@ class CnSemanticCandidateIndex:
                     sourceFields=chunk.sourceFields,
                 )
             )
-            candidateDomainScope[chunk.candidateCode] = chunk.domainScope
 
         hits: List[CnSemanticSearchHit] = []
-        for candidateCode, chunkMatches in matchesByCandidate.items():
+        for candidateKey, chunkMatches in matchesByCandidate.items():
+            domainScope, candidateCode = candidateKey
             sortedChunkMatches = sorted(
                 chunkMatches,
                 key=lambda match: (-match.score, match.chunkId),
@@ -345,7 +457,7 @@ class CnSemanticCandidateIndex:
             hits.append(
                 CnSemanticSearchHit(
                     candidateCode=candidateCode,
-                    domainScope=candidateDomainScope.get(candidateCode, ""),
+                    domainScope=domainScope,
                     score=bestMatch.score,
                     bestChunkType=bestMatch.chunkType,
                     matchedChunks=sortedChunkMatches[:maxMatchedChunksPerCandidate],
@@ -356,6 +468,92 @@ class CnSemanticCandidateIndex:
             hits,
             key=lambda hit: (-hit.score, hit.domainScope, hit.candidateCode),
         )[:topK]
+
+    def SearchHierarchyHints(
+        self,
+        queryText: str,
+        domainScopes: Sequence[str],
+        topKPerParent: int,
+        minScore: float = 0.0,
+        maxMatchedChunksPerCandidate: int = 3,
+    ) -> Dict[tuple[str, str, str], List[CnSemanticSearchHit]]:
+        """한 번의 query embedding으로 부모별 semantic recall 후보를 찾는다."""
+
+        queryEmbedding = self._BuildQueryEmbedding(queryText)
+        if queryEmbedding is None or topKPerParent <= 0:
+            return {}
+
+        domainScopeSet = set(domainScopes)
+        matchesByGroupAndCandidate: Dict[
+            tuple[str, str, str, str],
+            List[CnSemanticChunkMatch],
+        ] = {}
+        for chunk, embedding in zip(self.indexedChunks, self.indexedEmbeddings):
+            if domainScopeSet and chunk.domainScope not in domainScopeSet:
+                continue
+            score = _ComputeCosineSimilarity(queryEmbedding, embedding)
+            if score < minScore:
+                continue
+            candidateKey = (
+                chunk.domainScope,
+                chunk.hierarchyLevel,
+                chunk.parentCode,
+                chunk.candidateCode,
+            )
+            matchesByGroupAndCandidate.setdefault(candidateKey, []).append(
+                CnSemanticChunkMatch(
+                    chunkId=chunk.chunkId,
+                    chunkType=chunk.chunkType,
+                    score=round(score, 6),
+                    sourceFields=chunk.sourceFields,
+                )
+            )
+
+        hitsByGroup: Dict[
+            tuple[str, str, str],
+            List[CnSemanticSearchHit],
+        ] = {}
+        for candidateKey, chunkMatches in matchesByGroupAndCandidate.items():
+            domainScope, hierarchyLevel, parentCode, candidateCode = candidateKey
+            sortedChunkMatches = sorted(
+                chunkMatches,
+                key=lambda match: (-match.score, match.chunkId),
+            )
+            bestMatch = sortedChunkMatches[0]
+            groupKey = (domainScope, hierarchyLevel, parentCode)
+            hitsByGroup.setdefault(groupKey, []).append(
+                CnSemanticSearchHit(
+                    candidateCode=candidateCode,
+                    domainScope=domainScope,
+                    score=bestMatch.score,
+                    bestChunkType=bestMatch.chunkType,
+                    matchedChunks=sortedChunkMatches[
+                        :maxMatchedChunksPerCandidate
+                    ],
+                )
+            )
+
+        return {
+            groupKey: sorted(
+                hits,
+                key=lambda hit: (-hit.score, hit.candidateCode),
+            )[:topKPerParent]
+            for groupKey, hits in hitsByGroup.items()
+        }
+
+    def _BuildQueryEmbedding(
+        self,
+        queryText: str,
+    ) -> List[float] | None:
+        normalizedQueryText = NormalizeWhitespaceLines(queryText)
+        if not normalizedQueryText or not self.indexedChunks:
+            return None
+        response = self.embeddingAdapter.EmbedTexts(
+            TextEmbeddingRequest(texts=[normalizedQueryText])
+        )
+        if not response.embeddings:
+            return None
+        return response.embeddings[0]
 
 
 def _ComputeCosineSimilarity(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set
 
@@ -23,6 +24,21 @@ from bussiness_logic.bridge import (
     LlmRequest,
     LlmResponse,
     LlmResponseFormat,
+)
+from bussiness_logic.core.classification.hierarchical_beam import (
+    CnHierarchyIndex,
+    CnHierarchyNode,
+    HIERARCHY_LEVEL_CN8,
+    HIERARCHY_LEVEL_HS2,
+    HIERARCHY_LEVEL_HS4,
+    HIERARCHY_LEVEL_HS6,
+    HierarchyBeamConfig,
+    HierarchyBeamPath,
+    HierarchyBeamSearch,
+    HierarchyBeamSelector,
+    HierarchyLevelSelection,
+    HierarchyNodeScore,
+    HierarchySearchBoundary,
 )
 from bussiness_logic.core.context_retrieval.loader import OntologyDocumentLoader
 from bussiness_logic.core.context_retrieval.schema import PackagedOntologyContext
@@ -405,6 +421,36 @@ DEFAULT_INITIAL_HS4_BRANCH_REPRESENTATIVE_LIMIT = 3
 DEFAULT_INITIAL_HS6_BRANCH_REPRESENTATIVE_LIMIT = 5
 RETRIEVAL_SOURCE_HEURISTIC = "heuristic"
 RETRIEVAL_SOURCE_SEMANTIC = "semantic"
+HARD_CONDITION_STATUS_NOT_APPLICABLE = "not_applicable"
+HARD_CONDITION_STATUS_SATISFIED = "satisfied"
+HARD_CONDITION_STATUS_UNKNOWN = "unknown"
+HARD_CONDITION_STATUS_CONTRADICTED = "contradicted"
+HARD_CONDITION_STATE_ALIASES = {
+    "cooked": (
+        "cooked",
+        "pre-cooked",
+        "조리된",
+        "가열조리",
+        "구운",
+        "볶은",
+        "삶은",
+        "찐",
+        "튀긴",
+    ),
+    "uncooked": ("uncooked", "raw", "비가열제품", "생면"),
+    "dried": ("dried", "dry", "건조", "건면", "유탕면"),
+    "fresh": ("fresh", "신선", "생물", "생면"),
+}
+HARD_CONDITION_CONTRADICTIONS = {
+    "cooked": ("uncooked",),
+    "uncooked": ("cooked",),
+    "dried": ("fresh",),
+    "fresh": ("dried",),
+}
+HARD_CONDITION_QUANTITATIVE_PATTERN = re.compile(
+    r"(?:\d|%|at least|more than|less than|not exceeding|최소|이상|이하|초과|미만)",
+    re.IGNORECASE,
+)
 
 STAGE1_CLASSIFICATION_SYSTEM_PROMPT = """\
 You are an EU HS/CN classification review assistant for Korean exporters.
@@ -822,6 +868,16 @@ class CnCandidate(BaseModel):
         exclude=True,
     )
     hardConditions: str = Field(default="", alias="hard_conditions", exclude=True)
+    hardConditionStatus: str = Field(
+        default=HARD_CONDITION_STATUS_NOT_APPLICABLE,
+        alias="hard_condition_status",
+        exclude=True,
+    )
+    hardConditionEvidence: List[str] = Field(
+        default_factory=list,
+        alias="hard_condition_evidence",
+        exclude=True,
+    )
     cnExplanatoryNote: str = Field(default="", alias="cn_explanatory_note")
     needsHumanReview: bool = Field(default=True, alias="needs_human_review")
     retrievalSources: List[str] = Field(
@@ -872,12 +928,15 @@ class CnCandidate(BaseModel):
             "secondary_evidence_matches": list(self.secondaryEvidenceMatches[:8]),
             "weak_evidence_matches": list(self.weakEvidenceMatches[:8]),
             "exclude_rule_triggered": len(self.excludeRuleMatches) > 0,
+            "hard_condition_status": self.hardConditionStatus,
+            "hard_condition_evidence": list(self.hardConditionEvidence[:8]),
             "retrieval_sources": list(self.retrievalSources),
             "semantic_score": self.semanticScore,
             "semantic_matches": list(self.semanticMatches[:3]),
             "formula": (
-                "tiered include/search/description matches; weak OCR evidence "
-                "has low weight; exclude_rule match forces score 0"
+                "HS2 + HS4 + HS6 + CN8 local scores; each hierarchy level is "
+                "counted once; primary/secondary exclude or contradicted hard "
+                "condition removes the path"
             ),
         }
 
@@ -1512,6 +1571,7 @@ class CnCandidateRetriever:
         self,
         ontologyRootPath: str | Path,
         projectRootPath: Optional[str | Path] = None,
+        beamConfig: Optional[HierarchyBeamConfig] = None,
     ) -> None:
         self.ontologyRootPath = Path(ontologyRootPath)
         self.projectRootPath = (
@@ -1520,31 +1580,151 @@ class CnCandidateRetriever:
             else self.ontologyRootPath.parent
         )
         self._rowsByDomainScope: Optional[Dict[str, List[Dict[str, str]]]] = None
+        self._hierarchyIndex: Optional[CnHierarchyIndex] = None
+        self._beamConfig = beamConfig or HierarchyBeamConfig()
+        self._beamSelector = HierarchyBeamSelector()
+        self._beamSearch = HierarchyBeamSearch(
+            self._beamConfig,
+            self._beamSelector,
+        )
 
     def FindCandidates(
         self,
         productInput: ProductClassificationInput,
         topK: int = DEFAULT_CN_CANDIDATE_TOP_K,
     ) -> List[CnCandidate]:
-        rowsByDomainScope = self._LoadRowsByDomainScope()
+        return self._FindHierarchicalCandidates(
+            productInput=productInput,
+            topK=topK,
+        )
+
+    def _FindHierarchicalCandidates(
+        self,
+        productInput: ProductClassificationInput,
+        topK: int,
+        semanticHints: Optional[
+            Mapping[
+                tuple[str, str, str],
+                Sequence[CnSemanticSearchHit],
+            ]
+        ] = None,
+        boundary: Optional[HierarchySearchBoundary] = None,
+        excludedHs8Codes: Sequence[str] = (),
+    ) -> List[CnCandidate]:
+        if topK <= 0:
+            return []
+
+        hierarchyIndex = self._LoadHierarchyIndex()
         searchText, searchTextByTier, searchTermsByTier = self._BuildSearchProfile(
             productInput,
         )
-        candidates: List[CnCandidate] = []
-
-        for domainScope in productInput.domainScopes:
-            for row in rowsByDomainScope.get(domainScope, []):
-                candidate = self._ScoreRow(
-                    row=row,
+        preferredHeadingCodes = self._BuildPreferredHeadingCodes(productInput)
+        hs6Paths = self._beamSearch.Search(
+            productInput.domainScopes,
+            lambda domainScope, hierarchyLevel, parentCode: (
+                self._BuildHierarchyLevelSelection(
+                    hierarchyIndex=hierarchyIndex,
                     domainScope=domainScope,
+                    hierarchyLevel=hierarchyLevel,
+                    parentCode=parentCode,
+                    searchText=searchText,
+                    searchTextByTier=searchTextByTier,
+                    searchTermsByTier=searchTermsByTier,
+                    semanticHints=semanticHints,
+                )
+            ),
+            preferredHs4Codes=preferredHeadingCodes,
+            boundary=boundary,
+        )
+
+        candidates: List[CnCandidate] = []
+        excludedHs8CodeSet = set(excludedHs8Codes)
+        for hs6Path in hs6Paths:
+            cn8SemanticHits = self._ReadSemanticHits(
+                semanticHints,
+                hs6Path.domainScope,
+                HIERARCHY_LEVEL_CN8,
+                hs6Path.currentNode.node.code,
+            )
+            cn8SemanticCodes = {
+                hit.candidateCode for hit in cn8SemanticHits
+            }
+            cn8Scores = [
+                self._ScoreHierarchyNode(
+                    cn8Node,
                     searchText=searchText,
                     searchTextByTier=searchTextByTier,
                     searchTermsByTier=searchTermsByTier,
                 )
-                if candidate.score > 0:
-                    candidates.append(candidate)
+                for cn8Node in hierarchyIndex.GetChildren(
+                    hs6Path.domainScope,
+                    HIERARCHY_LEVEL_CN8,
+                    hs6Path.currentNode.node.code,
+                )
+            ]
+            cn8Scores = self._AttachSemanticEvidence(
+                cn8Scores,
+                cn8SemanticHits,
+            )
+            for nodeScore in cn8Scores:
+                if nodeScore.node.code in excludedHs8CodeSet:
+                    continue
+                if (
+                    boundary is not None
+                    and not boundary.Allows(
+                        HIERARCHY_LEVEL_CN8,
+                        nodeScore.node.code,
+                    )
+                ):
+                    continue
+                if nodeScore.isExcluded:
+                    continue
+                candidatePath = hs6Path.Extend(
+                    nodeScore,
+                    semanticSelected=(
+                        nodeScore.node.code in cn8SemanticCodes
+                    ),
+                )
+                if (
+                    candidatePath.cumulativeScore <= 0
+                    and RETRIEVAL_SOURCE_SEMANTIC
+                    not in candidatePath.retrievalSources
+                ):
+                    continue
+                candidates.append(self._BuildCandidateFromPath(candidatePath))
 
-        return self._SelectTopCandidates(candidates, productInput, topK)
+        return self._SelectHierarchicalLeafCandidates(candidates, topK)
+
+    def FindBacktrackingCandidates(
+        self,
+        productInput: ProductClassificationInput,
+        currentCandidates: Sequence[CnCandidate],
+        targetLevel: Optional[str],
+        excludedHs8Codes: Sequence[str],
+        topK: int = DEFAULT_CN_CANDIDATE_TOP_K,
+        semanticIndex: Optional[CnSemanticCandidateIndex] = None,
+        semanticTopK: int = DEFAULT_SEMANTIC_CANDIDATE_TOP_K,
+        minSemanticScore: float = 0.0,
+    ) -> List[CnCandidate]:
+        semanticHints = None
+        if semanticIndex is not None:
+            semanticHints = semanticIndex.SearchHierarchyHints(
+                queryText=productInput.BuildSemanticSearchText(),
+                domainScopes=productInput.domainScopes,
+                topKPerParent=semanticTopK,
+                minScore=minSemanticScore,
+            )
+        boundary = self._BuildBacktrackingBoundary(
+            currentCandidates,
+            targetLevel,
+        )
+        return self._FindHierarchicalCandidates(
+            productInput=productInput,
+            topK=topK,
+            semanticHints=semanticHints,
+            boundary=boundary,
+            excludedHs8Codes=excludedHs8Codes,
+        )
 
     def FindCandidatesWithSemanticIndex(
         self,
@@ -1555,17 +1735,21 @@ class CnCandidateRetriever:
         finalCandidateLimit: Optional[int] = None,
         minSemanticScore: float = 0.0,
     ) -> List[CnCandidate]:
-        semanticHits = semanticIndex.Search(
+        semanticHints = semanticIndex.SearchHierarchyHints(
             queryText=productInput.BuildSemanticSearchText(),
             domainScopes=productInput.domainScopes,
-            topK=semanticTopK,
+            topKPerParent=semanticTopK,
             minScore=minSemanticScore,
         )
-        return self._FindCandidatesWithSemanticHits(
+        candidateLimit = (
+            finalCandidateLimit
+            if finalCandidateLimit is not None
+            else heuristicTopK
+        )
+        return self._FindHierarchicalCandidates(
             productInput=productInput,
-            semanticHits=semanticHits,
-            heuristicTopK=heuristicTopK,
-            finalCandidateLimit=finalCandidateLimit,
+            topK=candidateLimit,
+            semanticHints=semanticHints,
         )
 
     def _FindCandidatesWithSemanticHits(
@@ -1885,6 +2069,591 @@ class CnCandidateRetriever:
             for domainScope, rows in rowsByDomainScope.items()
         }
 
+    def _LoadHierarchyIndex(self) -> CnHierarchyIndex:
+        if self._hierarchyIndex is None:
+            self._hierarchyIndex = CnHierarchyIndex(
+                self._LoadRowsByDomainScope(),
+            )
+        return self._hierarchyIndex
+
+    def _BuildBacktrackingBoundary(
+        self,
+        currentCandidates: Sequence[CnCandidate],
+        targetLevel: Optional[str],
+    ) -> HierarchySearchBoundary:
+        currentCodesByLevel = {
+            HIERARCHY_LEVEL_HS2: frozenset(
+                candidate.hs2Code
+                for candidate in currentCandidates
+                if candidate.hs2Code
+            ),
+            HIERARCHY_LEVEL_HS4: frozenset(
+                candidate.hs4Code
+                for candidate in currentCandidates
+                if candidate.hs4Code
+            ),
+            HIERARCHY_LEVEL_HS6: frozenset(
+                candidate.hs6Code
+                for candidate in currentCandidates
+                if candidate.hs6Code
+            ),
+        }
+        allowedCodesByLevel: Dict[str, frozenset[str]] = {}
+        excludedCodesByLevel: Dict[str, frozenset[str]] = {}
+
+        if targetLevel == HIERARCHY_LEVEL_CN8:
+            allowedCodesByLevel.update(currentCodesByLevel)
+        elif targetLevel == HIERARCHY_LEVEL_HS6:
+            allowedCodesByLevel.update({
+                HIERARCHY_LEVEL_HS2: currentCodesByLevel[
+                    HIERARCHY_LEVEL_HS2
+                ],
+                HIERARCHY_LEVEL_HS4: currentCodesByLevel[
+                    HIERARCHY_LEVEL_HS4
+                ],
+            })
+            excludedCodesByLevel[HIERARCHY_LEVEL_HS6] = (
+                currentCodesByLevel[HIERARCHY_LEVEL_HS6]
+            )
+        elif targetLevel == HIERARCHY_LEVEL_HS4:
+            allowedCodesByLevel[HIERARCHY_LEVEL_HS2] = (
+                currentCodesByLevel[HIERARCHY_LEVEL_HS2]
+            )
+            excludedCodesByLevel[HIERARCHY_LEVEL_HS4] = (
+                currentCodesByLevel[HIERARCHY_LEVEL_HS4]
+            )
+        elif targetLevel == HIERARCHY_LEVEL_HS2:
+            excludedCodesByLevel[HIERARCHY_LEVEL_HS2] = (
+                currentCodesByLevel[HIERARCHY_LEVEL_HS2]
+            )
+        else:
+            allowedCodesByLevel[HIERARCHY_LEVEL_HS2] = (
+                currentCodesByLevel[HIERARCHY_LEVEL_HS2]
+            )
+            excludedCodesByLevel[HIERARCHY_LEVEL_HS6] = (
+                currentCodesByLevel[HIERARCHY_LEVEL_HS6]
+            )
+
+        return HierarchySearchBoundary(
+            allowedCodesByLevel={
+                level: codes
+                for level, codes in allowedCodesByLevel.items()
+                if codes
+            },
+            excludedCodesByLevel={
+                level: codes
+                for level, codes in excludedCodesByLevel.items()
+                if codes
+            },
+        )
+
+    def _BuildHierarchyLevelSelection(
+        self,
+        *,
+        hierarchyIndex: CnHierarchyIndex,
+        domainScope: str,
+        hierarchyLevel: str,
+        parentCode: str,
+        searchText: str,
+        searchTextByTier: Mapping[str, str],
+        searchTermsByTier: Mapping[str, Set[str]],
+        semanticHints: Optional[
+            Mapping[
+                tuple[str, str, str],
+                Sequence[CnSemanticSearchHit],
+            ]
+        ],
+    ) -> HierarchyLevelSelection:
+        nodes = hierarchyIndex.GetChildren(
+            domainScope,
+            hierarchyLevel,
+            parentCode,
+        )
+        nodeScores = [
+            self._ScoreHierarchyNode(
+                node,
+                searchText=searchText,
+                searchTextByTier=searchTextByTier,
+                searchTermsByTier=searchTermsByTier,
+            )
+            for node in nodes
+        ]
+        semanticHits = self._ReadSemanticHits(
+            semanticHints,
+            domainScope,
+            hierarchyLevel,
+            parentCode,
+        )
+        return HierarchyLevelSelection(
+            nodeScores=tuple(
+                self._AttachSemanticEvidence(nodeScores, semanticHits)
+            ),
+            semanticCodes=tuple(
+                semanticHit.candidateCode
+                for semanticHit in semanticHits
+            ),
+            residualCodes=tuple(
+                node.code
+                for node in nodes
+                if self._IsResidualHierarchyNode(node)
+            ),
+        )
+
+    def _IsResidualHierarchyNode(self, node: CnHierarchyNode) -> bool:
+        if node.level != HIERARCHY_LEVEL_HS6:
+            return False
+        ownDescription = NormalizeWhiteSpace(
+            node.row.get("subheading_description", "")
+        ).lower()
+        childDescriptions = {
+            NormalizeWhiteSpace(description).lower()
+            for description in node.childDescriptionText.split(";")
+            if NormalizeWhiteSpace(description)
+        }
+        return (
+            ownDescription == "other"
+            or childDescriptions == {"other"}
+        )
+
+    def _ReadSemanticHits(
+        self,
+        semanticHints: Optional[
+            Mapping[
+                tuple[str, str, str],
+                Sequence[CnSemanticSearchHit],
+            ]
+        ],
+        domainScope: str,
+        hierarchyLevel: str,
+        parentCode: str,
+    ) -> Sequence[CnSemanticSearchHit]:
+        if semanticHints is None:
+            return ()
+        return semanticHints.get(
+            (domainScope, hierarchyLevel, parentCode),
+            (),
+        )
+
+    def _AttachSemanticEvidence(
+        self,
+        nodeScores: Sequence[HierarchyNodeScore],
+        semanticHits: Sequence[CnSemanticSearchHit],
+    ) -> List[HierarchyNodeScore]:
+        semanticHitByCode = {
+            semanticHit.candidateCode: semanticHit
+            for semanticHit in semanticHits
+        }
+        annotatedScores: List[HierarchyNodeScore] = []
+        for nodeScore in nodeScores:
+            semanticHit = semanticHitByCode.get(nodeScore.node.code)
+            if semanticHit is None:
+                annotatedScores.append(nodeScore)
+                continue
+            annotatedScores.append(
+                replace(
+                    nodeScore,
+                    semanticScore=semanticHit.score,
+                    semanticMatches=tuple(
+                        semanticMatch.model_dump(
+                            mode="json",
+                            by_alias=True,
+                        )
+                        for semanticMatch in semanticHit.matchedChunks
+                    ),
+                )
+            )
+        return annotatedScores
+
+    def _ScoreHierarchyNode(
+        self,
+        node: CnHierarchyNode,
+        *,
+        searchText: str,
+        searchTextByTier: Mapping[str, str],
+        searchTermsByTier: Mapping[str, Set[str]],
+    ) -> HierarchyNodeScore:
+        includeText, keywordText, descriptionText, excludeText = (
+            self._ReadHierarchyNodeTexts(node)
+        )
+        includeTierMatches = self._FindTieredCellMatches(
+            includeText,
+            searchTextByTier,
+            searchTermsByTier,
+        )
+        keywordTierMatches = self._FindTieredCellMatches(
+            keywordText,
+            searchTextByTier,
+            searchTermsByTier,
+        )
+        descriptionTierMatches = self._FindTieredTokenMatches(
+            descriptionText,
+            searchTermsByTier,
+        )
+        excludeTierMatches = self._FindTieredCellMatches(
+            excludeText,
+            searchTextByTier,
+            searchTermsByTier,
+        )
+        evidenceTierMatches = self._MergeTierMatches(
+            includeTierMatches,
+            keywordTierMatches,
+            descriptionTierMatches,
+        )
+        includeMatches = self._FlattenTierMatches(includeTierMatches)
+        keywordMatches = self._FlattenTierMatches(keywordTierMatches)
+        descriptionMatches = self._FlattenTierMatches(descriptionTierMatches)
+        excludeMatches = sorted(set(
+            excludeTierMatches.get(EVIDENCE_TIER_PRIMARY, [])
+            + excludeTierMatches.get(EVIDENCE_TIER_SECONDARY, [])
+        ))
+        hardConditionStatus, hardConditionEvidence = self._EvaluateHardConditions(
+            node,
+            searchText,
+        )
+        includePoints = self._ScoreTierMatches(
+            includeTierMatches,
+            TIER_INCLUDE_RULE_WEIGHTS,
+        )
+        keywordPoints = self._ScoreTierMatches(
+            keywordTierMatches,
+            TIER_SEARCH_KEYWORD_WEIGHTS,
+        )
+        descriptionPoints = self._ScoreTierMatches(
+            descriptionTierMatches,
+            TIER_DESCRIPTION_WEIGHTS,
+        )
+        matchedTerms = sorted(set(
+            includeMatches
+            + keywordMatches
+            + descriptionMatches
+        ))
+        return HierarchyNodeScore(
+            node=node,
+            score=round(
+                includePoints + keywordPoints + descriptionPoints,
+                6,
+            ),
+            includePoints=round(includePoints, 6),
+            keywordPoints=round(keywordPoints, 6),
+            descriptionPoints=round(descriptionPoints, 6),
+            includeMatches=tuple(includeMatches),
+            keywordMatches=tuple(keywordMatches),
+            descriptionMatches=tuple(descriptionMatches),
+            primaryMatches=tuple(
+                evidenceTierMatches.get(EVIDENCE_TIER_PRIMARY, [])
+            ),
+            secondaryMatches=tuple(
+                evidenceTierMatches.get(EVIDENCE_TIER_SECONDARY, [])
+            ),
+            weakMatches=tuple(
+                evidenceTierMatches.get(EVIDENCE_TIER_WEAK, [])
+            ),
+            matchedTerms=tuple(matchedTerms),
+            excludedTerms=tuple(excludeMatches),
+            hardConditionStatus=hardConditionStatus,
+            hardConditionEvidence=tuple(hardConditionEvidence),
+        )
+
+    def _ReadHierarchyNodeTexts(
+        self,
+        node: CnHierarchyNode,
+    ) -> tuple[str, str, str, str]:
+        row = node.row
+        if node.level == HIERARCHY_LEVEL_HS2:
+            return (
+                row.get("chapter_including", ""),
+                self._JoinTextValues(
+                    row.get("chapter_keywords", ""),
+                    node.childKeywordText,
+                ),
+                self._JoinTextValues(
+                    row.get("chapter_description", ""),
+                    node.childDescriptionText,
+                ),
+                row.get("chapter_excluding", ""),
+            )
+        if node.level == HIERARCHY_LEVEL_HS4:
+            return (
+                row.get("heading_including", ""),
+                self._JoinTextValues(
+                    row.get("heading_keywords", ""),
+                    node.childKeywordText,
+                ),
+                self._JoinTextValues(
+                    row.get("heading_description", ""),
+                    node.childDescriptionText,
+                ),
+                row.get("heading_excluding", ""),
+            )
+        if node.level == HIERARCHY_LEVEL_HS6:
+            return (
+                "",
+                self._JoinTextValues(
+                    row.get("subheading_keywords", ""),
+                    node.childKeywordText,
+                ),
+                self._JoinTextValues(
+                    row.get("subheading_description", ""),
+                    node.childDescriptionText,
+                ),
+                "",
+            )
+        if node.level == HIERARCHY_LEVEL_CN8:
+            return (
+                row.get("include_rule_keywords", ""),
+                self._JoinTextFields(
+                    row,
+                    (
+                        "cn_keywords",
+                        "branch_keywords",
+                        "cn_note_keywords",
+                    ),
+                ),
+                self._JoinTextFields(
+                    row,
+                    (
+                        "cn_description",
+                        "branch_context",
+                        "cn_explanatory_note",
+                    ),
+                ),
+                row.get("exclude_rule_keywords", ""),
+            )
+        raise ValueError(f"Unsupported hierarchy level: {node.level}")
+
+    def _JoinTextValues(self, *values: str) -> str:
+        return "; ".join(
+            NormalizeWhiteSpace(value)
+            for value in values
+            if NormalizeWhiteSpace(value)
+        )
+
+    def _JoinTextFields(
+        self,
+        row: Mapping[str, str],
+        fieldNames: Sequence[str],
+    ) -> str:
+        return "; ".join(
+            NormalizeWhiteSpace(row.get(fieldName, ""))
+            for fieldName in fieldNames
+            if NormalizeWhiteSpace(row.get(fieldName, ""))
+        )
+
+    def _EvaluateHardConditions(
+        self,
+        node: CnHierarchyNode,
+        searchText: str,
+    ) -> tuple[str, List[str]]:
+        if node.level != HIERARCHY_LEVEL_CN8:
+            return HARD_CONDITION_STATUS_NOT_APPLICABLE, []
+        hardConditions = NormalizeWhiteSpace(
+            node.row.get("hard_conditions", "")
+        )
+        if not hardConditions:
+            return HARD_CONDITION_STATUS_NOT_APPLICABLE, []
+
+        if HARD_CONDITION_QUANTITATIVE_PATTERN.search(hardConditions) is None:
+            conditionMatches = self._FindCellMatches(
+                hardConditions,
+                searchText,
+                self._BuildExpandedSearchTerms(searchText),
+            )
+            if conditionMatches:
+                return HARD_CONDITION_STATUS_SATISFIED, conditionMatches
+
+        normalizedConditions = hardConditions.lower()
+        normalizedSearchText = NormalizeWhiteSpace(searchText).lower()
+        for stateName, aliases in HARD_CONDITION_STATE_ALIASES.items():
+            if stateName not in normalizedConditions:
+                continue
+            matchingAliases = [
+                alias
+                for alias in aliases
+                if alias in normalizedSearchText
+            ]
+            if matchingAliases:
+                return HARD_CONDITION_STATUS_SATISFIED, matchingAliases
+            contradictionAliases: List[str] = []
+            for contradictionState in HARD_CONDITION_CONTRADICTIONS.get(
+                stateName,
+                (),
+            ):
+                contradictionAliases.extend(
+                    alias
+                    for alias in HARD_CONDITION_STATE_ALIASES.get(
+                        contradictionState,
+                        (),
+                    )
+                    if alias in normalizedSearchText
+                )
+            if contradictionAliases:
+                return (
+                    HARD_CONDITION_STATUS_CONTRADICTED,
+                    sorted(set(contradictionAliases)),
+                )
+
+        return HARD_CONDITION_STATUS_UNKNOWN, [hardConditions]
+
+    def _BuildCandidateFromPath(
+        self,
+        path: HierarchyBeamPath,
+    ) -> CnCandidate:
+        nodeScoresByLevel = {
+            nodeScore.node.level: nodeScore
+            for nodeScore in path.nodes
+        }
+        cn8Score = nodeScoresByLevel[HIERARCHY_LEVEL_CN8]
+        row = cn8Score.node.row
+        tierMatches = {
+            EVIDENCE_TIER_PRIMARY: self._ReadUniquePathValues(
+                path,
+                "primaryMatches",
+            ),
+            EVIDENCE_TIER_SECONDARY: self._ReadUniquePathValues(
+                path,
+                "secondaryMatches",
+            ),
+            EVIDENCE_TIER_WEAK: self._ReadUniquePathValues(
+                path,
+                "weakMatches",
+            ),
+        }
+        hierarchyLevelPoints = {
+            level: round(nodeScore.score, 3)
+            for level, nodeScore in nodeScoresByLevel.items()
+        }
+        hierarchyLevelMatches = {
+            level: list(nodeScore.matchedTerms)
+            for level, nodeScore in nodeScoresByLevel.items()
+            if nodeScore.matchedTerms
+        }
+        semanticScores = [
+            nodeScore.semanticScore
+            for nodeScore in path.nodes
+            if nodeScore.semanticScore is not None
+        ]
+        semanticMatches = [
+            dict(semanticMatch)
+            for nodeScore in path.nodes
+            for semanticMatch in nodeScore.semanticMatches
+        ]
+        return self._BuildCandidate(
+            row=row,
+            domainScope=path.domainScope,
+            score=path.cumulativeScore,
+            matchedTerms=self._ReadUniquePathValues(path, "matchedTerms"),
+            excludedTerms=[],
+            includeRuleMatches=self._ReadUniquePathValues(
+                path,
+                "includeMatches",
+            ),
+            searchKeywordMatches=self._ReadUniquePathValues(
+                path,
+                "keywordMatches",
+            ),
+            descriptionMatches=self._ReadUniquePathValues(
+                path,
+                "descriptionMatches",
+            ),
+            excludeRuleMatches=[],
+            tierMatches=tierMatches,
+            includeRulePoints=sum(
+                nodeScore.includePoints for nodeScore in path.nodes
+            ),
+            searchKeywordPoints=sum(
+                nodeScore.keywordPoints for nodeScore in path.nodes
+            ),
+            descriptionPoints=sum(
+                nodeScore.descriptionPoints for nodeScore in path.nodes
+            ),
+            hierarchyLevelPoints=hierarchyLevelPoints,
+            hierarchyLevelMatches=hierarchyLevelMatches,
+            retrievalSources=path.retrievalSources,
+            semanticScore=max(semanticScores) if semanticScores else None,
+            semanticMatches=semanticMatches,
+            hardConditionStatus=cn8Score.hardConditionStatus,
+            hardConditionEvidence=cn8Score.hardConditionEvidence,
+        )
+
+    def _ReadUniquePathValues(
+        self,
+        path: HierarchyBeamPath,
+        attributeName: str,
+    ) -> List[str]:
+        values: List[str] = []
+        for nodeScore in path.nodes:
+            rawValues = getattr(nodeScore, attributeName)
+            for value in rawValues:
+                if value not in values:
+                    values.append(value)
+        return values
+
+    def _SelectHierarchicalLeafCandidates(
+        self,
+        candidates: Sequence[CnCandidate],
+        topK: int,
+    ) -> List[CnCandidate]:
+        sortedCandidates = self._SortCandidates(candidates)
+        semanticCandidates = sorted(
+            [
+                candidate
+                for candidate in candidates
+                if RETRIEVAL_SOURCE_SEMANTIC in candidate.retrievalSources
+            ],
+            key=lambda candidate: (
+                -(candidate.semanticScore or 0.0),
+                self._BuildCandidateRankKey(candidate),
+            ),
+        )
+        semanticSlotCount = min(
+            self._beamConfig.semanticSlotsPerParent,
+            len(semanticCandidates),
+            topK,
+        )
+        staticCandidateLimit = max(0, topK - semanticSlotCount)
+        candidatesByHs6: Dict[str, List[CnCandidate]] = {}
+        for candidate in sortedCandidates:
+            candidatesByHs6.setdefault(
+                candidate.hs6Code or "unknown",
+                [],
+            ).append(candidate)
+
+        selectedCandidates: List[CnCandidate] = []
+        selectedCodes: Set[str] = set()
+        rankedHs6Codes = sorted(
+            candidatesByHs6,
+            key=lambda hs6Code: self._BuildBranchRankKey(
+                candidatesByHs6[hs6Code],
+            ),
+        )
+        for hs6Code in rankedHs6Codes:
+            if len(selectedCandidates) >= staticCandidateLimit:
+                break
+            representative = self._SelectBranchRepresentative(
+                candidatesByHs6[hs6Code],
+            )
+            if representative is None or representative.hs8 in selectedCodes:
+                continue
+            selectedCandidates.append(representative)
+            selectedCodes.add(representative.hs8)
+
+        for candidate in semanticCandidates:
+            if len(selectedCandidates) >= topK:
+                break
+            if candidate.hs8 in selectedCodes:
+                continue
+            selectedCandidates.append(candidate)
+            selectedCodes.add(candidate.hs8)
+
+        for candidate in sortedCandidates:
+            if len(selectedCandidates) >= topK:
+                break
+            if candidate.hs8 in selectedCodes:
+                continue
+            selectedCandidates.append(candidate)
+            selectedCodes.add(candidate.hs8)
+        return self._SortCandidates(selectedCandidates)[:topK]
+
     def _BuildSearchProfile(
         self,
         productInput: ProductClassificationInput,
@@ -2023,6 +2792,8 @@ class CnCandidateRetriever:
         retrievalSources: Optional[Sequence[str]] = None,
         semanticScore: Optional[float] = None,
         semanticMatches: Optional[Sequence[Mapping[str, Any]]] = None,
+        hardConditionStatus: str = HARD_CONDITION_STATUS_NOT_APPLICABLE,
+        hardConditionEvidence: Sequence[str] = (),
     ) -> CnCandidate:
         cnCode = row.get("cn", "") or row.get("hs8", "") or row.get("cn8", "")
         chapterCode = row.get("chapter", "") or row.get("hs2_code") or None
@@ -2087,6 +2858,8 @@ class CnCandidateRetriever:
             includeRuleKeywords=row.get("include_rule_keywords", ""),
             excludeRuleKeywords=row.get("exclude_rule_keywords", ""),
             hardConditions=row.get("hard_conditions", ""),
+            hardConditionStatus=hardConditionStatus,
+            hardConditionEvidence=list(hardConditionEvidence),
             cnExplanatoryNote=row.get("cn_explanatory_note", ""),
             needsHumanReview=True,
             retrievalSources=list(retrievalSources or [RETRIEVAL_SOURCE_HEURISTIC]),
@@ -2432,15 +3205,18 @@ class CnCandidateRetriever:
         self,
         candidates: Sequence[CnCandidate],
     ) -> List[CnCandidate]:
-        return sorted(
-            candidates,
-            key=lambda candidate: (
-                -candidate.score,
-                -(candidate.semanticScore or 0.0),
-                candidate.domainScope,
-                candidate.hs4Code or "",
-                candidate.hs8,
-            ),
+        return sorted(candidates, key=self._BuildCandidateRankKey)
+
+    def _BuildCandidateRankKey(
+        self,
+        candidate: CnCandidate,
+    ) -> tuple[float, float, str, str, str]:
+        return (
+            -candidate.score,
+            -(candidate.semanticScore or 0.0),
+            candidate.domainScope,
+            candidate.hs4Code or "",
+            candidate.hs8,
         )
 
     def _AppendCandidateIfNew(
@@ -2709,6 +3485,8 @@ class CnCandidateRetriever:
 
     def _BuildExpandedSearchTerms(self, searchText: str) -> Set[str]:
         terms = set(self._ExtractTerms(searchText))
+        for term in tuple(terms):
+            terms.update(self._BuildInflectionVariants(term))
         loweredSearchText = searchText.lower()
         rawSearchTokens = {
             token.lower()
@@ -2724,6 +3502,21 @@ class CnCandidateRetriever:
             for expandedTerm in expandedTerms:
                 terms.update(self._ExtractTerms(expandedTerm))
         return terms
+
+    def _BuildInflectionVariants(self, term: str) -> Set[str]:
+        if not term.isascii() or not term.isalpha() or len(term) < 4:
+            return set()
+        variants: Set[str] = set()
+        if term.endswith("ies") and len(term) > 4:
+            variants.add(term[:-3] + "y")
+        elif (
+            term.endswith("s")
+            and not term.endswith(("ss", "us", "is"))
+        ):
+            variants.add(term[:-1])
+        else:
+            variants.add(term + "s")
+        return variants
 
     def _ShouldExpandSourceTerm(
         self,

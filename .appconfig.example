@@ -78,6 +78,14 @@ semantic_candidate_top_k = 8
 semantic_min_score = 0.0
 # null이면 UI classifier가 요청한 top_k_candidates 값을 최종 후보 수로 유지합니다.
 hybrid_candidate_limit = 8
+beam_hs2_per_parent = 3
+beam_hs4_per_parent = 3
+beam_hs6_per_parent = 3
+beam_hs2_global_limit = 3
+beam_hs4_global_limit = 9
+beam_hs6_global_limit = 18
+beam_semantic_slots_per_parent = 1
+backtracking_max_retry_count = 1
 
 [ontology_smoke]
 phase_id = "stage1_classification"

@@ -576,6 +576,9 @@ from bussiness_logic.core import (
     Stage1ResponseValidator,
     Stage1TraversalController,
 )
+from bussiness_logic.core.classification.hierarchical_beam import (
+    HierarchyBeamConfig,
+)
 
 
 APP_CONFIG = LoadAppConfig(ASAP_PROJECT_ROOT)
@@ -604,6 +607,163 @@ class ExternalClassificationResult:
     citations: list[dict] = field(default_factory=list)
     semantic_retrieval_status: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+
+
+@dataclass
+class _Stage1ReviewRound:
+    candidates: list[Any]
+    evidencePackage: Any = None
+    validationReport: Any = None
+    decisionReport: Any = None
+    traversalReport: Any = None
+    responseText: str = ""
+    modelName: str = ""
+    promptText: str = ""
+    error: str | None = None
+
+
+def _BuildCandidateCitations(candidates: Sequence[Any]) -> list[dict[str, Any]]:
+    citations: list[dict[str, Any]] = []
+    for candidate in candidates:
+        citations.append({
+            "source_table": "cn_table",
+            "source_id": candidate.hs8,
+            "snippet": (getattr(candidate, "hs8Description", "") or "")[:120],
+            "reason": (
+                "Stage 1 shortlist via ASAPExpress CnCandidateRetriever "
+                "with retrieval sources: {0}.".format(
+                    ", ".join(
+                        getattr(candidate, "retrievalSources", [])
+                        or ["heuristic"]
+                    )
+                )
+            ),
+        })
+    return citations
+
+
+def _RunStage1ReviewRound(
+    productInput: ProductClassificationInput,
+    candidates: Sequence[Any],
+    adapter: Any,
+) -> _Stage1ReviewRound:
+    contextBuilder = OntologyContextBuilder(ASAP_ONTOLOGY_ROOT)
+    packagedContext = contextBuilder.BuildContext(
+        productInput.BuildSearchText(),
+        topK=8,
+    )
+    evidenceBuilder = Stage1EvidencePackageBuilder(
+        ASAP_ONTOLOGY_ROOT,
+        ASAP_PROJECT_ROOT,
+    )
+    evidencePackage = evidenceBuilder.Build(
+        productInput,
+        candidates,
+        packagedContext,
+    )
+
+    request = Stage1RequestBuilder().BuildRequest(
+        productInput,
+        candidates,
+        packagedContext,
+        evidencePackage=evidencePackage,
+    )
+    request = _copy_with_clamped_max_tokens(request, LLM_MAX_TOKENS)
+    request = _harden_stage1_request(request, productInput, candidates)
+    request = _build_compact_decision_request(request, productInput, candidates)
+    request = _copy_with_clamped_max_tokens(request, 768)
+    promptText = (
+        (request.systemPrompt or "")
+        + "\n---\n"
+        + (request.userPrompt or "")
+    )
+
+    try:
+        response = adapter.Generate(request)
+    except Exception as exception:  # noqa: BLE001
+        return _Stage1ReviewRound(
+            candidates=list(candidates),
+            evidencePackage=evidencePackage,
+            promptText=promptText,
+            error=f"llm_error: {exception}",
+        )
+
+    responseText = getattr(response, "generatedText", "") or ""
+    compactDecision = _extract_compact_decision(responseText, candidates)
+    if compactDecision is not None:
+        compactDecision = _apply_domain_selection_guard(
+            compactDecision,
+            productInput,
+            candidates,
+        )
+        responseText = _expand_compact_decision_to_stage1_json(
+            compactDecision,
+            productInput,
+            candidates,
+        )
+        response = _copy_response_with_text(response, responseText)
+    modelName = (
+        getattr(response, "modelName", None)
+        or getattr(response, "model", None)
+        or ""
+    )
+
+    validator = Stage1ResponseValidator()
+    validationReport = validator.ValidateResponse(
+        response,
+        productInput,
+        candidates,
+        evidencePackage=evidencePackage,
+    )
+    if not validationReport.isValid:
+        try:
+            repairRequest = _copy_with_clamped_max_tokens(
+                _build_repair_request(
+                    request,
+                    productInput,
+                    candidates,
+                    responseText,
+                    validationReport,
+                ),
+                LLM_MAX_TOKENS,
+            )
+            repairResponse = adapter.Generate(repairRequest)
+            repairValidation = validator.ValidateResponse(
+                repairResponse,
+                productInput,
+                candidates,
+                evidencePackage=evidencePackage,
+            )
+            if repairValidation.isValid:
+                response = repairResponse
+                responseText = getattr(response, "generatedText", "") or ""
+                validationReport = repairValidation
+                modelName = (
+                    getattr(response, "modelName", None)
+                    or getattr(response, "model", None)
+                    or modelName
+                )
+        except Exception:
+            pass
+
+    decisionPolicy = Stage1DecisionPolicy()
+    decisionReport = decisionPolicy.BuildDecision(
+        validationReport,
+        candidates,
+    )
+    traversalReport = Stage1TraversalController(
+        decisionPolicy=decisionPolicy,
+    ).BuildFromDecision(decisionReport, candidates)
+    return _Stage1ReviewRound(
+        candidates=list(candidates),
+        evidencePackage=evidencePackage,
+        validationReport=validationReport,
+        decisionReport=decisionReport,
+        traversalReport=traversalReport,
+        responseText=responseText,
+        modelName=str(modelName),
+        promptText=promptText,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -763,7 +923,22 @@ def run_external_classifier(
     candidateLimit = max(1, min(int(top_k_candidates), 5))
 
     # 2. Retrieval
-    retriever = CnCandidateRetriever(ASAP_ONTOLOGY_ROOT, ASAP_PROJECT_ROOT)
+    classificationConfig = APP_CONFIG.classification
+    retriever = CnCandidateRetriever(
+        ASAP_ONTOLOGY_ROOT,
+        ASAP_PROJECT_ROOT,
+        beamConfig=HierarchyBeamConfig(
+            hs2PerParent=classificationConfig.beam_hs2_per_parent,
+            hs4PerParent=classificationConfig.beam_hs4_per_parent,
+            hs6PerParent=classificationConfig.beam_hs6_per_parent,
+            hs2GlobalLimit=classificationConfig.beam_hs2_global_limit,
+            hs4GlobalLimit=classificationConfig.beam_hs4_global_limit,
+            hs6GlobalLimit=classificationConfig.beam_hs6_global_limit,
+            semanticSlotsPerParent=(
+                classificationConfig.beam_semantic_slots_per_parent
+            ),
+        ),
+    )
     semanticIndex, semanticStatus = build_semantic_candidate_index(retriever)
     if semanticIndex is None:
         candidates = retriever.FindCandidates(productInput, topK=candidateLimit)
@@ -788,143 +963,96 @@ def run_external_classifier(
             error="no_candidates_from_retriever",
         )
 
-    # Citations from candidates (for cite() in caller)
-    citations: list[dict] = []
-    for c in candidates:
-        citations.append({
-            "source_table": "cn_table",
-            "source_id": c.hs8,
-            "snippet": (getattr(c, "hs8Description", "") or "")[:120],
-            "reason": (
-                "Stage 1 shortlist via ASAPExpress CnCandidateRetriever "
-                "with retrieval sources: {0}.".format(
-                    ", ".join(getattr(c, "retrievalSources", []) or ["heuristic"])
-                )
-            ),
-        })
-
-    # 3. Ontology context
-    contextBuilder = OntologyContextBuilder(ASAP_ONTOLOGY_ROOT)
-    query = productInput.BuildSearchText()
-    packagedContext = contextBuilder.BuildContext(query, topK=8)
-
-    # 4. Evidence package
-    evidenceBuilder = Stage1EvidencePackageBuilder(
-        ASAP_ONTOLOGY_ROOT, ASAP_PROJECT_ROOT,
-    )
-    evidencePackage = evidenceBuilder.Build(productInput, candidates, packagedContext)
-
-    # 5. LLM request — clamp maxTokens so prompt + max_tokens fits the
-    # context window of gemma4:26b (4096). Stage1 default of 4096 alone
-    # overflows the model context and causes ollama to abort mid-stream.
-    requestBuilder = Stage1RequestBuilder()
-    request = requestBuilder.BuildRequest(
-        productInput, candidates, packagedContext,
-        evidencePackage=evidencePackage,
-    )
-    # ASAPExpress refactored LlmRequest / LlmGenerationOptions from
-    # @dataclass(frozen=True) to pydantic BaseModel — use model_copy(update=)
-    # for both shapes via a small dispatch.
-    request = _copy_with_clamped_max_tokens(request, LLM_MAX_TOKENS)
-    request = _harden_stage1_request(request, productInput, candidates)
-    request = _build_compact_decision_request(request, productInput, candidates)
-    request = _copy_with_clamped_max_tokens(request, 768)
-    prompt_text = (request.systemPrompt or "") + "\n---\n" + (request.userPrompt or "")
-
-    # 6. LLM call
     try:
         adapter = runtime_adapter or build_runtime_adapter()
-        response = adapter.Generate(request)
-    except Exception as e:  # noqa: BLE001
+    except Exception as exception:  # noqa: BLE001
         return ExternalClassificationResult(
             candidates=list(candidates),
-            citations=citations,
-            prompt_text=prompt_text[:2000],
+            citations=_BuildCandidateCitations(candidates),
             semantic_retrieval_status=semanticStatus,
-            error=f"llm_error: {e}",
+            error=f"llm_adapter_error: {exception}",
         )
 
-    response_text = getattr(response, "generatedText", "") or ""
-    compact_decision = _extract_compact_decision(response_text, candidates)
-    if compact_decision is not None:
-        compact_decision = _apply_domain_selection_guard(
-            compact_decision,
-            productInput,
-            candidates,
-        )
-        expanded_response_text = _expand_compact_decision_to_stage1_json(
-            compact_decision,
-            productInput,
-            candidates,
-        )
-        response = _copy_response_with_text(response, expanded_response_text)
-        response_text = expanded_response_text
-    model_name = (
-        getattr(response, "modelName", None)
-        or getattr(response, "model", None)
-        or ""
+    reviewRound = _RunStage1ReviewRound(
+        productInput,
+        candidates,
+        adapter,
     )
+    if reviewRound.error is not None:
+        return ExternalClassificationResult(
+            candidates=reviewRound.candidates,
+            citations=_BuildCandidateCitations(reviewRound.candidates),
+            prompt_text=reviewRound.promptText[:2000],
+            semantic_retrieval_status=semanticStatus,
+            error=reviewRound.error,
+        )
 
-    # 7. Validator → Decision → Traversal → Recommendation
-    validator = Stage1ResponseValidator()
-    validationReport = validator.ValidateResponse(
-        response, productInput, candidates, evidencePackage=evidencePackage,
-    )
-
-    # Local gemma-class models sometimes return schema descriptions or an
-    # OpenAPI-like envelope even with JSON mode enabled. Use the validator
-    # errors as a one-shot repair prompt before the decision policy sees it.
-    if not validationReport.isValid:
-        try:
-            repair_request = _copy_with_clamped_max_tokens(
-                _build_repair_request(
-                    request,
-                    productInput,
-                    candidates,
-                    response_text,
-                    validationReport,
-                ),
-                LLM_MAX_TOKENS,
+    traversalController = Stage1TraversalController()
+    if (
+        reviewRound.traversalReport.nextAction
+        == "backtrack_candidate_scope"
+        and classificationConfig.backtracking_max_retry_count > 0
+    ):
+        backtrackingCandidates = traversalController.BuildBacktrackingCandidates(
+            productInput=productInput,
+            currentCandidates=reviewRound.candidates,
+            decisionReport=reviewRound.decisionReport,
+            candidateRetriever=retriever,
+            topK=candidateLimit,
+            visitedHs8Codes=[
+                candidate.hs8 for candidate in reviewRound.candidates
+            ],
+            completedRetryCount=0,
+            maxRetryCount=classificationConfig.backtracking_max_retry_count,
+            semanticIndex=semanticIndex,
+            semanticTopK=classificationConfig.semantic_candidate_top_k,
+            minSemanticScore=classificationConfig.semantic_min_score,
+        )
+        if not backtrackingCandidates:
+            return ExternalClassificationResult(
+                candidates=reviewRound.candidates,
+                validation_report=reviewRound.validationReport,
+                decision_report=reviewRound.decisionReport,
+                traversal_report=reviewRound.traversalReport,
+                llm_response_text=reviewRound.responseText,
+                llm_model=reviewRound.modelName,
+                prompt_text=reviewRound.promptText[:2000],
+                citations=_BuildCandidateCitations(reviewRound.candidates),
+                semantic_retrieval_status=semanticStatus,
+                error="backtracking_scope_exhausted",
             )
-            repair_response = adapter.Generate(repair_request)
-            repair_validation = validator.ValidateResponse(
-                repair_response,
-                productInput,
-                candidates,
-                evidencePackage=evidencePackage,
+        reviewRound = _RunStage1ReviewRound(
+            productInput,
+            list(backtrackingCandidates)[:candidateLimit],
+            adapter,
+        )
+        if reviewRound.error is not None:
+            return ExternalClassificationResult(
+                candidates=reviewRound.candidates,
+                citations=_BuildCandidateCitations(reviewRound.candidates),
+                prompt_text=reviewRound.promptText[:2000],
+                semantic_retrieval_status=semanticStatus,
+                error="backtracking_{0}".format(reviewRound.error),
             )
-            if repair_validation.isValid:
-                response = repair_response
-                response_text = getattr(response, "generatedText", "") or ""
-                validationReport = repair_validation
-                model_name = (
-                    getattr(response, "modelName", None)
-                    or getattr(response, "model", None)
-                    or model_name
-                    or ""
-                )
-        except Exception:
-            pass
 
-    decisionPolicy = Stage1DecisionPolicy()
-    decisionReport = decisionPolicy.BuildDecision(validationReport, candidates)
-    traversalController = Stage1TraversalController(decisionPolicy=decisionPolicy)
-    traversalReport = traversalController.BuildFromDecision(decisionReport, candidates)
-    recommendationBuilder = Stage1RecommendationReportBuilder()
-    recommendation = recommendationBuilder.Build(
-        productInput, candidates, validationReport, decisionReport,
-        traversalReport, evidencePackage=evidencePackage,
+    recommendation = Stage1RecommendationReportBuilder().Build(
+        productInput,
+        reviewRound.candidates,
+        reviewRound.validationReport,
+        reviewRound.decisionReport,
+        reviewRound.traversalReport,
+        evidencePackage=reviewRound.evidencePackage,
     )
 
     return ExternalClassificationResult(
-        candidates=list(candidates),
+        candidates=reviewRound.candidates,
         recommendation=recommendation,
-        validation_report=validationReport,
-        decision_report=decisionReport,
-        traversal_report=traversalReport,
-        llm_response_text=response_text,
-        llm_model=str(model_name),
-        prompt_text=prompt_text[:2000],
-        citations=citations,
+        validation_report=reviewRound.validationReport,
+        decision_report=reviewRound.decisionReport,
+        traversal_report=reviewRound.traversalReport,
+        llm_response_text=reviewRound.responseText,
+        llm_model=reviewRound.modelName,
+        prompt_text=reviewRound.promptText[:2000],
+        citations=_BuildCandidateCitations(reviewRound.candidates),
         semantic_retrieval_status=semanticStatus,
     )

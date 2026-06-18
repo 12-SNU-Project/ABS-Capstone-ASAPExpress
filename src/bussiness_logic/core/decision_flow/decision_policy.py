@@ -8,6 +8,12 @@ from bussiness_logic.core.classification import (
     CnCandidate,
     Stage1ResponseValidationReport,
 )
+from bussiness_logic.core.classification.hierarchical_beam import (
+    HIERARCHY_LEVEL_CN8,
+    HIERARCHY_LEVEL_HS2,
+    HIERARCHY_LEVEL_HS4,
+    HIERARCHY_LEVEL_HS6,
+)
 from bussiness_logic.utils import NormalizeWhiteSpace
 
 
@@ -175,10 +181,15 @@ class Stage1DecisionPolicy:
             decisionStatus = "backtracking_recommended"
             recommendedCandidateHs8 = None
             backtrackingRecommended = True
-            backtrackingTargetLevel = "hs6_or_parent_candidate_scope"
+            backtrackingTargetLevel = self._FindBacktrackingTargetLevel(
+                classificationResult,
+                unlikelyCandidates,
+            )
             backtrackingReason = (
                 "No reviewed CN8 candidate remained plausible; regenerate "
-                "candidate set from the parent HS/CN hierarchy."
+                "once from the bounded {0} scope.".format(
+                    backtrackingTargetLevel,
+                )
             )
 
         return ClassificationDecisionHandler(
@@ -199,6 +210,47 @@ class Stage1DecisionPolicy:
                 "Human review remains required even when one candidate is prioritized.",
             ],
         )
+
+    def _FindBacktrackingTargetLevel(
+        self,
+        classificationResult: Mapping[str, Any],
+        rejectedHs8Codes: Sequence[str],
+    ) -> str:
+        rejectedHs8CodeSet = set(rejectedHs8Codes)
+        conflictingLevels: List[str] = []
+        candidateReviews = classificationResult.get("candidate_reviews")
+        if isinstance(candidateReviews, list):
+            for candidateReview in candidateReviews:
+                if not isinstance(candidateReview, Mapping):
+                    continue
+                if candidateReview.get("hs8") not in rejectedHs8CodeSet:
+                    continue
+                pathReview = candidateReview.get("classification_path_review")
+                if not isinstance(pathReview, Mapping):
+                    continue
+                for level in (
+                    HIERARCHY_LEVEL_HS2,
+                    HIERARCHY_LEVEL_HS4,
+                    HIERARCHY_LEVEL_HS6,
+                    HIERARCHY_LEVEL_CN8,
+                ):
+                    levelReview = pathReview.get(level)
+                    if (
+                        isinstance(levelReview, Mapping)
+                        and levelReview.get("consistency") == "conflicting"
+                    ):
+                        conflictingLevels.append(level)
+                        break
+
+        for level in (
+            HIERARCHY_LEVEL_HS2,
+            HIERARCHY_LEVEL_HS4,
+            HIERARCHY_LEVEL_HS6,
+            HIERARCHY_LEVEL_CN8,
+        ):
+            if level in conflictingLevels:
+                return level
+        return "hs6_or_parent_candidate_scope"
 
     def _BuildOrderedStatusCodes(
         self,
