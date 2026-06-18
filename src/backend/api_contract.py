@@ -188,6 +188,10 @@ class CandidateCodeSetView(ApiContractModel):
         default_factory=list,
         alias="shortlisted_candidates",
     )
+    classificationTrace: dict[str, Any] | None = Field(
+        default=None,
+        alias="classification_trace",
+    )
     candidates: list[CandidateCodeView] = Field(default_factory=list)
 
 

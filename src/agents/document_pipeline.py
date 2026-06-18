@@ -6,9 +6,11 @@ Document_Agent output that the Dash UI can render.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -23,13 +25,21 @@ from agents.document_agent import DocumentAgent
 from agents.evidence_intake_agent import EvidenceIntakeAgent
 from agents.orchestrator_agent import OrchestratorAgent
 from agents.blackboard import BlackboardStore
+from bussiness_logic.artifact_paths import (
+    BuildSafeArtifactPathSegment,
+    ExtractProductIdFromUrl,
+)
 from bussiness_logic.app_config import LoadAppConfig
 
 
 APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
-URL_INTAKE_ARTIFACT_ROOT = APP_CONFIG.paths.ResolvePath(
+PRODUCT_INPUT_ARTIFACT_ROOT = APP_CONFIG.paths.ResolvePath(
     PROJECT_ROOT,
-    APP_CONFIG.paths.dash_url_intake_artifact_root,
+    APP_CONFIG.paths.product_input_artifact_root,
+)
+PIPELINE_OUTPUTS_ROOT = APP_CONFIG.paths.ResolvePath(
+    PROJECT_ROOT,
+    APP_CONFIG.paths.pipeline_outputs_root,
 )
 
 
@@ -134,7 +144,7 @@ def collect_kurly_url_facts(
             fuzzyMinRatio=smoke_config.input_dictionary_fuzzy_min_ratio,
             llmMaxTokens=smoke_config.llm_input_reconstruction_max_tokens,
             llmDebugArtifactRootPath=(
-                URL_INTAKE_ARTIFACT_ROOT
+                PRODUCT_INPUT_ARTIFACT_ROOT
                 if (
                     runtime_adapter is not None
                     and smoke_config.write_llm_input_reconstruction_debug_artifacts
@@ -180,7 +190,7 @@ def collect_kurly_url_facts(
             inputReconstructionService=input_reconstruction_service,
         )
 
-    artifact_root = URL_INTAKE_ARTIFACT_ROOT
+    artifact_root = PRODUCT_INPUT_ARTIFACT_ROOT
     artifact_root.mkdir(parents=True, exist_ok=True)
     result = pipeline.Run(
         KurlyPipelineInput(
@@ -197,6 +207,8 @@ def collect_kurly_url_facts(
     ocr_summary = public_result.get("ocr") or {}
     pipeline_steps = public_result.get("pipeline_steps") or []
     input_reconstruction = public_result.get("input_reconstruction") or {}
+    productId = ExtractProductIdFromUrl(url)
+    productArtifactDirectory = artifact_root / productId
     if not isinstance(source_product_page, dict):
         source_product_page = {}
     if not isinstance(collection_summary, dict):
@@ -228,6 +240,7 @@ def collect_kurly_url_facts(
     facts = {
         "url": url,
         "source_urls": [url],
+        "product_id": productId,
         "product_name": product_input.productName or "",
         "description": product_input.shortDescription or product_input.productNoticeText or "",
         "short_description": product_input.shortDescription or "",
@@ -242,7 +255,7 @@ def collect_kurly_url_facts(
         "intended_use": "human consumption",
         "warnings": warnings,
         "url_intake": {
-            "artifact_root": str(artifact_root),
+            "artifact_root": str(productArtifactDirectory),
             "pipeline_steps": pipeline_steps,
             "collection": collection_summary,
             "ocr": ocr_summary,
@@ -252,6 +265,15 @@ def collect_kurly_url_facts(
         },
         "input_reconstruction": input_reconstruction,
     }
+    productArtifactDirectory.mkdir(parents=True, exist_ok=True)
+    productInputArtifactPath = productArtifactDirectory / "product-input.json"
+    facts["url_intake"]["product_input_artifact"] = str(productInputArtifactPath)
+    temporaryArtifactPath = productInputArtifactPath.with_suffix(".json.tmp")
+    temporaryArtifactPath.write_text(
+        json.dumps(facts, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temporaryArtifactPath.replace(productInputArtifactPath)
     return facts
 
 
@@ -420,6 +442,7 @@ def run_document_pipeline(
     facts: dict[str, Any],
     include_celex_excerpt: bool = False,
     progress_callback=None,
+    job_id: str | None = None,
 ) -> dict[str, Any]:
     """Run Evidence -> Classification -> Document -> Orchestrator.
 
@@ -434,7 +457,18 @@ def run_document_pipeline(
         "agent_results": list[dict],
       }
     """
-    store = BlackboardStore.create(runtime_mode="dash")
+    effectiveJobId = job_id or f"job_{uuid.uuid4().hex[:10]}"
+    safeJobId = BuildSafeArtifactPathSegment(effectiveJobId, fallback="")
+    if safeJobId != effectiveJobId:
+        raise ValueError("job_id must be a safe artifact path segment.")
+
+    productArtifactId = _ResolveProductArtifactId(query, facts)
+    runDirectory = PIPELINE_OUTPUTS_ROOT / productArtifactId / effectiveJobId
+    store = BlackboardStore.create(
+        runtime_mode="dash",
+        run_id=_BuildInternalRunId(effectiveJobId),
+        run_dir=runDirectory,
+    )
 
     def emit(stage: str, status: str, **payload) -> None:
         if progress_callback is None:
@@ -513,3 +547,30 @@ def run_document_pipeline(
         "run_id": store.run_id,
         "run_dir": str(Path(store.run_dir)),
     }
+
+
+def _ResolveProductArtifactId(query: str, facts: dict[str, Any]) -> str:
+    explicitProductId = BuildSafeArtifactPathSegment(
+        str(facts.get("product_id") or ""),
+        fallback="",
+    )
+    if explicitProductId:
+        return explicitProductId
+
+    sourceUrl = str(facts.get("url") or "").strip()
+    if not sourceUrl:
+        sourceUrls = facts.get("source_urls") or []
+        if isinstance(sourceUrls, list) and sourceUrls:
+            sourceUrl = str(sourceUrls[0] or "").strip()
+    productIdFromUrl = ExtractProductIdFromUrl(sourceUrl)
+    if productIdFromUrl != "unknown":
+        return productIdFromUrl
+
+    fallbackSeed = str(facts.get("product_name") or query or "unknown")
+    fallbackDigest = hashlib.sha256(fallbackSeed.encode("utf-8")).hexdigest()[:12]
+    return f"manual-{fallbackDigest}"
+
+
+def _BuildInternalRunId(jobId: str) -> str:
+    digestBytes = hashlib.sha256(jobId.encode("utf-8")).digest()[:8]
+    return "run_{0:020d}".format(int.from_bytes(digestBytes, byteorder="big"))

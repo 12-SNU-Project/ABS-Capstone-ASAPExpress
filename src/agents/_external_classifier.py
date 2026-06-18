@@ -601,6 +601,7 @@ class ExternalClassificationResult:
     validation_report: Any = None
     decision_report: Any = None
     traversal_report: Any = None
+    traversal_history: list[dict[str, Any]] = field(default_factory=list)
     llm_response_text: str = ""
     llm_model: str = ""
     prompt_text: str = ""
@@ -640,6 +641,189 @@ def _BuildCandidateCitations(candidates: Sequence[Any]) -> list[dict[str, Any]]:
             ),
         })
     return citations
+
+
+def _ReadField(obj: Any, *names: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        for name in names:
+            value = obj.get(name)
+            if value is not None:
+                return value
+        return default
+    for name in names:
+        value = getattr(obj, name, None)
+        if value is not None:
+            return value
+    return default
+
+
+def _ReadTextList(value: Any, *, limit: int) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [
+        str(item).strip()
+        for item in value[:limit]
+        if str(item).strip()
+    ]
+
+
+def _BuildCandidateTraceSnapshot(candidate: Any, rank: int) -> dict[str, Any]:
+    hs8 = _candidate_code(candidate, "hs8", "hs8Code")
+    codeHierarchy = _ReadField(
+        candidate,
+        "codeHierarchy",
+        "code_hierarchy",
+        default={},
+    )
+    scoreBreakdown = _ReadField(
+        candidate,
+        "scoreBreakdown",
+        "score_breakdown",
+        default={},
+    )
+    snapshot = {
+        "rank": rank,
+        "hs8": hs8,
+        "score": _ReadField(candidate, "score", default=0.0),
+        "matchedTerms": _ReadTextList(
+            _ReadField(candidate, "matchedTerms", "matched_terms", default=[]),
+            limit=12,
+        ),
+        "retrievalSources": _ReadTextList(
+            _ReadField(
+                candidate,
+                "retrievalSources",
+                "retrieval_sources",
+                default=[],
+            ),
+            limit=4,
+        ),
+        "codeHierarchy": codeHierarchy if isinstance(codeHierarchy, dict) else {},
+        "scoreBreakdown": (
+            scoreBreakdown
+            if isinstance(scoreBreakdown, dict)
+            else {}
+        ),
+        "hardConditions": _ReadField(
+            candidate,
+            "hardConditions",
+            "hard_conditions",
+            default="",
+        ),
+        "hardConditionStatus": _ReadField(
+            candidate,
+            "hardConditionStatus",
+            "hard_condition_status",
+            default="not_applicable",
+        ),
+        "hardConditionEvidence": _ReadTextList(
+            _ReadField(
+                candidate,
+                "hardConditionEvidence",
+                "hard_condition_evidence",
+                default=[],
+            ),
+            limit=8,
+        ),
+    }
+    return {
+        key: value
+        for key, value in snapshot.items()
+        if value is not None and value != "" and value != []
+    }
+
+
+def _BuildTraversalHistoryEntry(
+    *,
+    roundNumber: int,
+    phase: str,
+    candidates: Sequence[Any],
+    traversalReport: Any = None,
+    decisionReport: Any = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    entry = {
+        "round": roundNumber,
+        "phase": phase,
+        "candidate_hs8_codes": [
+            code
+            for code in (_candidate_code(candidate, "hs8") for candidate in candidates)
+            if code
+        ],
+        "candidate_scope": [
+            _BuildCandidateTraceSnapshot(candidate, rank)
+            for rank, candidate in enumerate(candidates, start=1)
+        ],
+        "decision_status": _ReadField(
+            traversalReport,
+            "decisionStatus",
+            "decision_status",
+            default=_ReadField(
+                decisionReport,
+                "decisionStatus",
+                "decision_status",
+                default="unknown",
+            ),
+        ),
+        "traversal_status": _ReadField(
+            traversalReport,
+            "traversalStatus",
+            "traversal_status",
+            default="unknown",
+        ),
+        "next_action": _ReadField(
+            traversalReport,
+            "nextAction",
+            "next_action",
+            default="",
+        ),
+        "retained_candidate_hs8_codes": list(
+            _ReadField(
+                traversalReport,
+                "retainedCandidateHs8Codes",
+                "retained_candidate_hs8_codes",
+                default=[],
+            )
+            or []
+        ),
+        "rejected_candidate_hs8_codes": list(
+            _ReadField(
+                traversalReport,
+                "rejectedCandidateHs8Codes",
+                "rejected_candidate_hs8_codes",
+                default=[],
+            )
+            or []
+        ),
+        "backtracking_recommended": bool(
+            _ReadField(
+                traversalReport,
+                "backtrackingRecommended",
+                "backtracking_recommended",
+                default=False,
+            )
+        ),
+        "backtracking_target_level": _ReadField(
+            traversalReport,
+            "backtrackingTargetLevel",
+            "backtracking_target_level",
+            default=None,
+        ),
+        "backtracking_reason": _ReadField(
+            traversalReport,
+            "backtrackingReason",
+            "backtracking_reason",
+            default=None,
+        ),
+        "error": error,
+    }
+    return {
+        key: value
+        for key, value in entry.items()
+        if value is not None and value != ""
+    }
 
 
 def _RunStage1ReviewRound(
@@ -987,6 +1171,15 @@ def run_external_classifier(
             error=reviewRound.error,
         )
 
+    traversalHistory = [
+        _BuildTraversalHistoryEntry(
+            roundNumber=1,
+            phase="initial_review",
+            candidates=reviewRound.candidates,
+            traversalReport=reviewRound.traversalReport,
+            decisionReport=reviewRound.decisionReport,
+        )
+    ]
     traversalController = Stage1TraversalController()
     if (
         reviewRound.traversalReport.nextAction
@@ -1009,11 +1202,22 @@ def run_external_classifier(
             minSemanticScore=classificationConfig.semantic_min_score,
         )
         if not backtrackingCandidates:
+            traversalHistory.append(
+                _BuildTraversalHistoryEntry(
+                    roundNumber=2,
+                    phase="backtracking_scope_exhausted",
+                    candidates=[],
+                    traversalReport=None,
+                    decisionReport=reviewRound.decisionReport,
+                    error="backtracking_scope_exhausted",
+                )
+            )
             return ExternalClassificationResult(
                 candidates=reviewRound.candidates,
                 validation_report=reviewRound.validationReport,
                 decision_report=reviewRound.decisionReport,
                 traversal_report=reviewRound.traversalReport,
+                traversal_history=traversalHistory,
                 llm_response_text=reviewRound.responseText,
                 llm_model=reviewRound.modelName,
                 prompt_text=reviewRound.promptText[:2000],
@@ -1027,13 +1231,34 @@ def run_external_classifier(
             adapter,
         )
         if reviewRound.error is not None:
+            error = "backtracking_{0}".format(reviewRound.error)
+            traversalHistory.append(
+                _BuildTraversalHistoryEntry(
+                    roundNumber=2,
+                    phase="backtracking_retry_error",
+                    candidates=reviewRound.candidates,
+                    traversalReport=reviewRound.traversalReport,
+                    decisionReport=reviewRound.decisionReport,
+                    error=error,
+                )
+            )
             return ExternalClassificationResult(
                 candidates=reviewRound.candidates,
                 citations=_BuildCandidateCitations(reviewRound.candidates),
+                traversal_history=traversalHistory,
                 prompt_text=reviewRound.promptText[:2000],
                 semantic_retrieval_status=semanticStatus,
-                error="backtracking_{0}".format(reviewRound.error),
+                error=error,
             )
+        traversalHistory.append(
+            _BuildTraversalHistoryEntry(
+                roundNumber=2,
+                phase="backtracking_retry",
+                candidates=reviewRound.candidates,
+                traversalReport=reviewRound.traversalReport,
+                decisionReport=reviewRound.decisionReport,
+            )
+        )
 
     recommendation = Stage1RecommendationReportBuilder().Build(
         productInput,
@@ -1050,6 +1275,7 @@ def run_external_classifier(
         validation_report=reviewRound.validationReport,
         decision_report=reviewRound.decisionReport,
         traversal_report=reviewRound.traversalReport,
+        traversal_history=traversalHistory,
         llm_response_text=reviewRound.responseText,
         llm_model=reviewRound.modelName,
         prompt_text=reviewRound.promptText[:2000],

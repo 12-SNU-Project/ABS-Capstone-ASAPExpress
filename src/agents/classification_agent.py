@@ -15,6 +15,7 @@ ASAPExpress code is loaded as-is via sys.path — no modifications.
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
+from typing import Any
 
 from agents._external_classifier import (
     ExternalClassificationResult,
@@ -88,7 +89,12 @@ class ClassificationAgent(BaseAgent):
 
         if result.error:
             self.reason(f"ASAPExpress classifier returned error: {result.error}")
-            self._emit_unresolved(store, pes, why=result.error)
+            self._emit_unresolved(
+                store,
+                pes,
+                why=result.error,
+                trace=self._build_classification_trace(result),
+            )
             return
 
         # Preserve the LLM response excerpt in reasoning_summary so the admin
@@ -100,7 +106,12 @@ class ClassificationAgent(BaseAgent):
         recommendation = result.recommendation
         if recommendation is None:
             self.reason("No Stage1RecommendationReport produced; emitting needs_more_facts.")
-            self._emit_unresolved(store, pes, why="no_recommendation")
+            self._emit_unresolved(
+                store,
+                pes,
+                why="no_recommendation",
+                trace=self._build_classification_trace(result),
+            )
             return
 
         # Extract candidate dicts from the Stage1 recommendation
@@ -153,7 +164,12 @@ class ClassificationAgent(BaseAgent):
         if not emitted:
             self.reason("ASAPExpress returned no recommended/retained candidates.")
             why = f"no_recommendation_or_retained ({decision_status})"
-            self._emit_unresolved(store, pes, why=why)
+            self._emit_unresolved(
+                store,
+                pes,
+                why=why,
+                trace=self._build_classification_trace(result),
+            )
             return
 
         ccs_id = store.next_id("ccs")
@@ -210,7 +226,12 @@ class ClassificationAgent(BaseAgent):
             })
         if not ccs_candidates:
             self.reason("No valid emitted CN8 candidates remained after validation.")
-            self._emit_unresolved(store, pes, why="no_valid_emitted_cn8")
+            self._emit_unresolved(
+                store,
+                pes,
+                why="no_valid_emitted_cn8",
+                trace=self._build_classification_trace(result),
+            )
             return
         store.append("candidate_code_sets", {
             "object_type": "CandidateCodeSet",
@@ -218,6 +239,7 @@ class ClassificationAgent(BaseAgent):
             "created_at": now_iso(),
             "candidate_set_id": ccs_id,
             "product_id": pes["product_id"],
+            "classification_trace": self._build_classification_trace(result),
             "candidates": ccs_candidates,
         })
         self.wrote(ccs_id)
@@ -327,6 +349,116 @@ class ClassificationAgent(BaseAgent):
             ).strip(),
             "status": status,
             "evidence": self._read_text_list(evidenceValue, limit=8),
+        }
+
+    def _build_classification_trace(
+        self,
+        result: ExternalClassificationResult,
+    ) -> dict[str, Any]:
+        traversalReport = result.traversal_report
+        decisionReport = result.decision_report
+        history = [
+            self._build_trace_history_entry(entry)
+            for entry in getattr(result, "traversal_history", []) or []
+            if isinstance(entry, dict)
+        ]
+        if traversalReport is None and decisionReport is None and not history:
+            return {}
+        backtrackingOccurred = any(
+            str(entry.get("phase") or "").startswith("backtracking")
+            or int(entry.get("round") or 1) > 1
+            for entry in history
+        )
+        trace = {
+            "decision_status": _read_field(
+                decisionReport,
+                "decisionStatus",
+                "decision_status",
+                default=_read_field(
+                    traversalReport,
+                    "decisionStatus",
+                    "decision_status",
+                    default="unknown",
+                ),
+            ),
+            "traversal_status": _read_field(
+                traversalReport,
+                "traversalStatus",
+                "traversal_status",
+                default="unknown",
+            ),
+            "next_action": _read_field(
+                traversalReport,
+                "nextAction",
+                "next_action",
+                default="",
+            ),
+            "backtracking_recommended": bool(_read_field(
+                traversalReport,
+                "backtrackingRecommended",
+                "backtracking_recommended",
+                default=False,
+            )),
+            "backtracking_occurred": backtrackingOccurred,
+            "backtracking_target_level": _read_field(
+                traversalReport,
+                "backtrackingTargetLevel",
+                "backtracking_target_level",
+                default=None,
+            ),
+            "backtracking_reason": _read_field(
+                traversalReport,
+                "backtrackingReason",
+                "backtracking_reason",
+                default=None,
+            ),
+            "retry_count": max(0, len(history) - 1),
+            "traversal_history": history,
+        }
+        return {
+            key: value
+            for key, value in trace.items()
+            if value is not None and value != "" and value != []
+        }
+
+    def _build_trace_history_entry(self, entry: dict[str, Any]) -> dict[str, Any]:
+        candidateScope = entry.get("candidate_scope") or []
+        if not isinstance(candidateScope, list):
+            candidateScope = []
+        projectedScope = [
+            self._build_trace_candidate_projection(snapshot, index)
+            for index, snapshot in enumerate(candidateScope[:5], start=1)
+            if isinstance(snapshot, dict)
+        ]
+        out = {
+            key: value
+            for key, value in entry.items()
+            if key != "candidate_scope"
+        }
+        if "candidate_scope" in entry:
+            out["candidate_scope"] = projectedScope
+        return out
+
+    def _build_trace_candidate_projection(
+        self,
+        candidateSnapshot: dict[str, Any],
+        rank: int,
+    ) -> dict[str, Any]:
+        hs8 = str(_read_field(candidateSnapshot, "hs8", default="") or "")[:8]
+        staticTree = self._build_candidate_static_tree(candidateSnapshot)
+        staticTree.pop("hard_condition", None)
+        return {
+            "candidate_id": f"trace_round_candidate_{rank}_{hs8 or 'unknown'}",
+            "hs6": hs8[:6],
+            "cn8": hs8,
+            "rank": int(_read_field(candidateSnapshot, "rank", default=rank) or rank),
+            "status": "trace_scope",
+            "candidate_source": "stage1_trace",
+            "llm_recommended": False,
+            "candidate_static_tree": staticTree,
+            "classification_basis": [
+                "Stage 1 traversal candidate scope snapshot."
+            ],
         }
 
     @staticmethod
@@ -484,9 +616,16 @@ class ClassificationAgent(BaseAgent):
         store.save(bb)
 
     # ------------------------------------------------------------------ helpers
-    def _emit_unresolved(self, store: BlackboardStore, pes: dict, *, why: str) -> None:
+    def _emit_unresolved(
+        self,
+        store: BlackboardStore,
+        pes: dict,
+        *,
+        why: str,
+        trace: dict[str, Any] | None = None,
+    ) -> None:
         ccs_id = store.next_id("ccs")
-        store.append("candidate_code_sets", {
+        candidateCodeSet = {
             "object_type": "CandidateCodeSet",
             "created_by": self.agent_name,
             "created_at": now_iso(),
@@ -496,7 +635,10 @@ class ClassificationAgent(BaseAgent):
             "failure_reason": why,
             "shortlisted_candidates": list(self._ontology_reads),
             "candidates": [],
-        })
+        }
+        if trace:
+            candidateCodeSet["classification_trace"] = trace
+        store.append("candidate_code_sets", candidateCodeSet)
         self.wrote(ccs_id)
         self.reason(
             f"Classification unresolved ({why}); wrote empty CandidateCodeSet "

@@ -364,6 +364,7 @@ class PipelineRunService:
                 query=request.query,
                 facts=dict(request.facts),
                 include_celex_excerpt=request.includeCelexExcerpt,
+                job_id=runId,
                 progress_callback=lambda event: self._registry.AppendEvent(
                     runId,
                     event,

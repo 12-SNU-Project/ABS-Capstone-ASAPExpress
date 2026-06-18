@@ -1,10 +1,13 @@
 """
 Blackboard storage — one JSON document + one append-only jsonl per run.
 
-Layout:
+Default standalone layout:
   artifacts/runs/run_<NNN>/
     blackboard.json     full Blackboard root (mutable)
     agent_runs.jsonl    AgentRun records (append-only)
+
+UI pipeline callers may provide an explicit run directory while retaining the
+schema-compatible ``run_<digits>`` internal run identifier.
 
 Schema validation is against the LinkML-generated JSON Schema
 (docs/ASAP_Ontology_v1/linkml/generated/asap_runtime.schema.json).
@@ -92,9 +95,10 @@ class BlackboardStore:
         runs_dir: Path = DEFAULT_RUNS_DIR,
         schema_path: Path = DEFAULT_SCHEMA,
         validate_on_write: bool | None = None,
+        run_dir: Path | None = None,
     ):
         self.run_id = run_id
-        self.run_dir = Path(runs_dir) / run_id
+        self.run_dir = Path(run_dir) if run_dir is not None else Path(runs_dir) / run_id
         self.bb_path = self.run_dir / "blackboard.json"
         self.runs_path = self.run_dir / "agent_runs.jsonl"
         self.schema_path = Path(schema_path)
@@ -119,22 +123,25 @@ class BlackboardStore:
         runs_dir: Path = DEFAULT_RUNS_DIR,
         schema_path: Path = DEFAULT_SCHEMA,
         validate_on_write: bool | None = None,
+        run_id: str | None = None,
+        run_dir: Path | None = None,
     ) -> "BlackboardStore":
         """Create a fresh run directory + empty Blackboard root."""
         runs_dir = Path(runs_dir)
-        run_id = _next_run_id(runs_dir)
+        resolvedRunId = run_id or _next_run_id(runs_dir)
         store = cls(
-            run_id,
+            resolvedRunId,
             runs_dir=runs_dir,
             schema_path=schema_path,
             validate_on_write=validate_on_write,
+            run_dir=run_dir,
         )
-        store.run_dir.mkdir(parents=True, exist_ok=True)
-        n = run_id.split("_", 1)[1]
+        store.run_dir.mkdir(parents=True, exist_ok=False)
+        n = resolvedRunId.split("_", 1)[1]
         bb = {
             "blackboard_id": f"bb_{n}",
             "run_context": {
-                "run_id": run_id,
+                "run_id": resolvedRunId,
                 "created_at": now_iso(),
                 "origin_country": origin_country,
                 "destination_market": destination_market,

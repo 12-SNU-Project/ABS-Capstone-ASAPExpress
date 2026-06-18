@@ -161,7 +161,10 @@ class PipelineApi:
         registryPayload = self._registry.BuildAdminDebugResult(runId)
         storedRunId = str(registryPayload.get("run_id") or runId)
         storedPayload = (
-            self._debugStore.ReadRunDebug(storedRunId)
+            self._debugStore.ReadRunDebug(
+                storedRunId,
+                runDir=registryPayload.get("run_dir"),
+            )
             if self._debugStore is not None
             else {}
         )

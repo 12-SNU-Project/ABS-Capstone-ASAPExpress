@@ -23,7 +23,7 @@ appConfig = LoadAppConfig(ASAP_ROOT)
 app = CreateBackendApp(
     debugRunsRoot=appConfig.paths.ResolvePath(
         ASAP_ROOT,
-        appConfig.paths.blackboard_runs_root,
+        appConfig.paths.pipeline_outputs_root,
     ),
     allowedFrontendOrigins=appConfig.web.allowed_frontend_origins,
 )
