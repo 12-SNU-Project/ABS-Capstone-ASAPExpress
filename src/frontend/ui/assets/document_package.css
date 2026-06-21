@@ -460,33 +460,50 @@ button {
 }
 
 .scenario-shell {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #ffffff;
-  padding: 14px;
-  margin-bottom: 14px;
+  padding: 2px 0 14px;
+  margin-bottom: 0;
 }
 
 .scenario-head {
   display: grid;
   grid-template-columns: minmax(150px, 0.75fr) minmax(260px, 1.25fr);
-  gap: 12px;
+  gap: 14px;
   align-items: stretch;
+  margin-bottom: 14px;
 }
 
 .scenario-code {
-  border: 1px solid var(--line);
-  border-left: 4px solid var(--blue);
-  border-radius: 10px;
-  padding: 12px;
-  background: #f8fafc;
+  position: relative;
+  overflow: hidden;
+  padding: 16px 18px;
+  border: 1px solid #1e3a8a;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 84% 12%, rgba(147, 197, 253, 0.2), transparent 34%),
+    linear-gradient(145deg, #0f172a 0%, #1e3a8a 100%);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+}
+
+.scenario-code .metric-label {
+  color: #93c5fd;
+}
+
+.scenario-code .metric-value {
+  color: #ffffff !important;
+}
+
+.scenario-code .card-meta {
+  color: #bfdbfe;
 }
 
 .scenario-checks {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: #ffffff;
+  padding: 14px 16px;
+  border: 1px solid #dbe3ec;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.07),
+    0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .scenario-checks label {
@@ -509,27 +526,53 @@ button {
 }
 
 .scenario-card {
-  border: 1px solid var(--line);
-  border-left: 4px solid #475569;
-  border-radius: 10px;
-  padding: 12px;
-  background: #ffffff;
+  --scenario-accent: #64748b;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #dbe3ec;
+  border-radius: 14px;
+  padding: 15px 16px 16px;
+  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
   min-height: 164px;
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.07),
+    0 1px 2px rgba(15, 23, 42, 0.04);
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.scenario-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  background: var(--scenario-accent);
+}
+
+.scenario-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 16px 32px rgba(15, 23, 42, 0.11),
+    0 2px 4px rgba(15, 23, 42, 0.05);
 }
 
 .scenario-card.green {
-  border-left-color: var(--green);
-  background: #f0fdf4;
+  --scenario-accent: #16a34a;
+  border-color: #bbf7d0;
+  background: linear-gradient(145deg, #f0fdf4 0%, #ffffff 82%);
 }
 
 .scenario-card.amber {
-  border-left-color: var(--amber);
-  background: #fff7ed;
+  --scenario-accent: #d97706;
+  border-color: #fed7aa;
+  background: linear-gradient(145deg, #fff7ed 0%, #ffffff 82%);
 }
 
 .scenario-card.red {
-  border-left-color: var(--red);
-  background: #fef2f2;
+  --scenario-accent: #dc2626;
+  border-color: #fecaca;
+  background: linear-gradient(145deg, #fef2f2 0%, #ffffff 82%);
 }
 
 .scenario-duty {
@@ -550,10 +593,11 @@ button {
 
 .scenario-window {
   border: 1px solid #dbe3ef;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.78);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
   margin-top: 12px;
   overflow: hidden;
+  box-shadow: 0 7px 18px rgba(15, 23, 42, 0.05);
 }
 
 .scenario-window-head {
@@ -646,8 +690,11 @@ button {
 }
 
 .document-checklist-intro {
-  padding-bottom: 12px;
-  border-bottom: 1px solid #dbe3ec;
+  padding: 14px 16px;
+  border: 1px solid #dbe3ec;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.065);
 }
 
 .document-checklist-summary {
@@ -658,8 +705,8 @@ button {
   width: max-content;
   max-width: 100%;
   border: 1px solid #dbe3ec;
-  border-radius: 9px;
-  background: #f8fafc;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.82);
 }
 
 .document-checklist-count {
@@ -838,6 +885,36 @@ button {
   border: 1px solid #dbe3ec;
   border-radius: 7px;
   background: #ffffff;
+}
+
+.document-drawer-body {
+  padding-top: 4px;
+}
+
+.document-drawer-body .card {
+  position: relative;
+  overflow: hidden;
+  border-color: #dbe3ec;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.07),
+    0 1px 2px rgba(15, 23, 42, 0.04);
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.document-drawer-body .card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 16px 32px rgba(15, 23, 42, 0.1),
+    0 2px 4px rgba(15, 23, 42, 0.05);
+}
+
+.document-drawer-body .document-table-wrap {
+  border-radius: 12px;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.055);
 }
 
 .badge {

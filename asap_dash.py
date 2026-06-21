@@ -26,7 +26,10 @@ app = CreateDashApp(
 )
 server = app.server
 
-
+# instruct gpt
+# RAG -> DPO 기법 -> Survey 기법
+# 그래프 구조 메커니즘
+#
 if __name__ == "__main__":
     app.run(
         debug=False,

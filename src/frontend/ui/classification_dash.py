@@ -374,16 +374,6 @@ def _product_page_basic_card(raw: dict[str, Any]) -> html.Div | None:
     if not any(str(value).strip() for value in [productName, description, url]):
         return None
 
-    rowStyle = {
-        "display": "grid",
-        "gridTemplateColumns": "120px minmax(0, 1fr)",
-        "gap": "10px",
-        "padding": "8px 0",
-        "borderBottom": "1px solid #edf2f7",
-        "fontSize": "12px",
-    }
-    labelStyle = {"fontWeight": 900, "color": "#475569"}
-    valueStyle = {"color": "#334155", "overflowWrap": "anywhere"}
     rows = [
         ("상품명", productName),
         ("설명", _short_text(description, max_length=260)),
@@ -391,29 +381,26 @@ def _product_page_basic_card(raw: dict[str, Any]) -> html.Div | None:
     ]
     return html.Div(
         [
-            html.Div("Product Facts", style={"fontSize": "13px", "fontWeight": 950, "color": "#0f172a"}),
+            html.Div("Product Facts", className="drawer-section-kicker"),
             html.Div(
                 "웹페이지 상단 영역에서 수집한 상품 기본 정보",
-                style={"fontSize": "12px", "color": "#64748b", "marginTop": "2px", "marginBottom": "8px"},
+                className="drawer-section-description",
             ),
-            *[
-                html.Div(
-                    [
-                        html.Div(label, style=labelStyle),
-                        html.Div(str(value or "-"), style=valueStyle),
-                    ],
-                    style=rowStyle,
-                )
-                for label, value in rows
-            ],
+            html.Dl(
+                [
+                    html.Div(
+                        [
+                            html.Dt(label),
+                            html.Dd(str(value or "-")),
+                        ],
+                        className="drawer-definition-row",
+                    )
+                    for label, value in rows
+                ],
+                className="drawer-definition-list",
+            ),
         ],
-        style={
-            "marginTop": "10px",
-            "padding": "12px",
-            "border": "1px solid #e5e7eb",
-            "borderRadius": "8px",
-            "background": "#ffffff",
-        },
+        className="drawer-modern-surface input-product-facts",
     )
 
 
@@ -463,7 +450,7 @@ def _source_evidence_table(
                 ],
                 className="input-card-head",
             ),
-            html.Div(rows, className="input-evidence-grid"),
+            html.Div(rows, className="input-evidence-list"),
             more,
         ],
         className="input-card-section",
@@ -613,20 +600,8 @@ def input_processing_detail_card(
         if not rawPanels:
             return None
         return html.Div(
-            [
-                html.Div(
-                    [
-                        html.Div("웹스크롤링 & OCR 원문", className="input-card-title"),
-                        html.Div(
-                            "웹페이지와 상세 이미지에서 수집한 가공 전 관찰값",
-                            className="input-card-count",
-                        ),
-                    ],
-                    className="input-card-head",
-                ),
-                *rawPanels,
-            ],
-            className="input-detail-result",
+            rawPanels,
+            className="input-detail-result drawer-content-stack",
         )
 
     status = input_processing_view.get("reconstruction_status") or {}
@@ -669,19 +644,6 @@ def input_processing_detail_card(
 
     return html.Div(
         [
-            html.Div(
-                [
-                    html.Div(
-                        "LLM Reconstruction 결과",
-                        className="input-reconstruction-result-title",
-                    ),
-                    html.Div(
-                        "OCR/PP Table 원문을 구조화하고 교정한 후속 결과",
-                        className="input-reconstruction-result-subtitle",
-                    ),
-                ],
-                className="input-reconstruction-result-head",
-            ),
             html.Div(
                 html.Table(
                     [
@@ -730,13 +692,13 @@ def input_processing_detail_card(
             ),
             html.Div(
                 [
-                    html.Div("Input reconstruction issue", style={"fontSize": "12px", "fontWeight": 900, "color": "#92400e", "marginBottom": "4px"}),
+                    html.Div("Input reconstruction issue", className="drawer-notice-title"),
                     html.Div(
                         reconstructionError or fallbackReason or "fallback reconstruction is being used",
-                        style={"fontSize": "12px", "color": "#78350f"},
+                        className="drawer-notice-text",
                     ),
                 ],
-                style={"marginTop": "10px", "padding": "10px", "border": "1px solid #fcd34d", "borderRadius": "8px", "background": "#fffbeb"},
+                className="drawer-notice warning",
             ) if reconstructionError or (
                 fallbackReason
                 and not status.get("used_llm_reconstruction")
@@ -767,16 +729,16 @@ def input_processing_detail_card(
             ),
             html.Div(
                 [
-                    html.Div("Conflicts", style={"fontSize": "12px", "fontWeight": 900, "color": "#991b1b", "marginBottom": "6px"}),
+                    html.Div("Conflicts", className="drawer-notice-title"),
                     html.Ul(
                         [html.Li(_short_text(conflict, max_length=220)) for conflict in conflicts[:6]],
-                        style={"margin": "0 0 0 18px", "padding": 0, "fontSize": "12px", "color": "#7f1d1d"},
+                        className="drawer-notice-list",
                     ),
                 ],
-                style={"marginTop": "10px", "padding": "10px", "border": "1px solid #fecaca", "borderRadius": "8px", "background": "#fef2f2"},
+                className="drawer-notice danger",
             ) if conflicts else None,
         ],
-        className="input-reconstruction-result",
+        className="input-reconstruction-result drawer-content-stack",
     )
 
 
@@ -1447,10 +1409,10 @@ def _classification_unresolved_card(candidateSet: dict[str, Any]) -> html.Div:
         shortlisted = []
     return html.Div(
         [
-            html.Div("분류 후보 산출 보류", style={"fontSize": "14px", "fontWeight": 950, "color": "#92400e"}),
+            html.Div("분류 후보 산출 보류", className="classification-unresolved-title"),
             html.Div(
                 "정적 후보 또는 LLM 검증 결과를 후보로 확정하지 않았습니다. 추가 상품 정보나 검토가 필요합니다.",
-                style={"fontSize": "12px", "color": "#78350f", "marginTop": "6px"},
+                className="classification-unresolved-text",
             ),
             html.Div(
                 [
@@ -1461,11 +1423,7 @@ def _classification_unresolved_card(candidateSet: dict[str, Any]) -> html.Div:
                 style={"display": "flex", "gap": "8px", "flexWrap": "wrap", "marginTop": "10px"},
             ),
         ],
-        style={
-            **CARD,
-            "borderColor": "#fcd34d",
-            "background": "#fffbeb",
-        },
+        className="classification-unresolved-surface",
     )
 
 
@@ -1780,13 +1738,12 @@ def _classification_backtracking_route_panel(
     if not backtrackingOccurred:
         return html.Div(
             [
-                html.Div("최종 후보군 탐색 경로", className="classification-result-title"),
                 _candidate_merged_tree_panel(
                     finalCandidates,
                     title="",
                 ),
             ],
-            className="classification-result-summary",
+            className="classification-tree-route",
         )
 
     sourceCandidates = _backtracking_source_candidates(
@@ -1825,7 +1782,6 @@ def _classification_backtracking_route_panel(
 
     return html.Div(
         [
-            html.Div("통합 탐색 트리 / 백트래킹 경로", className="classification-result-title"),
             html.Div(
                 [
                     html.Div("백트래킹 근거", className="classification-backtracking-basis-title"),
@@ -2170,7 +2126,7 @@ def classification_result_drawer(
                 html.Div(
                     [
                         html.Div("Classification 검증 결과", className="drawer-title-main"),
-                        html.Div("선택 결론 · 탐색 이력 · 백트래킹 경로", className="drawer-title-sub"),
+                        html.Div("우선 검토 코드와 검증 근거", className="drawer-title-sub"),
                     ]
                 ),
                 dmc.Button(

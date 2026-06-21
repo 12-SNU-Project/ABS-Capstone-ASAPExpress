@@ -427,7 +427,7 @@ def render_result(pkg, panel, options):
 def _document_panel_defs(additionalDocumentCount: int) -> list[tuple[str, str, str]]:
     return [
         (OVERVIEW_PANEL_ID, "전체 결론", "기본 화면"),
-        ("scenario", "시나리오", "기본/우대"),
+        ("scenario", "시나리오", "원산지 · Control · FTA"),
         ("bundles", "서류 추천", f"{additionalDocumentCount}개"),
     ]
 
@@ -482,7 +482,7 @@ def _render_detail_drawer(
         zIndex=3000,
         children=html.Div(
             render_panel(pkg, drawerPanel, cx, options) if drawerPanel else [],
-            className="drawer-panel-body",
+            className="drawer-panel-body document-drawer-body",
         ),
     )
 
@@ -561,7 +561,7 @@ def render_panel(pkg: dict[str, Any], panel: str, cx: dict[str, Any], options: l
                 cx.get("document_checklist") or {},
                 cx.get("groups") or [],
             )
-        return render_bundles(cx["groups"])
+        return render_bundles(cx["groups"], showHeading=False)
     if panel == "product":
         return render_product_rules_from_view(
             cx.get("product_pre") or [],
@@ -995,7 +995,6 @@ def render_trade_scenario(pkg: dict[str, Any], cx: dict[str, Any]) -> html.Div:
 
     return html.Div(
         [
-            html.Div("통관 조건 체크", className="section-title"),
             html.Div(
                 [
                     html.Div(
@@ -1184,7 +1183,11 @@ def render_preferential(reqs: list[dict[str, Any]]):
     )
 
 
-def render_bundles(groups: list[dict[str, Any]]):
+def render_bundles(
+    groups: list[dict[str, Any]],
+    *,
+    showHeading: bool = True,
+):
     if not groups:
         return html.Div("요구서류 묶음이 없습니다.", className="card-meta")
     cards = []
@@ -1214,7 +1217,14 @@ def render_bundles(groups: list[dict[str, Any]]):
                 className="card",
             )
         )
-    return html.Div([html.Div("요구서류 묶음", className="section-title"), html.Div(cards, className="two-col")])
+    return html.Div(
+        [
+            html.Div("요구서류 묶음", className="section-title")
+            if showHeading
+            else None,
+            html.Div(cards, className="two-col"),
+        ]
+    )
 
 
 def render_additional_documents(
