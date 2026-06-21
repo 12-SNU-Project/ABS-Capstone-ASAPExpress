@@ -10,6 +10,27 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.api_contract import CandidateCodeSetView, RunSnapshotResponse
 
 
+def _BuildOpenUserQuestions(
+    blackboard: Mapping[str, Any],
+    decision: Any,
+) -> list[dict[str, Any]]:
+    userQuestionIds = (
+        set(decision.get("user_questions") or [])
+        if isinstance(decision, Mapping)
+        else set()
+    )
+    return [
+        dict(question)
+        for question in blackboard.get("user_questions", [])
+        if isinstance(question, Mapping)
+        and question.get("status") == "open"
+        and (
+            not userQuestionIds
+            or question.get("question_id") in userQuestionIds
+        )
+    ]
+
+
 class PipelineRunResult(BaseModel):
     """UI가 기본으로 소비하는 pipeline 결과 DTO."""
 
@@ -46,19 +67,6 @@ class PipelineRunResult(BaseModel):
         blackboard = pipelineOutput.get("blackboard") or {}
         decision = pipelineOutput.get("decision")
         documentPackage = pipelineOutput.get("document_package")
-        userQuestionIds = set()
-        if isinstance(decision, Mapping):
-            userQuestionIds = set(decision.get("user_questions") or [])
-        userQuestions = [
-            dict(question)
-            for question in blackboard.get("user_questions", [])
-            if isinstance(question, Mapping)
-            and question.get("status") == "open"
-            and (
-                not userQuestionIds
-                or question.get("question_id") in userQuestionIds
-            )
-        ]
         return cls(
             run_id=runId,
             run_dir=runDir,
@@ -76,7 +84,7 @@ class PipelineRunResult(BaseModel):
             ),
             decision=decision,
             agent_results=list(pipelineOutput.get("agent_results") or []),
-            user_questions=userQuestions,
+            user_questions=_BuildOpenUserQuestions(blackboard, decision),
         )
 
     def ToUiDict(self) -> dict[str, Any]:
@@ -517,7 +525,7 @@ class PipelineOutputProjector:
             )
             if inputProcessingView:
                 compact["input_processing_view"] = inputProcessingView
-            userQuestions = self._BuildOpenUserQuestions(
+            userQuestions = _BuildOpenUserQuestions(
                 blackboard,
                 compact.get("decision"),
             )
@@ -537,26 +545,6 @@ class PipelineOutputProjector:
             if documentPackages:
                 compact["document_packages"] = documentPackages
         return compact
-
-    def _BuildOpenUserQuestions(
-        self,
-        blackboard: Mapping[str, Any],
-        decision: Any,
-    ) -> list[dict[str, Any]]:
-        userQuestionIds = set()
-        if isinstance(decision, Mapping):
-            userQuestionIds = set(decision.get("user_questions") or [])
-        return [
-            dict(question)
-            for question in blackboard.get("user_questions", [])
-            if isinstance(question, Mapping)
-            and question.get("status") == "open"
-            and (
-                not userQuestionIds
-                or question.get("question_id") in userQuestionIds
-            )
-        ]
-
 
 class PipelineSnapshotProjector:
     def __init__(

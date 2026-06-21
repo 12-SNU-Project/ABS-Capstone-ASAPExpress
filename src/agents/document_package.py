@@ -1270,13 +1270,7 @@ def render_text(pkg: DocumentPackage) -> str:
 
 
 def _dc_to_dict(obj) -> dict:
-    if isinstance(obj, (Certificate, CelexRef, Requirement, DocumentPackage)):
-        return {k: _dc_to_dict(v) for k, v in asdict(obj).items()}
-    if isinstance(obj, list):
-        return [_dc_to_dict(x) for x in obj]
-    if isinstance(obj, dict):
-        return {k: _dc_to_dict(v) for k, v in obj.items()}
-    return obj
+    return asdict(obj)
 
 
 def _load_facts_json(value: str) -> dict:

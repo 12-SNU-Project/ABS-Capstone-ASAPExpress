@@ -110,7 +110,7 @@ class RunRegistry:
             if identifier in self._runs:
                 return identifier, self._SnapshotCopyLocked(self._runs[identifier])
             for jobId, run in self._runs.items():
-                resultData = self._RunResultData(run)
+                resultData = self._ResultData(run)
                 if str(resultData.get("run_id") or "") == identifier:
                     return jobId, self._SnapshotCopyLocked(run)
         return None
@@ -126,7 +126,7 @@ class RunRegistry:
         if snapshotEntry is None:
             return {}
         jobId, snapshot = snapshotEntry
-        resultData = self._SnapshotResultData(snapshot)
+        resultData = self._ResultData(snapshot)
         packages = self._DocumentPackagesFromSnapshot(snapshot, resultData)
         return DocumentPackageCollectionResponse(
             job_id=jobId,
@@ -144,7 +144,7 @@ class RunRegistry:
         if snapshotEntry is None:
             return {}
         jobId, snapshot = snapshotEntry
-        resultData = self._SnapshotResultData(snapshot)
+        resultData = self._ResultData(snapshot)
         packages = self._DocumentPackagesFromSnapshot(snapshot, resultData)
         for package in packages:
             if packageId in {
@@ -180,7 +180,7 @@ class RunRegistry:
         if snapshotEntry is None:
             return {}
         jobId, snapshot = snapshotEntry
-        resultData = self._SnapshotResultData(snapshot)
+        resultData = self._ResultData(snapshot)
         return AdminRunDebugResponse(
             job_id=jobId,
             job_status=snapshot.get("status"),
@@ -270,16 +270,7 @@ class RunRegistry:
             snapshot["result"] = dict(result)
         return snapshot
 
-    def _RunResultData(self, run: Mapping[str, Any]) -> dict[str, Any]:
-        result = run.get("result")
-        if isinstance(result, dict):
-            return result
-        partialResult = run.get("partial_result")
-        if isinstance(partialResult, dict):
-            return partialResult
-        return {}
-
-    def _SnapshotResultData(self, snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    def _ResultData(self, snapshot: Mapping[str, Any]) -> dict[str, Any]:
         result = snapshot.get("result")
         if isinstance(result, Mapping):
             return dict(result)

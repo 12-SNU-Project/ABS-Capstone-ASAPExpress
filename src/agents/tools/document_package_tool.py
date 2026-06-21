@@ -15,7 +15,7 @@ not by this tool. The tool just preserves the existing investment.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict
 from typing import Any
 
 # Lazy import so cosmetic tooling (e.g. dash UI) does not pull psycopg2 if
@@ -43,14 +43,4 @@ class DocumentPackageTool:
             taric10,
             include_celex_excerpt=self._include_celex_excerpt,
         )
-        return self._to_dict(pkg)
-
-    @staticmethod
-    def _to_dict(obj: Any) -> Any:
-        if is_dataclass(obj):
-            return {k: DocumentPackageTool._to_dict(v) for k, v in asdict(obj).items()}
-        if isinstance(obj, list):
-            return [DocumentPackageTool._to_dict(x) for x in obj]
-        if isinstance(obj, dict):
-            return {k: DocumentPackageTool._to_dict(v) for k, v in obj.items()}
-        return obj
+        return asdict(pkg)

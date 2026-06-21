@@ -77,7 +77,6 @@ TextList: TypeAlias = Annotated[
 class ProductInputDataShape(str, Enum):
     TopLevelParsedPage = "top_level_parsed_page"
     CollectionResult = "collection_result"
-    SmokeSummary = "smoke_summary"
     FlatSmokeArtifact = "flat_smoke_artifact"
 
 
@@ -371,8 +370,6 @@ class ProductInputAdapter:
             return self._BuildFromTopLevelParsedPageData(productData)
         if dataShape == ProductInputDataShape.CollectionResult:
             return self._BuildFromCollectionResultData(productData)
-        if dataShape == ProductInputDataShape.SmokeSummary:
-            return self._BuildFromSmokeSummaryData(productData)
         if dataShape == ProductInputDataShape.FlatSmokeArtifact:
             return self._BuildFromFlatSmokeArtifactData(productData)
         raise ValueError("Unsupported product input data shape.")
@@ -409,8 +406,6 @@ class ProductInputAdapter:
             return ProductInputDataShape.TopLevelParsedPage
         if self._HasAnyKey(productData, "collection_result", "collectionResult"):
             return ProductInputDataShape.CollectionResult
-        if "product" in productData and "notice" in productData:
-            return ProductInputDataShape.SmokeSummary
         if self._LooksLikeFlatSmokeArtifact(productData):
             return ProductInputDataShape.FlatSmokeArtifact
         raise ValueError("Unsupported product input data shape.")

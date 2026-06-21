@@ -524,6 +524,60 @@ STAGE1_CLASSIFICATION_JSON_INSTRUCTIONS = {
 }
 
 
+def _ResolveDataPath(
+    ontologyRootPath: Path,
+    projectRootPath: Path,
+    declaredPath: str,
+) -> Optional[Path]:
+    if declaredPath == "":
+        return None
+    for candidatePath in (
+        ontologyRootPath / declaredPath,
+        projectRootPath / declaredPath,
+    ):
+        if candidatePath.exists():
+            return candidatePath
+    return None
+
+
+def _ReadCsvRows(csvPath: Path) -> List[Dict[str, str]]:
+    with csvPath.open("r", encoding="utf-8-sig", newline="") as csvFile:
+        return [dict(row) for row in csv.DictReader(csvFile)]
+
+
+def _LoadScopedCsvRows(
+    document: Any,
+    ontologyRootPath: Path,
+    projectRootPath: Path,
+) -> Dict[str, List[Dict[str, str]]]:
+    rowsByDomainScope: Dict[str, List[Dict[str, str]]] = {}
+    dataSources = document.frontmatter.get("data_sources")
+    if not isinstance(dataSources, list):
+        return rowsByDomainScope
+
+    for dataSource in dataSources:
+        if not isinstance(dataSource, Mapping):
+            continue
+        resourceId = dataSource.get("resource_id")
+        if not isinstance(resourceId, str):
+            continue
+        domainScope = (
+            FOOD_DOMAIN_SCOPE
+            if resourceId.endswith("." + FOOD_DOMAIN_SCOPE)
+            else COSMETICS_DOMAIN_SCOPE
+            if resourceId.endswith("." + COSMETICS_DOMAIN_SCOPE)
+            else None
+        )
+        resolvedPath = _ResolveDataPath(
+            ontologyRootPath,
+            projectRootPath,
+            str(dataSource.get("path", "")),
+        )
+        if domainScope is not None and resolvedPath is not None:
+            rowsByDomainScope[domainScope] = _ReadCsvRows(resolvedPath)
+    return rowsByDomainScope
+
+
 class ProductClassificationInput(BaseModel):
     """상품 수집 결과를 HS6/CN8 후보 조회에 맞게 정규화한 입력."""
 
@@ -1462,18 +1516,14 @@ class Stage1EvidencePackageBuilder:
         return rowsByCandidate
 
     def _LoadBtiRowsByDomainScope(self) -> Dict[str, List[Dict[str, str]]]:
-        rowsByDomainScope: Dict[str, List[Dict[str, str]]] = {}
         btiChunkDocument = self._FindDocument(BTI_CASE_CHUNKS_DOCUMENT_ID)
         if btiChunkDocument is None:
-            return rowsByDomainScope
-
-        for dataSource in self._ReadDataSources(btiChunkDocument):
-            domainScope = self._ReadDomainScope(dataSource)
-            resolvedPath = self._ResolvePath(str(dataSource.get("path", "")))
-            if domainScope is None or resolvedPath is None:
-                continue
-            rowsByDomainScope[domainScope] = self._ReadCsvRows(resolvedPath)
-        return rowsByDomainScope
+            return {}
+        return _LoadScopedCsvRows(
+            btiChunkDocument,
+            self.ontologyRootPath,
+            self.projectRootPath,
+        )
 
     def _DoesBtiRowMatchCandidate(
         self,
@@ -1509,44 +1559,6 @@ class Stage1EvidencePackageBuilder:
             if document.documentId == documentId:
                 return document
         return None
-
-    def _ReadDataSources(self, document: Any) -> List[Mapping[str, Any]]:
-        dataSources = document.frontmatter.get("data_sources")
-        if not isinstance(dataSources, list):
-            return []
-        return [
-            dataSource
-            for dataSource in dataSources
-            if isinstance(dataSource, Mapping)
-        ]
-
-    def _ReadDomainScope(self, dataSource: Mapping[str, Any]) -> Optional[str]:
-        resourceId = dataSource.get("resource_id")
-        if not isinstance(resourceId, str):
-            return None
-        if resourceId.endswith("." + FOOD_DOMAIN_SCOPE):
-            return FOOD_DOMAIN_SCOPE
-        if resourceId.endswith("." + COSMETICS_DOMAIN_SCOPE):
-            return COSMETICS_DOMAIN_SCOPE
-        return None
-
-    def _ResolvePath(self, declaredPath: str) -> Optional[Path]:
-        if declaredPath == "":
-            return None
-        for candidatePath in [
-            self.ontologyRootPath / declaredPath,
-            self.projectRootPath / declaredPath,
-        ]:
-            if candidatePath.exists():
-                return candidatePath
-        return None
-
-    def _ReadCsvRows(self, csvPath: Path) -> List[Dict[str, str]]:
-        with csvPath.open("r", encoding="utf-8-sig", newline="") as csvFile:
-            return [
-                dict(row)
-                for row in csv.DictReader(csvFile)
-            ]
 
     def _TrimEvidenceText(self, text: str) -> str:
         normalizedText = NormalizeWhitespaceLines(text)
@@ -2875,7 +2887,11 @@ class CnCandidateRetriever:
             return self._rowsByDomainScope
 
         rowsByDomainScope: Dict[str, List[Dict[str, str]]] = {}
-        cnTablePath = self._ResolvePath(str(CN_TABLE_RELATIVE_PATH))
+        cnTablePath = _ResolveDataPath(
+            self.ontologyRootPath,
+            self.projectRootPath,
+            str(CN_TABLE_RELATIVE_PATH),
+        )
         if cnTablePath is not None:
             self._rowsByDomainScope = self._ReadCnTableRowsByDomainScope(cnTablePath)
             return self._rowsByDomainScope
@@ -2885,12 +2901,13 @@ class CnCandidateRetriever:
             self._rowsByDomainScope = rowsByDomainScope
             return rowsByDomainScope
 
-        for dataSource in self._ReadDataSources(leafCardDocument):
-            domainScope = self._ReadDomainScope(dataSource)
-            resolvedPath = self._ResolvePath(str(dataSource.get("path", "")))
-            if domainScope is None or resolvedPath is None:
-                continue
-            rowsByDomainScope[domainScope] = self._ReadCsvRows(resolvedPath)
+        rowsByDomainScope.update(
+            _LoadScopedCsvRows(
+                leafCardDocument,
+                self.ontologyRootPath,
+                self.projectRootPath,
+            )
+        )
 
         self._rowsByDomainScope = rowsByDomainScope
         return rowsByDomainScope
@@ -2902,44 +2919,6 @@ class CnCandidateRetriever:
                 return document
         return None
 
-    def _ReadDataSources(self, document: Any) -> List[Mapping[str, Any]]:
-        dataSources = document.frontmatter.get("data_sources")
-        if not isinstance(dataSources, list):
-            return []
-        return [
-            dataSource
-            for dataSource in dataSources
-            if isinstance(dataSource, Mapping)
-        ]
-
-    def _ReadDomainScope(self, dataSource: Mapping[str, Any]) -> Optional[str]:
-        resourceId = dataSource.get("resource_id")
-        if not isinstance(resourceId, str):
-            return None
-        if resourceId.endswith("." + FOOD_DOMAIN_SCOPE):
-            return FOOD_DOMAIN_SCOPE
-        if resourceId.endswith("." + COSMETICS_DOMAIN_SCOPE):
-            return COSMETICS_DOMAIN_SCOPE
-        return None
-
-    def _ResolvePath(self, declaredPath: str) -> Optional[Path]:
-        if declaredPath == "":
-            return None
-        for candidatePath in [
-            self.ontologyRootPath / declaredPath,
-            self.projectRootPath / declaredPath,
-        ]:
-            if candidatePath.exists():
-                return candidatePath
-        return None
-
-    def _ReadCsvRows(self, csvPath: Path) -> List[Dict[str, str]]:
-        with csvPath.open("r", encoding="utf-8-sig", newline="") as csvFile:
-            return [
-                dict(row)
-                for row in csv.DictReader(csvFile)
-            ]
-
     def _ReadCnTableRowsByDomainScope(
         self,
         csvPath: Path,
@@ -2948,7 +2927,7 @@ class CnCandidateRetriever:
             FOOD_DOMAIN_SCOPE: [],
             COSMETICS_DOMAIN_SCOPE: [],
         }
-        for row in self._ReadCsvRows(csvPath):
+        for row in _ReadCsvRows(csvPath):
             chapter = (row.get("chapter", "") or row.get("hs2_code", "")).zfill(2)
             if chapter in FOOD_DOMAIN_SCOPE_CHAPTERS:
                 rowsByDomainScope[FOOD_DOMAIN_SCOPE].append(row)

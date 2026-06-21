@@ -15,13 +15,13 @@ class KurlyProductPageParserProtocol(Protocol):
     """Collector가 요구하는 KurlyMarket parser 최소 interface."""
 
     def IsSupportedProductPageUrl(self, url: str) -> bool:
-        raise NotImplementedError
+        ...
 
     def NormalizeTextLines(self, textLines: List[str]) -> List[str]:
-        raise NotImplementedError
+        ...
 
     def NormalizeProductNoticeLines(self, textLines: List[str]) -> List[str]:
-        raise NotImplementedError
+        ...
 
     def ParseCollectedTextLines(
         self,
@@ -29,7 +29,7 @@ class KurlyProductPageParserProtocol(Protocol):
         productNoticeLines: List[str],
         productPageUrl: Optional[str] = None,
     ) -> KurlyProductPage:
-        raise NotImplementedError
+        ...
 
 
 class KurlyCollectionError(RuntimeError):

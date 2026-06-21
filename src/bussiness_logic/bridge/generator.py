@@ -2,7 +2,6 @@
 
 import json
 import os
-from abc import ABC, abstractmethod
 from http.client import HTTPException
 from typing import Any, Dict, List
 from urllib.error import HTTPError, URLError
@@ -35,68 +34,6 @@ class RuntimeGenerationError(RuntimeError):
     """LLM runtime 호출이 실패했을 때 사용한다."""
 
 
-class RuntimeGenerationStrategy(ABC):
-    """runtime별 generation 구현을 분리하는 strategy interface."""
-
-    @abstractmethod
-    def Generate(
-        self,
-        runtimeDescriptor: RuntimeDescriptor,
-        runtimeConfig: LlmRuntimeConfig,
-        request: LlmRequest,
-    ) -> LlmResponse:
-        """runtime별 LLM 생성을 수행한다."""
-        ...
-
-
-class OpenAiCompatibleGenerationStrategy(RuntimeGenerationStrategy):
-    """oMLX처럼 OpenAI-compatible chat endpoint를 제공하는 런타임."""
-
-    def Generate(
-        self,
-        runtimeDescriptor: RuntimeDescriptor,
-        runtimeConfig: LlmRuntimeConfig,
-        request: LlmRequest,
-    ) -> LlmResponse:
-        return _GenerateWithOpenAiCompatibleRuntime(
-            runtimeDescriptor,
-            runtimeConfig,
-            request,
-        )
-
-
-class OllamaGenerationStrategy(RuntimeGenerationStrategy):
-    """Ollama generate endpoint를 사용하는 런타임."""
-
-    def Generate(
-        self,
-        runtimeDescriptor: RuntimeDescriptor,
-        runtimeConfig: LlmRuntimeConfig,
-        request: LlmRequest,
-    ) -> LlmResponse:
-        return _GenerateWithOllamaRuntime(
-            runtimeDescriptor,
-            runtimeConfig,
-            request,
-        )
-
-
-class OpenAiGenerationStrategy(RuntimeGenerationStrategy):
-    """OpenAI API chat completions endpoint를 사용하는 런타임."""
-
-    def Generate(
-        self,
-        runtimeDescriptor: RuntimeDescriptor,
-        runtimeConfig: LlmRuntimeConfig,
-        request: LlmRequest,
-    ) -> LlmResponse:
-        return _GenerateWithOpenAiRuntime(
-            runtimeDescriptor,
-            runtimeConfig,
-            request,
-        )
-
-
 def GenerateRuntimeResponse(
     runtimeDescriptor: RuntimeDescriptor,
     runtimeConfig: LlmRuntimeConfig,
@@ -104,25 +41,18 @@ def GenerateRuntimeResponse(
 ) -> LlmResponse:
     """runtimeKind에 따라 실제 generate 호출을 dispatch한다."""
 
-    generationStrategy = _BuildGenerationStrategy(runtimeDescriptor.runtimeKind)
-    return generationStrategy.Generate(runtimeDescriptor, runtimeConfig, request)
-
-
-def _BuildGenerationStrategy(
-    runtimeKind: LlmRuntimeKind,
-) -> RuntimeGenerationStrategy:
-    if runtimeKind == LlmRuntimeKind.OMLX:
-        return OpenAiCompatibleGenerationStrategy()
-
-    if runtimeKind == LlmRuntimeKind.OLLAMA:
-        return OllamaGenerationStrategy()
-
-    if runtimeKind == LlmRuntimeKind.OPENAI:
-        return OpenAiGenerationStrategy()
+    generators = {
+        LlmRuntimeKind.OMLX: _GenerateWithOpenAiCompatibleRuntime,
+        LlmRuntimeKind.OLLAMA: _GenerateWithOllamaRuntime,
+        LlmRuntimeKind.OPENAI: _GenerateWithOpenAiRuntime,
+    }
+    generator = generators.get(runtimeDescriptor.runtimeKind)
+    if generator is not None:
+        return generator(runtimeDescriptor, runtimeConfig, request)
 
     raise RuntimeGenerationError(
         "No generate implementation is configured for: {0}".format(
-            runtimeKind.value,
+            runtimeDescriptor.runtimeKind.value,
         )
     )
 
