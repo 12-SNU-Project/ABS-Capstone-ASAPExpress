@@ -6,6 +6,7 @@ from bussiness_logic.core.classification.stage1 import (
     CnCandidateRetriever,
     ProductClassificationInput,
 )
+from bussiness_logic.artifact_paths import ExtractProductIdFromUrl
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -49,7 +50,8 @@ def test_hs6_regression_fixture_sources_and_labels_are_available() -> None:
     }
 
     for case in _LoadCases():
-        assert (PROJECT_ROOT / case["source_artifact"]).is_file()
+        expectedProductId = str(case["case_id"]).removeprefix("kurly-")
+        assert ExtractProductIdFromUrl(case["source_url"]) == expectedProductId
         assert case["expected_hs6"] in knownHs6Codes
         assert case["label_basis"] == "US HS6 proxy from data/answer.csv"
 

@@ -2,7 +2,6 @@
   {
     "case_id": "kurly-global-m00000188980",
     "source_url": "https://www.kurlyglobal.com/products/m00000188980",
-    "source_artifact": "artifacts/asap_dash_url_intake/global-m00000188980/llm-input-reconstruction-response.json",
     "expected_hs6": "160555",
     "label_basis": "US HS6 proxy from data/answer.csv",
     "product_name": "낙지볶음",
@@ -15,7 +14,6 @@
   {
     "case_id": "kurly-global-m00000251678",
     "source_url": "https://www.kurlyglobal.com/products/m00000251678",
-    "source_artifact": "artifacts/runs/run_002/blackboard.json",
     "expected_hs6": "190230",
     "label_basis": "US HS6 proxy from data/answer.csv",
     "product_name": "[이연복의 목란] 짜장면 2인분",
@@ -28,7 +26,6 @@
   {
     "case_id": "kurly-global-m00000781317",
     "source_url": "https://www.kurlyglobal.com/products/m00000781317",
-    "source_artifact": "artifacts/runs/run_003/blackboard.json",
     "expected_hs6": "210410",
     "label_basis": "US HS6 proxy from data/answer.csv",
     "product_name": "[마마리] 오징어 무국",
