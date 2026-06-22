@@ -1145,7 +1145,7 @@ def _pipeline_step_statuses(result: dict[str, Any]) -> dict[str, dict[str, str]]
         },
         "reconstruct": {
             "status": reconstructStatus,
-            "detail": "PP table/OCR 결과를 구조화하고 LLM reconstruction 반영",
+            "detail": "PaddleOCR-VL 표/OCR 결과를 구조화하고 LLM reconstruction 반영",
             "meta": _progress_reconstruction_meta(reconstructionStatus),
         },
         "candidate": {

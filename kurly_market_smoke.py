@@ -1,8 +1,11 @@
 """KurlyMarket 상품 페이지 parser/OCR fallback runtime smoke."""
 
+import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Dict, List
 
 from loguru import logger
@@ -21,21 +24,58 @@ from bussiness_logic.product import (  # noqa: E402
     KurlyProductPipeline,
     KurlyPipelineInput,
     PaddleOcrEngine,
-    PaddleStructureOcrEngine,
+    PaddleOcrVlEngine,
 )
 from bussiness_logic.app_config import LoadAppConfig  # noqa: E402
+from bussiness_logic.artifact_paths import ExtractProductIdFromUrl  # noqa: E402
 from bussiness_logic.bridge import (  # noqa: E402
     BuildLlmRuntimeConfigFromEnv,
     BuildRuntimeAdapter,
     RuntimeAdapterBuildError,
 )
 from bussiness_logic.input_process import ProductInputReconstructionService  # noqa: E402
+from bussiness_logic.product.ocr.ocr_fallback import (  # noqa: E402
+    ProductOcrImageDownloader,
+)
+
+
+def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Kurly web scroll/OCR/LLM reconstruction smoke CLI",
+    )
+    parser.add_argument(
+        "--headed",
+        action="store_true",
+        help="브라우저를 열어 appconfig URL의 스크롤 과정을 표시합니다.",
+    )
+    parser.add_argument(
+        "--compare-ocr",
+        action="store_true",
+        help="동일 이미지의 raw OCR, PP-StructureV3, PaddleOCR-VL 결과를 비교합니다.",
+    )
+    parser.add_argument(
+        "--compare-max-images",
+        type=int,
+        default=1,
+        metavar="N",
+        help="상품별 비교 이미지 수입니다. 기본 1, 0이면 전체입니다.",
+    )
+    parsedArguments = parser.parse_args(arguments)
+    if parsedArguments.compare_max_images < 0:
+        parser.error("--compare-max-images must be greater than or equal to 0")
+    return parsedArguments
 
 
 class KurlyMarketSmokeRunner:
     """실제 KurlyMarket URL에서 parser와 선택적 OCR fallback을 확인한다."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        showBrowser: bool = False,
+        compareOcr: bool = False,
+        compareMaxImages: int = 1,
+    ) -> None:
         appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
         pathConfig = appConfig.paths
         smokeConfig = appConfig.kurly_smoke
@@ -43,7 +83,9 @@ class KurlyMarketSmokeRunner:
         self._productUrls = list(smokeConfig.product_urls)
         self._timeoutSeconds = smokeConfig.timeout_seconds
         self._scrollCount = smokeConfig.scroll_count
-        self._headless = smokeConfig.headless
+        self._headless = False if showBrowser else smokeConfig.headless
+        self._compareOcr = compareOcr
+        self._compareMaxImages = compareMaxImages
         self._runOcrFallback = smokeConfig.run_ocr_fallback
         self._useStructuredOcr = smokeConfig.use_structured_ocr
         self._maxOcrImageCount = smokeConfig.max_ocr_image_count
@@ -93,14 +135,20 @@ class KurlyMarketSmokeRunner:
         self._maxLoggedOcrCandidateUrls = smokeConfig.max_logged_ocr_candidate_urls
         self._fieldValuePreviewCharacters = smokeConfig.field_value_preview_characters
         self._ocrTextPreviewCharacters = smokeConfig.ocr_text_preview_characters
+        self._pipelineOcrEngine: Any = None
 
     def Run(self) -> None:
         self._ConfigureLogger()
         runLogger = self._Logger("Run")
         runLogger.info(
-            "KurlyMarket 상품 수집 smoke를 시작합니다 url_count={} run_ocr_fallback={}",
+            (
+                "KurlyMarket 상품 수집 smoke를 시작합니다 url_count={} "
+                "run_ocr_fallback={} browser_mode={} compare_ocr={}"
+            ),
             len(self._productUrls),
             self._runOcrFallback,
+            "headless" if self._headless else "headed",
+            self._compareOcr,
         )
         if not self._productUrls:
             runLogger.warning(
@@ -153,28 +201,23 @@ class KurlyMarketSmokeRunner:
             scrollCount=self._scrollCount,
         )
         inputReconstructionService = self._BuildInputReconstructionService()
-        if not self._runOcrFallback:
-            return KurlyProductPipeline(
-                collector=collector,
-                inputReconstructionService=inputReconstructionService,
-            )
-
-        if self._useStructuredOcr:
-            return KurlyProductPipeline(
-                collector=collector,
-                ocrEngine=PaddleStructureOcrEngine(
+        ocrEngine = None
+        if self._runOcrFallback:
+            ocrEngine = (
+                PaddleOcrVlEngine(
                     useProjectionTiling=self._structuredOcrUseProjectionTiling,
                     maxTileHeightPixels=self._structuredOcrMaxTileHeightPixels,
                     maxTileSidePixels=self._structuredOcrMaxTileSidePixels,
                     tileOverlapPixels=self._structuredOcrTileOverlapPixels,
                     allowHardCutFallback=self._structuredOcrAllowHardCutFallback,
-                ),
-                inputReconstructionService=inputReconstructionService,
+                )
+                if self._useStructuredOcr
+                else PaddleOcrEngine()
             )
-
+        self._pipelineOcrEngine = ocrEngine
         return KurlyProductPipeline(
             collector=collector,
-            ocrEngine=PaddleOcrEngine(),
+            ocrEngine=ocrEngine,
             inputReconstructionService=inputReconstructionService,
         )
 
@@ -228,7 +271,16 @@ class KurlyMarketSmokeRunner:
                     maxOcrImageCount=self._maxOcrImageCount,
                 )
             )
-            return self._BuildResult(productUrl, pipelineResult.model_dump(mode="json", by_alias=True))
+            resultData = self._BuildResult(
+                productUrl,
+                pipelineResult.model_dump(mode="json", by_alias=True),
+            )
+            if self._compareOcr:
+                resultData["ocr_comparison"] = self._RunOcrComparison(
+                    productUrl,
+                    list(pipelineResult.collectionResult.ocrCandidateImageUrls),
+                )
+            return resultData
         except Exception as error:
             return {
                 "product_page_url": productUrl,
@@ -258,7 +310,6 @@ class KurlyMarketSmokeRunner:
             inputReconstruction = ocrSummary.get("input_reconstruction", {})
         if not isinstance(inputReconstruction, dict):
             inputReconstruction = {}
-        ocrImageResults = pipelineResultData.get("ocr_image_results", [])
         combinedOcrText = pipelineResultData["combined_ocr_text"]
         requiresOcrFallback = parsedProductPage["requires_ocr_fallback"]
         productNoticeFieldCount = parsedProductPage.get(
@@ -269,13 +320,8 @@ class KurlyMarketSmokeRunner:
                 parsedProductPage.get("product_notice_options", []),
             )
 
-        successfulOcrResults = [
-            imageResult
-            for imageResult in ocrImageResults
-            if imageResult["error"] is None and len(imageResult["ocr_text"]) > 0
-        ]
         successfulOcrImageCount = int(
-            ocrSummary.get("successful_image_count", len(successfulOcrResults)),
+            ocrSummary.get("successful_image_count", 0),
         )
         isOcrFallbackOk = (
             not requiresOcrFallback
@@ -313,11 +359,11 @@ class KurlyMarketSmokeRunner:
             )[:self._maxLoggedOcrCandidateUrls],
             "image_result_count": ocrSummary.get(
                 "image_result_count",
-                len(ocrImageResults),
+                0,
             ),
             "successful_image_count": ocrSummary.get(
                 "successful_image_count",
-                len(successfulOcrResults),
+                0,
             ),
             "structured_table_image_count": ocrSummary.get(
                 "structured_table_image_count",
@@ -335,10 +381,7 @@ class KurlyMarketSmokeRunner:
                 "raw_text_length",
                 0,
             ),
-            "image_artifacts": ocrSummary.get(
-                "image_artifacts",
-                self._BuildOcrImageArtifacts(ocrImageResults),
-            ),
+            "image_artifacts": ocrSummary.get("image_artifacts", []),
             "combined_text_length": len(combinedOcrText),
             "combined_ocr_text": combinedOcrText,
         }
@@ -376,6 +419,236 @@ class KurlyMarketSmokeRunner:
             "warnings": collectionResult["warnings"],
             "errors": pipelineResultData["errors"],
         }
+
+    def _RunOcrComparison(
+        self,
+        productUrl: str,
+        imageUrls: List[str],
+    ) -> Dict[str, Any]:
+        selectedImageUrls = (
+            imageUrls
+            if self._compareMaxImages == 0
+            else imageUrls[:self._compareMaxImages]
+        )
+        engines: Dict[str, Any] = {}
+        if selectedImageUrls:
+            from paddleocr import PPStructureV3
+
+            engines = {
+                "raw_ocr": (
+                    self._pipelineOcrEngine
+                    if isinstance(self._pipelineOcrEngine, PaddleOcrEngine)
+                    else PaddleOcrEngine()
+                ),
+                "paddleocr_vl": (
+                    self._pipelineOcrEngine
+                    if isinstance(self._pipelineOcrEngine, PaddleOcrVlEngine)
+                    else PaddleOcrVlEngine(
+                        useProjectionTiling=(
+                            self._structuredOcrUseProjectionTiling
+                        ),
+                        maxTileHeightPixels=(
+                            self._structuredOcrMaxTileHeightPixels
+                        ),
+                        maxTileSidePixels=(
+                            self._structuredOcrMaxTileSidePixels
+                        ),
+                        tileOverlapPixels=self._structuredOcrTileOverlapPixels,
+                        allowHardCutFallback=(
+                            self._structuredOcrAllowHardCutFallback
+                        ),
+                    )
+                ),
+                "pp_structure_v3": PPStructureV3(
+                    lang="korean",
+                    use_doc_orientation_classify=False,
+                    use_doc_unwarping=False,
+                    use_textline_orientation=False,
+                    use_seal_recognition=False,
+                    use_table_recognition=True,
+                    use_formula_recognition=False,
+                    use_chart_recognition=False,
+                    use_region_detection=False,
+                    format_block_content=False,
+                ),
+            }
+        downloader = ProductOcrImageDownloader()
+        imageResults: List[Dict[str, Any]] = []
+        for imageIndex, imageUrl in enumerate(selectedImageUrls, start=1):
+            try:
+                imageBytes = downloader.Download(
+                    imageUrl,
+                    self._timeoutSeconds,
+                )
+            except Exception as error:
+                imageResults.append(
+                    {
+                        "index": imageIndex,
+                        "image_url": imageUrl,
+                        "download_error": str(error),
+                        "engines": {},
+                    }
+                )
+                continue
+            imageResults.append(
+                {
+                    "index": imageIndex,
+                    "image_url": imageUrl,
+                    "image_byte_count": len(imageBytes),
+                    "engines": {
+                        engineName: self._CompareOcrEngine(
+                            engineName,
+                            engines[engineName],
+                            imageBytes,
+                        )
+                        for engineName in (
+                            "raw_ocr",
+                            "pp_structure_v3",
+                            "paddleocr_vl",
+                        )
+                    },
+                }
+            )
+
+        artifactPath = (
+            self._artifactRootPath
+            / ExtractProductIdFromUrl(productUrl)
+            / "ocr-comparison.json"
+        )
+        comparisonData = {
+            "product_page_url": productUrl,
+            "generated_at": datetime.now().astimezone().isoformat(),
+            "candidate_image_count": len(imageUrls),
+            "image_count": len(imageResults),
+            "artifact_path": str(artifactPath),
+            "images": imageResults,
+        }
+        artifactPath.parent.mkdir(parents=True, exist_ok=True)
+        artifactPath.write_text(
+            json.dumps(comparisonData, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        comparisonLogger = self._Logger("_RunOcrComparison")
+        for imageResult in imageResults:
+            for engineName, engineResult in (
+                imageResult.get("engines", {}) or {}
+            ).items():
+                comparisonLogger.info(
+                    (
+                        "ocr_compare image={} engine={} status={} elapsed={} "
+                        "text_length={} tables={} preview={} error={}"
+                    ),
+                    imageResult.get("index"),
+                    engineName,
+                    engineResult.get("status"),
+                    engineResult.get("elapsed_seconds"),
+                    engineResult.get("text_length"),
+                    engineResult.get("table_count"),
+                    engineResult.get("text_preview"),
+                    engineResult.get("error"),
+                )
+        comparisonLogger.info("ocr_comparison_artifact={}", artifactPath)
+        return {
+            "image_count": len(imageResults),
+            "artifact_path": str(artifactPath),
+        }
+
+    def _CompareOcrEngine(
+        self,
+        engineName: str,
+        engine: Any,
+        imageBytes: bytes,
+    ) -> Dict[str, Any]:
+        startedAt = perf_counter()
+        text = ""
+        tableTexts: List[str] = []
+        warnings: List[str] = []
+        extra: Dict[str, Any] = {}
+        try:
+            if engineName == "raw_ocr":
+                text = engine.ExtractTextFromImage(imageBytes)
+            elif engineName == "paddleocr_vl":
+                result = engine.ExtractStructuredTextFromImage(imageBytes)
+                text = result.text
+                tableTexts = [table.plainText for table in result.tables]
+                warnings = list(result.warnings)
+                extra = {
+                    "fallback_reason": result.fallbackReason,
+                    "table_sources": [table.sourceName for table in result.tables],
+                }
+            else:
+                import cv2
+                import numpy as np
+
+                image = cv2.imdecode(
+                    np.frombuffer(imageBytes, dtype=np.uint8),
+                    cv2.IMREAD_COLOR,
+                )
+                if image is None:
+                    raise ValueError("failed to decode comparison image")
+                textParts: List[str] = []
+                for result in engine.predict(image):
+                    payload = self._ReadPaddleResultPayload(result)
+                    markdownText = self._ReadPaddleMarkdownText(result)
+                    if markdownText:
+                        textParts.append(markdownText)
+                    for block in payload.get("parsing_res_list", []) or []:
+                        if not isinstance(block, dict):
+                            continue
+                        content = block.get("block_content")
+                        if not isinstance(content, str) or not content.strip():
+                            continue
+                        if not markdownText:
+                            textParts.append(content.strip())
+                        if block.get("block_label") == "table":
+                            tableTexts.append(content.strip())
+                text = "\n\n".join(textParts)
+        except Exception as error:
+            return {
+                "status": "error",
+                "elapsed_seconds": round(perf_counter() - startedAt, 3),
+                "text_length": 0,
+                "table_count": 0,
+                "text_preview": "",
+                "text": "",
+                "table_texts": [],
+                "warnings": [],
+                "error": str(error),
+            }
+        comparisonResult = {
+            "status": "ok",
+            "elapsed_seconds": round(perf_counter() - startedAt, 3),
+            "text_length": len(text),
+            "line_count": len([line for line in text.splitlines() if line.strip()]),
+            "table_count": len(tableTexts),
+            "text_preview": self._BuildTextPreview(
+                text,
+                self._ocrTextPreviewCharacters,
+            ),
+            "text": text,
+            "table_texts": tableTexts,
+            "warnings": warnings,
+            "error": None,
+        }
+        comparisonResult.update(extra)
+        return comparisonResult
+
+    @staticmethod
+    def _ReadPaddleResultPayload(result: Any) -> Dict[str, Any]:
+        jsonPayload = getattr(result, "json", None)
+        payload = jsonPayload if isinstance(jsonPayload, dict) else result
+        if not isinstance(payload, dict):
+            return {}
+        nestedPayload = payload.get("res")
+        return nestedPayload if isinstance(nestedPayload, dict) else payload
+
+    @staticmethod
+    def _ReadPaddleMarkdownText(result: Any) -> str:
+        markdown = getattr(result, "markdown", None)
+        if not isinstance(markdown, dict):
+            return ""
+        markdownText = markdown.get("markdown_texts")
+        return markdownText.strip() if isinstance(markdownText, str) else ""
 
     @staticmethod
     def _IsParseOk(
@@ -430,7 +703,6 @@ class KurlyMarketSmokeRunner:
             noticeData["image_reference_detected"],
         )
         self._LogNoticeOptions(resultData)
-        self._LogNoticeFields(resultData)
         self._LogOcrSummary(resultData)
         self._LogInputReconstruction(resultData)
         self._LogWarningsAndErrors(resultData)
@@ -478,26 +750,31 @@ class KurlyMarketSmokeRunner:
             return
         reconstructionLogger.info(
             (
-                "llm_reconstruction method={} facts={} unresolved={} "
+                "llm_reconstruction method={} facts={} tables={} unresolved={} "
                 "conflicts={} used_llm={} fallback_reason={}"
             ),
             inputReconstruction.get("method"),
             len(inputReconstruction.get("facts", []) or []),
+            len(inputReconstruction.get("reconstructed_tables", []) or []),
             len(inputReconstruction.get("unresolved_facts", []) or []),
             len(inputReconstruction.get("conflicts", []) or []),
             inputReconstruction.get("used_llm_reconstruction"),
             inputReconstruction.get("fallback_reason"),
         )
-
-    def _LogNoticeFields(self, resultData: Dict[str, Any]) -> None:
-        noticeLogger = self._Logger("_LogNoticeFields")
-        noticeData = resultData["raw_collection"]["notice"]
-        for fieldRecord in noticeData.get("fields_preview", []):
-            noticeLogger.info(
-                "notice_field name={} value={} requires_ocr_fallback={}",
-                fieldRecord["field_name"],
-                fieldRecord["field_value"],
-                fieldRecord["requires_ocr_fallback"],
+        for factRecord in inputReconstruction.get("facts", []) or []:
+            reconstructionLogger.info(
+                "llm_fact field={} raw={} reconstructed={} status={}",
+                factRecord.get("field_name"),
+                factRecord.get("raw_evidence_value"),
+                factRecord.get("reconstructed_value"),
+                factRecord.get("validation_status"),
+            )
+        for tableRecord in inputReconstruction.get("reconstructed_tables", []) or []:
+            reconstructionLogger.info(
+                "llm_table name={} row_count={} source_refs={}",
+                tableRecord.get("table_name"),
+                len(tableRecord.get("rows", []) or []),
+                tableRecord.get("source_refs", []),
             )
 
     def _LogOcrSummary(self, resultData: Dict[str, Any]) -> None:
@@ -552,6 +829,15 @@ class KurlyMarketSmokeRunner:
                     imageResult["index"],
                     warning,
                 )
+        combinedOcrText = ocrData.get("combined_ocr_text", "")
+        if combinedOcrText:
+            ocrLogger.info(
+                "combined_ocr_text_preview={}",
+                self._BuildTextPreview(
+                    combinedOcrText,
+                    self._ocrTextPreviewCharacters,
+                ),
+            )
 
     def _LogWarningsAndErrors(self, resultData: Dict[str, Any]) -> None:
         eventLogger = self._Logger("_LogWarningsAndErrors")
@@ -621,6 +907,11 @@ class KurlyMarketSmokeRunner:
             "used_llm_reconstruction": usedLlmReconstruction,
             "fallback_reason": inputReconstruction.get("fallback_reason"),
             "facts": facts,
+            "reconstructed_tables": inputReconstruction.get(
+                "reconstructed_tables",
+                [],
+            )
+            or [],
             "unresolved_facts": unresolvedFacts,
             "conflicts": inputReconstruction.get("conflicts", []) or [],
             "fact_texts_for_classification": inputReconstruction.get(
@@ -654,15 +945,6 @@ class KurlyMarketSmokeRunner:
         if len(text) <= maxCharacters:
             return text
         return "{0}...".format(text[:maxCharacters])
-
-    def _BuildFieldPreview(
-        self,
-        fieldRecords: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        return [
-            self._BuildFieldRecordPreview(fieldRecord)
-            for fieldRecord in fieldRecords[:self._maxLoggedFieldsPerOption]
-        ]
 
     def _BuildOptionPreview(
         self,
@@ -722,63 +1004,6 @@ class KurlyMarketSmokeRunner:
         }
 
     @staticmethod
-    def _BuildOcrImageArtifacts(
-        ocrImageResults: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        return [
-            {
-                "index": imageIndex,
-                "image_path": imageResult["image_path"],
-                "image_paths": list(
-                    imageResult.get("image_paths") or [imageResult["image_path"]]
-                ),
-                "text_length": len(imageResult["ocr_text"]),
-                "used_structured_tables": (
-                    imageResult.get("structured_ocr", {}).get(
-                        "used_structured_tables",
-                        False,
-                    )
-                    if isinstance(imageResult.get("structured_ocr"), dict)
-                    else False
-                ),
-                "structured_table_count": (
-                    len(imageResult.get("structured_ocr", {}).get("tables", []))
-                    if isinstance(imageResult.get("structured_ocr"), dict)
-                    else 0
-                ),
-                "structured_fallback_reason": (
-                    imageResult.get("structured_ocr", {}).get("fallback_reason")
-                    if isinstance(imageResult.get("structured_ocr"), dict)
-                    else None
-                ),
-                "structured_warnings": (
-                    list(imageResult.get("structured_ocr", {}).get("warnings", []))
-                    if isinstance(imageResult.get("structured_ocr"), dict)
-                    else []
-                ),
-                "raw_tile_text_count": (
-                    len(imageResult.get("structured_ocr", {}).get("raw_tile_texts", []))
-                    if isinstance(imageResult.get("structured_ocr"), dict)
-                    else 0
-                ),
-                "raw_text_length": (
-                    len(imageResult.get("structured_ocr", {}).get("raw_text", ""))
-                    if isinstance(imageResult.get("structured_ocr"), dict)
-                    else 0
-                ),
-                "text_merge_mode": (
-                    imageResult.get("structured_ocr", {}).get("text_merge_mode")
-                    if isinstance(imageResult.get("structured_ocr"), dict)
-                    else None
-                ),
-                "error": imageResult["error"],
-            }
-            for imageIndex, imageResult in enumerate(ocrImageResults, start=1)
-            if imageResult.get("image_path") is not None
-            and imageResult.get("ocr_text", "").strip() != ""
-        ]
-
-    @staticmethod
     def _ConfigureLogger() -> None:
         logger.remove()
         logger.level("INFO", color="<green>")
@@ -808,4 +1033,9 @@ class KurlyMarketSmokeRunner:
 
 
 if __name__ == "__main__":
-    KurlyMarketSmokeRunner().Run()
+    cliArguments = ParseArguments()
+    KurlyMarketSmokeRunner(
+        showBrowser=cliArguments.headed,
+        compareOcr=cliArguments.compare_ocr,
+        compareMaxImages=cliArguments.compare_max_images,
+    ).Run()

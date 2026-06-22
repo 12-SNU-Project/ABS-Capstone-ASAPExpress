@@ -39,11 +39,11 @@ from bussiness_logic.utils import NormalizeWhiteSpace, NormalizeWhitespaceLines
 DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS = 4096
 
 PRODUCT_FACT_RECONSTRUCTION_SYSTEM_PROMPT = """
-You reconstruct structured product input facts from Korean product notice, PP-Structure table OCR, and raw OCR text.
+You reconstruct structured product input facts from Korean product notice, PaddleOCR-VL table extraction, and raw OCR text.
 Return strict JSON only.
 Return exactly one JSON object. Do not append markdown, commentary, or extra braces after the root object.
 Return only these top-level keys: reconstructed_tables, product_facts, unresolved_facts, conflicts, warnings.
-reconstructed_tables preserves PP-Structure table OCR contents for UI review. Do not summarize PP tables away.
+reconstructed_tables preserves structured table OCR contents for UI review. Do not summarize tables away.
 reconstructed_tables must be an array of objects with exactly these keys: table_name, source_refs, rows.
 Each reconstructed_tables row must have exactly these keys:
 field_name, raw_value, normalized_value, unit, daily_value_percent, source_refs.
@@ -236,7 +236,7 @@ class ProductFactRecord(BaseModel):
 
 
 class ProductReconstructedTableRow(BaseModel):
-    """PP table reconstruction row preserved for UI review."""
+    """Structured table reconstruction row preserved for UI review."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
@@ -249,7 +249,7 @@ class ProductReconstructedTableRow(BaseModel):
 
 
 class ProductReconstructedTable(BaseModel):
-    """PP table reconstruction preserved separately from classification facts."""
+    """Table reconstruction preserved separately from classification facts."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
@@ -1070,7 +1070,7 @@ class LlmProductFactReconstructor:
                 [
                     "아래 evidence만 사용해 상품 입력 fact JSON을 작성하라.",
                     "출력 key는 reconstructed_tables, product_facts, unresolved_facts, conflicts, warnings만 사용하라.",
-                    "reconstructed_tables에는 PP table/raw OCR에서 복원 가능한 표 행을 가능한 한 보존하라.",
+                    "reconstructed_tables에는 structured table/raw OCR에서 복원 가능한 표 행을 가능한 한 보존하라.",
                     "product_facts에는 분류 후보 생성에 필요한 핵심 상품 fact만 넣어라.",
                     "normalized_fact_texts, dictionary_matches, used_llm_reconstruction, fallback_reason은 출력하지 마라.",
                     "source_refs에는 evidence_id만 사용하라.",
@@ -1340,7 +1340,10 @@ class ProductInputReconstructionService:
             and sourceParts[0] == "image"
             and sourceParts[2] == "table"
         ):
-            return "PP table 이미지 {0} 표 {1}".format(sourceParts[1], sourceParts[3])
+            return "구조화 표 이미지 {0} 표 {1}".format(
+                sourceParts[1],
+                sourceParts[3],
+            )
         if (
             len(sourceParts) >= 4
             and sourceParts[0] == "image"

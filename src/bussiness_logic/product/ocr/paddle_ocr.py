@@ -2,11 +2,15 @@
 
 from abc import ABC, abstractmethod
 from html.parser import HTMLParser
-from typing import Any, Dict, List, Optional, Tuple
+from math import ceil, floor
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from bussiness_logic.product.ocr.ocr_image_tiling import ProductOcrImageTilePlanner
+from bussiness_logic.product.ocr.ocr_image_tiling import (
+    ProductOcrImageTile,
+    ProductOcrImageTilePlanner,
+)
 from bussiness_logic.utils import NormalizeWhiteSpace
 
 
@@ -15,12 +19,12 @@ class ProductOcrError(RuntimeError):
 
 
 class ProductOcrTableResult(BaseModel):
-    """PP-Structure 계열 OCR에서 추출한 단일 표 결과."""
+    """구조 OCR에서 추출한 단일 표 결과."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
     tableIndex: int = Field(alias="table_index")
-    sourceName: str = Field(default="pp_structure_v3", alias="source_name")
+    sourceName: str = Field(default="structured_ocr", alias="source_name")
     pageIndex: Optional[int] = Field(default=None, alias="page_index")
     tileIndex: Optional[int] = Field(default=None, alias="tile_index")
     html: str = ""
@@ -145,18 +149,7 @@ class PaddleOcrEngine(ProductOcrEngine):
         return "\n".join(self._ExtractResultTexts(result))
 
     def _EncodeImageBytes(self, image: Any, suffix: str = ".jpg") -> bytes:
-        try:
-            import cv2
-        except ImportError as error:
-            raise ProductOcrError(
-                "PaddleOcrEngine requires cv2 to encode image tiles."
-            ) from error
-
-        normalizedSuffix = suffix if suffix.startswith(".") else ".jpg"
-        success, encodedImage = cv2.imencode(normalizedSuffix, image)
-        if not success:
-            raise ProductOcrError("failed to encode OCR tile image.")
-        return bytes(encodedImage)
+        return _EncodeImageBytes(image, suffix)
 
     def _ReadInitializedOcr(self) -> Any:
         if self._ocr is None:
@@ -196,20 +189,7 @@ class PaddleOcrEngine(ProductOcrEngine):
             return paddleOcrClass(**legacyOptions)
 
     def _DecodeImageBytes(self, imageBytes: bytes) -> Any:
-        try:
-            import cv2
-            import numpy as np
-        except ImportError as error:
-            raise ProductOcrError(
-                "PaddleOcrEngine requires numpy and cv2 to decode image bytes."
-            ) from error
-
-        imageArray = np.frombuffer(imageBytes, dtype=np.uint8)
-        image = cv2.imdecode(imageArray, cv2.IMREAD_COLOR)
-        if image is None:
-            raise ProductOcrError("failed to decode image bytes for OCR.")
-
-        return image
+        return _DecodeImageBytes(imageBytes)
 
     def _ExtractResultTexts(self, result: Any) -> List[str]:
         texts: List[str] = []
@@ -283,26 +263,32 @@ class PaddleOcrEngine(ProductOcrEngine):
         )
 
 
-class PaddleStructureOcrEngine(PaddleOcrEngine):
-    """PP-StructureV3 표 추출을 먼저 시도하고 실패 시 일반 OCR로 fallback한다."""
+class PaddleOcrVlEngine(ProductOcrEngine):
+    """PaddleOCR-VL 표 이해 결과를 TableRecognitionV2로 검증한다."""
 
     def __init__(
         self,
-        lang: str = "korean",
         device: Optional[str] = None,
         useDocOrientationClassify: bool = False,
         useDocUnwarping: bool = False,
-        useTextlineOrientation: bool = False,
-        extraOptions: Optional[Dict[str, Any]] = None,
-        structureExtraOptions: Optional[Dict[str, Any]] = None,
+        vlExtraOptions: Optional[Dict[str, Any]] = None,
+        tableExtraOptions: Optional[Dict[str, Any]] = None,
         useImageTiling: bool = True,
         useProjectionTiling: bool = True,
         maxTileHeightPixels: int = 2400,
         maxTileSidePixels: int = 4000,
         tileOverlapPixels: int = 240,
         allowHardCutFallback: bool = False,
+        tableCropPaddingPixels: int = 24,
+        vlPipeline: Any = None,
+        tablePipeline: Any = None,
     ) -> None:
-        self._structureExtraOptions = dict(structureExtraOptions or {})
+        self._device = device
+        self._useDocOrientationClassify = useDocOrientationClassify
+        self._useDocUnwarping = useDocUnwarping
+        self._vlExtraOptions = dict(vlExtraOptions or {})
+        self._tableExtraOptions = dict(tableExtraOptions or {})
+        self._tableCropPaddingPixels = max(0, tableCropPaddingPixels)
         self._tilePlanner = ProductOcrImageTilePlanner(
             useImageTiling=useImageTiling,
             useProjectionTiling=useProjectionTiling,
@@ -311,45 +297,72 @@ class PaddleStructureOcrEngine(PaddleOcrEngine):
             tileOverlapPixels=tileOverlapPixels,
             allowHardCutFallback=allowHardCutFallback,
         )
-        self._structurePipeline: Any = None
-        super().__init__(
-            lang=lang,
-            device=device,
-            useDocOrientationClassify=useDocOrientationClassify,
-            useDocUnwarping=useDocUnwarping,
-            useTextlineOrientation=useTextlineOrientation,
-            extraOptions=extraOptions,
-        )
+        self._vlPipeline = vlPipeline
+        self._tablePipeline = tablePipeline
+
+    def ExtractTextFromImage(self, imageBytes: bytes) -> str:
+        return self.ExtractStructuredTextFromImage(imageBytes).text
 
     def ExtractStructuredTextFromImage(
         self,
         imageBytes: bytes,
     ) -> ProductStructuredOcrResult:
-        image = self._DecodeImageBytes(imageBytes)
+        image = _DecodeImageBytes(imageBytes)
         tilePlan = self._tilePlanner.BuildTilePlan(image)
         warnings: List[str] = list(tilePlan.warnings)
-        tileImages = tilePlan.AsTuples()
-        rawTileTexts = self._ExtractRawTileTexts(tileImages)
-        rawText = self._BuildRawTileText(rawTileTexts)
-        try:
-            tables = self._ExtractTablesFromTiles(tileImages)
-        except Exception as error:
-            warnings.append("pp_structure_failed: {0}".format(error))
-            return self._BuildRawFallbackResult(
-                rawText,
-                rawTileTexts,
-                fallbackReason="pp_structure_failed",
-                warnings=warnings,
-            )
+        rawTileTexts: List[ProductOcrTileTextResult] = []
+        successfulVlTileCount = 0
+        tablesWithBounds: List[
+            Tuple[ProductOcrTableResult, Tuple[int, int, int, int]]
+        ] = []
+        for tile in tilePlan.tiles:
+            try:
+                rawText, tableBlocks = self._ExtractVlTile(tile)
+            except Exception as error:
+                warnings.append(
+                    "paddleocr_vl_failed tile={0}: {1}".format(
+                        tile.tileIndex or 1,
+                        error,
+                    )
+                )
+                continue
+            successfulVlTileCount += 1
+            if rawText:
+                rawTileTexts.append(
+                    ProductOcrTileTextResult(
+                        tileIndex=tile.tileIndex,
+                        text=rawText,
+                    )
+                )
+            for tableBlock in tableBlocks:
+                tableResult, originalBounds, validationWarning = (
+                    self._BuildTableResultFromVlBlock(
+                        tile,
+                        tableBlock,
+                        tableIndex=len(tablesWithBounds) + 1,
+                    )
+                )
+                if validationWarning is not None:
+                    warnings.append(validationWarning)
+                if tableResult is None or originalBounds is None:
+                    continue
+                if self._IsDuplicateTable(
+                    tablesWithBounds,
+                    tableResult,
+                    originalBounds,
+                ):
+                    continue
+                tablesWithBounds.append((tableResult, originalBounds))
 
+        tables = [
+            table.model_copy(update={"tableIndex": tableIndex})
+            for tableIndex, (table, _) in enumerate(tablesWithBounds, start=1)
+        ]
+        rawText = self._BuildRawTileText(rawTileTexts)
         tableText = self._BuildStructuredTableText(tables)
         if tableText:
-            mergedText = self._BuildMergedStructuredAndRawText(
-                structuredText=tableText,
-                rawText=rawText,
-            )
             return ProductStructuredOcrResult(
-                text=mergedText,
+                text=self._BuildMergedStructuredAndRawText(tableText, rawText),
                 structuredText=tableText,
                 rawText=rawText,
                 textMergeMode="structured_plus_raw",
@@ -362,7 +375,11 @@ class PaddleStructureOcrEngine(PaddleOcrEngine):
         return self._BuildRawFallbackResult(
             rawText,
             rawTileTexts,
-            fallbackReason="no_table_detected",
+            fallbackReason=(
+                "paddleocr_vl_failed"
+                if successfulVlTileCount == 0
+                else "no_table_detected"
+            ),
             warnings=warnings,
         )
 
@@ -370,13 +387,13 @@ class PaddleStructureOcrEngine(PaddleOcrEngine):
         self,
         imageBytes: bytes,
     ) -> List[Tuple[Optional[int], bytes]]:
-        image = self._DecodeImageBytes(imageBytes)
-        tileImages = self._tilePlanner.BuildTiles(image)
-        if len(tileImages) == 1 and tileImages[0][0] is None:
+        image = _DecodeImageBytes(imageBytes)
+        tiles = self._tilePlanner.BuildTilePlan(image).tiles
+        if len(tiles) == 1 and tiles[0].tileIndex is None:
             return [(None, imageBytes)]
         return [
-            (tileIndex, self._EncodeImageBytes(tileImage, ".jpg"))
-            for tileIndex, tileImage in tileImages
+            (tile.tileIndex, _EncodeImageBytes(tile.image, ".jpg"))
+            for tile in tiles
         ]
 
     def _BuildRawFallbackResult(
@@ -395,81 +412,57 @@ class PaddleStructureOcrEngine(PaddleOcrEngine):
             warnings=list(warnings),
         )
 
-    def _ReadInitializedStructurePipeline(self) -> Any:
-        if self._structurePipeline is not None:
-            return self._structurePipeline
+    def _ReadInitializedVlPipeline(self) -> Any:
+        if self._vlPipeline is not None:
+            return self._vlPipeline
 
         try:
-            from paddleocr import PPStructureV3
+            from paddleocr import PaddleOCRVL
         except ImportError as error:
             raise ProductOcrError(
-                "paddleocr package with PPStructureV3 is required."
+                "paddleocr package with PaddleOCRVL is required."
             ) from error
 
         options: Dict[str, Any] = {
-            "lang": self._lang,
-            "use_table_recognition": True,
-            "use_formula_recognition": False,
+            "pipeline_version": "v1.6",
+            "use_layout_detection": True,
             "use_chart_recognition": False,
             "use_seal_recognition": False,
+            "use_ocr_for_image_block": True,
             "use_doc_orientation_classify": self._useDocOrientationClassify,
             "use_doc_unwarping": self._useDocUnwarping,
-            "use_textline_orientation": self._useTextlineOrientation,
-            **self._structureExtraOptions,
+            "format_block_content": False,
+            "use_queues": False,
+            **self._vlExtraOptions,
         }
         if self._device is not None:
             options["device"] = self._device
+        self._vlPipeline = PaddleOCRVL(**options)
+        return self._vlPipeline
 
-        try:
-            self._structurePipeline = PPStructureV3(**options)
-        except TypeError:
-            reducedOptions = {
-                key: value
-                for key, value in options.items()
-                if key in {"lang", "use_table_recognition", "device"}
-            }
-            self._structurePipeline = PPStructureV3(**reducedOptions)
-        return self._structurePipeline
-
-    def _ExtractTablesFromTiles(
+    def _ExtractVlTile(
         self,
-        tileImages: List[tuple[Optional[int], Any]],
-    ) -> List[ProductOcrTableResult]:
-        structurePipeline = self._ReadInitializedStructurePipeline()
-        tables: List[ProductOcrTableResult] = []
-        seenPlainTexts: set[str] = set()
-        for tileIndex, tileImage in tileImages:
-            output = structurePipeline.predict(input=tileImage)
-            tablePayloads: List[Dict[str, Any]] = []
-            self._CollectTablePayloads(output, tablePayloads)
-            for tablePayload in tablePayloads:
-                tableResult = self._BuildTableResult(
-                    tablePayload,
-                    tableIndex=len(tables) + 1,
-                    tileIndex=tileIndex,
-                )
-                normalizedPlainText = NormalizeWhiteSpace(tableResult.plainText)
-                if tableResult.plainText and normalizedPlainText not in seenPlainTexts:
-                    tables.append(tableResult)
-                    seenPlainTexts.add(normalizedPlainText)
-        return tables
-
-    def _ExtractRawTileTexts(
-        self,
-        tileImages: List[tuple[Optional[int], Any]],
-    ) -> List[ProductOcrTileTextResult]:
-        tileTextResults: List[ProductOcrTileTextResult] = []
-        for tileIndex, tileImage in tileImages:
-            tileText = self._ExtractTextFromDecodedImage(tileImage)
-            if tileText.strip() == "":
-                continue
-            tileTextResults.append(
-                ProductOcrTileTextResult(
-                    tileIndex=tileIndex,
-                    text=tileText,
-                )
-            )
-        return tileTextResults
+        tile: ProductOcrImageTile,
+    ) -> Tuple[str, List[Mapping[str, Any]]]:
+        output = self._ReadInitializedVlPipeline().predict(tile.image)
+        markdownTexts: List[str] = []
+        tableBlocks: List[Mapping[str, Any]] = []
+        blockTexts: List[str] = []
+        for result in output:
+            payload = self._ReadResultPayload(result)
+            markdownText = self._ReadMarkdownText(result)
+            if markdownText:
+                markdownTexts.append(markdownText)
+            for block in payload.get("parsing_res_list", []):
+                if not isinstance(block, Mapping):
+                    continue
+                content = block.get("block_content")
+                if isinstance(content, str) and content.strip():
+                    blockTexts.append(content.strip())
+                if block.get("block_label") == "table":
+                    tableBlocks.append(block)
+        rawText = "\n\n".join(markdownTexts or blockTexts)
+        return rawText, tableBlocks
 
     def _BuildRawTileText(
         self,
@@ -496,82 +489,292 @@ class PaddleStructureOcrEngine(PaddleOcrEngine):
             )
         return structuredText or rawText
 
-    def _CollectTablePayloads(
+    def _BuildTableResultFromVlBlock(
         self,
-        value: Any,
-        tablePayloads: List[Dict[str, Any]],
-    ) -> None:
-        if value is None:
-            return
-
-        if isinstance(value, dict):
-            if "pred_html" in value or "table_ocr_pred" in value:
-                tablePayloads.append(value)
-                return
-            for childValue in value.values():
-                self._CollectTablePayloads(childValue, tablePayloads)
-            return
-
-        if isinstance(value, (list, tuple)):
-            for item in value:
-                self._CollectTablePayloads(item, tablePayloads)
-            return
-
-        jsonValue = getattr(value, "json", None)
-        if isinstance(jsonValue, dict):
-            self._CollectTablePayloads(jsonValue, tablePayloads)
-            return
-
-        if hasattr(value, "to_dict"):
-            try:
-                dictValue = value.to_dict()
-            except Exception:
-                dictValue = None
-            if isinstance(dictValue, dict):
-                self._CollectTablePayloads(dictValue, tablePayloads)
-
-    def _BuildTableResult(
-        self,
-        tablePayload: Dict[str, Any],
+        tile: ProductOcrImageTile,
+        tableBlock: Mapping[str, Any],
         tableIndex: int,
-        tileIndex: Optional[int],
-    ) -> ProductOcrTableResult:
-        html = tablePayload.get("pred_html")
-        if not isinstance(html, str):
-            html = ""
-
-        tableOcrPayload = tablePayload.get("table_ocr_pred")
-        cellTexts: List[str] = []
-        if isinstance(tableOcrPayload, dict):
-            rawCellTexts = tableOcrPayload.get("rec_texts")
-            if isinstance(rawCellTexts, list):
-                cellTexts.extend(
-                    NormalizeWhiteSpace(cellText)
-                    for cellText in rawCellTexts
-                    if isinstance(cellText, str) and NormalizeWhiteSpace(cellText)
+    ) -> Tuple[
+        Optional[ProductOcrTableResult],
+        Optional[Tuple[int, int, int, int]],
+        Optional[str],
+    ]:
+        vlHtml = tableBlock.get("block_content")
+        if not isinstance(vlHtml, str) or not self._LooksLikeTableHtml(vlHtml):
+            return None, None, (
+                "paddleocr_vl_table_invalid tile={0} table={1}".format(
+                    tile.tileIndex or 1,
+                    tableIndex,
                 )
-        if not cellTexts and html:
-            cellTexts.extend(self._ExtractTextsFromHtml(html))
-
-        plainText = "\n".join(cellTexts)
-        pageIndex = tablePayload.get("page_index")
+            )
+        cropResult = self._BuildTableCrop(tile, tableBlock.get("block_bbox"))
+        if cropResult is None:
+            return None, None, (
+                "paddleocr_vl_table_bbox_invalid tile={0} table={1}".format(
+                    tile.tileIndex or 1,
+                    tableIndex,
+                )
+            )
+        tableCrop, originalBounds = cropResult
+        html = vlHtml
+        cellTexts = self._ExtractTextsFromHtml(html)
+        sourceName = "paddleocr_vl_v1_6"
+        validationWarning: Optional[str] = None
+        try:
+            verifiedPayload = self._ReadVerifiedTablePayload(tableCrop)
+            validationError = self._ValidateVerifiedTablePayload(
+                verifiedPayload,
+                tableCrop,
+            )
+            if validationError is None:
+                html = str(verifiedPayload.get("pred_html") or html)
+                cellTexts = self._ReadCellTexts(verifiedPayload) or cellTexts
+                sourceName = "paddleocr_vl_v1_6+table_recognition_v2"
+            else:
+                validationWarning = self._BuildValidationWarning(
+                    tile,
+                    tableIndex,
+                    validationError,
+                )
+        except Exception as error:
+            validationWarning = self._BuildValidationWarning(
+                tile,
+                tableIndex,
+                str(error),
+            )
         return ProductOcrTableResult(
             tableIndex=tableIndex,
-            pageIndex=pageIndex if isinstance(pageIndex, int) else None,
-            tileIndex=tileIndex,
+            sourceName=sourceName,
+            tileIndex=tile.tileIndex,
             html=html,
             cellTexts=cellTexts,
-            plainText=plainText,
+            plainText=self._BuildPlainTextFromHtml(html, cellTexts),
+        ), originalBounds, validationWarning
+
+    def _BuildTableCrop(
+        self,
+        tile: ProductOcrImageTile,
+        rawBounds: Any,
+    ) -> Optional[Tuple[Any, Tuple[int, int, int, int]]]:
+        bounds = self._ReadBox(rawBounds)
+        if bounds is None:
+            return None
+        imageHeight, imageWidth = tile.image.shape[:2]
+        if (
+            bounds[0] < 0
+            or bounds[1] < 0
+            or bounds[2] > imageWidth
+            or bounds[3] > imageHeight
+            or bounds[2] <= bounds[0]
+            or bounds[3] <= bounds[1]
+        ):
+            return None
+        left = max(0, floor(bounds[0]) - self._tableCropPaddingPixels)
+        top = max(0, floor(bounds[1]) - self._tableCropPaddingPixels)
+        right = min(imageWidth, ceil(bounds[2]) + self._tableCropPaddingPixels)
+        bottom = min(imageHeight, ceil(bounds[3]) + self._tableCropPaddingPixels)
+        if right <= left or bottom <= top:
+            return None
+        originalBounds = (
+            tile.originX + floor(bounds[0]),
+            tile.originY + floor(bounds[1]),
+            tile.originX + ceil(bounds[2]),
+            tile.originY + ceil(bounds[3]),
+        )
+        return tile.image[top:bottom, left:right], originalBounds
+
+    def _ReadInitializedTablePipeline(self) -> Any:
+        if self._tablePipeline is not None:
+            return self._tablePipeline
+        try:
+            from paddleocr import TableRecognitionPipelineV2
+        except ImportError as error:
+            raise ProductOcrError(
+                "paddleocr package with TableRecognitionPipelineV2 is required."
+            ) from error
+        options: Dict[str, Any] = {
+            "use_doc_orientation_classify": False,
+            "use_doc_unwarping": False,
+            "use_layout_detection": False,
+            "use_ocr_model": True,
+            **self._tableExtraOptions,
+        }
+        if self._device is not None:
+            options["device"] = self._device
+        self._tablePipeline = TableRecognitionPipelineV2(**options)
+        return self._tablePipeline
+
+    def _ReadVerifiedTablePayload(self, tableCrop: Any) -> Mapping[str, Any]:
+        output = self._ReadInitializedTablePipeline().predict(
+            tableCrop,
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_layout_detection=False,
+            use_ocr_model=True,
+        )
+        for result in output:
+            payload = self._ReadResultPayload(result)
+            tableResults = payload.get("table_res_list")
+            if isinstance(tableResults, list):
+                for tableResult in tableResults:
+                    if isinstance(tableResult, Mapping):
+                        return tableResult
+        return {}
+
+    def _ValidateVerifiedTablePayload(
+        self,
+        payload: Mapping[str, Any],
+        tableCrop: Any,
+    ) -> Optional[str]:
+        html = payload.get("pred_html")
+        if not isinstance(html, str) or not self._LooksLikeTableHtml(html):
+            return "invalid_pred_html"
+        cellBoxes = payload.get("cell_box_list")
+        if cellBoxes is None:
+            return "empty_cell_boxes"
+        try:
+            if len(cellBoxes) == 0:
+                return "empty_cell_boxes"
+        except TypeError:
+            return "invalid_cell_boxes"
+        cropHeight, cropWidth = tableCrop.shape[:2]
+        for cellBox in cellBoxes:
+            bounds = self._ReadBox(cellBox)
+            if bounds is None:
+                return "invalid_cell_box"
+            if (
+                bounds[0] < 0
+                or bounds[1] < 0
+                or bounds[2] > cropWidth
+                or bounds[3] > cropHeight
+                or bounds[2] <= bounds[0]
+                or bounds[3] <= bounds[1]
+            ):
+                return "cell_box_out_of_bounds"
+        if not self._ReadCellTexts(payload):
+            return "empty_cell_texts"
+        return None
+
+    def _ReadCellTexts(self, payload: Mapping[str, Any]) -> List[str]:
+        tableOcrPayload = payload.get("table_ocr_pred")
+        if not isinstance(tableOcrPayload, Mapping):
+            return []
+        rawCellTexts = tableOcrPayload.get("rec_texts")
+        if not isinstance(rawCellTexts, list):
+            return []
+        return [
+            NormalizeWhiteSpace(text)
+            for text in rawCellTexts
+            if isinstance(text, str) and NormalizeWhiteSpace(text)
+        ]
+
+    def _ReadResultPayload(self, result: Any) -> Mapping[str, Any]:
+        jsonPayload = getattr(result, "json", None)
+        payload = jsonPayload if isinstance(jsonPayload, Mapping) else result
+        if not isinstance(payload, Mapping):
+            return {}
+        nestedPayload = payload.get("res")
+        return nestedPayload if isinstance(nestedPayload, Mapping) else payload
+
+    def _ReadMarkdownText(self, result: Any) -> str:
+        markdown = getattr(result, "markdown", None)
+        if isinstance(markdown, str):
+            return markdown.strip()
+        if not isinstance(markdown, Mapping):
+            return ""
+        markdownTexts = markdown.get("markdown_texts")
+        if isinstance(markdownTexts, str):
+            return markdownTexts.strip()
+        if isinstance(markdownTexts, list):
+            return "\n\n".join(
+                text.strip()
+                for text in markdownTexts
+                if isinstance(text, str) and text.strip()
+            )
+        return ""
+
+    def _ReadBox(self, value: Any) -> Optional[Tuple[float, float, float, float]]:
+        try:
+            import numpy as np
+
+            coordinates = np.asarray(value, dtype=float).reshape(-1)
+        except Exception:
+            return None
+        if coordinates.size < 4 or coordinates.size % 2 != 0:
+            return None
+        xValues = coordinates[0::2]
+        yValues = coordinates[1::2]
+        return (
+            float(xValues.min()),
+            float(yValues.min()),
+            float(xValues.max()),
+            float(yValues.max()),
+        )
+
+    def _IsDuplicateTable(
+        self,
+        tablesWithBounds: List[
+            Tuple[ProductOcrTableResult, Tuple[int, int, int, int]]
+        ],
+        candidate: ProductOcrTableResult,
+        candidateBounds: Tuple[int, int, int, int],
+    ) -> bool:
+        candidateText = NormalizeWhiteSpace(candidate.plainText)
+        for table, bounds in tablesWithBounds:
+            if candidateText and candidateText == NormalizeWhiteSpace(table.plainText):
+                return True
+            if self._BuildIntersectionOverUnion(bounds, candidateBounds) >= 0.65:
+                return True
+        return False
+
+    def _BuildIntersectionOverUnion(
+        self,
+        left: Tuple[int, int, int, int],
+        right: Tuple[int, int, int, int],
+    ) -> float:
+        intersectionWidth = max(0, min(left[2], right[2]) - max(left[0], right[0]))
+        intersectionHeight = max(0, min(left[3], right[3]) - max(left[1], right[1]))
+        intersectionArea = intersectionWidth * intersectionHeight
+        leftArea = max(0, left[2] - left[0]) * max(0, left[3] - left[1])
+        rightArea = max(0, right[2] - right[0]) * max(0, right[3] - right[1])
+        unionArea = leftArea + rightArea - intersectionArea
+        return intersectionArea / unionArea if unionArea else 0.0
+
+    def _BuildValidationWarning(
+        self,
+        tile: ProductOcrImageTile,
+        tableIndex: int,
+        reason: str,
+    ) -> str:
+        return "table_validation_failed tile={0} table={1} reason={2}".format(
+            tile.tileIndex or 1,
+            tableIndex,
+            NormalizeWhiteSpace(reason) or "unknown",
         )
 
     def _ExtractTextsFromHtml(self, html: str) -> List[str]:
-        parser = _HtmlTextExtractor()
+        parser = _HtmlTableExtractor()
         parser.feed(html)
-        return [
-            NormalizeWhiteSpace(text)
-            for text in parser.texts
-            if NormalizeWhiteSpace(text)
-        ]
+        return [cell for row in parser.rows for cell in row]
+
+    def _BuildPlainTextFromHtml(
+        self,
+        html: str,
+        fallbackCellTexts: List[str],
+    ) -> str:
+        parser = _HtmlTableExtractor()
+        parser.feed(html)
+        if parser.rows:
+            return "\n".join(" | ".join(row) for row in parser.rows)
+        return "\n".join(fallbackCellTexts)
+
+    def _LooksLikeTableHtml(self, html: str) -> bool:
+        loweredHtml = html.lower()
+        return (
+            "<table" in loweredHtml
+            and "<tr" in loweredHtml
+            and ("<td" in loweredHtml or "<th" in loweredHtml)
+        )
 
     def _BuildStructuredTableText(
         self,
@@ -590,12 +793,67 @@ class PaddleStructureOcrEngine(PaddleOcrEngine):
         return "\n\n".join(tableTexts)
 
 
-class _HtmlTextExtractor(HTMLParser):
+PaddleStructureOcrEngine = PaddleOcrVlEngine
+
+
+class _HtmlTableExtractor(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
-        self.texts: List[str] = []
+        self.rows: List[List[str]] = []
+        self._currentRow: List[str] = []
+        self._currentCellParts: List[str] = []
+        self._insideCell = False
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: List[Tuple[str, Optional[str]]],
+    ) -> None:
+        del attrs
+        if tag.lower() == "tr":
+            self._currentRow = []
+        elif tag.lower() in {"td", "th"}:
+            self._insideCell = True
+            self._currentCellParts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in {"td", "th"}:
+            cellText = NormalizeWhiteSpace(" ".join(self._currentCellParts))
+            self._currentRow.append(cellText)
+            self._currentCellParts = []
+            self._insideCell = False
+        elif tag.lower() == "tr" and any(self._currentRow):
+            self.rows.append(list(self._currentRow))
+            self._currentRow = []
 
     def handle_data(self, data: str) -> None:
         normalizedText = NormalizeWhiteSpace(data)
-        if normalizedText:
-            self.texts.append(normalizedText)
+        if self._insideCell and normalizedText:
+            self._currentCellParts.append(normalizedText)
+
+
+def _DecodeImageBytes(imageBytes: bytes) -> Any:
+    try:
+        import cv2
+        import numpy as np
+    except ImportError as error:
+        raise ProductOcrError(
+            "OCR image decoding requires numpy and cv2."
+        ) from error
+    imageArray = np.frombuffer(imageBytes, dtype=np.uint8)
+    image = cv2.imdecode(imageArray, cv2.IMREAD_COLOR)
+    if image is None:
+        raise ProductOcrError("failed to decode image bytes for OCR.")
+    return image
+
+
+def _EncodeImageBytes(image: Any, suffix: str = ".jpg") -> bytes:
+    try:
+        import cv2
+    except ImportError as error:
+        raise ProductOcrError("OCR image encoding requires cv2.") from error
+    normalizedSuffix = suffix if suffix.startswith(".") else ".jpg"
+    success, encodedImage = cv2.imencode(normalizedSuffix, image)
+    if not success:
+        raise ProductOcrError("failed to encode OCR tile image.")
+    return bytes(encodedImage)

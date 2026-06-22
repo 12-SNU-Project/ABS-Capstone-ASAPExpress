@@ -166,7 +166,6 @@ class ProductOcrArtifactStore:
         if len(imageTiles) == 1 and imageTiles[0][0] is None:
             if textQualityEvaluator.HasInformativeResult(structuredOcrResult):
                 return [artifactPath]
-            self.DeleteImage(artifactPath)
             return []
 
         retainedTilePaths: List[Path] = []
@@ -186,7 +185,6 @@ class ProductOcrArtifactStore:
                     imageBytes=tileBytes,
                 )
             )
-        self.DeleteImage(artifactPath)
         return retainedTilePaths
 
     def WriteTileImage(
@@ -204,10 +202,6 @@ class ProductOcrArtifactStore:
         )
         tilePath.write_bytes(imageBytes)
         return tilePath
-
-    def DeleteImage(self, artifactPath: Optional[Path]) -> None:
-        if artifactPath is not None:
-            artifactPath.unlink(missing_ok=True)
 
     def _BuildArtifactDirectory(
         self,
@@ -328,7 +322,6 @@ class ProductOcrFallbackRunner:
                     structuredOcrResult,
                 )
             ):
-                self._artifactStore.DeleteImage(artifactPath)
                 return None
             imageTiles = self._ocrEngine.BuildArtifactImageTiles(imageBytes)
             artifactPaths = self._artifactStore.ReplaceImageWithInformativeTiles(
@@ -349,7 +342,6 @@ class ProductOcrFallbackRunner:
                 structuredOcr=structuredOcrResult,
             )
         except Exception as error:
-            self._artifactStore.DeleteImage(artifactPath)
             return ProductOcrImageResult(
                 imageUrl=imageUrl,
                 error="OCR fallback failed for image {0}: {1}".format(

@@ -82,7 +82,7 @@ def collect_kurly_url_facts(
         KurlyPipelineInput,
         KurlyProductPipeline,
         PaddleOcrEngine,
-        PaddleStructureOcrEngine,
+        PaddleOcrVlEngine,
     )
     from bussiness_logic.bridge import (
         BuildLlmRuntimeConfigFromEnv,
@@ -156,7 +156,7 @@ def collect_kurly_url_facts(
     if run_ocr:
         try:
             ocr_engine = (
-                PaddleStructureOcrEngine(
+                PaddleOcrVlEngine(
                     useProjectionTiling=(
                         smoke_config.structured_ocr_use_projection_tiling
                     ),

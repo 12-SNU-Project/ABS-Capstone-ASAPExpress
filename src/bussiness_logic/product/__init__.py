@@ -2,6 +2,7 @@
 
 from bussiness_logic.product.ocr import (
     PaddleOcrEngine,
+    PaddleOcrVlEngine,
     PaddleStructureOcrEngine,
     ProductOcrArtifactStore,
     ProductOcrEngine,
@@ -65,6 +66,7 @@ __all__ = [
     "RenderedPageEvidence",
 
     "PaddleOcrEngine",
+    "PaddleOcrVlEngine",
     "PaddleStructureOcrEngine",
     "ProductOcrArtifactStore",
     "ProductOcrFallbackRunner",
