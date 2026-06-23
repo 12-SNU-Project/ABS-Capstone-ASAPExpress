@@ -443,25 +443,24 @@ class KurlyMarketSmokeRunner:
             if self._compareMaxImages == 0
             else imageUrls[:self._compareMaxImages]
         )
-        reusableVlResults = {
+        reusablePipelineResults = {
             result.imageUrl: result
             for result in pipelineOcrImageResults
-            if "structured_ocr" in result.processingTimes
-            and result.error is None
+            if result.error is None
         }
         engines: Dict[str, Any] = {}
         if selectedImageUrls:
             from paddleocr import PPStructureV3
 
             engines = {
-                "raw_ocr": (
+                "only_raw_ocr": (
                     self._pipelineRawOcrEngine
                     if isinstance(self._pipelineRawOcrEngine, PaddleOcrEngine)
                     else self._pipelineOcrEngine
                     if isinstance(self._pipelineOcrEngine, PaddleOcrEngine)
                     else PaddleOcrEngine()
                 ),
-                "pp_structure_v3": PPStructureV3(
+                "only_pp_structure": PPStructureV3(
                     lang="korean",
                     use_doc_orientation_classify=False,
                     use_doc_unwarping=False,
@@ -473,12 +472,7 @@ class KurlyMarketSmokeRunner:
                     use_region_detection=False,
                     format_block_content=False,
                 ),
-            }
-            if any(
-                imageUrl not in reusableVlResults
-                for imageUrl in selectedImageUrls
-            ):
-                engines["paddleocr_vl"] = (
+                "only_vlm": (
                     self._pipelineOcrEngine
                     if isinstance(self._pipelineOcrEngine, PaddleOcrVlEngine)
                     else PaddleOcrVlEngine(
@@ -497,7 +491,8 @@ class KurlyMarketSmokeRunner:
                             self._structuredOcrAllowHardCutFallback
                         ),
                     )
-                )
+                ),
+            }
         downloader = ProductOcrImageDownloader()
         imageResults: List[Dict[str, Any]] = []
         for imageIndex, imageUrl in enumerate(selectedImageUrls, start=1):
@@ -516,32 +511,33 @@ class KurlyMarketSmokeRunner:
                     }
                 )
                 continue
+            engineResults = {
+                engineName: self._CompareOcrEngine(
+                    engineName,
+                    engines[engineName],
+                    imageBytes,
+                )
+                for engineName in (
+                    "only_raw_ocr",
+                    "only_pp_structure",
+                    "only_vlm",
+                )
+            }
+            engineResults["production_hybrid"] = (
+                self._BuildProductionHybridComparison(
+                    reusablePipelineResults[imageUrl]
+                )
+                if imageUrl in reusablePipelineResults
+                else self._BuildSkippedOcrComparison(
+                    "pipeline_result_unavailable",
+                )
+            )
             imageResults.append(
                 {
                     "index": imageIndex,
                     "image_url": imageUrl,
                     "image_byte_count": len(imageBytes),
-                    "engines": {
-                        engineName: (
-                            self._BuildReusedVlComparison(
-                                reusableVlResults[imageUrl]
-                            )
-                            if (
-                                engineName == "paddleocr_vl"
-                                and imageUrl in reusableVlResults
-                            )
-                            else self._CompareOcrEngine(
-                                engineName,
-                                engines[engineName],
-                                imageBytes,
-                            )
-                        )
-                        for engineName in (
-                            "raw_ocr",
-                            "pp_structure_v3",
-                            "paddleocr_vl",
-                        )
-                    },
+                    "engines": engineResults,
                 }
             )
 
@@ -550,11 +546,45 @@ class KurlyMarketSmokeRunner:
             / ExtractProductIdFromUrl(productUrl)
             / "ocr-comparison.json"
         )
+        engineTotals: Dict[str, Dict[str, Any]] = {}
+        for imageResult in imageResults:
+            for engineName, engineResult in (
+                imageResult.get("engines", {}) or {}
+            ).items():
+                total = engineTotals.setdefault(
+                    engineName,
+                    {
+                        "ok_count": 0,
+                        "error_count": 0,
+                        "skipped_count": 0,
+                        "elapsed_seconds": 0.0,
+                    },
+                )
+                status = engineResult.get("status")
+                if status == "ok":
+                    total["ok_count"] += 1
+                    total["elapsed_seconds"] = round(
+                        total["elapsed_seconds"]
+                        + float(engineResult.get("elapsed_seconds") or 0.0),
+                        3,
+                    )
+                elif status == "skipped":
+                    total["skipped_count"] += 1
+                else:
+                    total["error_count"] += 1
         comparisonData = {
             "product_page_url": productUrl,
             "generated_at": datetime.now().astimezone().isoformat(),
+            "comparison_modes": [
+                "only_raw_ocr",
+                "only_pp_structure",
+                "only_vlm",
+                "production_hybrid",
+            ],
+            "vl_backend": self._structuredOcrVlExtraOptions.get("vl_rec_backend"),
             "candidate_image_count": len(imageUrls),
             "image_count": len(imageResults),
+            "engine_totals": engineTotals,
             "artifact_path": str(artifactPath),
             "images": imageResults,
         }
@@ -564,43 +594,33 @@ class KurlyMarketSmokeRunner:
             encoding="utf-8",
         )
         comparisonLogger = self._Logger("_RunOcrComparison")
-        for imageResult in imageResults:
-            for engineName, engineResult in (
-                imageResult.get("engines", {}) or {}
-            ).items():
-                comparisonLogger.info(
-                    (
-                        "ocr_compare image={} engine={} status={} elapsed={} "
-                        "text_length={} tables={} preview={} error={}"
-                    ),
-                    imageResult.get("index"),
-                    engineName,
-                    engineResult.get("status"),
-                    engineResult.get("elapsed_seconds"),
-                    engineResult.get("text_length"),
-                    engineResult.get("table_count"),
-                    engineResult.get("text_preview"),
-                    engineResult.get("error"),
-                )
-        comparisonLogger.info("ocr_comparison_artifact={}", artifactPath)
+        comparisonLogger.info(
+            "ocr_comparison_artifact={} engine_totals={}",
+            artifactPath,
+            engineTotals,
+        )
         return {
             "image_count": len(imageResults),
+            "engine_totals": engineTotals,
             "artifact_path": str(artifactPath),
         }
 
-    def _BuildReusedVlComparison(
+    def _BuildProductionHybridComparison(
         self,
         imageResult: ProductOcrImageResult,
     ) -> Dict[str, Any]:
         structuredResult = imageResult.structuredOcr
         text = structuredResult.text
         tableTexts = [table.plainText for table in structuredResult.tables]
+        stageTimes = {
+            key: value
+            for key, value in imageResult.processingTimes.items()
+            if key != "download"
+        }
         return {
             "status": "ok",
-            "elapsed_seconds": imageResult.processingTimes.get(
-                "structured_ocr",
-                0.0,
-            ),
+            "elapsed_seconds": round(sum(stageTimes.values()), 3),
+            "pipeline_stage_times": stageTimes,
             "text_length": len(text),
             "line_count": len(
                 [line for line in text.splitlines() if line.strip()]
@@ -622,6 +642,21 @@ class KurlyMarketSmokeRunner:
             "error": None,
         }
 
+    @staticmethod
+    def _BuildSkippedOcrComparison(reason: str) -> Dict[str, Any]:
+        return {
+            "status": "skipped",
+            "elapsed_seconds": 0.0,
+            "text_length": 0,
+            "line_count": 0,
+            "table_count": 0,
+            "text_preview": "",
+            "text": "",
+            "table_texts": [],
+            "warnings": [],
+            "error": reason,
+        }
+
     def _CompareOcrEngine(
         self,
         engineName: str,
@@ -634,9 +669,9 @@ class KurlyMarketSmokeRunner:
         warnings: List[str] = []
         extra: Dict[str, Any] = {}
         try:
-            if engineName == "raw_ocr":
+            if engineName == "only_raw_ocr":
                 text = engine.ExtractTextFromImage(imageBytes)
-            elif engineName == "paddleocr_vl":
+            elif engineName == "only_vlm":
                 result = engine.ExtractStructuredTextFromImage(imageBytes)
                 text = result.text
                 tableTexts = [table.plainText for table in result.tables]

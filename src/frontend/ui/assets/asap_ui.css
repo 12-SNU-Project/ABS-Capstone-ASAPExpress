@@ -37,6 +37,52 @@
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
 }
 
+.input-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.input-evidence-panel {
+  padding: 12px;
+  border: 1px solid #dbe3ec;
+  border-top: 3px solid #cbd5e1;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.055);
+}
+
+.input-evidence-panel.raw {
+  border-top-color: #38bdf8;
+}
+
+.input-evidence-panel.vlm {
+  border-top-color: #6366f1;
+}
+
+.input-evidence-panel.web {
+  border-top-color: #64748b;
+}
+
+.input-evidence-panel.other {
+  border-top-color: #94a3b8;
+}
+
+.input-evidence-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.input-evidence-panel-title {
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 950;
+}
+
 .input-evidence-card {
   position: relative;
   min-height: 92px;
@@ -89,6 +135,12 @@
   color: #1d4ed8;
   font-size: 11px;
   font-weight: 800;
+}
+
+@media (max-width: 900px) {
+  .input-evidence-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .input-reconstruction-section {
@@ -159,6 +211,14 @@
   background: #f5f9fd;
 }
 
+.input-reconstruction-table tbody tr.input-reconstruction-corrected-row {
+  background: linear-gradient(90deg, #eef2ff 0, #ffffff 34%);
+}
+
+.input-reconstruction-table tbody tr.input-reconstruction-corrected-row td:first-child {
+  border-left: 3px solid #6366f1;
+}
+
 .input-reconstruction-table tbody tr:last-child td {
   border-bottom: 0;
 }
@@ -172,6 +232,35 @@
   margin-top: 2px;
   color: #94a3b8;
   font-size: 10px;
+}
+
+.input-reconstruction-raw-value {
+  color: #475569;
+  background: #f8fafc;
+}
+
+.input-reconstruction-normalized-value {
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-weight: 700;
+}
+
+.input-reconstruction-normalized-value.corrected {
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.2);
+}
+
+.input-correction-chip {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 6px;
+  padding: 2px 7px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 10px;
+  font-weight: 900;
 }
 
 .input-reconstruction-expandable summary {

@@ -1529,15 +1529,13 @@ class ProductInputReconstructionService:
             ocrImageResults=ocrImageResults,
             combinedOcrText=combinedOcrText,
         )
-        baselineResult = self._deterministicReconstructor.Reconstruct(
-            evidencePackage,
-        )
         if self._llmReconstructor is None:
-            reconstructionResult = baselineResult
+            reconstructionResult = self._deterministicReconstructor.Reconstruct(
+                evidencePackage,
+            )
         else:
             llmResult = self._llmReconstructor.Reconstruct(evidencePackage)
-            reconstructionResult = self._MergeReconstructionResults(
-                baselineResult,
+            reconstructionResult = self._SelectReconstructionResult(
                 llmResult,
                 evidencePackage,
             )
@@ -1556,39 +1554,27 @@ class ProductInputReconstructionService:
             }
         )
 
-    def _MergeReconstructionResults(
+    def _SelectReconstructionResult(
         self,
-        baselineResult: ProductFactReconstructionResult,
         llmResult: ProductFactReconstructionResult,
         evidencePackage: ProductInputEvidencePackage,
     ) -> ProductFactReconstructionResult:
-        if not llmResult.usedLlmReconstruction:
-            return baselineResult.model_copy(
-                update={
-                    "warnings": list(
-                        dict.fromkeys(
-                            [*baselineResult.warnings, *llmResult.warnings]
-                        )
-                    ),
-                    "fallbackReason": llmResult.fallbackReason,
-                    "debugArtifacts": dict(llmResult.debugArtifacts),
-                }
-            )
+        if llmResult.usedLlmReconstruction:
+            return self._validator.Validate(llmResult, evidencePackage)
 
-        # 검증을 통과한 LLM compact fact를 기준으로 유지한다.
-        # deterministic 결과는 LLM 실패 시에만 fallback으로 사용한다.
-        return self._validator.Validate(
-            llmResult.model_copy(
-                update={
-                    "warnings": list(
-                        dict.fromkeys(
-                            [*baselineResult.warnings, *llmResult.warnings]
-                        )
-                    ),
-                    "dictionaryMatches": baselineResult.dictionaryMatches,
-                }
-            ),
+        baselineResult = self._deterministicReconstructor.Reconstruct(
             evidencePackage,
+        )
+        return baselineResult.model_copy(
+            update={
+                "warnings": list(
+                    dict.fromkeys(
+                        [*baselineResult.warnings, *llmResult.warnings]
+                    )
+                ),
+                "fallbackReason": llmResult.fallbackReason,
+                "debugArtifacts": dict(llmResult.debugArtifacts),
+            }
         )
 
     def _BuildSourceRefLabels(
@@ -1667,7 +1653,7 @@ class ProductInputReconstructionService:
             and sourceParts[0] == "image"
             and sourceParts[2] == "table"
         ):
-            return "구조화 표 이미지 {0} 표 {1}".format(
+            return "VLM 표 이미지 {0} 표 {1}".format(
                 sourceParts[1],
                 sourceParts[3],
             )

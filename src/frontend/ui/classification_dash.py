@@ -209,6 +209,22 @@ def _expandable_text(value: Any, *, max_length: int = 180) -> Any:
     )
 
 
+def _display_source_type(source_type: Any) -> str:
+    labels = {
+        "pp_table": "VLM table",
+        "raw_ocr_tile": "Raw OCR tile",
+        "notice_field": "Web notice",
+        "notice_option": "Web option",
+        "combined_ocr_text": "Combined OCR",
+    }
+    sourceType = str(source_type or "").strip()
+    return labels.get(sourceType, sourceType or "-")
+
+
+def _display_source_label(label: Any) -> str:
+    return str(label or "-").replace("구조화 표", "VLM 표")
+
+
 def _fact_source_text(
     fact: dict[str, Any],
     source_labels: dict[str, Any] | None = None,
@@ -217,7 +233,7 @@ def _fact_source_text(
     if isinstance(refs, list):
         labels = source_labels or {}
         return ", ".join(
-            str(labels.get(str(ref), ref))
+            _display_source_label(labels.get(str(ref), ref))
             for ref in refs[:3]
             if str(ref).strip()
         )
@@ -334,6 +350,13 @@ def _reconstruction_fact_table(
     for fact in facts[:max_rows]:
         validationStatus = str(fact.get("validation_status") or "-").strip()
         correctionType = str(fact.get("correction_type") or "").strip()
+        rawValue = str(fact.get("raw_value") or "").strip()
+        normalizedValue = str(fact.get("normalized_value") or rawValue).strip()
+        isCorrected = bool(
+            rawValue
+            and normalizedValue
+            and rawValue != normalizedValue
+        )
         rows.append(
             html.Tr(
                 [
@@ -341,11 +364,21 @@ def _reconstruction_fact_table(
                         _short_text(fact.get("field_name"), max_length=90),
                         className="input-reconstruction-primary",
                     ),
-                    html.Td(_short_text(fact.get("raw_value"), max_length=220)),
                     html.Td(
-                        _short_text(
-                            fact.get("normalized_value") or fact.get("raw_value"),
-                            max_length=220,
+                        _expandable_text(rawValue, max_length=220),
+                        className="input-reconstruction-raw-value",
+                    ),
+                    html.Td(
+                        [
+                            _expandable_text(normalizedValue, max_length=220),
+                            html.Div("교정됨", className="input-correction-chip")
+                            if isCorrected
+                            else None,
+                        ],
+                        className=(
+                            "input-reconstruction-normalized-value corrected"
+                            if isCorrected
+                            else "input-reconstruction-normalized-value"
                         ),
                     ),
                     html.Td(
@@ -368,7 +401,10 @@ def _reconstruction_fact_table(
                             max_length=160,
                         ),
                     ),
-                ]
+                ],
+                className=(
+                    "input-reconstruction-corrected-row" if isCorrected else ""
+                ),
             )
         )
 
@@ -395,8 +431,8 @@ def _reconstruction_fact_table(
                             html.Tr(
                                 [
                                     html.Th("필드"),
-                                    html.Th("원문 값"),
-                                    html.Th("정규화 값"),
+                                    html.Th("VLM/OCR 판독값"),
+                                    html.Th("LLM 교정값"),
                                     html.Th("검증 / 교정"),
                                     html.Th("출처"),
                                 ]
@@ -514,32 +550,113 @@ def _source_evidence_table(
     if not cleaned:
         return None
 
-    rows: list[Any] = []
-    for record in cleaned[:max_rows]:
-        sourceLabel = record.get("source_label") or record.get("source_type") or "-"
+    def evidence_card(record: dict[str, Any]) -> html.Div:
         sourceType = record.get("source_type") or ""
-        rows.append(
-            html.Div(
-                [
-                    html.Div(
-                        [
-                            html.Span(_short_text(sourceLabel, max_length=70), className="input-source-label"),
-                            html.Span(_short_text(sourceType, max_length=34), className="input-source-chip"),
-                        ],
-                        className="input-evidence-source",
-                    ),
-                    html.Div(_short_text(record.get("text"), max_length=300), className="input-evidence-text"),
-                ],
-                className="input-evidence-card",
-            )
+        sourceLabel = (
+            record.get("source_label")
+            or _display_source_type(sourceType)
+            or "-"
+        )
+        return html.Div(
+            [
+                html.Div(
+                    [
+                        html.Span(
+                            _short_text(
+                                _display_source_label(sourceLabel),
+                                max_length=70,
+                            ),
+                            className="input-source-label",
+                        ),
+                        html.Span(
+                            _short_text(
+                                _display_source_type(sourceType),
+                                max_length=34,
+                            ),
+                            className="input-source-chip",
+                        ),
+                    ],
+                    className="input-evidence-source",
+                ),
+                html.Div(
+                    _short_text(record.get("text"), max_length=360),
+                    className="input-evidence-text",
+                ),
+            ],
+            className="input-evidence-card",
         )
 
-    more = None
-    if len(cleaned) > max_rows:
-        more = html.Div(
-            f"+ {len(cleaned) - max_rows} more source evidence rows",
-            style={"fontSize": "12px", "color": "#64748b", "marginTop": "8px"},
+    def evidence_panel(
+        panel_title: str,
+        panel_records: list[dict[str, Any]],
+        class_name: str,
+    ) -> html.Div | None:
+        if not panel_records:
+            return None
+        shownRecords = panel_records[:max_rows]
+        return html.Div(
+            [
+                html.Div(
+                    [
+                        html.Div(panel_title, className="input-evidence-panel-title"),
+                        html.Div(
+                            f"{len(panel_records)} rows",
+                            className="input-card-count",
+                        ),
+                    ],
+                    className="input-evidence-panel-head",
+                ),
+                html.Div(
+                    [evidence_card(record) for record in shownRecords],
+                    className="input-evidence-list",
+                ),
+                html.Div(
+                    f"+ {len(panel_records) - max_rows} more rows",
+                    className="input-reconstruction-more",
+                )
+                if len(panel_records) > max_rows
+                else None,
+            ],
+            className=f"input-evidence-panel {class_name}",
         )
+
+    rawRecords = [
+        record
+        for record in cleaned
+        if record.get("source_type") in {"raw_ocr_tile", "combined_ocr_text"}
+    ]
+    vlmRecords = [
+        record
+        for record in cleaned
+        if record.get("source_type") == "pp_table"
+    ]
+    webRecords = [
+        record
+        for record in cleaned
+        if record.get("source_type") in {"notice_field", "notice_option"}
+    ]
+    otherRecords = [
+        record
+        for record in cleaned
+        if record.get("source_type")
+        not in {
+            "raw_ocr_tile",
+            "combined_ocr_text",
+            "pp_table",
+            "notice_field",
+            "notice_option",
+        }
+    ]
+    panels = [
+        panel
+        for panel in [
+            evidence_panel("OCR 원문", rawRecords, "raw"),
+            evidence_panel("VLM 표 원문", vlmRecords, "vlm"),
+            evidence_panel("웹 수집 원문", webRecords, "web"),
+            evidence_panel("기타 evidence", otherRecords, "other"),
+        ]
+        if panel is not None
+    ]
 
     return html.Div(
         [
@@ -550,8 +667,7 @@ def _source_evidence_table(
                 ],
                 className="input-card-head",
             ),
-            html.Div(rows, className="input-evidence-list"),
-            more,
+            html.Div(panels, className="input-evidence-grid"),
         ],
         className="input-card-section",
     )
@@ -580,12 +696,19 @@ def _reconstructed_tables_widget(
             sourceRefs = row.get("source_refs") or []
             if isinstance(sourceRefs, list):
                 sourceText = ", ".join(
-                    str(labels.get(str(ref), ref))
+                    _display_source_label(labels.get(str(ref), ref))
                     for ref in sourceRefs[:3]
                     if str(ref).strip()
                 )
             else:
                 sourceText = str(sourceRefs or "")
+            rawValue = str(row.get("raw_value") or "").strip()
+            normalizedValue = str(row.get("normalized_value") or rawValue).strip()
+            isCorrected = bool(
+                rawValue
+                and normalizedValue
+                and rawValue != normalizedValue
+            )
             tableRows.append(
                 html.Tr(
                     [
@@ -593,10 +716,21 @@ def _reconstructed_tables_widget(
                             _short_text(row.get("field_name"), max_length=90),
                             className="input-reconstruction-primary",
                         ),
-                        html.Td(_expandable_text(row.get("raw_value"))),
                         html.Td(
-                            _expandable_text(
-                                row.get("normalized_value") or row.get("raw_value"),
+                            _expandable_text(rawValue, max_length=260),
+                            className="input-reconstruction-raw-value",
+                        ),
+                        html.Td(
+                            [
+                                _expandable_text(normalizedValue, max_length=260),
+                                html.Div("교정됨", className="input-correction-chip")
+                                if isCorrected
+                                else None,
+                            ],
+                            className=(
+                                "input-reconstruction-normalized-value corrected"
+                                if isCorrected
+                                else "input-reconstruction-normalized-value"
                             ),
                         ),
                         html.Td(
@@ -614,7 +748,10 @@ def _reconstructed_tables_widget(
                         ),
                         html.Td(_validation_cell(row)),
                         html.Td(_short_text(sourceText, max_length=160)),
-                    ]
+                    ],
+                    className=(
+                        "input-reconstruction-corrected-row" if isCorrected else ""
+                    ),
                 )
             )
         more = None
@@ -640,8 +777,8 @@ def _reconstructed_tables_widget(
                                     html.Tr(
                                         [
                                             html.Th("항목"),
-                                            html.Th("원문 값"),
-                                            html.Th("정규화 값"),
+                                            html.Th("VLM/OCR 판독값"),
+                                            html.Th("LLM 교정값"),
                                             html.Th("단위 / 기준"),
                                             html.Th("검증"),
                                             html.Th("출처"),
@@ -696,7 +833,7 @@ def input_processing_detail_card(
             for panel in [
                 _product_page_basic_card(basicInfo),
                 _source_evidence_table(
-                    "가공 전 OCR/PP Table 원문",
+                    "가공 전 OCR/VLM Evidence 원문",
                     sourceEvidencePreview,
                     max_rows=12,
                 ),
@@ -908,7 +1045,11 @@ def input_processing_detail_drawer(
                             className="drawer-title-main",
                         ),
                         html.Div(
-                            "가공 전 수집 데이터" if isRaw else "가공 후 구조화 데이터",
+                            (
+                                "가공 전 수집 데이터"
+                                if isRaw
+                                else "LLM이 evidence에서 선택/정규화한 데이터"
+                            ),
                             className="drawer-title-sub",
                         ),
                     ]
