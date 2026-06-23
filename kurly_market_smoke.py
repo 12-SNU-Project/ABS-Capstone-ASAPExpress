@@ -36,6 +36,7 @@ from bussiness_logic.bridge import (  # noqa: E402
 from bussiness_logic.input_process import ProductInputReconstructionService  # noqa: E402
 from bussiness_logic.product.ocr.ocr_fallback import (  # noqa: E402
     ProductOcrImageDownloader,
+    ProductOcrImageResult,
 )
 
 
@@ -104,6 +105,9 @@ class KurlyMarketSmokeRunner:
         self._structuredOcrAllowHardCutFallback = (
             smokeConfig.structured_ocr_allow_hard_cut_fallback
         )
+        self._structuredOcrVlExtraOptions = (
+            smokeConfig.BuildStructuredOcrVlExtraOptions()
+        )
         self._useInputReconstruction = smokeConfig.use_input_reconstruction
         self._useLlmInputReconstruction = smokeConfig.use_llm_input_reconstruction
         self._writeLlmInputReconstructionDebugArtifacts = (
@@ -136,6 +140,7 @@ class KurlyMarketSmokeRunner:
         self._fieldValuePreviewCharacters = smokeConfig.field_value_preview_characters
         self._ocrTextPreviewCharacters = smokeConfig.ocr_text_preview_characters
         self._pipelineOcrEngine: Any = None
+        self._pipelineRawOcrEngine: Any = None
 
     def Run(self) -> None:
         self._ConfigureLogger()
@@ -202,9 +207,13 @@ class KurlyMarketSmokeRunner:
         )
         inputReconstructionService = self._BuildInputReconstructionService()
         ocrEngine = None
+        screeningOcrEngine = None
         if self._runOcrFallback:
+            if self._useStructuredOcr:
+                screeningOcrEngine = PaddleOcrEngine()
             ocrEngine = (
                 PaddleOcrVlEngine(
+                    vlExtraOptions=self._structuredOcrVlExtraOptions,
                     useProjectionTiling=self._structuredOcrUseProjectionTiling,
                     maxTileHeightPixels=self._structuredOcrMaxTileHeightPixels,
                     maxTileSidePixels=self._structuredOcrMaxTileSidePixels,
@@ -215,9 +224,11 @@ class KurlyMarketSmokeRunner:
                 else PaddleOcrEngine()
             )
         self._pipelineOcrEngine = ocrEngine
+        self._pipelineRawOcrEngine = screeningOcrEngine
         return KurlyProductPipeline(
             collector=collector,
             ocrEngine=ocrEngine,
+            screeningOcrEngine=screeningOcrEngine,
             inputReconstructionService=inputReconstructionService,
         )
 
@@ -279,6 +290,7 @@ class KurlyMarketSmokeRunner:
                 resultData["ocr_comparison"] = self._RunOcrComparison(
                     productUrl,
                     list(pipelineResult.collectionResult.ocrCandidateImageUrls),
+                    pipelineResult.ocrImageResults,
                 )
             return resultData
         except Exception as error:
@@ -424,40 +436,30 @@ class KurlyMarketSmokeRunner:
         self,
         productUrl: str,
         imageUrls: List[str],
+        pipelineOcrImageResults: List[ProductOcrImageResult],
     ) -> Dict[str, Any]:
         selectedImageUrls = (
             imageUrls
             if self._compareMaxImages == 0
             else imageUrls[:self._compareMaxImages]
         )
+        reusableVlResults = {
+            result.imageUrl: result
+            for result in pipelineOcrImageResults
+            if "structured_ocr" in result.processingTimes
+            and result.error is None
+        }
         engines: Dict[str, Any] = {}
         if selectedImageUrls:
             from paddleocr import PPStructureV3
 
             engines = {
                 "raw_ocr": (
-                    self._pipelineOcrEngine
+                    self._pipelineRawOcrEngine
+                    if isinstance(self._pipelineRawOcrEngine, PaddleOcrEngine)
+                    else self._pipelineOcrEngine
                     if isinstance(self._pipelineOcrEngine, PaddleOcrEngine)
                     else PaddleOcrEngine()
-                ),
-                "paddleocr_vl": (
-                    self._pipelineOcrEngine
-                    if isinstance(self._pipelineOcrEngine, PaddleOcrVlEngine)
-                    else PaddleOcrVlEngine(
-                        useProjectionTiling=(
-                            self._structuredOcrUseProjectionTiling
-                        ),
-                        maxTileHeightPixels=(
-                            self._structuredOcrMaxTileHeightPixels
-                        ),
-                        maxTileSidePixels=(
-                            self._structuredOcrMaxTileSidePixels
-                        ),
-                        tileOverlapPixels=self._structuredOcrTileOverlapPixels,
-                        allowHardCutFallback=(
-                            self._structuredOcrAllowHardCutFallback
-                        ),
-                    )
                 ),
                 "pp_structure_v3": PPStructureV3(
                     lang="korean",
@@ -472,6 +474,30 @@ class KurlyMarketSmokeRunner:
                     format_block_content=False,
                 ),
             }
+            if any(
+                imageUrl not in reusableVlResults
+                for imageUrl in selectedImageUrls
+            ):
+                engines["paddleocr_vl"] = (
+                    self._pipelineOcrEngine
+                    if isinstance(self._pipelineOcrEngine, PaddleOcrVlEngine)
+                    else PaddleOcrVlEngine(
+                        vlExtraOptions=self._structuredOcrVlExtraOptions,
+                        useProjectionTiling=(
+                            self._structuredOcrUseProjectionTiling
+                        ),
+                        maxTileHeightPixels=(
+                            self._structuredOcrMaxTileHeightPixels
+                        ),
+                        maxTileSidePixels=(
+                            self._structuredOcrMaxTileSidePixels
+                        ),
+                        tileOverlapPixels=self._structuredOcrTileOverlapPixels,
+                        allowHardCutFallback=(
+                            self._structuredOcrAllowHardCutFallback
+                        ),
+                    )
+                )
         downloader = ProductOcrImageDownloader()
         imageResults: List[Dict[str, Any]] = []
         for imageIndex, imageUrl in enumerate(selectedImageUrls, start=1):
@@ -496,10 +522,19 @@ class KurlyMarketSmokeRunner:
                     "image_url": imageUrl,
                     "image_byte_count": len(imageBytes),
                     "engines": {
-                        engineName: self._CompareOcrEngine(
-                            engineName,
-                            engines[engineName],
-                            imageBytes,
+                        engineName: (
+                            self._BuildReusedVlComparison(
+                                reusableVlResults[imageUrl]
+                            )
+                            if (
+                                engineName == "paddleocr_vl"
+                                and imageUrl in reusableVlResults
+                            )
+                            else self._CompareOcrEngine(
+                                engineName,
+                                engines[engineName],
+                                imageBytes,
+                            )
                         )
                         for engineName in (
                             "raw_ocr",
@@ -551,6 +586,40 @@ class KurlyMarketSmokeRunner:
         return {
             "image_count": len(imageResults),
             "artifact_path": str(artifactPath),
+        }
+
+    def _BuildReusedVlComparison(
+        self,
+        imageResult: ProductOcrImageResult,
+    ) -> Dict[str, Any]:
+        structuredResult = imageResult.structuredOcr
+        text = structuredResult.text
+        tableTexts = [table.plainText for table in structuredResult.tables]
+        return {
+            "status": "ok",
+            "elapsed_seconds": imageResult.processingTimes.get(
+                "structured_ocr",
+                0.0,
+            ),
+            "text_length": len(text),
+            "line_count": len(
+                [line for line in text.splitlines() if line.strip()]
+            ),
+            "table_count": len(tableTexts),
+            "text_preview": self._BuildTextPreview(
+                text,
+                self._ocrTextPreviewCharacters,
+            ),
+            "text": text,
+            "table_texts": tableTexts,
+            "warnings": list(structuredResult.warnings),
+            "fallback_reason": structuredResult.fallbackReason,
+            "table_sources": [
+                table.sourceName
+                for table in structuredResult.tables
+            ],
+            "reused_pipeline_result": True,
+            "error": None,
         }
 
     def _CompareOcrEngine(
