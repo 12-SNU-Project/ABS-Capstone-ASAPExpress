@@ -6,10 +6,12 @@ Document_Agent output that the Dash UI can render.
 """
 from __future__ import annotations
 
+from functools import lru_cache
 import hashlib
 import json
 import os
 import sys
+from threading import Lock
 import uuid
 from pathlib import Path
 from typing import Any
@@ -41,6 +43,35 @@ PIPELINE_OUTPUTS_ROOT = APP_CONFIG.paths.ResolvePath(
     PROJECT_ROOT,
     APP_CONFIG.paths.pipeline_outputs_root,
 )
+_KURLY_OCR_RUNTIME_LOCK = Lock()
+
+
+@lru_cache(maxsize=1)
+def _BuildKurlyOcrEngines() -> tuple[Any, Any]:
+    """프로세스 수명 동안 무거운 Paddle OCR 모델을 재사용한다."""
+
+    from bussiness_logic.product import PaddleOcrEngine, PaddleOcrVlEngine
+
+    smokeConfig = APP_CONFIG.kurly_smoke
+    if not smokeConfig.use_structured_ocr:
+        return PaddleOcrEngine(), None
+    return (
+        PaddleOcrVlEngine(
+            vlExtraOptions=smokeConfig.BuildStructuredOcrVlExtraOptions(),
+            useProjectionTiling=(
+                smokeConfig.structured_ocr_use_projection_tiling
+            ),
+            maxTileHeightPixels=(
+                smokeConfig.structured_ocr_max_tile_height_pixels
+            ),
+            maxTileSidePixels=smokeConfig.structured_ocr_max_tile_side_pixels,
+            tileOverlapPixels=smokeConfig.structured_ocr_tile_overlap_pixels,
+            allowHardCutFallback=(
+                smokeConfig.structured_ocr_allow_hard_cut_fallback
+            ),
+        ),
+        PaddleOcrEngine(),
+    )
 
 
 def _read_agent_runs(store: BlackboardStore) -> list[dict[str, Any]]:
@@ -81,8 +112,6 @@ def collect_kurly_url_facts(
         KurlyDomesticPageParser,
         KurlyPipelineInput,
         KurlyProductPipeline,
-        PaddleOcrEngine,
-        PaddleOcrVlEngine,
     )
     from bussiness_logic.bridge import (
         BuildLlmRuntimeConfigFromEnv,
@@ -155,26 +184,11 @@ def collect_kurly_url_facts(
 
     if run_ocr:
         try:
-            ocr_engine = (
-                PaddleOcrVlEngine(
-                    useProjectionTiling=(
-                        smoke_config.structured_ocr_use_projection_tiling
-                    ),
-                    maxTileHeightPixels=(
-                        smoke_config.structured_ocr_max_tile_height_pixels
-                    ),
-                    maxTileSidePixels=smoke_config.structured_ocr_max_tile_side_pixels,
-                    tileOverlapPixels=smoke_config.structured_ocr_tile_overlap_pixels,
-                    allowHardCutFallback=(
-                        smoke_config.structured_ocr_allow_hard_cut_fallback
-                    ),
-                )
-                if smoke_config.use_structured_ocr
-                else PaddleOcrEngine()
-            )
+            ocr_engine, screening_ocr_engine = _BuildKurlyOcrEngines()
             pipeline = KurlyProductPipeline(
                 collector=collector,
                 ocrEngine=ocr_engine,
+                screeningOcrEngine=screening_ocr_engine,
                 inputReconstructionService=input_reconstruction_service,
             )
         except Exception as exc:  # noqa: BLE001
@@ -192,14 +206,19 @@ def collect_kurly_url_facts(
 
     artifact_root = PRODUCT_INPUT_ARTIFACT_ROOT
     artifact_root.mkdir(parents=True, exist_ok=True)
-    result = pipeline.Run(
-        KurlyPipelineInput(
-            productPageUrl=url,
-            runOcrFallback=run_ocr,
-            artifactRootPath=artifact_root,
-            maxOcrImageCount=max_ocr_images,
-        )
+    pipelineInput = KurlyPipelineInput(
+        productPageUrl=url,
+        runOcrFallback=run_ocr,
+        artifactRootPath=artifact_root,
+        maxOcrImageCount=max_ocr_images,
     )
+    if run_ocr:
+        # ponytail: 로컬 Paddle 모델은 직렬 재사용한다. 동시 처리량이 필요하면
+        # 별도 OCR worker로 옮긴다.
+        with _KURLY_OCR_RUNTIME_LOCK:
+            result = pipeline.Run(pipelineInput)
+    else:
+        result = pipeline.Run(pipelineInput)
     product_input = ProductInputAdapter().BuildFromObject(result)
     public_result = result.BuildPublicResult()
     source_product_page = public_result.get("source_product_page") or {}

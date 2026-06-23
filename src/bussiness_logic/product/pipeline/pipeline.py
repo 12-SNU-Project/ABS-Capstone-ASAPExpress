@@ -31,11 +31,13 @@ class KurlyProductPipeline:
         self,
         collector: KurlyPageCollector,
         ocrEngine: Optional[ProductOcrEngine] = None,
+        screeningOcrEngine: Optional[ProductOcrEngine] = None,
         ocrFactNormalizer: Optional[ProductOcrFactNormalizer] = None,
         inputReconstructionService: Optional[ProductInputReconstructionService] = None,
     ) -> None:
         self._collector = collector
         self._ocrEngine = ocrEngine
+        self._screeningOcrEngine = screeningOcrEngine
         self._ocrFactNormalizer = ocrFactNormalizer or ProductOcrFactNormalizer()
         self._inputReconstructionService = inputReconstructionService
 
@@ -213,7 +215,10 @@ class KurlyProductPipeline:
             )
             return []
 
-        ocrFallbackRunner = ProductOcrFallbackRunner(self._ocrEngine)
+        ocrFallbackRunner = ProductOcrFallbackRunner(
+            self._ocrEngine,
+            screeningEngine=self._screeningOcrEngine,
+        )
         imageResults = ocrFallbackRunner.Run(
             imageUrls=collectionResult.ocrCandidateImageUrls,
             artifactRootPath=pipelineInput.artifactRootPath,
@@ -227,24 +232,31 @@ class KurlyProductPipeline:
             if imageResult.error is not None
         )
 
-        batchImageCount = max(1, pipelineInput.maxOcrImageCount)
         candidateImageCount = len(collectionResult.ocrCandidateImageUrls)
-        batchCount = (
-            candidateImageCount + batchImageCount - 1
-        ) // batchImageCount
+        selectedImageCount = min(candidateImageCount, pipelineInput.maxOcrImageCount)
+        structuredOcrImageCount = sum(
+            "structured_ocr" in imageResult.processingTimes
+            for imageResult in imageResults
+        )
+        screenedRawImageCount = sum(
+            imageResult.structuredOcr.textMergeMode == "screened_raw_only"
+            for imageResult in imageResults
+        )
 
         steps.append(
             PipelineStep(
                 stepName="ocr_fallback",
                 succeeded=not errors,
                 message=(
-                    "candidate_image_count={0}, batch_image_count={1}, "
-                    "batch_count={2}, ocr_image_count={3}, error_count={4}"
+                    "candidate_image_count={0}, selected_image_count={1}, "
+                    "ocr_image_count={2}, structured_ocr_image_count={3}, "
+                    "screened_raw_image_count={4}, error_count={5}"
                 ).format(
                     candidateImageCount,
-                    batchImageCount,
-                    batchCount,
+                    selectedImageCount,
                     len(imageResults),
+                    structuredOcrImageCount,
+                    screenedRawImageCount,
                     len(errors),
                 ),
             )

@@ -154,6 +154,9 @@ class KurlySmokeAppConfig(BaseModel):
     structured_ocr_tile_overlap_pixels: StrictInt = 240
     structured_ocr_use_projection_tiling: StrictBool = True
     structured_ocr_allow_hard_cut_fallback: StrictBool = False
+    structured_ocr_vl_rec_backend: Optional[StrictStr] = None
+    structured_ocr_vl_rec_server_url: Optional[StrictStr] = None
+    structured_ocr_vl_rec_api_model_name: Optional[StrictStr] = None
     use_input_reconstruction: StrictBool = True
     use_llm_input_reconstruction: StrictBool = False
     write_llm_input_reconstruction_debug_artifacts: StrictBool = True
@@ -187,6 +190,25 @@ class KurlySmokeAppConfig(BaseModel):
         if value <= 0:
             raise ValueError("llm_input_reconstruction_max_tokens must be positive.")
         return value
+
+    @field_validator("max_ocr_image_count")
+    @classmethod
+    def ValidateMaxOcrImageCount(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("max_ocr_image_count must be non-negative.")
+        return value
+
+    def BuildStructuredOcrVlExtraOptions(self) -> dict[str, str]:
+        options = {
+            "vl_rec_backend": self.structured_ocr_vl_rec_backend,
+            "vl_rec_server_url": self.structured_ocr_vl_rec_server_url,
+            "vl_rec_api_model_name": self.structured_ocr_vl_rec_api_model_name,
+        }
+        return {
+            key: value.strip()
+            for key, value in options.items()
+            if isinstance(value, str) and value.strip()
+        }
 
 
 class OntologySmokeAppConfig(BaseModel):

@@ -2,7 +2,8 @@
 
 import re
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from time import perf_counter
+from typing import Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -10,7 +11,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from bussiness_logic.artifact_paths import ExtractProductIdFromUrl
 from bussiness_logic.product.ocr.paddle_ocr import (
+    BuildOcrRegionCrop,
     ProductOcrEngine,
+    ProductOcrTextRegion,
+    ProductOcrTileTextResult,
     ProductStructuredOcrResult,
 )
 
@@ -23,6 +27,35 @@ DEFAULT_PRODUCT_OCR_IMAGE_DOWNLOAD_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
+)
+OCR_SCREENING_FOOD_DETAIL_LABELS = (
+    "제품명",
+    "식품유형",
+    "식품의 유형",
+    "원재료",
+    "원료명",
+    "내용량",
+    "보관방법",
+    "소비기한",
+    "유통기한",
+    "품목보고",
+    "포장재질",
+)
+OCR_SCREENING_NUTRITION_LABELS = (
+    "영양정보",
+    "영양성분",
+    "나트륨",
+    "탄수화물",
+    "당류",
+    "지방",
+    "트랜스지방",
+    "포화지방",
+    "콜레스테롤",
+    "단백질",
+)
+OCR_SCREENING_QUANTITY_PATTERN = re.compile(
+    r"\d+(?:[.,]\d+)?\s*(?:mg|g|kg|ml|l|%|kcal|㎎|㎏|㎖)",
+    re.IGNORECASE,
 )
 
 
@@ -38,6 +71,10 @@ class ProductOcrImageResult(BaseModel):
     structuredOcr: ProductStructuredOcrResult = Field(
         default_factory=ProductStructuredOcrResult,
         alias="structured_ocr",
+    )
+    processingTimes: Dict[str, float] = Field(
+        default_factory=dict,
+        alias="processing_times",
     )
     error: Optional[str] = None
 
@@ -244,8 +281,10 @@ class ProductOcrFallbackRunner:
         imageDownloader: Optional[ProductOcrImageDownloader] = None,
         artifactStore: Optional[ProductOcrArtifactStore] = None,
         textQualityEvaluator: Optional[ProductOcrTextQualityEvaluator] = None,
+        screeningEngine: Optional[ProductOcrEngine] = None,
     ) -> None:
         self._ocrEngine = ocrEngine
+        self._screeningEngine = screeningEngine
         self._imageDownloader = imageDownloader or ProductOcrImageDownloader(
             downloadUserAgent,
         )
@@ -268,20 +307,16 @@ class ProductOcrFallbackRunner:
         )
 
         imageResults: List[ProductOcrImageResult] = []
-        batchImageCount = max(1, maxImageCount)
-        for batchStartIndex in range(0, len(imageUrls), batchImageCount):
-            batchImageUrls = imageUrls[
-                batchStartIndex : batchStartIndex + batchImageCount
-            ]
-            for batchOffset, imageUrl in enumerate(batchImageUrls, start=1):
-                imageResult = self._ExtractImageText(
-                    imageIndex=batchStartIndex + batchOffset,
-                    imageUrl=imageUrl,
-                    artifactDirectory=artifactDirectory,
-                    downloadTimeoutSeconds=downloadTimeoutSeconds,
-                )
-                if imageResult is not None:
-                    imageResults.append(imageResult)
+        selectedImageUrls = imageUrls[: max(0, maxImageCount)]
+        for imageIndex, imageUrl in enumerate(selectedImageUrls, start=1):
+            imageResult = self._ExtractImageText(
+                imageIndex=imageIndex,
+                imageUrl=imageUrl,
+                artifactDirectory=artifactDirectory,
+                downloadTimeoutSeconds=downloadTimeoutSeconds,
+            )
+            if imageResult is not None:
+                imageResults.append(imageResult)
 
         return imageResults
 
@@ -301,20 +336,79 @@ class ProductOcrFallbackRunner:
         downloadTimeoutSeconds: int,
     ) -> Optional[ProductOcrImageResult]:
         artifactPath: Optional[Path] = None
+        processingTimes: Dict[str, float] = {}
         try:
+            startedAt = perf_counter()
             imageBytes = self._imageDownloader.Download(
                 imageUrl,
                 downloadTimeoutSeconds,
             )
+            processingTimes["download"] = perf_counter() - startedAt
             artifactPath = self._artifactStore.WriteImage(
                 artifactDirectory=artifactDirectory,
                 imageIndex=imageIndex,
                 imageUrl=imageUrl,
                 imageBytes=imageBytes,
             )
-            structuredOcrResult = self._ocrEngine.ExtractStructuredTextFromImage(
-                imageBytes,
+            screeningResult: Optional[ProductStructuredOcrResult] = None
+            screeningRegions: List[ProductOcrTextRegion] = []
+            if self._screeningEngine is not None:
+                try:
+                    startedAt = perf_counter()
+                    screeningResult, screeningRegions = (
+                        self._screeningEngine.ExtractStructuredTextWithRegionsFromImage(
+                            imageBytes,
+                        )
+                    )
+                    processingTimes["raw_ocr"] = perf_counter() - startedAt
+                except Exception:
+                    screeningResult = None
+
+            shouldRunStructuredOcr, screeningSummary = (
+                self._EvaluateStructuredOcrCandidate(
+                    screeningResult.text if screeningResult is not None else "",
+                )
             )
+            if screeningResult is not None and not shouldRunStructuredOcr:
+                structuredOcrResult = screeningResult.model_copy(
+                    update={
+                        "fallbackReason": None,
+                        "textMergeMode": "screened_raw_only",
+                        "warnings": [
+                            *screeningResult.warnings,
+                            "structured_ocr_skipped_by_screening {0}".format(
+                                screeningSummary,
+                            ),
+                        ],
+                    }
+                )
+            else:
+                structuredInputBytes = imageBytes
+                roiBounds: Optional[Tuple[int, int, int, int]] = None
+                if screeningRegions:
+                    startedAt = perf_counter()
+                    regionCrop = BuildOcrRegionCrop(
+                        imageBytes,
+                        screeningRegions,
+                        OCR_SCREENING_NUTRITION_LABELS,
+                    )
+                    processingTimes["roi_build"] = perf_counter() - startedAt
+                    if regionCrop is not None:
+                        structuredInputBytes, roiBounds = regionCrop
+                startedAt = perf_counter()
+                structuredOcrResult = (
+                    self._ocrEngine.ExtractStructuredTextFromImage(
+                        structuredInputBytes,
+                    )
+                )
+                processingTimes["structured_ocr"] = perf_counter() - startedAt
+                if screeningResult is not None:
+                    structuredOcrResult = self._MergeStructuredAndScreeningOcr(
+                        structuredOcrResult,
+                        screeningResult,
+                        screeningSummary=screeningSummary,
+                        roiBounds=roiBounds,
+                    )
             ocrText = structuredOcrResult.text
             if (
                 not isinstance(ocrText, str)
@@ -323,7 +417,11 @@ class ProductOcrFallbackRunner:
                 )
             ):
                 return None
-            imageTiles = self._ocrEngine.BuildArtifactImageTiles(imageBytes)
+            imageTiles = (
+                [(None, imageBytes)]
+                if screeningResult is not None
+                else self._ocrEngine.BuildArtifactImageTiles(imageBytes)
+            )
             artifactPaths = self._artifactStore.ReplaceImageWithInformativeTiles(
                 artifactPath=artifactPath,
                 imageIndex=imageIndex,
@@ -340,12 +438,115 @@ class ProductOcrFallbackRunner:
                 imagePaths=[str(path) for path in artifactPaths],
                 ocrText=ocrText,
                 structuredOcr=structuredOcrResult,
+                processingTimes={
+                    key: round(value, 3)
+                    for key, value in processingTimes.items()
+                },
             )
         except Exception as error:
             return ProductOcrImageResult(
                 imageUrl=imageUrl,
+                processingTimes={
+                    key: round(value, 3)
+                    for key, value in processingTimes.items()
+                },
                 error="OCR fallback failed for image {0}: {1}".format(
                     imageUrl,
                     error,
                 ),
             )
+
+    def _MergeStructuredAndScreeningOcr(
+        self,
+        structuredResult: ProductStructuredOcrResult,
+        screeningResult: ProductStructuredOcrResult,
+        *,
+        screeningSummary: str,
+        roiBounds: Optional[Tuple[int, int, int, int]],
+    ) -> ProductStructuredOcrResult:
+        rawText = screeningResult.rawText or screeningResult.text
+        rawTileTexts = (
+            screeningResult.rawTileTexts
+            or [ProductOcrTileTextResult(text=rawText)]
+            if rawText
+            else []
+        )
+        roiWarning = (
+            "structured_ocr_roi_applied bounds={0},{1},{2},{3}".format(
+                *roiBounds,
+            )
+            if roiBounds is not None
+            else "structured_ocr_roi_unavailable"
+        )
+        warnings = list(
+            dict.fromkeys(
+                [
+                    *screeningResult.warnings,
+                    *structuredResult.warnings,
+                    "structured_ocr_screening {0}".format(screeningSummary),
+                    roiWarning,
+                ]
+            )
+        )
+        if not structuredResult.usedStructuredTables:
+            return screeningResult.model_copy(
+                update={
+                    "fallbackReason": structuredResult.fallbackReason,
+                    "textMergeMode": "screened_raw_only",
+                    "warnings": warnings,
+                }
+            )
+
+        mergedText = structuredResult.structuredText
+        if rawText:
+            mergedText = "[structured_tables]\n{0}\n\n[raw_ocr_tiles]\n{1}".format(
+                structuredResult.structuredText,
+                rawText,
+            )
+        return structuredResult.model_copy(
+            update={
+                "text": mergedText,
+                "rawText": rawText,
+                "rawTileTexts": rawTileTexts,
+                "textMergeMode": "structured_plus_screening_raw",
+                "warnings": warnings,
+            }
+        )
+
+    def _EvaluateStructuredOcrCandidate(
+        self,
+        text: str,
+    ) -> Tuple[bool, str]:
+        normalizedText = re.sub(r"\s+", "", (text or "").lower())
+        meaningfulCharacterCount = len(re.findall(r"[A-Za-z가-힣]", normalizedText))
+        nutritionMatchCount = sum(
+            label.replace(" ", "") in normalizedText
+            for label in OCR_SCREENING_NUTRITION_LABELS
+        )
+        foodDetailMatchCount = sum(
+            label.replace(" ", "") in normalizedText
+            for label in OCR_SCREENING_FOOD_DETAIL_LABELS
+        )
+        quantityMatchCount = len(
+            OCR_SCREENING_QUANTITY_PATTERN.findall(text or "")
+        )
+        isCandidate = meaningfulCharacterCount >= 40 and (
+            (
+                nutritionMatchCount >= 3
+                and quantityMatchCount >= 3
+            )
+            or (
+                nutritionMatchCount >= 2
+                and foodDetailMatchCount >= 3
+                and quantityMatchCount >= 4
+            )
+        )
+        return isCandidate, (
+            "nutrition_labels={0} food_detail_labels={1} "
+            "quantities={2} meaningful_characters={3}"
+        ).format(
+            nutritionMatchCount,
+            foodDetailMatchCount,
+            quantityMatchCount,
+            meaningfulCharacterCount,
+        )

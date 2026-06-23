@@ -56,6 +56,7 @@ Do not infer HS, CN, TARIC, customs, legal, or regulatory conclusions.
 Do not create product facts that are absent from the provided evidence.
 Correct OCR typos only when the surrounding evidence strongly supports the correction.
 If evidence is insufficient or conflicting, use unresolved_facts or conflicts.
+Evidence with different option_key values describes separate product options. Preserve option-specific values in separate reconstructed_tables and do not report them as conflicts.
 The application will generate normalized_fact_texts after validation.
 Preserve table rows in reconstructed_tables even when they are not selected as product_facts.
 Prefer concise product_facts for classification: product name, food/cosmetic type, physical form, processing state, preparation/use, storage state, ingredients, composition ratios, net content, and origin/manufacture country when explicit.
@@ -74,6 +75,10 @@ INLINE_OCR_COLLECTION_MARKER_PATTERN = re.compile(
 )
 GENERIC_OCR_FIELD_PATTERN = re.compile(
     r"(?i)(?:^|\s)(?:ocr|raw\s*ocr|tile|table|관찰|관측|메타|metadata)(?:\s|$)"
+)
+QUANTITY_TOKEN_PATTERN = re.compile(
+    r"(?<!\d)(\d+(?:[.,]\d+)?)\s*(mg|g|kg|ml|l|%|kcal|㎎|㎏|㎖)",
+    re.IGNORECASE,
 )
 
 PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
@@ -141,17 +146,48 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                 {
                     "evidence_id": "evidence-1",
                     "source_type": "raw_ocr_tile",
+                    "option_key": "option-1",
                     "text": "제품명 오봉집낙지볶음 내용량 300g(274kcal) 식품의 유형 기타수산물가공품",
                 },
                 {
                     "evidence_id": "evidence-2",
                     "source_type": "raw_ocr_tile",
+                    "option_key": "option-2",
                     "text": "제품명 오봉집낙지볶음 내용량 500g(457kcal) 식품의 유형 기타수산물가공품",
                 },
             ],
         },
         "output": {
-            "reconstructed_tables": [],
+            "reconstructed_tables": [
+                {
+                    "table_name": "옵션 1",
+                    "source_refs": ["evidence-1"],
+                    "rows": [
+                        {
+                            "field_name": "내용량",
+                            "raw_value": "300g(274kcal)",
+                            "normalized_value": "300g(274kcal)",
+                            "unit": "g",
+                            "daily_value_percent": "",
+                            "source_refs": ["evidence-1"],
+                        }
+                    ],
+                },
+                {
+                    "table_name": "옵션 2",
+                    "source_refs": ["evidence-2"],
+                    "rows": [
+                        {
+                            "field_name": "내용량",
+                            "raw_value": "500g(457kcal)",
+                            "normalized_value": "500g(457kcal)",
+                            "unit": "g",
+                            "daily_value_percent": "",
+                            "source_refs": ["evidence-2"],
+                        }
+                    ],
+                },
+            ],
             "product_facts": [
                 {
                     "field_name": "제품명",
@@ -170,19 +206,8 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                     "validation_status": "accepted",
                 },
             ],
-            "unresolved_facts": [
-                {
-                    "field_name": "포장단위별 내용물의 용량(중량), 수량",
-                    "raw_value": "300g(274kcal) / 500g(457kcal)",
-                    "normalized_value": "",
-                    "source_refs": ["evidence-1", "evidence-2"],
-                    "correction_type": "none",
-                    "validation_status": "unresolved",
-                }
-            ],
-            "conflicts": [
-                "포장단위별 내용물의 용량(중량), 수량이 evidence-1에서는 300g, evidence-2에서는 500g으로 충돌한다."
-            ],
+            "unresolved_facts": [],
+            "conflicts": [],
             "warnings": [],
         },
     },
@@ -198,6 +223,12 @@ class ProductInputEvidenceRecord(BaseModel):
     sourceType: str = Field(alias="source_type")
     text: str
     sourceRef: Optional[str] = Field(default=None, alias="source_ref")
+    optionKey: Optional[str] = Field(default=None, alias="option_key")
+    validationStatus: str = Field(default="unverified", alias="validation_status")
+    validationIssues: List[str] = Field(
+        default_factory=list,
+        alias="validation_issues",
+    )
 
 
 class ProductInputEvidencePackage(BaseModel):
@@ -246,6 +277,11 @@ class ProductReconstructedTableRow(BaseModel):
     unit: str = ""
     dailyValuePercent: str = Field(default="", alias="daily_value_percent")
     sourceRefs: List[str] = Field(default_factory=list, alias="source_refs")
+    validationStatus: str = Field(default="unverified", alias="validation_status")
+    validationIssues: List[str] = Field(
+        default_factory=list,
+        alias="validation_issues",
+    )
 
 
 class ProductReconstructedTable(BaseModel):
@@ -271,6 +307,17 @@ def _StripOcrCollectionMarkers(text: str) -> str:
         if OCR_COLLECTION_MARKER_PATTERN.fullmatch(line.strip()) is None
     ]
     return NormalizeWhitespaceLines("\n".join(lines))
+
+
+def _ExtractQuantityTokens(text: str) -> set[tuple[str, str]]:
+    unitAliases = {"㎎": "mg", "㎏": "kg", "㎖": "ml"}
+    return {
+        (
+            value.replace(",", ""),
+            unitAliases.get(unit.lower(), unit.lower()),
+        )
+        for value, unit in QUANTITY_TOKEN_PATTERN.findall(text or "")
+    }
 
 
 def _IsGenericOcrFieldName(fieldName: str) -> bool:
@@ -455,6 +502,20 @@ class _BoundOcrTable(_BoundModel):
         default="",
         validation_alias=AliasChoices("plainText", "plain_text"),
     )
+    validationStatus: str = Field(
+        default="unverified",
+        validation_alias=AliasChoices(
+            "validationStatus",
+            "validation_status",
+        ),
+    )
+    validationIssues: List[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices(
+            "validationIssues",
+            "validation_issues",
+        ),
+    )
 
 
 class _BoundRawTileText(_BoundModel):
@@ -496,7 +557,11 @@ class ProductInputEvidenceBuilder:
             for ocrImageResult in ocrImageResults
         ]
         self._AppendNoticeEvidence(records, boundCollectionResult.parsedProductPage)
-        self._AppendOcrEvidence(records, boundOcrImageResults)
+        self._AppendOcrEvidence(
+            records,
+            boundOcrImageResults,
+            boundCollectionResult.parsedProductPage,
+        )
         if not any(record.sourceType.startswith("raw_ocr") for record in records):
             self._AppendRecord(
                 records,
@@ -524,12 +589,14 @@ class ProductInputEvidenceBuilder:
                     sourceType="notice_option",
                     text=noticeOption.optionName,
                     sourceRef="notice-option-{0}".format(optionIndex),
+                    optionKey="option-{0}".format(optionIndex),
                 )
             for fieldIndex, field in enumerate(noticeOption.fields, start=1):
                 self._AppendNoticeFieldRecord(
                     records,
                     field,
                     "notice-option-{0}-field-{1}".format(optionIndex, fieldIndex),
+                    optionKey="option-{0}".format(optionIndex),
                 )
         if parsedProductPage.productNoticeOptions:
             return
@@ -548,6 +615,7 @@ class ProductInputEvidenceBuilder:
         records: List[ProductInputEvidenceRecord],
         field: _BoundNoticeField,
         sourceRef: str,
+        optionKey: Optional[str] = None,
     ) -> None:
         if field.fieldName is None and field.fieldValue is None:
             return
@@ -560,12 +628,14 @@ class ProductInputEvidenceBuilder:
             sourceType="notice_field",
             text=text or "",
             sourceRef=sourceRef,
+            optionKey=optionKey,
         )
 
     def _AppendOcrEvidence(
         self,
         records: List[ProductInputEvidenceRecord],
         ocrImageResults: Sequence[_BoundOcrImageResult],
+        parsedProductPage: _BoundParsedProductPage,
     ) -> None:
         for imageIndex, imageResult in enumerate(ocrImageResults, start=1):
             for tableIndex, table in enumerate(imageResult.structuredOcr.tables, start=1):
@@ -574,6 +644,12 @@ class ProductInputEvidenceBuilder:
                     sourceType="pp_table",
                     text=table.plainText,
                     sourceRef="image-{0}-table-{1}".format(imageIndex, tableIndex),
+                    optionKey=self._MatchOptionKey(
+                        table.plainText,
+                        parsedProductPage.productNoticeOptions,
+                    ),
+                    validationStatus=table.validationStatus,
+                    validationIssues=table.validationIssues,
                 )
             for rawTileText in imageResult.structuredOcr.rawTileTexts:
                 self._AppendRecord(
@@ -584,6 +660,10 @@ class ProductInputEvidenceBuilder:
                         imageIndex,
                         rawTileText.tileIndex if rawTileText.tileIndex is not None else 1,
                     ),
+                    optionKey=self._MatchOptionKey(
+                        rawTileText.text,
+                        parsedProductPage.productNoticeOptions,
+                    ),
                 )
 
     def _AppendRecord(
@@ -592,6 +672,9 @@ class ProductInputEvidenceBuilder:
         sourceType: str,
         text: str,
         sourceRef: Optional[str],
+        optionKey: Optional[str] = None,
+        validationStatus: str = "unverified",
+        validationIssues: Optional[Sequence[str]] = None,
     ) -> None:
         normalizedText = _StripOcrCollectionMarkers(text)
         if normalizedText == "":
@@ -602,8 +685,45 @@ class ProductInputEvidenceBuilder:
                 sourceType=sourceType,
                 text=normalizedText,
                 sourceRef=sourceRef,
+                optionKey=optionKey,
+                validationStatus=validationStatus,
+                validationIssues=list(validationIssues or []),
             )
         )
+
+    def _MatchOptionKey(
+        self,
+        text: str,
+        options: Sequence[_BoundNoticeOption],
+    ) -> Optional[str]:
+        normalizedText = NormalizeWhiteSpace(text).lower().replace(" ", "")
+        matchedOptionKeys: List[str] = []
+        for optionIndex, option in enumerate(options, start=1):
+            anchors = self._BuildOptionAnchors(option)
+            if anchors and any(anchor in normalizedText for anchor in anchors):
+                matchedOptionKeys.append("option-{0}".format(optionIndex))
+        return matchedOptionKeys[0] if len(matchedOptionKeys) == 1 else None
+
+    def _BuildOptionAnchors(self, option: _BoundNoticeOption) -> set[str]:
+        rawValues = [
+            option.optionName or "",
+            *[
+                field.fieldValue or ""
+                for field in option.fields
+                if field.fieldValue is not None
+            ],
+        ]
+        anchors = {
+            NormalizeWhiteSpace(value).lower().replace(" ", "")
+            for value in rawValues
+            if len(NormalizeWhiteSpace(value)) >= 3
+        }
+        anchors.update(
+            "{0}{1}".format(value, unit)
+            for rawValue in rawValues
+            for value, unit in _ExtractQuantityTokens(rawValue)
+        )
+        return anchors
 
 
 class ProductFactReconstructionValidator:
@@ -615,12 +735,17 @@ class ProductFactReconstructionValidator:
         evidencePackage: ProductInputEvidencePackage,
     ) -> ProductFactReconstructionResult:
         validEvidenceIds = {record.evidenceId for record in evidencePackage.records}
+        evidenceById = {
+            record.evidenceId: record
+            for record in evidencePackage.records
+        }
         productFacts: List[ProductFactRecord] = []
         unresolvedFacts: List[ProductFactRecord] = []
         warnings = list(result.warnings)
         reconstructedTables = self._CleanReconstructedTables(
             result.reconstructedTables,
             validEvidenceIds=validEvidenceIds,
+            evidenceById=evidenceById,
             warnings=warnings,
         )
         for factRecord in result.productFacts:
@@ -648,6 +773,29 @@ class ProductFactReconstructionValidator:
                     )
                 )
                 continue
+            validationIssue = self._ValidateQuantityEvidence(
+                cleanedFactRecord.rawValue or cleanedFactRecord.normalizedValue,
+                cleanedFactRecord.sourceRefs,
+                evidenceById,
+            )
+            validationIssue = validationIssue or self._ValidateTextEvidence(
+                cleanedFactRecord.rawValue or cleanedFactRecord.normalizedValue,
+                cleanedFactRecord.sourceRefs,
+                evidenceById,
+            )
+            if validationIssue is not None:
+                warnings.append(
+                    "unresolved_fact_evidence field={0} reason={1}".format(
+                        cleanedFactRecord.fieldName,
+                        validationIssue,
+                    )
+                )
+                unresolvedFacts.append(
+                    cleanedFactRecord.model_copy(
+                        update={"validationStatus": "unresolved"}
+                    )
+                )
+                continue
             productFacts.append(cleanedFactRecord)
         for factRecord in result.unresolvedFacts:
             cleanedFactRecord = self._CleanFactRecord(
@@ -672,6 +820,7 @@ class ProductFactReconstructionValidator:
         tables: Sequence[ProductReconstructedTable],
         *,
         validEvidenceIds: set[str],
+        evidenceById: Mapping[str, ProductInputEvidenceRecord],
         warnings: List[str],
     ) -> List[ProductReconstructedTable]:
         cleanedTables: List[ProductReconstructedTable] = []
@@ -708,6 +857,22 @@ class ProductFactReconstructionValidator:
                     warnings=warnings,
                     context="table={0} field={1}".format(tableName, fieldName),
                 )
+                validationIssue = self._ValidateQuantityEvidence(
+                    rawValue or normalizedValue,
+                    rowSourceRefs or tableSourceRefs,
+                    evidenceById,
+                )
+                validationIssue = validationIssue or self._ValidateTextEvidence(
+                    rawValue or normalizedValue,
+                    rowSourceRefs or tableSourceRefs,
+                    evidenceById,
+                )
+                validationStatus = self._ResolveRowValidationStatus(
+                    rawValue or normalizedValue,
+                    rowSourceRefs or tableSourceRefs,
+                    evidenceById,
+                    validationIssue,
+                )
                 cleanedRows.append(
                     row.model_copy(
                         update={
@@ -719,6 +884,10 @@ class ProductFactReconstructionValidator:
                                 row.dailyValuePercent,
                             ),
                             "sourceRefs": rowSourceRefs or tableSourceRefs,
+                            "validationStatus": validationStatus,
+                            "validationIssues": (
+                                [] if validationIssue is None else [validationIssue]
+                            ),
                         }
                     )
                 )
@@ -800,6 +969,100 @@ class ProductFactReconstructionValidator:
                 ),
             }
         )
+
+    def _ValidateQuantityEvidence(
+        self,
+        value: str,
+        sourceRefs: Sequence[str],
+        evidenceById: Mapping[str, ProductInputEvidenceRecord],
+    ) -> Optional[str]:
+        valueTokens = _ExtractQuantityTokens(value)
+        if not valueTokens:
+            return None
+        evidenceText = "\n".join(
+            evidenceById[sourceRef].text
+            for sourceRef in sourceRefs
+            if sourceRef in evidenceById
+        )
+        evidenceTokens = _ExtractQuantityTokens(evidenceText)
+        missingTokens = valueTokens - evidenceTokens
+        if missingTokens:
+            return "missing_quantity_tokens:{0}".format(
+                ",".join(
+                    "{0}{1}".format(number, unit)
+                    for number, unit in sorted(missingTokens)
+                )
+            )
+        matchingRecords = [
+            evidenceById[sourceRef]
+            for sourceRef in sourceRefs
+            if (
+                sourceRef in evidenceById
+                and valueTokens <= _ExtractQuantityTokens(
+                    evidenceById[sourceRef].text
+                )
+            )
+        ]
+        if any(
+            record.sourceType != "pp_table"
+            or record.validationStatus == "verified"
+            for record in matchingRecords
+        ):
+            return None
+        validationIssues = [
+            issue
+            for record in matchingRecords
+            for issue in record.validationIssues
+            if issue
+        ]
+        if validationIssues:
+            return "structured_source_validation:{0}".format(
+                ",".join(dict.fromkeys(validationIssues))
+            )
+        return None
+
+    def _ResolveRowValidationStatus(
+        self,
+        value: str,
+        sourceRefs: Sequence[str],
+        evidenceById: Mapping[str, ProductInputEvidenceRecord],
+        validationIssue: Optional[str],
+    ) -> str:
+        if validationIssue is not None:
+            return "review_required"
+        if not _ExtractQuantityTokens(value):
+            return "evidence_matched"
+        if any(
+            evidenceById[sourceRef].validationStatus == "verified"
+            for sourceRef in sourceRefs
+            if sourceRef in evidenceById
+        ):
+            return "verified"
+        return "evidence_matched"
+
+    def _ValidateTextEvidence(
+        self,
+        value: str,
+        sourceRefs: Sequence[str],
+        evidenceById: Mapping[str, ProductInputEvidenceRecord],
+    ) -> Optional[str]:
+        if _ExtractQuantityTokens(value):
+            return None
+        compactValue = re.sub(r"[^0-9A-Za-z가-힣]+", "", value).lower()
+        if len(compactValue) < 3:
+            return None
+        if any(
+            compactValue
+            in re.sub(
+                r"[^0-9A-Za-z가-힣]+",
+                "",
+                evidenceById[sourceRef].text,
+            ).lower()
+            for sourceRef in sourceRefs
+            if sourceRef in evidenceById
+        ):
+            return None
+        return "raw_value_not_found_in_source"
 
     def _BuildNormalizedFactTexts(
         self,
@@ -959,9 +1222,22 @@ class DeterministicProductFactReconstructor:
         evidencePackage: ProductInputEvidencePackage,
     ) -> List[str]:
         normalizedFactText = NormalizeWhiteSpace(factText)
+        splitFact = _SplitFieldText(factText)
+        factValue = splitFact[1] if splitFact is not None else factText
+        normalizedFactValue = NormalizeWhiteSpace(factValue)
+        factQuantityTokens = _ExtractQuantityTokens(factValue)
         sourceRefs: List[str] = []
         for record in evidencePackage.records:
-            if normalizedFactText in NormalizeWhiteSpace(record.text):
+            normalizedEvidenceText = NormalizeWhiteSpace(record.text)
+            evidenceQuantityTokens = _ExtractQuantityTokens(record.text)
+            if (
+                normalizedFactText in normalizedEvidenceText
+                or normalizedFactValue in normalizedEvidenceText
+                or (
+                    factQuantityTokens
+                    and factQuantityTokens <= evidenceQuantityTokens
+                )
+            ):
                 sourceRefs.append(record.evidenceId)
         return sourceRefs
 
@@ -1214,14 +1490,6 @@ class ProductInputReconstructionService:
         llmDebugArtifactRootPath: Optional[Path] = None,
     ) -> None:
         self._evidenceBuilder = ProductInputEvidenceBuilder()
-        if runtimeAdapter is not None:
-            self._reconstructor = LlmProductFactReconstructor(
-                runtimeAdapter=runtimeAdapter,
-                maxTokens=llmMaxTokens,
-                debugArtifactRootPath=llmDebugArtifactRootPath,
-            )
-            return
-
         resolvedDictionaryPath = (
             DEFAULT_PRODUCT_INPUT_DICTIONARY_PATH
             if dictionaryPath is None
@@ -1234,8 +1502,20 @@ class ProductInputReconstructionService:
             dictionaryEntries,
             fuzzyMinRatio=fuzzyMinRatio,
         )
-        self._reconstructor = DeterministicProductFactReconstructor(
+        self._validator = ProductFactReconstructionValidator()
+        self._deterministicReconstructor = DeterministicProductFactReconstructor(
             dictionaryRetriever,
+            validator=self._validator,
+        )
+        self._llmReconstructor = (
+            LlmProductFactReconstructor(
+                runtimeAdapter=runtimeAdapter,
+                validator=self._validator,
+                maxTokens=llmMaxTokens,
+                debugArtifactRootPath=llmDebugArtifactRootPath,
+            )
+            if runtimeAdapter is not None
+            else None
         )
 
     def ReconstructFromPipelineParts(
@@ -1249,7 +1529,18 @@ class ProductInputReconstructionService:
             ocrImageResults=ocrImageResults,
             combinedOcrText=combinedOcrText,
         )
-        reconstructionResult = self._reconstructor.Reconstruct(evidencePackage)
+        baselineResult = self._deterministicReconstructor.Reconstruct(
+            evidencePackage,
+        )
+        if self._llmReconstructor is None:
+            reconstructionResult = baselineResult
+        else:
+            llmResult = self._llmReconstructor.Reconstruct(evidencePackage)
+            reconstructionResult = self._MergeReconstructionResults(
+                baselineResult,
+                llmResult,
+                evidencePackage,
+            )
         sourceRefLabels = self._BuildSourceRefLabels(
             evidencePackage,
             reconstructionResult,
@@ -1263,6 +1554,41 @@ class ProductInputReconstructionService:
                     sourceRefLabels,
                 )
             }
+        )
+
+    def _MergeReconstructionResults(
+        self,
+        baselineResult: ProductFactReconstructionResult,
+        llmResult: ProductFactReconstructionResult,
+        evidencePackage: ProductInputEvidencePackage,
+    ) -> ProductFactReconstructionResult:
+        if not llmResult.usedLlmReconstruction:
+            return baselineResult.model_copy(
+                update={
+                    "warnings": list(
+                        dict.fromkeys(
+                            [*baselineResult.warnings, *llmResult.warnings]
+                        )
+                    ),
+                    "fallbackReason": llmResult.fallbackReason,
+                    "debugArtifacts": dict(llmResult.debugArtifacts),
+                }
+            )
+
+        # 검증을 통과한 LLM compact fact를 기준으로 유지한다.
+        # deterministic 결과는 LLM 실패 시에만 fallback으로 사용한다.
+        return self._validator.Validate(
+            llmResult.model_copy(
+                update={
+                    "warnings": list(
+                        dict.fromkeys(
+                            [*baselineResult.warnings, *llmResult.warnings]
+                        )
+                    ),
+                    "dictionaryMatches": baselineResult.dictionaryMatches,
+                }
+            ),
+            evidencePackage,
         )
 
     def _BuildSourceRefLabels(
@@ -1297,6 +1623,7 @@ class ProductInputReconstructionService:
                 {
                     "evidence_id": record.evidenceId,
                     "source_type": record.sourceType,
+                    "option_key": record.optionKey or "",
                     "source_label": sourceRefLabels.get(
                         record.evidenceId,
                         self._BuildRecordSourceLabel(record),

@@ -1,9 +1,11 @@
 """상품 이미지 OCR adapter."""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from html.parser import HTMLParser
 from math import ceil, floor
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+import re
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -18,6 +20,14 @@ class ProductOcrError(RuntimeError):
     """OCR engine 초기화 또는 추론이 실패했을 때 사용한다."""
 
 
+@dataclass(frozen=True)
+class ProductOcrTextRegion:
+    """Raw OCR 텍스트와 원본 이미지 좌표."""
+
+    text: str
+    bounds: Tuple[int, int, int, int]
+
+
 class ProductOcrTableResult(BaseModel):
     """구조 OCR에서 추출한 단일 표 결과."""
 
@@ -30,6 +40,11 @@ class ProductOcrTableResult(BaseModel):
     html: str = ""
     cellTexts: List[str] = Field(default_factory=list, alias="cell_texts")
     plainText: str = Field(default="", alias="plain_text")
+    validationStatus: str = Field(default="unverified", alias="validation_status")
+    validationIssues: List[str] = Field(
+        default_factory=list,
+        alias="validation_issues",
+    )
 
 
 class ProductOcrTileTextResult(BaseModel):
@@ -99,6 +114,12 @@ class ProductOcrEngine(ABC):
             fallbackReason="structured_ocr_not_supported",
         )
 
+    def ExtractStructuredTextWithRegionsFromImage(
+        self,
+        imageBytes: bytes,
+    ) -> Tuple[ProductStructuredOcrResult, List[ProductOcrTextRegion]]:
+        return self.ExtractStructuredTextFromImage(imageBytes), []
+
 
 class PaddleOcrEngine(ProductOcrEngine):
     """PaddleOCR 기반 OCR adapter."""
@@ -133,20 +154,50 @@ class PaddleOcrEngine(ProductOcrEngine):
         return self._ocr is not None
 
     def ExtractTextFromImage(self, imageBytes: bytes) -> str:
-        image = self._DecodeImageBytes(imageBytes)
-        return self._ExtractTextFromDecodedImage(image)
+        structuredResult, _ = self.ExtractStructuredTextWithRegionsFromImage(
+            imageBytes,
+        )
+        return structuredResult.text
 
-    def _ExtractTextFromDecodedImage(self, image: Any) -> str:
+    def ExtractStructuredTextFromImage(
+        self,
+        imageBytes: bytes,
+    ) -> ProductStructuredOcrResult:
+        structuredResult, _ = self.ExtractStructuredTextWithRegionsFromImage(
+            imageBytes,
+        )
+        return structuredResult
+
+    def ExtractStructuredTextWithRegionsFromImage(
+        self,
+        imageBytes: bytes,
+    ) -> Tuple[ProductStructuredOcrResult, List[ProductOcrTextRegion]]:
+        image = self._DecodeImageBytes(imageBytes)
+        result = self._PredictDecodedImage(image)
+        rawText = "\n".join(self._ExtractResultTexts(result))
+        return (
+            ProductStructuredOcrResult(
+                text=rawText,
+                rawText=rawText,
+                textMergeMode="raw_only",
+                rawTileTexts=(
+                    [ProductOcrTileTextResult(text=rawText)]
+                    if rawText
+                    else []
+                ),
+                fallbackReason="structured_ocr_not_supported",
+            ),
+            self._ExtractTextRegions(result),
+        )
+
+    def _PredictDecodedImage(self, image: Any) -> Any:
         ocr = self._ReadInitializedOcr()
 
         if hasattr(ocr, "predict"):
-            result = ocr.predict(image)
+            return ocr.predict(image)
         elif hasattr(ocr, "ocr"):
-            result = ocr.ocr(image, cls=self._useTextlineOrientation)
-        else:
-            raise ProductOcrError("PaddleOCR object does not expose predict or ocr.")
-
-        return "\n".join(self._ExtractResultTexts(result))
+            return ocr.ocr(image, cls=self._useTextlineOrientation)
+        raise ProductOcrError("PaddleOCR object does not expose predict or ocr.")
 
     def _EncodeImageBytes(self, image: Any, suffix: str = ".jpg") -> bytes:
         return _EncodeImageBytes(image, suffix)
@@ -261,6 +312,80 @@ class PaddleOcrEngine(ProductOcrEngine):
             and len(value[1]) >= 1
             and isinstance(value[1][0], str)
         )
+
+    def _ExtractTextRegions(self, result: Any) -> List[ProductOcrTextRegion]:
+        regions: List[ProductOcrTextRegion] = []
+        self._CollectTextRegions(result, regions)
+        return list(dict.fromkeys(regions))
+
+    def _CollectTextRegions(
+        self,
+        value: Any,
+        regions: List[ProductOcrTextRegion],
+    ) -> None:
+        if value is None:
+            return
+        if isinstance(value, Mapping):
+            self._CollectTextRegionsFromMapping(value, regions)
+            return
+        if isinstance(value, (list, tuple)):
+            if self._LooksLegacyOcrLine(value):
+                bounds = _ReadBox(value[0])
+                text = NormalizeWhiteSpace(value[1][0])
+                if bounds is not None and text:
+                    regions.append(
+                        ProductOcrTextRegion(
+                            text=text,
+                            bounds=tuple(round(item) for item in bounds),
+                        )
+                    )
+                return
+            for item in value:
+                self._CollectTextRegions(item, regions)
+            return
+
+        jsonValue = getattr(value, "json", None)
+        if isinstance(jsonValue, Mapping):
+            self._CollectTextRegionsFromMapping(jsonValue, regions)
+            return
+        if hasattr(value, "to_dict"):
+            try:
+                dictValue = value.to_dict()
+            except Exception:
+                dictValue = None
+            if isinstance(dictValue, Mapping):
+                self._CollectTextRegionsFromMapping(dictValue, regions)
+
+    def _CollectTextRegionsFromMapping(
+        self,
+        value: Mapping[str, Any],
+        regions: List[ProductOcrTextRegion],
+    ) -> None:
+        textValues = value.get("rec_texts")
+        if textValues is None:
+            textValues = value.get("texts")
+        boxValues = value.get("rec_boxes")
+        if boxValues is None:
+            boxValues = value.get("rec_polys")
+        if boxValues is None:
+            boxValues = value.get("dt_polys")
+        if isinstance(textValues, Sequence) and boxValues is not None:
+            for textValue, boxValue in zip(textValues, boxValues):
+                if not isinstance(textValue, str):
+                    continue
+                bounds = _ReadBox(boxValue)
+                normalizedText = NormalizeWhiteSpace(textValue)
+                if bounds is None or normalizedText == "":
+                    continue
+                regions.append(
+                    ProductOcrTextRegion(
+                        text=normalizedText,
+                        bounds=tuple(round(item) for item in bounds),
+                    )
+                )
+        nestedValue = value.get("res")
+        if isinstance(nestedValue, Mapping):
+            self._CollectTextRegionsFromMapping(nestedValue, regions)
 
 
 class PaddleOcrVlEngine(ProductOcrEngine):
@@ -516,10 +641,12 @@ class PaddleOcrVlEngine(ProductOcrEngine):
                 )
             )
         tableCrop, originalBounds = cropResult
-        html = vlHtml
-        cellTexts = self._ExtractTextsFromHtml(html)
+        cellTexts = self._ExtractTextsFromHtml(vlHtml)
         sourceName = "paddleocr_vl_v1_6"
+        validationStatus = "unverified"
+        validationIssues: List[str] = []
         validationWarning: Optional[str] = None
+        semanticIssues = self._ValidateNutritionUnits(vlHtml)
         try:
             verifiedPayload = self._ReadVerifiedTablePayload(tableCrop)
             validationError = self._ValidateVerifiedTablePayload(
@@ -527,16 +654,34 @@ class PaddleOcrVlEngine(ProductOcrEngine):
                 tableCrop,
             )
             if validationError is None:
-                html = str(verifiedPayload.get("pred_html") or html)
-                cellTexts = self._ReadCellTexts(verifiedPayload) or cellTexts
-                sourceName = "paddleocr_vl_v1_6+table_recognition_v2"
+                verifiedHtml = str(verifiedPayload.get("pred_html") or "")
+                validationIssues = self._CompareTableEvidence(
+                    vlHtml,
+                    verifiedHtml,
+                )
+                validationIssues.extend(semanticIssues)
+                validationIssues = list(dict.fromkeys(validationIssues))
+                if validationIssues:
+                    validationWarning = self._BuildValidationWarning(
+                        tile,
+                        tableIndex,
+                        ",".join(validationIssues),
+                    )
+                else:
+                    validationStatus = "verified"
+                    sourceName = "paddleocr_vl_v1_6+table_recognition_v2_verified"
             else:
+                validationIssues = [validationError, *semanticIssues]
                 validationWarning = self._BuildValidationWarning(
                     tile,
                     tableIndex,
                     validationError,
                 )
         except Exception as error:
+            validationIssues = [
+                NormalizeWhiteSpace(str(error)) or "unknown",
+                *semanticIssues,
+            ]
             validationWarning = self._BuildValidationWarning(
                 tile,
                 tableIndex,
@@ -546,9 +691,11 @@ class PaddleOcrVlEngine(ProductOcrEngine):
             tableIndex=tableIndex,
             sourceName=sourceName,
             tileIndex=tile.tileIndex,
-            html=html,
+            html=vlHtml,
             cellTexts=cellTexts,
-            plainText=self._BuildPlainTextFromHtml(html, cellTexts),
+            plainText=self._BuildPlainTextFromHtml(vlHtml, cellTexts),
+            validationStatus=validationStatus,
+            validationIssues=validationIssues,
         ), originalBounds, validationWarning
 
     def _BuildTableCrop(
@@ -694,22 +841,7 @@ class PaddleOcrVlEngine(ProductOcrEngine):
         return ""
 
     def _ReadBox(self, value: Any) -> Optional[Tuple[float, float, float, float]]:
-        try:
-            import numpy as np
-
-            coordinates = np.asarray(value, dtype=float).reshape(-1)
-        except Exception:
-            return None
-        if coordinates.size < 4 or coordinates.size % 2 != 0:
-            return None
-        xValues = coordinates[0::2]
-        yValues = coordinates[1::2]
-        return (
-            float(xValues.min()),
-            float(yValues.min()),
-            float(xValues.max()),
-            float(yValues.max()),
-        )
+        return _ReadBox(value)
 
     def _IsDuplicateTable(
         self,
@@ -751,6 +883,91 @@ class PaddleOcrVlEngine(ProductOcrEngine):
             tableIndex,
             NormalizeWhiteSpace(reason) or "unknown",
         )
+
+    def _CompareTableEvidence(
+        self,
+        vlHtml: str,
+        verifiedHtml: str,
+    ) -> List[str]:
+        vlTokens = self._ExtractQuantityTokens(
+            self._BuildPlainTextFromHtml(vlHtml, []),
+        )
+        verifiedTokens = self._ExtractQuantityTokens(
+            self._BuildPlainTextFromHtml(verifiedHtml, []),
+        )
+        if not vlTokens or not verifiedTokens:
+            return ["quantity_evidence_unavailable"]
+
+        issues: List[str] = []
+        vlUnitsByValue = self._BuildUnitsByValue(vlTokens)
+        verifiedUnitsByValue = self._BuildUnitsByValue(verifiedTokens)
+        for value in vlUnitsByValue.keys() & verifiedUnitsByValue.keys():
+            if not (vlUnitsByValue[value] & verifiedUnitsByValue[value]):
+                issues.append("unit_conflict:{0}".format(value))
+
+        overlapCount = len(vlTokens & verifiedTokens)
+        minimumComparableCount = min(len(vlTokens), len(verifiedTokens))
+        if overlapCount == 0 or overlapCount * 2 < minimumComparableCount:
+            issues.append("quantity_mismatch")
+        return list(dict.fromkeys(issues))
+
+    def _ExtractQuantityTokens(self, text: str) -> set[Tuple[str, str]]:
+        matches = re.findall(
+            r"(?<!\d)(\d+(?:[.,]\d+)?)\s*(mg|g|kg|ml|l|%|kcal|㎎|㎏|㎖)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        unitAliases = {"㎎": "mg", "㎏": "kg", "㎖": "ml"}
+        return {
+            (
+                value.replace(",", ""),
+                unitAliases.get(unit.lower(), unit.lower()),
+            )
+            for value, unit in matches
+        }
+
+    def _BuildUnitsByValue(
+        self,
+        tokens: set[Tuple[str, str]],
+    ) -> Dict[str, set[str]]:
+        unitsByValue: Dict[str, set[str]] = {}
+        for value, unit in tokens:
+            unitsByValue.setdefault(value, set()).add(unit)
+        return unitsByValue
+
+    def _ValidateNutritionUnits(self, html: str) -> List[str]:
+        expectedUnits = {
+            "나트륨": {"mg"},
+            "콜레스테롤": {"mg"},
+            "탄수화물": {"g"},
+            "당류": {"g"},
+            "지방": {"g"},
+            "트랜스지방": {"g"},
+            "포화지방": {"g"},
+            "단백질": {"g"},
+        }
+        parser = _HtmlTableExtractor()
+        parser.feed(html)
+        issues: List[str] = []
+        for row in parser.rows:
+            if len(row) < 2:
+                continue
+            normalizedLabel = NormalizeWhiteSpace(row[0]).replace(" ", "")
+            rowTokens = self._ExtractQuantityTokens(" ".join(row[1:]))
+            for label, allowedUnits in expectedUnits.items():
+                if label not in normalizedLabel:
+                    continue
+                unexpectedUnits = {
+                    unit
+                    for _, unit in rowTokens
+                    if unit not in allowedUnits and unit != "%"
+                }
+                issues.extend(
+                    "nutrition_unit_mismatch:{0}:{1}".format(label, unit)
+                    for unit in sorted(unexpectedUnits)
+                )
+                break
+        return issues
 
     def _ExtractTextsFromHtml(self, html: str) -> List[str]:
         parser = _HtmlTableExtractor()
@@ -832,6 +1049,68 @@ class _HtmlTableExtractor(HTMLParser):
             self._currentCellParts.append(normalizedText)
 
 
+def BuildOcrRegionCrop(
+    imageBytes: bytes,
+    textRegions: Sequence[ProductOcrTextRegion],
+    anchorLabels: Sequence[str],
+) -> Optional[Tuple[bytes, Tuple[int, int, int, int]]]:
+    """영양정보 anchor가 차지하는 영역만 VLM 입력으로 자른다."""
+
+    compactLabels = tuple(
+        NormalizeWhiteSpace(label).lower().replace(" ", "")
+        for label in anchorLabels
+        if NormalizeWhiteSpace(label)
+    )
+    anchorRegions = [
+        region
+        for region in textRegions
+        if any(
+            label in NormalizeWhiteSpace(region.text).lower().replace(" ", "")
+            for label in compactLabels
+        )
+    ]
+    if len(anchorRegions) < 2:
+        return None
+
+    image = _DecodeImageBytes(imageBytes)
+    imageHeight, imageWidth = image.shape[:2]
+    anchorTop = min(region.bounds[1] for region in anchorRegions)
+    anchorBottom = max(region.bounds[3] for region in anchorRegions)
+    anchorLeft = min(region.bounds[0] for region in anchorRegions)
+    verticalPadding = max(64, (anchorBottom - anchorTop) // 4)
+    horizontalPadding = max(32, imageWidth // 40)
+    top = max(0, anchorTop - verticalPadding)
+    bottom = min(imageHeight, anchorBottom + verticalPadding)
+    nearbyRegions = [
+        region
+        for region in textRegions
+        if top <= (region.bounds[1] + region.bounds[3]) // 2 <= bottom
+        and region.bounds[2] >= anchorLeft - horizontalPadding
+    ]
+    if not nearbyRegions:
+        return None
+
+    left = max(
+        0,
+        min(anchorLeft, *(region.bounds[0] for region in nearbyRegions))
+        - horizontalPadding,
+    )
+    right = min(
+        imageWidth,
+        max(region.bounds[2] for region in nearbyRegions) + horizontalPadding,
+    )
+    if right - left < 128 or bottom - top < 128:
+        return None
+    if (right - left) * (bottom - top) >= imageWidth * imageHeight * 0.90:
+        return None
+    return _EncodeImageBytes(image[top:bottom, left:right], ".jpg"), (
+        left,
+        top,
+        right,
+        bottom,
+    )
+
+
 def _DecodeImageBytes(imageBytes: bytes) -> Any:
     try:
         import cv2
@@ -845,6 +1124,25 @@ def _DecodeImageBytes(imageBytes: bytes) -> Any:
     if image is None:
         raise ProductOcrError("failed to decode image bytes for OCR.")
     return image
+
+
+def _ReadBox(value: Any) -> Optional[Tuple[float, float, float, float]]:
+    try:
+        import numpy as np
+
+        coordinates = np.asarray(value, dtype=float).reshape(-1)
+    except Exception:
+        return None
+    if coordinates.size < 4 or coordinates.size % 2 != 0:
+        return None
+    xValues = coordinates[0::2]
+    yValues = coordinates[1::2]
+    return (
+        float(xValues.min()),
+        float(yValues.min()),
+        float(xValues.max()),
+        float(yValues.max()),
+    )
 
 
 def _EncodeImageBytes(image: Any, suffix: str = ".jpg") -> bytes:
