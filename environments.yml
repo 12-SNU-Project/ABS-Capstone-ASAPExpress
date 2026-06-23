@@ -16,7 +16,7 @@ dependencies:
   - pytest
   - pip:
       # UI
-      - dash
+      - dash>=4.1.0
       - dash-mantine-components
       - PySide6
 
@@ -28,11 +28,9 @@ dependencies:
       # After environment creation, install browser binaries with:
       #   python -m playwright install chromium
       - playwright
-      - dash>=4.1.0
       - opencv-python
-      - paddlepaddle
-      - paddleocr
-      - paddlex[ocr]
+      - paddlepaddle>=3.3,<3.4
+      - paddleocr[doc-parser]>=3.7,<3.8
 
       # Semantic CN candidate retrieval
       - sentence-transformers
