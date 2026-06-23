@@ -47,6 +47,9 @@ reconstructed_tables preserves structured table OCR contents for UI review. Do n
 reconstructed_tables must be an array of objects with exactly these keys: table_name, source_refs, rows.
 Each reconstructed_tables row must have exactly these keys:
 field_name, raw_value, normalized_value, unit, daily_value_percent, source_refs.
+For reconstructed_tables, raw_value must be copied verbatim from referenced table evidence when pp_table evidence exists.
+Never correct spelling, labels, or units in raw_value. Put OCR corrections only in normalized_value.
+Use raw OCR or notice evidence to support normalized_value, not to replace table raw_value.
 For nutrition tables, return each nutrient as its own row. For label/specification tables, return each label field as its own row.
 product_facts is only the compact classification input facts derived from the same evidence.
 product_facts and unresolved_facts must be arrays of objects with exactly these keys:
@@ -273,6 +276,7 @@ class ProductReconstructedTableRow(BaseModel):
 
     fieldName: str = Field(alias="field_name")
     rawValue: str = Field(default="", alias="raw_value")
+    rawOcrHint: str = Field(default="", alias="raw_ocr_hint")
     normalizedValue: str = Field(default="", alias="normalized_value")
     unit: str = ""
     dailyValuePercent: str = Field(default="", alias="daily_value_percent")
@@ -318,6 +322,10 @@ def _ExtractQuantityTokens(text: str) -> set[tuple[str, str]]:
         )
         for value, unit in QUANTITY_TOKEN_PATTERN.findall(text or "")
     }
+
+
+def _CompactEvidenceText(text: str) -> str:
+    return re.sub(r"[^0-9A-Za-z가-힣]+", "", text or "").lower()
 
 
 def _IsGenericOcrFieldName(fieldName: str) -> bool:
@@ -857,19 +865,54 @@ class ProductFactReconstructionValidator:
                     warnings=warnings,
                     context="table={0} field={1}".format(tableName, fieldName),
                 )
+                rawValidationRefs = self._BuildTableRawValidationRefs(
+                    rowSourceRefs or tableSourceRefs,
+                    tableSourceRefs,
+                    evidenceById,
+                )
+                anchoredRawValue = self._FindTableRawValue(
+                    fieldName,
+                    rawValidationRefs,
+                    evidenceById,
+                )
+                if anchoredRawValue and anchoredRawValue != rawValue:
+                    if normalizedValue == "":
+                        normalizedValue = rawValue
+                    rawValue = anchoredRawValue
+                    rowSourceRefs = self._MergeSourceRefs(
+                        rawValidationRefs,
+                        rowSourceRefs,
+                    )
+                relatedRawOcrRefs = self._BuildRelatedRawOcrRefs(
+                    rawValidationRefs,
+                    evidenceById,
+                )
+                rawOcrHint = NormalizeWhitespaceLines(
+                    _StripOcrCollectionMarkers(row.rawOcrHint)
+                ) or self._FindRawOcrHint(
+                    fieldName,
+                    rawValue or normalizedValue,
+                    self._MergeSourceRefs(rowSourceRefs, relatedRawOcrRefs),
+                    evidenceById,
+                )
+                if rawOcrHint:
+                    rowSourceRefs = self._MergeSourceRefs(
+                        rowSourceRefs,
+                        relatedRawOcrRefs,
+                    )
                 validationIssue = self._ValidateQuantityEvidence(
                     rawValue or normalizedValue,
-                    rowSourceRefs or tableSourceRefs,
+                    rawValidationRefs or rowSourceRefs or tableSourceRefs,
                     evidenceById,
                 )
                 validationIssue = validationIssue or self._ValidateTextEvidence(
                     rawValue or normalizedValue,
-                    rowSourceRefs or tableSourceRefs,
+                    rawValidationRefs or rowSourceRefs or tableSourceRefs,
                     evidenceById,
                 )
                 validationStatus = self._ResolveRowValidationStatus(
                     rawValue or normalizedValue,
-                    rowSourceRefs or tableSourceRefs,
+                    rawValidationRefs or rowSourceRefs or tableSourceRefs,
                     evidenceById,
                     validationIssue,
                 )
@@ -878,6 +921,7 @@ class ProductFactReconstructionValidator:
                         update={
                             "fieldName": fieldName,
                             "rawValue": rawValue,
+                            "rawOcrHint": rawOcrHint,
                             "normalizedValue": normalizedValue,
                             "unit": NormalizeWhiteSpace(row.unit),
                             "dailyValuePercent": NormalizeWhiteSpace(
@@ -901,7 +945,266 @@ class ProductFactReconstructionValidator:
                         }
                     )
                 )
-        return cleanedTables
+        return self._BackfillVlmSkeletonRows(cleanedTables, evidenceById)
+
+    def _BackfillVlmSkeletonRows(
+        self,
+        tables: Sequence[ProductReconstructedTable],
+        evidenceById: Mapping[str, ProductInputEvidenceRecord],
+    ) -> List[ProductReconstructedTable]:
+        mergedTables = list(tables)
+        tableIndexesByRef: Dict[str, int] = {}
+        for tableIndex, table in enumerate(mergedTables):
+            for sourceRef in table.sourceRefs:
+                tableIndexesByRef.setdefault(sourceRef, tableIndex)
+            for row in table.rows:
+                for sourceRef in row.sourceRefs:
+                    tableIndexesByRef.setdefault(sourceRef, tableIndex)
+
+        for record in evidenceById.values():
+            if record.sourceType != "pp_table":
+                continue
+            skeletonRows = self._BuildVlmSkeletonRows(record, evidenceById)
+            if not skeletonRows:
+                continue
+            tableIndex = tableIndexesByRef.get(record.evidenceId)
+            if tableIndex is None:
+                tableIndexesByRef[record.evidenceId] = len(mergedTables)
+                mergedTables.append(
+                    ProductReconstructedTable(
+                        tableName="VLM 원문 skeleton",
+                        sourceRefs=[record.evidenceId],
+                        rows=skeletonRows,
+                    )
+                )
+                continue
+            table = mergedTables[tableIndex]
+            existingKeys = self._BuildRowKeys(table.rows)
+            rowsToAppend = [
+                row for row in skeletonRows if self._BuildRowKey(row) not in existingKeys
+            ]
+            if rowsToAppend:
+                mergedTables[tableIndex] = table.model_copy(
+                    update={
+                        "sourceRefs": self._MergeSourceRefs(
+                            table.sourceRefs,
+                            [record.evidenceId],
+                        ),
+                        "rows": [*table.rows, *rowsToAppend],
+                    }
+                )
+        return mergedTables
+
+    def _BuildVlmSkeletonRows(
+        self,
+        record: ProductInputEvidenceRecord,
+        evidenceById: Mapping[str, ProductInputEvidenceRecord],
+    ) -> List[ProductReconstructedTableRow]:
+        relatedRawOcrRefs = self._BuildRelatedRawOcrRefs(
+            [record.evidenceId],
+            evidenceById,
+        )
+        rows: List[ProductReconstructedTableRow] = []
+        for line in record.text.splitlines():
+            cells = [
+                NormalizeWhiteSpace(cell)
+                for cell in line.split("|")
+                if NormalizeWhiteSpace(cell)
+            ]
+            if len(cells) < 2:
+                continue
+            rows.extend(
+                self._BuildVlmSkeletonRowsFromCells(
+                    cells,
+                    record.evidenceId,
+                    relatedRawOcrRefs,
+                    evidenceById,
+                )
+            )
+        return rows
+
+    def _BuildVlmSkeletonRowsFromCells(
+        self,
+        cells: Sequence[str],
+        tableRef: str,
+        rawOcrRefs: Sequence[str],
+        evidenceById: Mapping[str, ProductInputEvidenceRecord],
+    ) -> List[ProductReconstructedTableRow]:
+        if len(cells) == 3 and cells[2].endswith("%"):
+            return [
+                self._BuildVlmSkeletonRow(
+                    cells[0],
+                    cells[1],
+                    tableRef,
+                    rawOcrRefs,
+                    evidenceById,
+                    dailyValuePercent=cells[2],
+                )
+            ]
+        return [
+            self._BuildVlmSkeletonRow(
+                cells[cellIndex],
+                cells[cellIndex + 1],
+                tableRef,
+                rawOcrRefs,
+                evidenceById,
+            )
+            for cellIndex in range(0, len(cells) - 1, 2)
+        ]
+
+    def _BuildVlmSkeletonRow(
+        self,
+        fieldName: str,
+        rawValue: str,
+        tableRef: str,
+        rawOcrRefs: Sequence[str],
+        evidenceById: Mapping[str, ProductInputEvidenceRecord],
+        *,
+        dailyValuePercent: str = "",
+    ) -> ProductReconstructedTableRow:
+        sourceRefs = self._MergeSourceRefs([tableRef], rawOcrRefs)
+        rawOcrHint = self._FindRawOcrHint(
+            fieldName,
+            rawValue,
+            rawOcrRefs,
+            evidenceById,
+        )
+        return ProductReconstructedTableRow(
+            fieldName=fieldName,
+            rawValue=rawValue,
+            rawOcrHint=rawOcrHint,
+            normalizedValue="",
+            dailyValuePercent=dailyValuePercent,
+            sourceRefs=sourceRefs if rawOcrHint else [tableRef],
+            validationStatus="vlm_skeleton",
+        )
+
+    def _BuildRowKeys(
+        self,
+        rows: Sequence[ProductReconstructedTableRow],
+    ) -> set[tuple[str, str]]:
+        return {self._BuildRowKey(row) for row in rows}
+
+    def _BuildRowKey(
+        self,
+        row: ProductReconstructedTableRow,
+    ) -> tuple[str, str]:
+        return (_CompactEvidenceText(row.fieldName), _CompactEvidenceText(row.rawValue))
+
+    def _BuildTableRawValidationRefs(
+        self,
+        rowSourceRefs: Sequence[str],
+        tableSourceRefs: Sequence[str],
+        evidenceById: Mapping[str, ProductInputEvidenceRecord],
+    ) -> List[str]:
+        tableRefs = [
+            sourceRef
+            for sourceRef in rowSourceRefs
+            if (
+                sourceRef in evidenceById
+                and evidenceById[sourceRef].sourceType == "pp_table"
+            )
+        ]
+        if tableRefs:
+            return tableRefs
+        return [
+            sourceRef
+            for sourceRef in tableSourceRefs
+            if (
+                sourceRef in evidenceById
+                and evidenceById[sourceRef].sourceType == "pp_table"
+            )
+        ]
+
+    def _FindTableRawValue(
+        self,
+        fieldName: str,
+        sourceRefs: Sequence[str],
+        evidenceById: Mapping[str, ProductInputEvidenceRecord],
+    ) -> Optional[str]:
+        fieldKey = _CompactEvidenceText(fieldName)
+        if not fieldKey:
+            return None
+        for sourceRef in sourceRefs:
+            record = evidenceById.get(sourceRef)
+            if record is None or record.sourceType != "pp_table":
+                continue
+            for line in record.text.splitlines():
+                cells = [
+                    NormalizeWhiteSpace(cell)
+                    for cell in line.split("|")
+                    if NormalizeWhiteSpace(cell)
+                ]
+                for cellIndex, cell in enumerate(cells[:-1]):
+                    if _CompactEvidenceText(cell) == fieldKey:
+                        return cells[cellIndex + 1]
+        return None
+
+    def _BuildRelatedRawOcrRefs(
+        self,
+        sourceRefs: Sequence[str],
+        evidenceById: Mapping[str, ProductInputEvidenceRecord],
+    ) -> List[str]:
+        imageIndexes = {
+            match.group(1)
+            for sourceRef in sourceRefs
+            if (
+                sourceRef in evidenceById
+                and evidenceById[sourceRef].sourceRef is not None
+                and (
+                    match := re.match(
+                        r"^image-(\d+)-table-",
+                        evidenceById[sourceRef].sourceRef or "",
+                    )
+                )
+            )
+        }
+        if not imageIndexes:
+            return []
+        return [
+            record.evidenceId
+            for record in evidenceById.values()
+            if (
+                record.sourceType == "raw_ocr_tile"
+                and record.sourceRef is not None
+                and any(
+                    record.sourceRef.startswith("image-{0}-tile-".format(imageIndex))
+                    for imageIndex in imageIndexes
+                )
+            )
+        ]
+
+    def _FindRawOcrHint(
+        self,
+        fieldName: str,
+        rawValue: str,
+        sourceRefs: Sequence[str],
+        evidenceById: Mapping[str, ProductInputEvidenceRecord],
+    ) -> str:
+        fieldKey = _CompactEvidenceText(fieldName)
+        valueTokens = _ExtractQuantityTokens(rawValue)
+        for sourceRef in sourceRefs:
+            record = evidenceById.get(sourceRef)
+            if record is None or record.sourceType != "raw_ocr_tile":
+                continue
+            lines = [
+                NormalizeWhiteSpace(line)
+                for line in record.text.splitlines()
+                if NormalizeWhiteSpace(line)
+            ]
+            for lineIndex, line in enumerate(lines):
+                if fieldKey and fieldKey in _CompactEvidenceText(line):
+                    return " / ".join(lines[lineIndex : lineIndex + 3])
+                if valueTokens and valueTokens <= _ExtractQuantityTokens(line):
+                    return line
+        return ""
+
+    def _MergeSourceRefs(
+        self,
+        preferredRefs: Sequence[str],
+        sourceRefs: Sequence[str],
+    ) -> List[str]:
+        return list(dict.fromkeys([*preferredRefs, *sourceRefs]))
 
     def _CleanSourceRefs(
         self,
@@ -1048,16 +1351,12 @@ class ProductFactReconstructionValidator:
     ) -> Optional[str]:
         if _ExtractQuantityTokens(value):
             return None
-        compactValue = re.sub(r"[^0-9A-Za-z가-힣]+", "", value).lower()
+        compactValue = _CompactEvidenceText(value)
         if len(compactValue) < 3:
             return None
         if any(
             compactValue
-            in re.sub(
-                r"[^0-9A-Za-z가-힣]+",
-                "",
-                evidenceById[sourceRef].text,
-            ).lower()
+            in _CompactEvidenceText(evidenceById[sourceRef].text)
             for sourceRef in sourceRefs
             if sourceRef in evidenceById
         ):
