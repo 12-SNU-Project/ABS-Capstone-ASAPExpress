@@ -174,6 +174,55 @@
   font-size: 10px;
 }
 
+.input-reconstruction-expandable summary {
+  cursor: pointer;
+  color: #334155;
+}
+
+.input-reconstruction-expanded-text {
+  margin-top: 7px;
+  padding: 8px 10px;
+  border-left: 2px solid #94a3b8;
+  background: #f8fafc;
+  color: #1e293b;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.input-validation-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.input-validation-chip.accepted,
+.input-validation-chip.verified,
+.input-validation-chip.evidence_matched {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.input-validation-chip.review_required {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.input-validation-chip.unresolved {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
 .input-reconstruction-status {
   color: #075985;
   font-weight: 800;

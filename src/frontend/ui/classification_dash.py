@@ -64,28 +64,6 @@ MONO = {
     "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
     "fontSize": "12px",
 }
-CLASSIFIER_INPUT_EXCLUDED_FACT_MARKERS = {
-    "알레르기",
-    "혼입",
-    "같은 제조시설",
-    "같은 제조 시설",
-    "판매처",
-    "판매원",
-    "판매자",
-    "유통전문판매원",
-    "판매업소",
-    "제조원",
-    "제조사",
-    "제조업소",
-    "제조업체",
-    "allergen",
-    "allergy",
-    "may contain",
-    "same facility",
-    "seller",
-    "vendor",
-    "manufacturer",
-}
 STAGE_DISPLAY_NAMES = {
     "Input": "Input",
     "Pipeline": "Pipeline",
@@ -117,6 +95,42 @@ PROGRESS_STEP_DEFINITIONS = [
         "title": "Classification 검증",
     },
 ]
+RECONSTRUCTION_GROUPS = (
+    (
+        "basic",
+        "기본 상품 정보",
+        ("제품명", "상품명", "식품유형", "식품의유형", "내용량", "중량", "용량"),
+    ),
+    (
+        "ingredients",
+        "원재료명 및 함량",
+        ("원재료", "원료명", "주원료", "배합", "전성분", "inci", "성분명"),
+    ),
+    (
+        "allergens",
+        "알레르기 정보",
+        ("알레르기", "알러지", "알레르겐", "함유주의"),
+    ),
+    (
+        "nutrition",
+        "영양 정보",
+        (
+            "영양",
+            "열량",
+            "나트륨",
+            "탄수화물",
+            "당류",
+            "지방",
+            "콜레스테롤",
+            "단백질",
+        ),
+    ),
+    (
+        "storage",
+        "보관·가공 정보",
+        ("보관", "소비기한", "유통기한", "조리", "가열", "냉장", "냉동"),
+    ),
+)
 
 
 def display_stage_name(stage: Any) -> str:
@@ -182,12 +196,17 @@ def _short_text(value: Any, *, max_length: int = 160) -> str:
     return text[: max_length - 1].rstrip() + "..."
 
 
-def _fact_display_value(fact: dict[str, Any]) -> str:
-    return str(
-        fact.get("normalized_value")
-        or fact.get("raw_value")
-        or ""
-    ).strip()
+def _expandable_text(value: Any, *, max_length: int = 180) -> Any:
+    text = str(value or "").strip()
+    if len(text) <= max_length:
+        return text or "-"
+    return html.Details(
+        [
+            html.Summary(_short_text(text, max_length=max_length)),
+            html.Div(text, className="input-reconstruction-expanded-text"),
+        ],
+        className="input-reconstruction-expandable",
+    )
 
 
 def _fact_source_text(
@@ -205,19 +224,100 @@ def _fact_source_text(
     return str(refs or "")
 
 
-def _filter_static_classifier_input_facts(
+def _group_reconstruction_rows(
+    tables: list[Any],
     facts: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    filtered: list[dict[str, Any]] = []
-    for fact in facts:
-        if not isinstance(fact, dict):
+    groupedRows = {key: [] for key, _, _ in RECONSTRUCTION_GROUPS}
+    groupedRows["other"] = []
+    seenRows: set[tuple[str, str]] = set()
+    sourceRows: list[tuple[dict[str, Any], str]] = []
+
+    for table in tables:
+        if not isinstance(table, dict):
             continue
-        fieldName = str(fact.get("field_name") or "")
-        factText = "{0} {1}".format(fieldName, _fact_display_value(fact)).lower()
-        if any(marker in factText for marker in CLASSIFIER_INPUT_EXCLUDED_FACT_MARKERS):
+        tableName = str(table.get("table_name") or "")
+        sourceRows.extend(
+            (row, tableName)
+            for row in table.get("rows") or []
+            if isinstance(row, dict)
+        )
+    sourceRows.extend(
+        (
+            {
+                "field_name": fact.get("field_name"),
+                "raw_value": fact.get("raw_value"),
+                "normalized_value": fact.get("normalized_value"),
+                "source_refs": fact.get("source_refs") or [],
+                "validation_status": fact.get("validation_status") or "accepted",
+            },
+            "",
+        )
+        for fact in facts
+        if isinstance(fact, dict)
+    )
+
+    for row, tableName in sourceRows:
+        fieldName = str(row.get("field_name") or "").strip()
+        displayValue = str(
+            row.get("normalized_value") or row.get("raw_value") or ""
+        ).strip()
+        rowKey = (fieldName.replace(" ", "").lower(), displayValue)
+        if not any(rowKey) or rowKey in seenRows:
             continue
-        filtered.append(fact)
-    return filtered
+        seenRows.add(rowKey)
+        searchableName = "{0} {1}".format(fieldName, tableName).replace(
+            " ",
+            "",
+        ).lower()
+        groupKey = next(
+            (
+                key
+                for key, _, markers in RECONSTRUCTION_GROUPS
+                if any(
+                    marker.replace(" ", "").lower() in searchableName
+                    for marker in markers
+                )
+            ),
+            "other",
+        )
+        groupedRows[groupKey].append(row)
+
+    groupTitles = {key: title for key, title, _ in RECONSTRUCTION_GROUPS}
+    groupTitles["other"] = "기타 구조화 정보"
+    return [
+        {"table_name": groupTitles[groupKey], "rows": rows}
+        for groupKey, rows in groupedRows.items()
+        if rows
+    ]
+
+
+def _validation_cell(row: dict[str, Any]) -> html.Div:
+    status = str(row.get("validation_status") or "unverified").strip().lower()
+    statusLabels = {
+        "accepted": "채택",
+        "verified": "교차검증",
+        "evidence_matched": "근거 일치",
+        "review_required": "검토 필요",
+        "unresolved": "미해결",
+        "unverified": "미검증",
+    }
+    issues = row.get("validation_issues") or []
+    issueText = ", ".join(str(issue) for issue in issues if str(issue).strip())
+    return html.Div(
+        [
+            html.Span(
+                statusLabels.get(status, status or "-"),
+                className=f"input-validation-chip {status}",
+            ),
+            html.Div(
+                _short_text(issueText, max_length=140),
+                className="input-reconstruction-secondary",
+            )
+            if issueText
+            else None,
+        ]
+    )
 
 
 def _reconstruction_fact_table(
@@ -493,20 +593,26 @@ def _reconstructed_tables_widget(
                             _short_text(row.get("field_name"), max_length=90),
                             className="input-reconstruction-primary",
                         ),
-                        html.Td(_short_text(row.get("raw_value"), max_length=220)),
+                        html.Td(_expandable_text(row.get("raw_value"))),
                         html.Td(
-                            _short_text(
+                            _expandable_text(
                                 row.get("normalized_value") or row.get("raw_value"),
-                                max_length=220,
                             ),
                         ),
-                        html.Td(_short_text(row.get("unit"), max_length=50)),
                         html.Td(
                             _short_text(
-                                row.get("daily_value_percent"),
-                                max_length=60,
+                                " / ".join(
+                                    str(value).strip()
+                                    for value in [
+                                        row.get("unit"),
+                                        row.get("daily_value_percent"),
+                                    ]
+                                    if str(value or "").strip()
+                                ),
+                                max_length=70,
                             ),
                         ),
+                        html.Td(_validation_cell(row)),
                         html.Td(_short_text(sourceText, max_length=160)),
                     ]
                 )
@@ -536,8 +642,8 @@ def _reconstructed_tables_widget(
                                             html.Th("항목"),
                                             html.Th("원문 값"),
                                             html.Th("정규화 값"),
-                                            html.Th("단위"),
-                                            html.Th("일일 기준"),
+                                            html.Th("단위 / 기준"),
+                                            html.Th("검증"),
                                             html.Th("출처"),
                                         ]
                                     )
@@ -564,7 +670,7 @@ def _reconstructed_tables_widget(
                     html.Div(f"{len(cleanedTables)} tables", className="input-card-count"),
                 ],
                 className="input-reconstruction-section-head",
-            ),
+            ) if title else None,
             *tableBlocks,
         ],
         className="input-reconstruction-section",
@@ -626,13 +732,16 @@ def input_processing_detail_card(
     if not isinstance(sourceLabels, dict):
         sourceLabels = {}
     reconstructionMode = status.get("mode") or "unknown"
-    staticClassifierFacts = _filter_static_classifier_input_facts(productFacts)
     reconstructionError = status.get("error")
     fallbackReason = status.get("fallback_reason")
+    groupedTables = _group_reconstruction_rows(
+        reconstructedTables,
+        productFacts,
+    )
     afterPanel = (
         _reconstructed_tables_widget(
-            "LLM 복원 후 구조화된 상세 표",
-            reconstructedTables,
+            "",
+            groupedTables,
             source_labels=sourceLabels,
         )
         or _reconstruction_fact_table(
@@ -704,12 +813,6 @@ def input_processing_detail_card(
                 and not status.get("used_llm_reconstruction")
             ) else None,
             afterPanel,
-            _reconstruction_fact_table(
-                "최종 분류 입력 facts",
-                staticClassifierFacts,
-                source_labels=sourceLabels,
-                max_rows=16,
-            ) if staticClassifierFacts else None,
             html.Details(
                 [
                     html.Summary(
