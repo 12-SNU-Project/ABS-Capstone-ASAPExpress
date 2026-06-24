@@ -47,7 +47,7 @@ reconstructed_tables preserves structured table OCR contents for UI review. Do n
 reconstructed_tables must be an array of objects with exactly these keys: table_name, source_refs, rows.
 Each reconstructed_tables row must have exactly these keys:
 field_name, raw_value, normalized_value, unit, daily_value_percent, source_refs.
-For reconstructed_tables, raw_value must be copied verbatim from referenced table evidence when pp_table evidence exists.
+For reconstructed_tables, raw_value must be copied verbatim from referenced table evidence when vlm_table evidence exists.
 Never correct spelling, labels, or units in raw_value. Put OCR corrections only in normalized_value.
 Use raw OCR or notice evidence to support normalized_value, not to replace table raw_value.
 For nutrition tables, return each nutrient as its own row. For label/specification tables, return each label field as its own row.
@@ -83,6 +83,12 @@ QUANTITY_TOKEN_PATTERN = re.compile(
     r"(?<!\d)(\d+(?:[.,]\d+)?)\s*(mg|g|kg|ml|l|%|kcal|㎎|㎏|㎖)",
     re.IGNORECASE,
 )
+VLM_TABLE_SOURCE_TYPE = "vlm_table"
+LEGACY_VLM_TABLE_SOURCE_TYPE = "pp_table"
+
+
+def _IsVlmTableSourceType(sourceType: str) -> bool:
+    return sourceType in {VLM_TABLE_SOURCE_TYPE, LEGACY_VLM_TABLE_SOURCE_TYPE}
 
 PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
     {
@@ -90,7 +96,7 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
             "evidence": [
                 {
                     "evidence_id": "evidence-1",
-                    "source_type": "pp_table",
+                    "source_type": "vlm_table",
                     "text": "영양성분 나트류 320mg 탄수하물 40g 단백질 8g",
                 }
             ],
@@ -276,7 +282,6 @@ class ProductReconstructedTableRow(BaseModel):
 
     fieldName: str = Field(alias="field_name")
     rawValue: str = Field(default="", alias="raw_value")
-    rawOcrHint: str = Field(default="", alias="raw_ocr_hint")
     normalizedValue: str = Field(default="", alias="normalized_value")
     unit: str = ""
     dailyValuePercent: str = Field(default="", alias="daily_value_percent")
@@ -649,7 +654,7 @@ class ProductInputEvidenceBuilder:
             for tableIndex, table in enumerate(imageResult.structuredOcr.tables, start=1):
                 self._AppendRecord(
                     records,
-                    sourceType="pp_table",
+                    sourceType=VLM_TABLE_SOURCE_TYPE,
                     text=table.plainText,
                     sourceRef="image-{0}-table-{1}".format(imageIndex, tableIndex),
                     optionKey=self._MatchOptionKey(
@@ -883,23 +888,6 @@ class ProductFactReconstructionValidator:
                         rawValidationRefs,
                         rowSourceRefs,
                     )
-                relatedRawOcrRefs = self._BuildRelatedRawOcrRefs(
-                    rawValidationRefs,
-                    evidenceById,
-                )
-                rawOcrHint = NormalizeWhitespaceLines(
-                    _StripOcrCollectionMarkers(row.rawOcrHint)
-                ) or self._FindRawOcrHint(
-                    fieldName,
-                    rawValue or normalizedValue,
-                    self._MergeSourceRefs(rowSourceRefs, relatedRawOcrRefs),
-                    evidenceById,
-                )
-                if rawOcrHint:
-                    rowSourceRefs = self._MergeSourceRefs(
-                        rowSourceRefs,
-                        relatedRawOcrRefs,
-                    )
                 validationIssue = self._ValidateQuantityEvidence(
                     rawValue or normalizedValue,
                     rawValidationRefs or rowSourceRefs or tableSourceRefs,
@@ -921,7 +909,6 @@ class ProductFactReconstructionValidator:
                         update={
                             "fieldName": fieldName,
                             "rawValue": rawValue,
-                            "rawOcrHint": rawOcrHint,
                             "normalizedValue": normalizedValue,
                             "unit": NormalizeWhiteSpace(row.unit),
                             "dailyValuePercent": NormalizeWhiteSpace(
@@ -962,7 +949,7 @@ class ProductFactReconstructionValidator:
                     tableIndexesByRef.setdefault(sourceRef, tableIndex)
 
         for record in evidenceById.values():
-            if record.sourceType != "pp_table":
+            if not _IsVlmTableSourceType(record.sourceType):
                 continue
             skeletonRows = self._BuildVlmSkeletonRows(record, evidenceById)
             if not skeletonRows:
@@ -1063,19 +1050,12 @@ class ProductFactReconstructionValidator:
         dailyValuePercent: str = "",
     ) -> ProductReconstructedTableRow:
         sourceRefs = self._MergeSourceRefs([tableRef], rawOcrRefs)
-        rawOcrHint = self._FindRawOcrHint(
-            fieldName,
-            rawValue,
-            rawOcrRefs,
-            evidenceById,
-        )
         return ProductReconstructedTableRow(
             fieldName=fieldName,
             rawValue=rawValue,
-            rawOcrHint=rawOcrHint,
             normalizedValue="",
             dailyValuePercent=dailyValuePercent,
-            sourceRefs=sourceRefs if rawOcrHint else [tableRef],
+            sourceRefs=sourceRefs,
             validationStatus="vlm_skeleton",
         )
 
@@ -1102,7 +1082,7 @@ class ProductFactReconstructionValidator:
             for sourceRef in rowSourceRefs
             if (
                 sourceRef in evidenceById
-                and evidenceById[sourceRef].sourceType == "pp_table"
+                and _IsVlmTableSourceType(evidenceById[sourceRef].sourceType)
             )
         ]
         if tableRefs:
@@ -1112,7 +1092,7 @@ class ProductFactReconstructionValidator:
             for sourceRef in tableSourceRefs
             if (
                 sourceRef in evidenceById
-                and evidenceById[sourceRef].sourceType == "pp_table"
+                and _IsVlmTableSourceType(evidenceById[sourceRef].sourceType)
             )
         ]
 
@@ -1127,7 +1107,7 @@ class ProductFactReconstructionValidator:
             return None
         for sourceRef in sourceRefs:
             record = evidenceById.get(sourceRef)
-            if record is None or record.sourceType != "pp_table":
+            if record is None or not _IsVlmTableSourceType(record.sourceType):
                 continue
             for line in record.text.splitlines():
                 cells = [
@@ -1173,31 +1153,6 @@ class ProductFactReconstructionValidator:
                 )
             )
         ]
-
-    def _FindRawOcrHint(
-        self,
-        fieldName: str,
-        rawValue: str,
-        sourceRefs: Sequence[str],
-        evidenceById: Mapping[str, ProductInputEvidenceRecord],
-    ) -> str:
-        fieldKey = _CompactEvidenceText(fieldName)
-        valueTokens = _ExtractQuantityTokens(rawValue)
-        for sourceRef in sourceRefs:
-            record = evidenceById.get(sourceRef)
-            if record is None or record.sourceType != "raw_ocr_tile":
-                continue
-            lines = [
-                NormalizeWhiteSpace(line)
-                for line in record.text.splitlines()
-                if NormalizeWhiteSpace(line)
-            ]
-            for lineIndex, line in enumerate(lines):
-                if fieldKey and fieldKey in _CompactEvidenceText(line):
-                    return " / ".join(lines[lineIndex : lineIndex + 3])
-                if valueTokens and valueTokens <= _ExtractQuantityTokens(line):
-                    return line
-        return ""
 
     def _MergeSourceRefs(
         self,
@@ -1307,7 +1262,7 @@ class ProductFactReconstructionValidator:
             )
         ]
         if any(
-            record.sourceType != "pp_table"
+            not _IsVlmTableSourceType(record.sourceType)
             or record.validationStatus == "verified"
             for record in matchingRecords
         ):
