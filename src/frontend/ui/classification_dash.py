@@ -80,57 +80,43 @@ STAGE_DISPLAY_NAMES = {
 PROGRESS_STEP_DEFINITIONS = [
     {
         "key": "collect",
-        "title": "웹스크롤링 & OCR 처리",
+        "title": "상품 정보 수집",
     },
     {
         "key": "reconstruct",
-        "title": "표 가공 및 LLM reconstruction",
+        "title": "상품 정보 가공",
     },
     {
         "key": "candidate",
-        "title": "후보 산출 로직",
+        "title": "분류코드 산출",
     },
     {
         "key": "validation",
-        "title": "Classification 검증",
+        "title": "산출 결과 검증",
     },
 ]
 RECONSTRUCTION_GROUPS = (
     (
-        "basic",
-        "기본 상품 정보",
-        ("제품명", "상품명", "식품유형", "식품의유형", "내용량", "중량", "용량"),
-    ),
-    (
         "ingredients",
         "원재료명 및 함량",
-        ("원재료", "원료명", "주원료", "배합", "전성분", "inci", "성분명"),
-    ),
-    (
-        "allergens",
-        "알레르기 정보",
-        ("알레르기", "알러지", "알레르겐", "함유주의"),
-    ),
-    (
-        "nutrition",
-        "영양 정보",
         (
-            "영양",
-            "열량",
-            "나트륨",
-            "탄수화물",
-            "당류",
-            "지방",
-            "콜레스테롤",
-            "단백질",
+            "원재료",
+            "원료명",
+            "원제",
+            "주원료",
+            "배합",
+            "전성분",
+            "ingredients",
+            "inci",
+            "성분명",
+            "함량",
+            "함유량",
+            "함유",
+            "조성",
         ),
     ),
-    (
-        "storage",
-        "보관·가공 정보",
-        ("보관", "소비기한", "유통기한", "조리", "가열", "냉장", "냉동"),
-    ),
 )
+VLM_EVIDENCE_SOURCE_TYPES = {"vlm_table", "pp_table"}
 
 
 def display_stage_name(stage: Any) -> str:
@@ -211,6 +197,7 @@ def _expandable_text(value: Any, *, max_length: int = 180) -> Any:
 
 def _display_source_type(source_type: Any) -> str:
     labels = {
+        "vlm_table": "VLM table",
         "pp_table": "VLM table",
         "raw_ocr_tile": "Raw OCR tile",
         "notice_field": "Web notice",
@@ -240,100 +227,224 @@ def _fact_source_text(
     return str(refs or "")
 
 
-def _group_reconstruction_rows(
-    tables: list[Any],
-    facts: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    groupedRows = {key: [] for key, _, _ in RECONSTRUCTION_GROUPS}
-    groupedRows["other"] = []
-    seenRows: set[tuple[str, str]] = set()
-    sourceRows: list[tuple[dict[str, Any], str]] = []
+def _evidence_id(row: dict[str, Any]) -> str:
+    return str(row.get("evidence_id") or row.get("id") or "").strip()
 
-    for table in tables:
-        if not isinstance(table, dict):
+
+def _table_source_refs(table: dict[str, Any]) -> list[str]:
+    refs: list[str] = []
+    for sourceRef in table.get("source_refs") or []:
+        sourceRefText = str(sourceRef).strip()
+        if sourceRefText:
+            refs.append(sourceRefText)
+    for row in table.get("rows") or []:
+        if not isinstance(row, dict):
             continue
-        tableName = str(table.get("table_name") or "")
-        sourceRows.extend(
-            (row, tableName)
-            for row in table.get("rows") or []
-            if isinstance(row, dict)
+        for sourceRef in row.get("source_refs") or []:
+            sourceRefText = str(sourceRef).strip()
+            if sourceRefText:
+                refs.append(sourceRefText)
+    return list(dict.fromkeys(refs))
+
+
+def _table_product_context_text(
+    table: dict[str, Any],
+    evidence_rows: list[Any],
+) -> str:
+    evidenceById = {
+        evidenceId: row
+        for row in evidence_rows
+        if isinstance(row, dict) and (evidenceId := _evidence_id(row))
+    }
+    optionLabels = {
+        str(row.get("option_key") or "").strip(): _short_text(
+            row.get("text") or row.get("source_label") or row.get("option_key"),
+            max_length=120,
         )
-    sourceRows.extend(
-        (
-            {
-                "field_name": fact.get("field_name"),
-                "raw_value": fact.get("raw_value"),
-                "normalized_value": fact.get("normalized_value"),
-                "source_refs": fact.get("source_refs") or [],
-                "validation_status": fact.get("validation_status") or "accepted",
-            },
-            "",
+        for row in evidence_rows
+        if (
+            isinstance(row, dict)
+            and str(row.get("source_type") or "") == "notice_option"
+            and str(row.get("option_key") or "").strip()
         )
-        for fact in facts
-        if isinstance(fact, dict)
+    }
+    optionKeys = []
+    for sourceRef in _table_source_refs(table):
+        row = evidenceById.get(sourceRef)
+        if row is None:
+            continue
+        optionKey = str(row.get("option_key") or "").strip()
+        if optionKey:
+            optionKeys.append(optionKey)
+    labels = [
+        optionLabels.get(optionKey, optionKey)
+        for optionKey in dict.fromkeys(optionKeys)
+    ]
+    if not labels:
+        return ""
+    return "상품/옵션: " + ", ".join(labels[:2])
+
+
+def _is_ingredient_text(value: Any) -> bool:
+    compactText = str(value or "").replace(" ", "").lower()
+    return any(
+        marker.replace(" ", "").lower() in compactText
+        for _, _, markers in RECONSTRUCTION_GROUPS
+        for marker in markers
     )
 
-    for row, tableName in sourceRows:
-        fieldName = str(row.get("field_name") or "").strip()
-        displayValue = str(
-            row.get("normalized_value") or row.get("raw_value") or ""
-        ).strip()
-        rowKey = (fieldName.replace(" ", "").lower(), displayValue)
-        if not any(rowKey) or rowKey in seenRows:
-            continue
-        seenRows.add(rowKey)
-        searchableName = "{0} {1}".format(fieldName, tableName).replace(
-            " ",
-            "",
-        ).lower()
-        groupKey = next(
-            (
-                key
-                for key, _, markers in RECONSTRUCTION_GROUPS
-                if any(
-                    marker.replace(" ", "").lower() in searchableName
-                    for marker in markers
-                )
-            ),
-            "other",
-        )
-        groupedRows[groupKey].append(row)
 
-    groupTitles = {key: title for key, title, _ in RECONSTRUCTION_GROUPS}
-    groupTitles["other"] = "기타 구조화 정보"
+def _filter_ingredient_facts(facts: list[Any]) -> list[dict[str, Any]]:
     return [
-        {"table_name": groupTitles[groupKey], "rows": rows}
-        for groupKey, rows in groupedRows.items()
-        if rows
+        fact
+        for fact in facts
+        if isinstance(fact, dict) and _is_ingredient_text(fact.get("field_name"))
     ]
 
 
-def _validation_cell(row: dict[str, Any]) -> html.Div:
-    status = str(row.get("validation_status") or "unverified").strip().lower()
-    statusLabels = {
-        "accepted": "채택",
-        "verified": "교차검증",
-        "evidence_matched": "근거 일치",
-        "review_required": "검토 필요",
-        "unresolved": "미해결",
-        "unverified": "미검증",
-    }
-    issues = row.get("validation_issues") or []
-    issueText = ", ".join(str(issue) for issue in issues if str(issue).strip())
-    return html.Div(
-        [
-            html.Span(
-                statusLabels.get(status, status or "-"),
-                className=f"input-validation-chip {status}",
-            ),
-            html.Div(
-                _short_text(issueText, max_length=140),
-                className="input-reconstruction-secondary",
+def _vlm_evidence_tables(evidence_rows: list[Any]) -> list[dict[str, Any]]:
+    tables: list[dict[str, Any]] = []
+    for record in evidence_rows:
+        if (
+            not isinstance(record, dict)
+            or record.get("source_type") not in VLM_EVIDENCE_SOURCE_TYPES
+        ):
+            continue
+        rows: list[dict[str, str]] = []
+        for line in str(record.get("text") or "").splitlines():
+            cells = [cell.strip() for cell in line.split("|") if cell.strip()]
+            for cellIndex in range(0, len(cells) - 1, 2):
+                fieldName = cells[cellIndex]
+                rawValue = cells[cellIndex + 1]
+                if _is_ingredient_text("{0} {1}".format(fieldName, rawValue)):
+                    rows.append({"field_name": fieldName, "value": rawValue})
+        if rows:
+            tables.append(
+                {
+                    "table_name": record.get("source_label")
+                    or record.get("evidence_id")
+                    or "VLM 표 원문",
+                    "rows": rows,
+                }
             )
-            if issueText
-            else None,
+    return tables
+
+
+def _llm_reconstruction_tables(tables: list[Any]) -> list[dict[str, Any]]:
+    cleanedTables: list[dict[str, Any]] = []
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        tableName = str(table.get("table_name") or "LLM reconstruction")
+        rows: list[dict[str, str]] = []
+        for row in table.get("rows") or []:
+            if not isinstance(row, dict):
+                continue
+            fieldName = str(row.get("field_name") or "").strip()
+            rawValue = str(row.get("raw_value") or "").strip()
+            normalizedValue = str(row.get("normalized_value") or "").strip()
+            if normalizedValue and _is_ingredient_text(
+                "{0} {1} {2} {3}".format(
+                    tableName,
+                    fieldName,
+                    rawValue,
+                    normalizedValue,
+                )
+            ):
+                rows.append({"field_name": fieldName, "value": normalizedValue})
+        if rows:
+            cleanedTables.append({"table_name": tableName, "rows": rows})
+    return cleanedTables
+
+
+def _vlm_rows_for_source_refs(
+    source_refs: list[Any],
+    evidence_by_id: dict[str, dict[str, Any]],
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    seenKeys: set[tuple[str, str]] = set()
+    for sourceRef in source_refs:
+        record = evidence_by_id.get(str(sourceRef))
+        if (
+            not isinstance(record, dict)
+            or record.get("source_type") not in VLM_EVIDENCE_SOURCE_TYPES
+        ):
+            continue
+        for line in str(record.get("text") or "").splitlines():
+            cells = [cell.strip() for cell in line.split("|") if cell.strip()]
+            for cellIndex in range(0, len(cells) - 1, 2):
+                fieldName = cells[cellIndex]
+                rawValue = cells[cellIndex + 1]
+                if not _is_ingredient_text("{0} {1}".format(fieldName, rawValue)):
+                    continue
+                key = (fieldName, rawValue)
+                if key in seenKeys:
+                    continue
+                seenKeys.add(key)
+                rows.append({"field_name": fieldName, "value": rawValue})
+    return rows
+
+
+def _reconstruction_option_sections(
+    tables: list[Any],
+    evidence_rows: list[Any],
+) -> list[dict[str, Any]]:
+    evidenceById = {
+        str(record.get("evidence_id")): record
+        for record in evidence_rows
+        if isinstance(record, dict) and str(record.get("evidence_id") or "").strip()
+    }
+    sections: list[dict[str, Any]] = []
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        tableName = str(table.get("table_name") or "LLM reconstruction").strip()
+        tableSourceRefs = [
+            str(sourceRef)
+            for sourceRef in table.get("source_refs") or []
+            if str(sourceRef).strip()
         ]
-    )
+        beforeRows: list[dict[str, str]] = []
+        afterRows: list[dict[str, str]] = []
+        for row in table.get("rows") or []:
+            if not isinstance(row, dict):
+                continue
+            fieldName = str(row.get("field_name") or "").strip()
+            rawValue = str(row.get("raw_value") or "").strip()
+            normalizedValue = str(row.get("normalized_value") or "").strip()
+            if not _is_ingredient_text(
+                "{0} {1} {2} {3}".format(
+                    tableName,
+                    fieldName,
+                    rawValue,
+                    normalizedValue,
+                )
+            ):
+                continue
+            rowSourceRefs = [
+                str(sourceRef)
+                for sourceRef in row.get("source_refs") or []
+                if str(sourceRef).strip()
+            ]
+            rowVlmRows = _vlm_rows_for_source_refs(
+                [*rowSourceRefs, *tableSourceRefs],
+                evidenceById,
+            )
+            if rowVlmRows:
+                beforeRows.extend(rowVlmRows)
+            elif rawValue:
+                beforeRows.append({"field_name": fieldName, "value": rawValue})
+            if normalizedValue:
+                afterRows.append({"field_name": fieldName, "value": normalizedValue})
+        if beforeRows or afterRows:
+            sections.append(
+                {
+                    "table_name": tableName,
+                    "before_rows": beforeRows,
+                    "after_rows": afterRows,
+                }
+            )
+    return sections
 
 
 def _reconstruction_fact_table(
@@ -351,12 +462,7 @@ def _reconstruction_fact_table(
         validationStatus = str(fact.get("validation_status") or "-").strip()
         correctionType = str(fact.get("correction_type") or "").strip()
         rawValue = str(fact.get("raw_value") or "").strip()
-        normalizedValue = str(fact.get("normalized_value") or rawValue).strip()
-        isCorrected = bool(
-            rawValue
-            and normalizedValue
-            and rawValue != normalizedValue
-        )
+        normalizedValue = str(fact.get("normalized_value") or "").strip()
         rows.append(
             html.Tr(
                 [
@@ -365,20 +471,12 @@ def _reconstruction_fact_table(
                         className="input-reconstruction-primary",
                     ),
                     html.Td(
-                        _expandable_text(rawValue, max_length=220),
-                        className="input-reconstruction-raw-value",
+                        _short_text(fact.get("raw_value"), max_length=220),
                     ),
                     html.Td(
-                        [
-                            _expandable_text(normalizedValue, max_length=220),
-                            html.Div("교정됨", className="input-correction-chip")
-                            if isCorrected
-                            else None,
-                        ],
-                        className=(
-                            "input-reconstruction-normalized-value corrected"
-                            if isCorrected
-                            else "input-reconstruction-normalized-value"
+                        _short_text(
+                            fact.get("normalized_value") or fact.get("raw_value"),
+                            max_length=220,
                         ),
                     ),
                     html.Td(
@@ -402,9 +500,6 @@ def _reconstruction_fact_table(
                         ),
                     ),
                 ],
-                className=(
-                    "input-reconstruction-corrected-row" if isCorrected else ""
-                ),
             )
         )
 
@@ -431,8 +526,8 @@ def _reconstruction_fact_table(
                             html.Tr(
                                 [
                                     html.Th("필드"),
-                                    html.Th("VLM/OCR 판독값"),
-                                    html.Th("LLM 교정값"),
+                                    html.Th("원문 값"),
+                                    html.Th("정규화 값"),
                                     html.Th("검증 / 교정"),
                                     html.Th("출처"),
                                 ]
@@ -628,7 +723,7 @@ def _source_evidence_table(
     vlmRecords = [
         record
         for record in cleaned
-        if record.get("source_type") == "pp_table"
+        if record.get("source_type") in {"vlm_table", "pp_table"}
     ]
     webRecords = [
         record
@@ -642,6 +737,7 @@ def _source_evidence_table(
         not in {
             "raw_ocr_tile",
             "combined_ocr_text",
+            "vlm_table",
             "pp_table",
             "notice_field",
             "notice_option",
@@ -678,6 +774,7 @@ def _reconstructed_tables_widget(
     tables: list[Any],
     *,
     source_labels: dict[str, Any] | None = None,
+    evidence_rows: list[Any] | None = None,
     max_rows_per_table: int = 12,
 ) -> html.Div | None:
     cleanedTables = [table for table in tables if isinstance(table, dict)]
@@ -685,6 +782,7 @@ def _reconstructed_tables_widget(
         return None
 
     labels = source_labels or {}
+    evidenceRows = evidence_rows or []
     tableBlocks: list[Any] = []
     for tableIndex, table in enumerate(cleanedTables, start=1):
         rows = table.get("rows") or []
@@ -702,13 +800,6 @@ def _reconstructed_tables_widget(
                 )
             else:
                 sourceText = str(sourceRefs or "")
-            rawValue = str(row.get("raw_value") or "").strip()
-            normalizedValue = str(row.get("normalized_value") or rawValue).strip()
-            isCorrected = bool(
-                rawValue
-                and normalizedValue
-                and rawValue != normalizedValue
-            )
             tableRows.append(
                 html.Tr(
                     [
@@ -716,42 +807,22 @@ def _reconstructed_tables_widget(
                             _short_text(row.get("field_name"), max_length=90),
                             className="input-reconstruction-primary",
                         ),
-                        html.Td(
-                            _expandable_text(rawValue, max_length=260),
-                            className="input-reconstruction-raw-value",
-                        ),
-                        html.Td(
-                            [
-                                _expandable_text(normalizedValue, max_length=260),
-                                html.Div("교정됨", className="input-correction-chip")
-                                if isCorrected
-                                else None,
-                            ],
-                            className=(
-                                "input-reconstruction-normalized-value corrected"
-                                if isCorrected
-                                else "input-reconstruction-normalized-value"
-                            ),
-                        ),
+                        html.Td(_short_text(row.get("raw_value"), max_length=220)),
                         html.Td(
                             _short_text(
-                                " / ".join(
-                                    str(value).strip()
-                                    for value in [
-                                        row.get("unit"),
-                                        row.get("daily_value_percent"),
-                                    ]
-                                    if str(value or "").strip()
-                                ),
-                                max_length=70,
+                                row.get("normalized_value") or row.get("raw_value"),
+                                max_length=220,
                             ),
                         ),
-                        html.Td(_validation_cell(row)),
+                        html.Td(_short_text(row.get("unit"), max_length=50)),
+                        html.Td(
+                            _short_text(
+                                row.get("daily_value_percent"),
+                                max_length=60,
+                            ),
+                        ),
                         html.Td(_short_text(sourceText, max_length=160)),
-                    ],
-                    className=(
-                        "input-reconstruction-corrected-row" if isCorrected else ""
-                    ),
+                    ]
                 )
             )
         more = None
@@ -760,12 +831,26 @@ def _reconstructed_tables_widget(
                 f"+ {len(rows) - max_rows_per_table} more rows",
                 className="input-reconstruction-more",
             )
+        productContextText = _table_product_context_text(table, evidenceRows)
         tableBlocks.append(
             html.Div(
                 [
                     html.Div(
                         [
-                            html.Div(_short_text(tableName, max_length=120), className="input-card-title"),
+                            html.Div(
+                                [
+                                    html.Div(
+                                        _short_text(tableName, max_length=120),
+                                        className="input-card-title",
+                                    ),
+                                    html.Div(
+                                        productContextText,
+                                        className="input-card-subtitle",
+                                    )
+                                    if productContextText
+                                    else None,
+                                ],
+                            ),
                             html.Div(f"{len(rows)} rows", className="input-card-count"),
                         ],
                         className="input-reconstruction-section-head",
@@ -777,10 +862,10 @@ def _reconstructed_tables_widget(
                                     html.Tr(
                                         [
                                             html.Th("항목"),
-                                            html.Th("VLM/OCR 판독값"),
-                                            html.Th("LLM 교정값"),
-                                            html.Th("단위 / 기준"),
-                                            html.Th("검증"),
+                                            html.Th("원문 값"),
+                                            html.Th("정규화 값"),
+                                            html.Th("단위"),
+                                            html.Th("일일 기준"),
                                             html.Th("출처"),
                                         ]
                                     )
@@ -807,10 +892,223 @@ def _reconstructed_tables_widget(
                     html.Div(f"{len(cleanedTables)} tables", className="input-card-count"),
                 ],
                 className="input-reconstruction-section-head",
-            ) if title else None,
+            ),
             *tableBlocks,
         ],
         className="input-reconstruction-section",
+    )
+
+
+def _simple_reconstruction_table_widget(
+    title: str,
+    tables: list[dict[str, Any]],
+    value_header: str,
+) -> html.Div | None:
+    if not tables:
+        return None
+    blocks: list[Any] = []
+    for table in tables:
+        rows = table.get("rows") or []
+        if not rows:
+            continue
+        blocks.append(
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Div(
+                                _short_text(table.get("table_name"), max_length=120),
+                                className="input-card-title",
+                            ),
+                            html.Div(f"{len(rows)} rows", className="input-card-count"),
+                        ],
+                        className="input-reconstruction-section-head",
+                    ),
+                    html.Div(
+                        html.Table(
+                            [
+                                html.Thead(
+                                    html.Tr(
+                                        [
+                                            html.Th("항목"),
+                                            html.Th(value_header),
+                                        ]
+                                    )
+                                ),
+                                html.Tbody(
+                                    [
+                                        html.Tr(
+                                            [
+                                                html.Td(
+                                                    _short_text(
+                                                        row.get("field_name"),
+                                                        max_length=90,
+                                                    ),
+                                                    className="input-reconstruction-primary",
+                                                ),
+                                                html.Td(
+                                                    _expandable_text(
+                                                        row.get("value"),
+                                                        max_length=360,
+                                                    ),
+                                                    className="input-reconstruction-raw-value",
+                                                ),
+                                            ]
+                                        )
+                                        for row in rows
+                                        if isinstance(row, dict)
+                                    ]
+                                ),
+                            ],
+                            className="input-reconstruction-table simple",
+                        ),
+                        className="input-reconstruction-table-wrap",
+                    ),
+                ],
+                className="input-reconstruction-table-block",
+            )
+        )
+    if not blocks:
+        return None
+    return html.Div(
+        [
+            html.Div(title, className="input-reconstruction-pane-title"),
+            *blocks,
+        ],
+        className="input-reconstruction-pane",
+    )
+
+
+def _simple_reconstruction_rows_widget(
+    rows: list[dict[str, Any]],
+    value_header: str,
+) -> html.Div | None:
+    cleanedRows = [row for row in rows if isinstance(row, dict)]
+    if not cleanedRows:
+        return html.Div("표시할 값이 없습니다.", className="drawer-empty-state compact")
+    return html.Div(
+        html.Table(
+            [
+                html.Thead(
+                    html.Tr(
+                        [
+                            html.Th("항목"),
+                            html.Th(value_header),
+                        ]
+                    )
+                ),
+                html.Tbody(
+                    [
+                        html.Tr(
+                            [
+                                html.Td(
+                                    _short_text(row.get("field_name"), max_length=90),
+                                    className="input-reconstruction-primary",
+                                ),
+                                html.Td(
+                                    _expandable_text(
+                                        row.get("value"),
+                                        max_length=420,
+                                    ),
+                                    className="input-reconstruction-raw-value",
+                                ),
+                            ]
+                        )
+                        for row in cleanedRows
+                    ]
+                ),
+            ],
+            className="input-reconstruction-table simple",
+        ),
+        className="input-reconstruction-table-wrap",
+    )
+
+
+def _reconstruction_option_compare_widget(
+    sections: list[dict[str, Any]],
+) -> html.Div | None:
+    if not sections:
+        return None
+    blocks: list[Any] = []
+    for section in sections:
+        beforeRows = section.get("before_rows") or []
+        afterRows = section.get("after_rows") or []
+        rowCount = max(len(beforeRows), len(afterRows))
+        blocks.append(
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Div(
+                                _short_text(section.get("table_name"), max_length=120),
+                                className="input-card-title",
+                            ),
+                            html.Div(f"{rowCount} rows", className="input-card-count"),
+                        ],
+                        className="input-reconstruction-section-head",
+                    ),
+                    html.Div(
+                        [
+                            html.Div(
+                                [
+                                    html.Div(
+                                        "교정 전 원문값",
+                                        className="input-reconstruction-pane-title",
+                                    ),
+                                    _simple_reconstruction_rows_widget(
+                                        beforeRows,
+                                        "OCR/VLM 판독값",
+                                    ),
+                                ],
+                                className="input-reconstruction-pane",
+                            ),
+                            html.Div(
+                                [
+                                    html.Div(
+                                        "교정 후 LLM Reconstruction",
+                                        className="input-reconstruction-pane-title",
+                                    ),
+                                    _simple_reconstruction_rows_widget(
+                                        afterRows,
+                                        "LLM 교정값",
+                                    ),
+                                ],
+                                className="input-reconstruction-pane",
+                            ),
+                        ],
+                        className="input-reconstruction-compare-grid",
+                    ),
+                ],
+                className="input-reconstruction-option-section",
+            )
+        )
+    return html.Div(blocks, className="input-reconstruction-option-list")
+
+
+def _reconstruction_compare_widget(
+    before_tables: list[dict[str, Any]],
+    after_tables: list[dict[str, Any]],
+) -> html.Div | None:
+    beforePanel = _simple_reconstruction_table_widget(
+        "교정 전 VLM 표 원문",
+        before_tables,
+        "VLM 판독값",
+    )
+    afterPanel = _simple_reconstruction_table_widget(
+        "교정 후 LLM Reconstruction",
+        after_tables,
+        "LLM 교정값",
+    )
+    if beforePanel is None and afterPanel is None:
+        return None
+    return html.Div(
+        [
+            beforePanel
+            or html.Div("VLM 표 원문이 없습니다.", className="drawer-empty-state"),
+            afterPanel
+            or html.Div("LLM 교정 결과가 없습니다.", className="drawer-empty-state"),
+        ],
+        className="input-reconstruction-compare-grid",
     )
 
 
@@ -871,15 +1169,12 @@ def input_processing_detail_card(
     reconstructionMode = status.get("mode") or "unknown"
     reconstructionError = status.get("error")
     fallbackReason = status.get("fallback_reason")
-    groupedTables = _group_reconstruction_rows(
-        reconstructedTables,
-        productFacts,
-    )
     afterPanel = (
         _reconstructed_tables_widget(
-            "",
-            groupedTables,
+            "LLM 복원 후 구조화된 상세 표",
+            reconstructedTables,
             source_labels=sourceLabels,
+            evidence_rows=sourceEvidencePreview,
         )
         or _reconstruction_fact_table(
             "LLM 복원 후 구조화된 상세 facts",
@@ -950,11 +1245,22 @@ def input_processing_detail_card(
                 and not status.get("used_llm_reconstruction")
             ) else None,
             afterPanel,
+            _reconstruction_fact_table(
+                "최종 분류 입력 facts",
+                productFacts,
+                source_labels=sourceLabels,
+                max_rows=16,
+            ) if productFacts else None,
             html.Details(
                 [
                     html.Summary(
                         "Classification input text lines",
-                        style={"cursor": "pointer", "fontSize": "12px", "fontWeight": 850, "color": "#334155"},
+                        style={
+                            "cursor": "pointer",
+                            "fontSize": "12px",
+                            "fontWeight": 850,
+                            "color": "#334155",
+                        },
                     ),
                     _classification_fact_text_table(factTexts, title=""),
                 ],
@@ -1122,8 +1428,29 @@ def render_input_form(
                                     "fontWeight": 850,
                                 },
                             ),
+                            html.Button(
+                                "Rerun LLM reconstruction",
+                                id="btn-rerun-reconstruction",
+                                n_clicks=0,
+                                disabled=runDisabled,
+                                className="run-pipeline-button",
+                                style={
+                                    "padding": "10px 18px",
+                                    "fontSize": "14px",
+                                    "background": "#f8fafc",
+                                    "color": "#334155",
+                                    "border": "1px solid #cbd5e1",
+                                    "borderRadius": "8px",
+                                    "cursor": "pointer",
+                                    "fontWeight": 750,
+                                },
+                            ),
                         ],
-                        style={"display": "flex", "alignItems": "center"},
+                        style={
+                            "display": "flex",
+                            "alignItems": "center",
+                            "gap": "8px",
+                        },
                     ),
                 ],
                 style=CARD,

@@ -71,6 +71,20 @@ class PipelineApi:
             responsePayload, statusCode = self.StartRunFromPayload(payload)
             return jsonify(responsePayload), statusCode
 
+        @server.route("/api/reconstruction-runs", methods=["POST"])
+        def rerun_input_reconstruction() -> ResponseReturnValue:
+            payload = flask_request.get_json(silent=True) or {}
+            if not isinstance(payload, dict):
+                return jsonify(ApiErrorResponse(
+                    error="invalid_json_payload",
+                    message="Request body must be a JSON object.",
+                    hint="Send url or product_id.",
+                ).ToDict()), 400
+            responsePayload, statusCode = self.RerunCachedInputReconstruction(
+                payload,
+            )
+            return jsonify(responsePayload), statusCode
+
         @server.route("/api/runs/<job_id>")
         def read_run_snapshot(job_id: str) -> ResponseReturnValue:
             snapshot = self._registry.BuildUiResult(job_id)
@@ -229,6 +243,76 @@ class PipelineApi:
             events_url=f"/api/runs/{jobId}/events",
             result_url=f"/api/runs/{jobId}",
         ).ToDict(), 202
+
+    def RerunCachedInputReconstruction(
+        self,
+        payload: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], int]:
+        productIdentifier = str(
+            payload.get("url")
+            or payload.get("kurly_url")
+            or payload.get("product_id")
+            or ""
+        ).strip()
+        if not productIdentifier:
+            return ApiErrorResponse(
+                error="missing_cached_product_identifier",
+                message="url or product_id is required.",
+                field="url",
+            ).ToDict(), 400
+        try:
+            from agents.document_pipeline import rerun_cached_input_reconstruction
+            from backend.pipeline_projection import InputProcessingViewProjector
+
+            facts = rerun_cached_input_reconstruction(productIdentifier)
+            jobId = "reconstruct_{0}".format(uuid.uuid4().hex[:10])
+            inputProcessingView = (
+                InputProcessingViewProjector().BuildInputProcessingViewFromFacts(
+                    facts,
+                )
+            )
+            requestFacts = {
+                "product_id": facts.get("product_id") or "",
+                "product_name": facts.get("product_name") or "",
+                "description": facts.get("description") or "",
+                "url": facts.get("url") or "",
+                "source_urls": facts.get("source_urls") or [],
+            }
+            return {
+                "job_id": jobId,
+                "job_status": "completed",
+                "request": {
+                    "query": str(
+                        facts.get("product_name")
+                        or facts.get("description")
+                        or facts.get("url")
+                        or productIdentifier
+                    ),
+                    "facts": requestFacts,
+                },
+                "input_processing_view": inputProcessingView,
+                "events": [
+                    {
+                        "ts": time.strftime("%H:%M:%S"),
+                        "stage": "Input_Reconstruction",
+                        "status": "completed",
+                        "message": "캐시된 OCR evidence로 LLM reconstruction만 재실행했습니다.",
+                    }
+                ],
+                "warnings": facts.get("warnings") or [],
+            }, 200
+        except FileNotFoundError as error:
+            return ApiErrorResponse(
+                error="cached_reconstruction_artifact_not_found",
+                message=str(error),
+                field="product_id",
+            ).ToDict(), 404
+        except (ValidationError, ValueError, RuntimeError) as error:
+            return ApiErrorResponse(
+                error="cached_reconstruction_failed",
+                message=str(error),
+                field="reconstruction",
+            ).ToDict(), 400
 
     def BuildRunFacts(
         self,

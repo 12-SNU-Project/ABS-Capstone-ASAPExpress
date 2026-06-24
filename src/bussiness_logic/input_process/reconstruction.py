@@ -39,7 +39,7 @@ from bussiness_logic.utils import NormalizeWhiteSpace, NormalizeWhitespaceLines
 DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS = 4096
 
 PRODUCT_FACT_RECONSTRUCTION_SYSTEM_PROMPT = """
-You reconstruct structured product input facts from Korean product notice, PaddleOCR-VL table extraction, and raw OCR text.
+You reconstruct structured product input facts from Korean product notice, structured table OCR (PaddleOCR-VL/PP-Structure), and raw OCR text.
 Return strict JSON only.
 Return exactly one JSON object. Do not append markdown, commentary, or extra braces after the root object.
 Return only these top-level keys: reconstructed_tables, product_facts, unresolved_facts, conflicts, warnings.
@@ -47,9 +47,6 @@ reconstructed_tables preserves structured table OCR contents for UI review. Do n
 reconstructed_tables must be an array of objects with exactly these keys: table_name, source_refs, rows.
 Each reconstructed_tables row must have exactly these keys:
 field_name, raw_value, normalized_value, unit, daily_value_percent, source_refs.
-For reconstructed_tables, raw_value must be copied verbatim from referenced table evidence when vlm_table evidence exists.
-Never correct spelling, labels, or units in raw_value. Put OCR corrections only in normalized_value.
-Use raw OCR or notice evidence to support normalized_value, not to replace table raw_value.
 For nutrition tables, return each nutrient as its own row. For label/specification tables, return each label field as its own row.
 product_facts is only the compact classification input facts derived from the same evidence.
 product_facts and unresolved_facts must be arrays of objects with exactly these keys:
@@ -59,10 +56,11 @@ Do not infer HS, CN, TARIC, customs, legal, or regulatory conclusions.
 Do not create product facts that are absent from the provided evidence.
 Correct OCR typos only when the surrounding evidence strongly supports the correction.
 If evidence is insufficient or conflicting, use unresolved_facts or conflicts.
-Evidence with different option_key values describes separate product options. Preserve option-specific values in separate reconstructed_tables and do not report them as conflicts.
 The application will generate normalized_fact_texts after validation.
 Preserve table rows in reconstructed_tables even when they are not selected as product_facts.
 Prefer concise product_facts for classification: product name, food/cosmetic type, physical form, processing state, preparation/use, storage state, ingredients, composition ratios, net content, and origin/manufacture country when explicit.
+For food products, product_facts must include explicit ingredient/composition rows when they appear in evidence, including component-specific ingredients for multi-component products such as dumpling plus sauce.
+Do not put nutrient measurements such as sodium, carbohydrates, fat, protein, kcal, or daily value percentages in product_facts; keep nutrition rows only in reconstructed_tables.
 Do not include allergen warnings, same-facility/cross-contamination warnings, seller/vendor/manufacturer business-party names, expiry, package material, or marketing copy as product_facts unless they directly change customs classification.
 Return atomic field_name/raw_value pairs. Do not put a whole OCR block under a generic field.
 Never use field names such as OCR observation, OCR 관찰, tile, raw OCR, table marker, or evidence id.
@@ -85,6 +83,26 @@ QUANTITY_TOKEN_PATTERN = re.compile(
 )
 VLM_TABLE_SOURCE_TYPE = "vlm_table"
 LEGACY_VLM_TABLE_SOURCE_TYPE = "pp_table"
+CLASSIFICATION_INGREDIENT_FIELD_MARKERS = (
+    "원재료",
+    "원료",
+    "원제",
+    "배합",
+    "성분명",
+    "ingredients",
+    "composition",
+)
+NUTRITION_FIELD_MARKERS = (
+    "영양",
+    "나트륨",
+    "탄수화물",
+    "당류",
+    "지방",
+    "콜레스테롤",
+    "단백질",
+    "kcal",
+    "dailyvalue",
+)
 
 
 def _IsVlmTableSourceType(sourceType: str) -> bool:
@@ -282,6 +300,7 @@ class ProductReconstructedTableRow(BaseModel):
 
     fieldName: str = Field(alias="field_name")
     rawValue: str = Field(default="", alias="raw_value")
+    rawOcrHint: str = Field(default="", alias="raw_ocr_hint")
     normalizedValue: str = Field(default="", alias="normalized_value")
     unit: str = ""
     dailyValuePercent: str = Field(default="", alias="daily_value_percent")
@@ -715,7 +734,36 @@ class ProductInputEvidenceBuilder:
             anchors = self._BuildOptionAnchors(option)
             if anchors and any(anchor in normalizedText for anchor in anchors):
                 matchedOptionKeys.append("option-{0}".format(optionIndex))
-        return matchedOptionKeys[0] if len(matchedOptionKeys) == 1 else None
+        if len(matchedOptionKeys) == 1:
+            return matchedOptionKeys[0]
+
+        optionTokenSets = [
+            self._BuildOptionMatchTokens(option)
+            for option in options
+        ]
+        repeatedTokens = {
+            token
+            for token in set().union(*optionTokenSets)
+            if sum(token in tokenSet for tokenSet in optionTokenSets) > 1
+        }
+        scoredMatches: List[tuple[int, str]] = []
+        for optionIndex, tokenSet in enumerate(optionTokenSets, start=1):
+            distinctiveTokens = [
+                token for token in tokenSet if token not in repeatedTokens
+            ]
+            score = sum(
+                len(token)
+                for token in distinctiveTokens
+                if token in normalizedText
+            )
+            if score > 0:
+                scoredMatches.append((score, "option-{0}".format(optionIndex)))
+        if not scoredMatches:
+            return None
+        scoredMatches.sort(reverse=True)
+        if len(scoredMatches) > 1 and scoredMatches[0][0] == scoredMatches[1][0]:
+            return None
+        return scoredMatches[0][1]
 
     def _BuildOptionAnchors(self, option: _BoundNoticeOption) -> set[str]:
         rawValues = [
@@ -737,6 +785,28 @@ class ProductInputEvidenceBuilder:
             for value, unit in _ExtractQuantityTokens(rawValue)
         )
         return anchors
+
+    def _BuildOptionMatchTokens(self, option: _BoundNoticeOption) -> set[str]:
+        rawValues = [
+            option.optionName or "",
+            *[
+                field.fieldValue or ""
+                for field in option.fields
+                if field.fieldValue is not None
+            ],
+        ]
+        tokens: set[str] = set()
+        for rawValue in rawValues:
+            normalizedValue = NormalizeWhiteSpace(rawValue).lower()
+            compactValue = _CompactEvidenceText(normalizedValue)
+            if len(compactValue) >= 3:
+                tokens.add(compactValue)
+            tokens.update(
+                token
+                for token in re.findall(r"[0-9a-z가-힣]+", normalizedValue)
+                if len(token) >= 2
+            )
+        return tokens
 
 
 class ProductFactReconstructionValidator:
@@ -817,6 +887,13 @@ class ProductFactReconstructionValidator:
             )
             if cleanedFactRecord is not None:
                 unresolvedFacts.append(cleanedFactRecord)
+        productFacts, promotedUnresolvedFacts = self._PromoteTableIngredientFacts(
+            productFacts,
+            reconstructedTables,
+            evidenceById,
+            warnings,
+        )
+        unresolvedFacts.extend(promotedUnresolvedFacts)
         normalizedFactTexts = self._BuildNormalizedFactTexts(productFacts)
         return result.model_copy(
             update={
@@ -827,6 +904,98 @@ class ProductFactReconstructionValidator:
                 "warnings": warnings,
             }
         )
+
+    def _PromoteTableIngredientFacts(
+        self,
+        productFacts: Sequence[ProductFactRecord],
+        reconstructedTables: Sequence[ProductReconstructedTable],
+        evidenceById: Mapping[str, ProductInputEvidenceRecord],
+        warnings: List[str],
+    ) -> tuple[List[ProductFactRecord], List[ProductFactRecord]]:
+        promotedProductFacts = list(productFacts)
+        unresolvedFacts: List[ProductFactRecord] = []
+        seenIngredientValues = {
+            _CompactEvidenceText(fact.normalizedValue or fact.rawValue)
+            for fact in promotedProductFacts
+            if self._IsIngredientClassificationField(fact.fieldName)
+        }
+        for table in reconstructedTables:
+            for row in table.rows:
+                if not self._ShouldPromoteTableRow(row):
+                    continue
+                valueKey = _CompactEvidenceText(row.normalizedValue or row.rawValue)
+                if valueKey == "" or valueKey in seenIngredientValues:
+                    continue
+                factRecord = ProductFactRecord(
+                    fieldName=self._BuildPromotedFactFieldName(table, row),
+                    rawValue=row.rawValue,
+                    normalizedValue=row.normalizedValue or row.rawValue,
+                    sourceRefs=list(row.sourceRefs or table.sourceRefs),
+                    correctionType=(
+                        "llm_reconstructed"
+                        if row.normalizedValue and row.normalizedValue != row.rawValue
+                        else "none"
+                    ),
+                    validationStatus="accepted",
+                )
+                validationIssue = None
+                if row.validationStatus == "review_required":
+                    validationIssue = ",".join(row.validationIssues) or "table_row_review_required"
+                validationIssue = validationIssue or self._ValidateQuantityEvidence(
+                    factRecord.rawValue or factRecord.normalizedValue,
+                    factRecord.sourceRefs,
+                    evidenceById,
+                )
+                validationIssue = validationIssue or self._ValidateTextEvidence(
+                    factRecord.rawValue or factRecord.normalizedValue,
+                    factRecord.sourceRefs,
+                    evidenceById,
+                )
+                if validationIssue is not None:
+                    warnings.append(
+                        "unresolved_promoted_ingredient_fact field={0} reason={1}".format(
+                            factRecord.fieldName,
+                            validationIssue,
+                        )
+                    )
+                    unresolvedFacts.append(
+                        factRecord.model_copy(update={"validationStatus": "unresolved"})
+                    )
+                    continue
+                promotedProductFacts.append(factRecord)
+                seenIngredientValues.add(valueKey)
+        return promotedProductFacts, unresolvedFacts
+
+    def _ShouldPromoteTableRow(self, row: ProductReconstructedTableRow) -> bool:
+        return self._IsIngredientClassificationField(
+            row.fieldName,
+        ) and not self._IsNutritionField(row.fieldName)
+
+    def _IsIngredientClassificationField(self, fieldName: str) -> bool:
+        compactFieldName = _CompactEvidenceText(fieldName)
+        return any(
+            marker in compactFieldName
+            for marker in CLASSIFICATION_INGREDIENT_FIELD_MARKERS
+        )
+
+    def _IsNutritionField(self, fieldName: str) -> bool:
+        compactFieldName = _CompactEvidenceText(fieldName)
+        return any(marker in compactFieldName for marker in NUTRITION_FIELD_MARKERS)
+
+    def _BuildPromotedFactFieldName(
+        self,
+        table: ProductReconstructedTable,
+        row: ProductReconstructedTableRow,
+    ) -> str:
+        fieldName = NormalizeWhiteSpace(row.fieldName)
+        tableName = NormalizeWhiteSpace(table.tableName)
+        if (
+            tableName == ""
+            or tableName == "Reconstructed table"
+            or tableName in fieldName
+        ):
+            return fieldName
+        return "{0} ({1})".format(fieldName, tableName)
 
     def _CleanReconstructedTables(
         self,
@@ -888,6 +1057,25 @@ class ProductFactReconstructionValidator:
                         rawValidationRefs,
                         rowSourceRefs,
                     )
+                if normalizedValue == "":
+                    normalizedValue = rawValue
+                relatedRawOcrRefs = self._BuildRelatedRawOcrRefs(
+                    rawValidationRefs,
+                    evidenceById,
+                )
+                rawOcrHint = NormalizeWhitespaceLines(
+                    _StripOcrCollectionMarkers(row.rawOcrHint)
+                ) or self._FindRawOcrHint(
+                    fieldName,
+                    rawValue or normalizedValue,
+                    self._MergeSourceRefs(rowSourceRefs, relatedRawOcrRefs),
+                    evidenceById,
+                )
+                if rawOcrHint:
+                    rowSourceRefs = self._MergeSourceRefs(
+                        rowSourceRefs,
+                        relatedRawOcrRefs,
+                    )
                 validationIssue = self._ValidateQuantityEvidence(
                     rawValue or normalizedValue,
                     rawValidationRefs or rowSourceRefs or tableSourceRefs,
@@ -909,6 +1097,7 @@ class ProductFactReconstructionValidator:
                         update={
                             "fieldName": fieldName,
                             "rawValue": rawValue,
+                            "rawOcrHint": rawOcrHint,
                             "normalizedValue": normalizedValue,
                             "unit": NormalizeWhiteSpace(row.unit),
                             "dailyValuePercent": NormalizeWhiteSpace(
@@ -932,144 +1121,7 @@ class ProductFactReconstructionValidator:
                         }
                     )
                 )
-        return self._BackfillVlmSkeletonRows(cleanedTables, evidenceById)
-
-    def _BackfillVlmSkeletonRows(
-        self,
-        tables: Sequence[ProductReconstructedTable],
-        evidenceById: Mapping[str, ProductInputEvidenceRecord],
-    ) -> List[ProductReconstructedTable]:
-        mergedTables = list(tables)
-        tableIndexesByRef: Dict[str, int] = {}
-        for tableIndex, table in enumerate(mergedTables):
-            for sourceRef in table.sourceRefs:
-                tableIndexesByRef.setdefault(sourceRef, tableIndex)
-            for row in table.rows:
-                for sourceRef in row.sourceRefs:
-                    tableIndexesByRef.setdefault(sourceRef, tableIndex)
-
-        for record in evidenceById.values():
-            if not _IsVlmTableSourceType(record.sourceType):
-                continue
-            skeletonRows = self._BuildVlmSkeletonRows(record, evidenceById)
-            if not skeletonRows:
-                continue
-            tableIndex = tableIndexesByRef.get(record.evidenceId)
-            if tableIndex is None:
-                tableIndexesByRef[record.evidenceId] = len(mergedTables)
-                mergedTables.append(
-                    ProductReconstructedTable(
-                        tableName="VLM 원문 skeleton",
-                        sourceRefs=[record.evidenceId],
-                        rows=skeletonRows,
-                    )
-                )
-                continue
-            table = mergedTables[tableIndex]
-            existingKeys = self._BuildRowKeys(table.rows)
-            rowsToAppend = [
-                row for row in skeletonRows if self._BuildRowKey(row) not in existingKeys
-            ]
-            if rowsToAppend:
-                mergedTables[tableIndex] = table.model_copy(
-                    update={
-                        "sourceRefs": self._MergeSourceRefs(
-                            table.sourceRefs,
-                            [record.evidenceId],
-                        ),
-                        "rows": [*table.rows, *rowsToAppend],
-                    }
-                )
-        return mergedTables
-
-    def _BuildVlmSkeletonRows(
-        self,
-        record: ProductInputEvidenceRecord,
-        evidenceById: Mapping[str, ProductInputEvidenceRecord],
-    ) -> List[ProductReconstructedTableRow]:
-        relatedRawOcrRefs = self._BuildRelatedRawOcrRefs(
-            [record.evidenceId],
-            evidenceById,
-        )
-        rows: List[ProductReconstructedTableRow] = []
-        for line in record.text.splitlines():
-            cells = [
-                NormalizeWhiteSpace(cell)
-                for cell in line.split("|")
-                if NormalizeWhiteSpace(cell)
-            ]
-            if len(cells) < 2:
-                continue
-            rows.extend(
-                self._BuildVlmSkeletonRowsFromCells(
-                    cells,
-                    record.evidenceId,
-                    relatedRawOcrRefs,
-                    evidenceById,
-                )
-            )
-        return rows
-
-    def _BuildVlmSkeletonRowsFromCells(
-        self,
-        cells: Sequence[str],
-        tableRef: str,
-        rawOcrRefs: Sequence[str],
-        evidenceById: Mapping[str, ProductInputEvidenceRecord],
-    ) -> List[ProductReconstructedTableRow]:
-        if len(cells) == 3 and cells[2].endswith("%"):
-            return [
-                self._BuildVlmSkeletonRow(
-                    cells[0],
-                    cells[1],
-                    tableRef,
-                    rawOcrRefs,
-                    evidenceById,
-                    dailyValuePercent=cells[2],
-                )
-            ]
-        return [
-            self._BuildVlmSkeletonRow(
-                cells[cellIndex],
-                cells[cellIndex + 1],
-                tableRef,
-                rawOcrRefs,
-                evidenceById,
-            )
-            for cellIndex in range(0, len(cells) - 1, 2)
-        ]
-
-    def _BuildVlmSkeletonRow(
-        self,
-        fieldName: str,
-        rawValue: str,
-        tableRef: str,
-        rawOcrRefs: Sequence[str],
-        evidenceById: Mapping[str, ProductInputEvidenceRecord],
-        *,
-        dailyValuePercent: str = "",
-    ) -> ProductReconstructedTableRow:
-        sourceRefs = self._MergeSourceRefs([tableRef], rawOcrRefs)
-        return ProductReconstructedTableRow(
-            fieldName=fieldName,
-            rawValue=rawValue,
-            normalizedValue="",
-            dailyValuePercent=dailyValuePercent,
-            sourceRefs=sourceRefs,
-            validationStatus="vlm_skeleton",
-        )
-
-    def _BuildRowKeys(
-        self,
-        rows: Sequence[ProductReconstructedTableRow],
-    ) -> set[tuple[str, str]]:
-        return {self._BuildRowKey(row) for row in rows}
-
-    def _BuildRowKey(
-        self,
-        row: ProductReconstructedTableRow,
-    ) -> tuple[str, str]:
-        return (_CompactEvidenceText(row.fieldName), _CompactEvidenceText(row.rawValue))
+        return cleanedTables
 
     def _BuildTableRawValidationRefs(
         self,
@@ -1153,6 +1205,31 @@ class ProductFactReconstructionValidator:
                 )
             )
         ]
+
+    def _FindRawOcrHint(
+        self,
+        fieldName: str,
+        rawValue: str,
+        sourceRefs: Sequence[str],
+        evidenceById: Mapping[str, ProductInputEvidenceRecord],
+    ) -> str:
+        fieldKey = _CompactEvidenceText(fieldName)
+        valueTokens = _ExtractQuantityTokens(rawValue)
+        for sourceRef in sourceRefs:
+            record = evidenceById.get(sourceRef)
+            if record is None or record.sourceType != "raw_ocr_tile":
+                continue
+            lines = [
+                NormalizeWhiteSpace(line)
+                for line in record.text.splitlines()
+                if NormalizeWhiteSpace(line)
+            ]
+            for lineIndex, line in enumerate(lines):
+                if fieldKey and fieldKey in _CompactEvidenceText(line):
+                    return " / ".join(lines[lineIndex : lineIndex + 3])
+                if valueTokens and valueTokens <= _ExtractQuantityTokens(line):
+                    return line
+        return ""
 
     def _MergeSourceRefs(
         self,
@@ -1783,6 +1860,12 @@ class ProductInputReconstructionService:
             ocrImageResults=ocrImageResults,
             combinedOcrText=combinedOcrText,
         )
+        return self.ReconstructFromEvidencePackage(evidencePackage)
+
+    def ReconstructFromEvidencePackage(
+        self,
+        evidencePackage: ProductInputEvidencePackage,
+    ) -> ProductFactReconstructionResult:
         if self._llmReconstructor is None:
             reconstructionResult = self._deterministicReconstructor.Reconstruct(
                 evidencePackage,
@@ -1855,9 +1938,13 @@ class ProductInputReconstructionService:
         referencedEvidenceIds = self._CollectReferencedEvidenceIds(
             reconstructionResult,
         )
+        previewEvidenceIds = self._BuildPreviewEvidenceIds(
+            evidencePackage,
+            referencedEvidenceIds,
+        )
         previewRecords: List[Dict[str, str]] = []
         for record in evidencePackage.records:
-            if referencedEvidenceIds and record.evidenceId not in referencedEvidenceIds:
+            if previewEvidenceIds and record.evidenceId not in previewEvidenceIds:
                 continue
             previewRecords.append(
                 {
@@ -1874,6 +1961,42 @@ class ProductInputReconstructionService:
             if len(previewRecords) >= 16:
                 break
         return previewRecords
+
+    def _BuildPreviewEvidenceIds(
+        self,
+        evidencePackage: ProductInputEvidencePackage,
+        referencedEvidenceIds: set[str],
+    ) -> set[str]:
+        previewEvidenceIds = set(referencedEvidenceIds)
+        referencedImageIndexes = {
+            match.group(1)
+            for record in evidencePackage.records
+            if (
+                record.evidenceId in referencedEvidenceIds
+                and record.sourceRef is not None
+                and (
+                    match := re.match(
+                        r"^image-(\d+)-(?:tile|table)-",
+                        record.sourceRef,
+                    )
+                )
+            )
+        }
+        if not referencedImageIndexes:
+            return previewEvidenceIds
+        previewEvidenceIds.update(
+            record.evidenceId
+            for record in evidencePackage.records
+            if (
+                _IsVlmTableSourceType(record.sourceType)
+                and record.sourceRef is not None
+                and any(
+                    record.sourceRef.startswith("image-{0}-table-".format(imageIndex))
+                    for imageIndex in referencedImageIndexes
+                )
+            )
+        )
+        return previewEvidenceIds
 
     def _CollectReferencedEvidenceIds(
         self,

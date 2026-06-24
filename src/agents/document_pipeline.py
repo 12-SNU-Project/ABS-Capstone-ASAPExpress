@@ -113,15 +113,7 @@ def collect_kurly_url_facts(
         KurlyPipelineInput,
         KurlyProductPipeline,
     )
-    from bussiness_logic.bridge import (
-        BuildLlmRuntimeConfigFromEnv,
-        BuildRuntimeAdapter,
-        RuntimeAdapterBuildError,
-    )
-    from bussiness_logic.input_process import (
-        ProductInputAdapter,
-        ProductInputReconstructionService,
-    )
+    from bussiness_logic.input_process import ProductInputAdapter
 
     warnings: list[str] = []
     smoke_config = APP_CONFIG.kurly_smoke
@@ -147,40 +139,7 @@ def collect_kurly_url_facts(
         timeoutMilliseconds=timeout_seconds * 1000,
         scrollCount=scroll_count,
     )
-    input_reconstruction_service = None
-    if smoke_config.use_input_reconstruction:
-        runtime_adapter = None
-        if smoke_config.use_llm_input_reconstruction:
-            try:
-                runtime_adapter = BuildRuntimeAdapter(
-                    BuildLlmRuntimeConfigFromEnv(projectRootPath=PROJECT_ROOT),
-                    requireAvailable=True,
-                )
-            except RuntimeAdapterBuildError as exc:
-                warnings.append(f"llm_input_reconstruction_unavailable: {exc}")
-        input_reconstruction_service = ProductInputReconstructionService(
-            dictionaryPath=(
-                str(
-                    APP_CONFIG.paths.ResolvePath(
-                        PROJECT_ROOT,
-                        smoke_config.input_dictionary_path,
-                    )
-                )
-                if smoke_config.input_dictionary_path is not None
-                else None
-            ),
-            runtimeAdapter=runtime_adapter,
-            fuzzyMinRatio=smoke_config.input_dictionary_fuzzy_min_ratio,
-            llmMaxTokens=smoke_config.llm_input_reconstruction_max_tokens,
-            llmDebugArtifactRootPath=(
-                PRODUCT_INPUT_ARTIFACT_ROOT
-                if (
-                    runtime_adapter is not None
-                    and smoke_config.write_llm_input_reconstruction_debug_artifacts
-                )
-                else None
-            ),
-        )
+    input_reconstruction_service = _BuildInputReconstructionService(warnings)
 
     if run_ocr:
         try:
@@ -294,6 +253,192 @@ def collect_kurly_url_facts(
     )
     temporaryArtifactPath.replace(productInputArtifactPath)
     return facts
+
+
+def rerun_cached_input_reconstruction(product_identifier: str) -> dict[str, Any]:
+    """저장된 OCR evidence request를 재사용해 LLM reconstruction만 다시 실행한다."""
+
+    from bussiness_logic.input_process import ProductInputEvidencePackage
+
+    warnings: list[str] = []
+    productId = ExtractProductIdFromUrl(product_identifier)
+    artifactDirectory = PRODUCT_INPUT_ARTIFACT_ROOT / productId
+    requestArtifactPath = artifactDirectory / "llm-input-reconstruction-request.json"
+    if not requestArtifactPath.exists():
+        raise FileNotFoundError(
+            "cached_llm_reconstruction_request_not_found: {0}".format(
+                requestArtifactPath,
+            )
+        )
+
+    requestArtifact = json.loads(requestArtifactPath.read_text(encoding="utf-8"))
+    requestPayload = requestArtifact.get("request") or {}
+    userPrompt = requestPayload.get("user_prompt") or requestPayload.get("userPrompt")
+    if not isinstance(userPrompt, str) or not userPrompt.strip():
+        raise ValueError("cached reconstruction request has no user_prompt.")
+    contextPayload = json.loads(userPrompt.strip().splitlines()[-1])
+    evidencePackage = ProductInputEvidencePackage.model_validate(
+        {
+            "product_page_url": (
+                requestArtifact.get("product_page_url")
+                or product_identifier
+            ),
+            "records": contextPayload.get("evidence") or [],
+        }
+    )
+
+    reconstructionService = _BuildInputReconstructionService(warnings)
+    if reconstructionService is None:
+        raise RuntimeError("input_reconstruction is disabled by app config.")
+    reconstructionResult = reconstructionService.ReconstructFromEvidencePackage(
+        evidencePackage,
+    )
+    cachedFacts = _ReadCachedProductInputFacts(artifactDirectory)
+    inputReconstruction = _BuildPublicInputReconstruction(reconstructionResult)
+    cachedFacts.update(
+        {
+            "url": (
+                cachedFacts.get("url")
+                or requestArtifact.get("product_page_url")
+                or product_identifier
+            ),
+            "source_urls": cachedFacts.get("source_urls")
+            or [requestArtifact.get("product_page_url") or product_identifier],
+            "product_id": productId,
+            "input_reconstruction": inputReconstruction,
+            "classification_input_product_facts": inputReconstruction[
+                "classification_input_product_facts"
+            ],
+            "unresolved_product_facts": inputReconstruction[
+                "unresolved_product_facts"
+            ],
+            "product_fact_conflicts": inputReconstruction["product_fact_conflicts"],
+            "classification_input_fact_texts": inputReconstruction[
+                "classification_input_fact_texts"
+            ],
+            "warnings": list(
+                dict.fromkeys(
+                    [
+                        *warnings,
+                        *cachedFacts.get("warnings", []),
+                        *inputReconstruction.get("warnings", []),
+                    ]
+                )
+            ),
+        }
+    )
+    return cachedFacts
+
+
+def _BuildInputReconstructionService(warnings: list[str]) -> Any:
+    from bussiness_logic.bridge import (
+        BuildLlmRuntimeConfigFromEnv,
+        BuildRuntimeAdapter,
+        RuntimeAdapterBuildError,
+    )
+    from bussiness_logic.input_process import ProductInputReconstructionService
+
+    smoke_config = APP_CONFIG.kurly_smoke
+    if not smoke_config.use_input_reconstruction:
+        return None
+    runtime_adapter = None
+    if smoke_config.use_llm_input_reconstruction:
+        try:
+            runtime_adapter = BuildRuntimeAdapter(
+                BuildLlmRuntimeConfigFromEnv(projectRootPath=PROJECT_ROOT),
+                requireAvailable=True,
+            )
+        except RuntimeAdapterBuildError as exc:
+            warnings.append(f"llm_input_reconstruction_unavailable: {exc}")
+    return ProductInputReconstructionService(
+        dictionaryPath=(
+            str(
+                APP_CONFIG.paths.ResolvePath(
+                    PROJECT_ROOT,
+                    smoke_config.input_dictionary_path,
+                )
+            )
+            if smoke_config.input_dictionary_path is not None
+            else None
+        ),
+        runtimeAdapter=runtime_adapter,
+        fuzzyMinRatio=smoke_config.input_dictionary_fuzzy_min_ratio,
+        llmMaxTokens=smoke_config.llm_input_reconstruction_max_tokens,
+        llmDebugArtifactRootPath=(
+            PRODUCT_INPUT_ARTIFACT_ROOT
+            if (
+                runtime_adapter is not None
+                and smoke_config.write_llm_input_reconstruction_debug_artifacts
+            )
+            else None
+        ),
+    )
+
+
+def _ReadCachedProductInputFacts(artifactDirectory: Path) -> dict[str, Any]:
+    artifactPath = artifactDirectory / "product-input.json"
+    if not artifactPath.exists():
+        return {}
+    payload = json.loads(artifactPath.read_text(encoding="utf-8"))
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _BuildPublicInputReconstruction(reconstructionResult: Any) -> dict[str, Any]:
+    reconstructionData = reconstructionResult.model_dump(
+        mode="json",
+        by_alias=True,
+        include={
+            "productFacts",
+            "reconstructedTables",
+            "unresolvedFacts",
+            "conflicts",
+            "normalizedFactTexts",
+            "warnings",
+            "usedLlmReconstruction",
+            "fallbackReason",
+            "sourceRefLabels",
+            "sourceEvidencePreview",
+        },
+    )
+    productFacts = list(reconstructionData.get("product_facts", []))
+    reconstructedTables = list(reconstructionData.get("reconstructed_tables", []))
+    unresolvedFacts = list(reconstructionData.get("unresolved_facts", []))
+    factTexts = list(reconstructionData.get("normalized_fact_texts", []))
+    usedLlm = bool(reconstructionData.get("used_llm_reconstruction"))
+    fallbackReason = reconstructionData.get("fallback_reason")
+    return {
+        "mode": (
+            "llm_reconstruction"
+            if usedLlm
+            else "fallback_reconstruction"
+            if productFacts or factTexts
+            else "unavailable"
+        ),
+        "used_llm_reconstruction": usedLlm,
+        "fallback_reason": fallbackReason,
+        "error": (
+            fallbackReason
+            if fallbackReason
+            and fallbackReason not in {"llm_reconstruction_not_used"}
+            else None
+        ),
+        "fact_count": len(productFacts),
+        "reconstructed_table_count": len(reconstructedTables),
+        "unresolved_count": len(unresolvedFacts),
+        "conflict_count": len(reconstructionData.get("conflicts", [])),
+        "fact_text_count": len(factTexts),
+        "classification_input_product_facts": productFacts,
+        "reconstructed_tables": reconstructedTables,
+        "unresolved_product_facts": unresolvedFacts,
+        "product_fact_conflicts": list(reconstructionData.get("conflicts", [])),
+        "classification_input_fact_texts": factTexts,
+        "source_ref_labels": dict(reconstructionData.get("source_ref_labels", {})),
+        "source_evidence_preview": list(
+            reconstructionData.get("source_evidence_preview", [])
+        ),
+        "warnings": list(reconstructionData.get("warnings", [])),
+        "debug_artifact_count": len(reconstructionResult.debugArtifacts),
+    }
 
 
 def build_raw_input_from_ui(

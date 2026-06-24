@@ -16,8 +16,6 @@ OCR_FACT_LABEL_KEYWORDS = [
     "전성분",
     "ingredients",
     "함량",
-    "영양성분",
-    "영양정보",
     "식품의 유형",
     "식품유형",
     "제품명",
@@ -53,16 +51,11 @@ OCR_INGREDIENT_FIELD_LABELS = {
     "ingredients",
     "inci",
 }
-OCR_NUTRITION_FIELD_LABELS = {
-    "영양성분",
-    "영양정보",
-}
 OCR_INGREDIENT_CAPTURE_WEAK_INTERRUPT_LABELS = {
     "보관",
     "주의사항",
 }
 OCR_LONG_FIELD_CAPTURE_FOLLOWING_LINE_LIMIT = 36
-OCR_NUTRITION_FIELD_CAPTURE_FOLLOWING_LINE_LIMIT = 12
 OCR_MARKETING_KEYWORDS = [
     "멤버십",
     "적립",
@@ -347,8 +340,6 @@ class ProductOcrFactNormalizer:
     def _ReadFieldCaptureFollowingLineLimit(self, fieldLabel: str) -> int:
         if fieldLabel in OCR_INGREDIENT_FIELD_LABELS:
             return OCR_LONG_FIELD_CAPTURE_FOLLOWING_LINE_LIMIT
-        if fieldLabel in OCR_NUTRITION_FIELD_LABELS:
-            return OCR_NUTRITION_FIELD_CAPTURE_FOLLOWING_LINE_LIMIT
         return OCR_FIELD_CAPTURE_FOLLOWING_LINE_LIMIT
 
     def _BuildFieldFactText(

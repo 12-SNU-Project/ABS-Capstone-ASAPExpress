@@ -22,6 +22,13 @@
   color: #0f172a;
 }
 
+.input-card-subtitle {
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+}
+
 .input-card-count {
   font-size: 11px;
   color: #64748b;
@@ -141,10 +148,40 @@
   .input-evidence-grid {
     grid-template-columns: 1fr;
   }
+
+  .input-reconstruction-compare-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .input-reconstruction-section {
   margin-top: 16px;
+}
+
+.input-reconstruction-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.input-reconstruction-option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.input-reconstruction-option-section {
+  padding: 14px;
+  border: 1px solid #dbe3ec;
+  border-radius: 16px;
+  background: #f8fafc;
+}
+
+.input-reconstruction-pane-title {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 900;
+  margin-bottom: 8px;
 }
 
 .input-reconstruction-result {
@@ -183,6 +220,10 @@
   line-height: 1.45;
 }
 
+.input-reconstruction-table.simple {
+  min-width: 420px;
+}
+
 .input-reconstruction-table th {
   padding: 9px 11px;
   border-bottom: 1px solid #cbd5e1;
@@ -211,14 +252,6 @@
   background: #f5f9fd;
 }
 
-.input-reconstruction-table tbody tr.input-reconstruction-corrected-row {
-  background: linear-gradient(90deg, #eef2ff 0, #ffffff 34%);
-}
-
-.input-reconstruction-table tbody tr.input-reconstruction-corrected-row td:first-child {
-  border-left: 3px solid #6366f1;
-}
-
 .input-reconstruction-table tbody tr:last-child td {
   border-bottom: 0;
 }
@@ -240,27 +273,9 @@
 }
 
 .input-reconstruction-normalized-value {
-  color: #1d4ed8;
-  background: #eff6ff;
-  font-weight: 700;
-}
-
-.input-reconstruction-normalized-value.corrected {
-  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.2);
-}
-
-.input-correction-chip {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  margin-top: 6px;
-  padding: 2px 7px;
-  border: 1px solid #bfdbfe;
-  border-radius: 999px;
-  background: #dbeafe;
-  color: #1d4ed8;
-  font-size: 10px;
-  font-weight: 900;
+  color: #334155;
+  background: #f8fafc;
+  font-weight: 650;
 }
 
 .input-reconstruction-expandable summary {
@@ -317,37 +332,10 @@
   font-weight: 800;
 }
 
-.input-reconstruction-index {
-  width: 52px;
-  color: #64748b;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-weight: 800;
-  text-align: center;
-}
-
 .input-reconstruction-more {
   padding: 7px 2px 0;
   color: #64748b;
   font-size: 10px;
-}
-
-.input-reconstruction-status-table {
-  min-width: 620px;
-}
-
-.input-reconstruction-status-table th,
-.input-reconstruction-status-table td {
-  text-align: center;
-}
-
-.input-reconstruction-status-table td {
-  color: #0f172a;
-  font-size: 12px;
-  font-weight: 850;
-}
-
-.input-reconstruction-text-table {
-  min-width: 520px;
 }
 
 .pipeline-progress-shell {

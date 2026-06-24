@@ -13,6 +13,7 @@ def RegisterRuntimeCallbacks(app: Dash) -> None:
         Output("store-run-id", "data"),
         Output("url", "pathname"),
         Input("btn-run", "n_clicks"),
+        Input("btn-rerun-reconstruction", "n_clicks"),
         State("ipt-product-name", "value"),
         State("ipt-description", "value"),
         State("ipt-kurly-url", "value"),
@@ -31,10 +32,12 @@ def RegisterRuntimeCallbacks(app: Dash) -> None:
 
     @app.callback(
         Output("btn-run", "disabled"),
+        Output("btn-rerun-reconstruction", "disabled"),
         Input("store-result", "data"),
     )
-    def toggle_run_button(result_data: dict[str, object] | None) -> bool:
-        return bool(
+    def toggle_run_buttons(result_data: dict[str, object] | None) -> tuple[bool, bool]:
+        disabled = bool(
             isinstance(result_data, dict)
             and result_data.get("job_status") in {"submitting", "queued", "running"}
         )
+        return disabled, disabled

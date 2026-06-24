@@ -1,12 +1,19 @@
 """Clientside Dash callback scripts."""
 
 RUN_CREATE_CALLBACK = """
-async function(nClicks, productName, description, kurlyUrl, currentRunId, resultData, apiBaseUrl) {
+async function(nClicks, rerunClicks, productName, description, kurlyUrl, currentRunId, resultData, apiBaseUrl) {
     const dc = window.dash_clientside || dash_clientside;
-    if (!nClicks) {
+    if (!nClicks && !rerunClicks) {
         return [dc.no_update, dc.no_update];
     }
+    const triggered = (
+        dc.callback_context &&
+        dc.callback_context.triggered &&
+        dc.callback_context.triggered.length
+    ) ? dc.callback_context.triggered[0].prop_id : "";
+    const reconstructionOnly = triggered.indexOf("btn-rerun-reconstruction.") === 0;
     if (
+        !reconstructionOnly &&
         currentRunId &&
         resultData &&
         resultData.job_id === currentRunId &&
@@ -23,11 +30,17 @@ async function(nClicks, productName, description, kurlyUrl, currentRunId, result
     const nextKurlyUrl = clean(kurlyUrl);
     const query = nextProductName || nextDescription || nextKurlyUrl;
     const backendBaseUrl = clean(apiBaseUrl).replace(/\\/+$/, "");
+    const previousFacts = (
+        resultData &&
+        resultData.request &&
+        resultData.request.facts &&
+        typeof resultData.request.facts === "object"
+    ) ? resultData.request.facts : {};
     const facts = {
         product_name: nextProductName,
         description: nextDescription,
-        url: nextKurlyUrl,
-        source_urls: nextKurlyUrl ? [nextKurlyUrl] : [],
+        url: nextKurlyUrl || clean(previousFacts.url),
+        source_urls: (nextKurlyUrl || clean(previousFacts.url)) ? [nextKurlyUrl || clean(previousFacts.url)] : [],
         origin_country: "KR",
         intended_use: "human consumption"
     };
@@ -51,6 +64,84 @@ async function(nClicks, productName, description, kurlyUrl, currentRunId, result
         window.asapPipelineSse = null;
     }
     resetRunViews();
+
+    if (reconstructionOnly) {
+        const cachedIdentifier = facts.url || clean(previousFacts.product_id);
+        if (!cachedIdentifier) {
+            setStore({
+                job_id: null,
+                job_status: "failed",
+                request: {query: query, facts: facts},
+                error: "캐시 reconstruction에는 URL 또는 product_id가 필요합니다.",
+                events: [{
+                    stage: "Input_Reconstruction",
+                    status: "failed",
+                    message: "캐시 reconstruction에는 URL 또는 product_id가 필요합니다."
+                }]
+            });
+            return [dc.no_update, "/classification"];
+        }
+        if (!backendBaseUrl) {
+            setStore({
+                job_id: null,
+                job_status: "failed",
+                request: {query: query, facts: facts},
+                error: "Backend API URL이 설정되지 않았습니다.",
+                events: [{
+                    stage: "Input_Reconstruction",
+                    status: "failed",
+                    message: "Backend API URL이 설정되지 않았습니다."
+                }]
+            });
+            return [dc.no_update, "/classification"];
+        }
+        if (dc.set_props) {
+            dc.set_props("btn-rerun-reconstruction", {disabled: true});
+        }
+        setStore({
+            job_id: null,
+            job_status: "submitting",
+            request: {query: query || cachedIdentifier, facts: facts},
+            events: [{
+                stage: "Input_Reconstruction",
+                status: "submitting",
+                message: "캐시된 OCR evidence로 LLM reconstruction만 재실행합니다."
+            }]
+        });
+        try {
+            const response = await fetch(`${backendBaseUrl}/api/reconstruction-runs`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    url: facts.url,
+                    product_id: clean(previousFacts.product_id)
+                })
+            });
+            const payload = await response.json();
+            if (!response.ok) {
+                throw new Error(payload.message || payload.error || "reconstruction_rerun_failed");
+            }
+            setStore(payload);
+            return [dc.no_update, "/classification"];
+        } catch (error) {
+            setStore({
+                job_id: null,
+                job_status: "failed",
+                request: {query: query || cachedIdentifier, facts: facts},
+                error: String(error && error.message ? error.message : error),
+                events: [{
+                    stage: "Input_Reconstruction",
+                    status: "failed",
+                    message: String(error && error.message ? error.message : error)
+                }]
+            });
+            return [dc.no_update, "/classification"];
+        } finally {
+            if (dc.set_props) {
+                dc.set_props("btn-rerun-reconstruction", {disabled: false});
+            }
+        }
+    }
 
     if (!query) {
         setStore({
