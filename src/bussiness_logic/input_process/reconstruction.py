@@ -16,11 +16,11 @@ from pydantic import (
     field_validator,
 )
 
-from bussiness_logic.bridge import (
+from bussiness_logic.bridge.adapter import RuntimeAdapter
+from bussiness_logic.bridge.schema import (
     LlmGenerationOptions,
     LlmRequest,
     LlmResponseFormat,
-    RuntimeAdapter,
 )
 from bussiness_logic.artifact_paths import ExtractProductIdFromUrl
 from bussiness_logic.input_process.dictionary import (

@@ -22,7 +22,7 @@ from agents._external_classifier import (
     run_external_classifier,
 )
 from agents.agent_base import BaseAgent
-from agents.tools import TaricBranchResolverTool
+from agents.tools.taric_branch_resolver import TaricBranchResolverTool
 from agents.blackboard import BlackboardStore, now_iso
 
 

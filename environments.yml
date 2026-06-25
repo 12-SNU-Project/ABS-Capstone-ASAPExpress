@@ -8,17 +8,14 @@ dependencies:
   - python=3.12
   - pip
   - numpy
-  - pandas
   - pydantic
   - pyyaml
   - requests
-  - loguru
   - pytest
   - pip:
       # UI
       - dash>=4.1.0
       - dash-mantine-components
-      - PySide6
 
       # Runtime validation / optional admin tooling
       - jsonschema

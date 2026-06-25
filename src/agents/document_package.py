@@ -10,24 +10,16 @@ Document Package Resolver — TARIC10 코드 → EU 수입 시 요구 서류 패
   - A2M처럼 입력 TARIC10 exact row뿐 아니라 상위 code-level measure도 함께 조회.
     예: 2103901000 -> 2103900000 -> 2103000000 -> 2100000000
 
-사용:
-    PYTHONPATH=src python -m agents.document_package 0101210000
-    PYTHONPATH=src python -m agents.document_package 0101210000 --format json
-    PYTHONPATH=src python -m agents.document_package 0101210000 --format text
-    PYTHONPATH=src python -m agents.document_package 0101210000 --include-celex-excerpt
-
 입력 코드는 10자리 TARIC. 8자리만 주면 자동으로 '00' 패딩 + 모든 TARIC10 변형 그룹.
 """
 from __future__ import annotations
 
-import argparse
-import json
 import os
 import re
 import sys
 import threading
 from collections import defaultdict
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Optional
 
 try:
@@ -1803,159 +1795,3 @@ def _verification_urls(taric10: str) -> dict:
             f"&Taric={taric10}"
         ),
     }
-
-
-# ---------------------------------------------------------------------------
-# 출력 포맷터
-# ---------------------------------------------------------------------------
-def render_text(pkg: DocumentPackage) -> str:
-    lines: list[str] = []
-    push = lines.append
-
-    push("=" * 78)
-    push(f"  TARIC10: {pkg.taric10}    CN8: {pkg.cn8}    measure rows: {pkg.total_measure_rows}")
-    push("=" * 78)
-
-    if pkg.notes:
-        for n in pkg.notes:
-            push(f"  ⚠️  {n}")
-        push("")
-
-    if not pkg.has_data:
-        push("  (no current measures)")
-        return "\n".join(lines)
-
-    if pkg.checklist_summary:
-        counts = pkg.checklist_summary.get("counts", {})
-        push(
-            "  checklist: "
-            f"필요 {counts.get('required', 0)} · "
-            f"조건부 {counts.get('conditional', 0)} · "
-            f"면제 {counts.get('exempted', 0)} · "
-            f"판단보류 {counts.get('pending', 0)}"
-        )
-        missing = pkg.checklist_summary.get("missing_facts") or []
-        if missing:
-            push(f"  missing facts: {', '.join(missing[:12])}")
-        push("")
-
-    for i, req in enumerate(pkg.requirements, 1):
-        kr = "✓ KR" if req.applies_to_korea else "✗ KR"
-        push("")
-        push(f"  [{i}] {req.measure_type}     [{kr}]")
-        if req.source_goods_codes and req.source_goods_codes != [pkg.taric10]:
-            push(f"      source goods_code(s): {', '.join(req.source_goods_codes)}")
-        push(f"      origins: {', '.join(req.origins[:4])}{' ...' if len(req.origins) > 4 else ''}")
-        if req.duty.get("rate"):
-            push(f"      duty rate: {req.duty['rate']}")
-        if req.duty.get("conditions"):
-            for c in req.duty["conditions"][:3]:
-                push(f"      condition: {c['condition_code']} → cert {c['certificate']} action {c['action_code']}")
-
-        mand = [c for c in req.certificates if c.category == "mandatory_certificate"]
-        exemp = [c for c in req.certificates if c.category == "exemption_declaration"]
-        other = [c for c in req.certificates if c.category not in ("mandatory_certificate", "exemption_declaration")]
-
-        if mand:
-            push(f"      📋 필수 서류 ({len(mand)}):")
-            for c in mand[:6]:
-                push(f"            {c.code} — {c.description[:90]}")
-            if len(mand) > 6:
-                push(f"            ... +{len(mand)-6} more")
-        if exemp:
-            push(f"      📝 면제 사유 선언 가능 ({len(exemp)}):")
-            for c in exemp[:4]:
-                push(f"            {c.code} — {c.description[:90]}")
-            if len(exemp) > 4:
-                push(f"            ... +{len(exemp)-4} more")
-        if other:
-            push(f"      🔗 기타 ({len(other)}): {', '.join(c.code for c in other)}")
-        if req.detailed_requirements:
-            push(f"      detailed requirements ({len(req.detailed_requirements)}):")
-            for detail in req.detailed_requirements[:5]:
-                lookup = ""
-                if detail.external_lookup_required in {"true", "conditional"}:
-                    lookup = f" | external: {detail.external_lookup_required}"
-                missing = f" | missing: {', '.join(detail.missing_facts[:3])}" if detail.missing_facts else ""
-                push(
-                    f"            [{detail.decision_label}] {detail.required_document[:80]}"
-                    f" [{detail.domain_route or detail.domain}{lookup}{missing}]"
-                )
-            if len(req.detailed_requirements) > 5:
-                push(f"            ... +{len(req.detailed_requirements)-5} more")
-        if req.footnotes:
-            push(f"      footnotes: {', '.join(req.footnotes[:5])}")
-        if req.legal_base:
-            push(f"      📜 법규: {req.legal_base}")
-            if req.celex:
-                push(f"            CELEX {req.celex.celex_id} [{req.celex.match_status}]")
-                if req.celex.title:
-                    push(f"            \"{req.celex.title[:110]}\"")
-                if req.celex.excerpt:
-                    push(f"            본문 발췌: {req.celex.excerpt[:200]}...")
-        if req.needs_review:
-            push(f"      ⚠️  needs_review")
-
-    push("")
-    push("-" * 78)
-    push("  검증 URL:")
-    push(f"    Access2Markets: {pkg.verification_urls['access2markets']}")
-    push(f"    TARIC consult:  {pkg.verification_urls['taric_consultation']}")
-    push("=" * 78)
-    return "\n".join(lines)
-
-
-def _dc_to_dict(obj) -> dict:
-    return asdict(obj)
-
-
-def _load_facts_json(value: str) -> dict:
-    if not value:
-        return {}
-    try:
-        data = json.loads(value)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid facts JSON: {exc}") from exc
-    if not isinstance(data, dict):
-        raise ValueError("Facts JSON must be an object/dict.")
-    return data
-
-
-def _load_facts_file(path: str) -> dict:
-    if not path:
-        return {}
-    with open(path, encoding="utf-8") as f:
-        return _load_facts_json(f.read())
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("taric10", help="10-digit TARIC code (or 8-digit CN8 — auto-padded)")
-    p.add_argument("--format", choices=["text", "json"], default="text")
-    p.add_argument("--include-celex-excerpt", action="store_true",
-                   help="Include first ~600 chars of CELEX body for each legal base")
-    p.add_argument("--facts-json", default="", help="Product facts JSON object.")
-    p.add_argument("--facts-file", default="", help="Path to product facts JSON file.")
-    args = p.parse_args()
-
-    try:
-        product_facts = _load_facts_file(args.facts_file) if args.facts_file else _load_facts_json(args.facts_json)
-        pkg = get_document_package(
-            args.taric10,
-            include_celex_excerpt=args.include_celex_excerpt,
-            product_facts=product_facts,
-        )
-    except ValueError as e:
-        sys.exit(f"[fatal] {e}")
-
-    if args.format == "json":
-        print(json.dumps(_dc_to_dict(pkg), ensure_ascii=False, indent=2))
-    else:
-        print(render_text(pkg))
-
-
-if __name__ == "__main__":
-    main()

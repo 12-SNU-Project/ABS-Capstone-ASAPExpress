@@ -8,14 +8,14 @@ Architecture (codex 2026-06-08):
                                tools: ASAPExpressClassifierTool,
                                       TaricBranchResolverTool
     - Document_Agent           서류/관세/제품규제 추천
-                               tools: DocumentPackageTool,
+                               document package resolver,
                                       DomainRouterTool,
                                       CelexBasisTool (planned)
     - Orchestrator_Agent       병합 + backtracking + ask_user
 
   Legacy standalone agents were removed from active source:
     - TARIC resolver behavior      → agents.tools.TaricBranchResolverTool
-    - document requirement behavior → Document_Agent + DocumentPackageTool
+    - document requirement behavior → Document_Agent + document package resolver
     - regulatory domain behavior   → Document_Agent + DomainRouterTool
 
 Agents are exposed at the package level; Tools at agents.tools.

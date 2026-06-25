@@ -50,7 +50,7 @@ _KURLY_OCR_RUNTIME_LOCK = Lock()
 def _BuildKurlyOcrEngines() -> tuple[Any, Any]:
     """프로세스 수명 동안 무거운 Paddle OCR 모델을 재사용한다."""
 
-    from bussiness_logic.product import PaddleOcrEngine, PaddleOcrVlEngine
+    from bussiness_logic.product.ocr.paddle_ocr import PaddleOcrEngine, PaddleOcrVlEngine
 
     smokeConfig = APP_CONFIG.kurly_smoke
     if not smokeConfig.use_structured_ocr:
@@ -105,15 +105,13 @@ def collect_kurly_url_facts(
     Evidence_Intake_Agent, so the Blackboard still starts from normalized
     product facts.
     """
-    from bussiness_logic.product import (
-        KurlyGlobalPageParser,
-        KurlyPageAdapter,
-        KurlyPageCollector,
-        KurlyDomesticPageParser,
-        KurlyPipelineInput,
-        KurlyProductPipeline,
-    )
-    from bussiness_logic.input_process import ProductInputAdapter
+    from bussiness_logic.input_process.product_input_adapter import ProductInputAdapter
+    from bussiness_logic.product.pipeline.pipeline import KurlyProductPipeline
+    from bussiness_logic.product.pipeline.pipeline_schema import KurlyPipelineInput
+    from bussiness_logic.product.web_parser.kurly_domestic import KurlyDomesticPageParser
+    from bussiness_logic.product.web_parser.kurly_global import KurlyGlobalPageParser
+    from bussiness_logic.product.web_parser.kurly_market_collector import KurlyPageCollector
+    from bussiness_logic.product.web_parser.kurly_page_adapter import KurlyPageAdapter
 
     warnings: list[str] = []
     smoke_config = APP_CONFIG.kurly_smoke
@@ -258,7 +256,7 @@ def collect_kurly_url_facts(
 def rerun_cached_input_reconstruction(product_identifier: str) -> dict[str, Any]:
     """저장된 OCR evidence request를 재사용해 LLM reconstruction만 다시 실행한다."""
 
-    from bussiness_logic.input_process import ProductInputEvidencePackage
+    from bussiness_logic.input_process.reconstruction import ProductInputEvidencePackage
 
     warnings: list[str] = []
     productId = ExtractProductIdFromUrl(product_identifier)
@@ -331,12 +329,14 @@ def rerun_cached_input_reconstruction(product_identifier: str) -> dict[str, Any]
 
 
 def _BuildInputReconstructionService(warnings: list[str]) -> Any:
-    from bussiness_logic.bridge import (
-        BuildLlmRuntimeConfigFromEnv,
+    from bussiness_logic.bridge.factory import (
         BuildRuntimeAdapter,
         RuntimeAdapterBuildError,
     )
-    from bussiness_logic.input_process import ProductInputReconstructionService
+    from bussiness_logic.bridge.selector import BuildLlmRuntimeConfigFromEnv
+    from bussiness_logic.input_process.reconstruction import (
+        ProductInputReconstructionService,
+    )
 
     smoke_config = APP_CONFIG.kurly_smoke
     if not smoke_config.use_input_reconstruction:

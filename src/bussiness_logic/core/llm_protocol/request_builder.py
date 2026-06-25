@@ -3,7 +3,11 @@
 from pathlib import Path
 from typing import Optional
 
-from bussiness_logic.bridge import LlmGenerationOptions, LlmRequest, LlmResponseFormat
+from bussiness_logic.bridge.schema import (
+    LlmGenerationOptions,
+    LlmRequest,
+    LlmResponseFormat,
+)
 from bussiness_logic.core.context_retrieval.context_builder import OntologyContextBuilder
 from bussiness_logic.core.context_retrieval.schema import PackagedOntologyContext
 

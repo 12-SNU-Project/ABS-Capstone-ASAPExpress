@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from bussiness_logic.bridge import TextEmbeddingAdapter, TextEmbeddingRequest
+from bussiness_logic.bridge.embedding import TextEmbeddingAdapter, TextEmbeddingRequest
 from bussiness_logic.core.classification.hierarchical_beam import (
     CnHierarchyIndex,
     CnHierarchyNode,

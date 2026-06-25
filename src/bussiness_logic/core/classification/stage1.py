@@ -19,7 +19,7 @@ from pydantic import (
     computed_field,
 )
 
-from bussiness_logic.bridge import (
+from bussiness_logic.bridge.schema import (
     LlmGenerationOptions,
     LlmRequest,
     LlmResponse,
@@ -181,20 +181,6 @@ EXCLUDED_CLASSIFICATION_FACT_MARKERS = {
     "may contain",
     "same facility",
     "same manufacturing",
-}
-PREFERRED_HEADING_HINTS = {
-    "라면": ["1902"],
-    "면류": ["1902"],
-    "유탕면": ["1902"],
-    "noodle": ["1902"],
-    "noodles": ["1902"],
-    "pasta": ["1902"],
-    "주꾸미": ["1605"],
-    "새우": ["1605"],
-    "shrimp": ["1605"],
-    "클렌저": ["3304"],
-    "세럼": ["3304"],
-    "화장품": ["3304"],
 }
 PRODUCT_DOMAIN_SCOPE_MAP = {
     "food": [FOOD_DOMAIN_SCOPE],

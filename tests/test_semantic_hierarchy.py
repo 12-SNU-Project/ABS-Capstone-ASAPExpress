@@ -1,4 +1,4 @@
-from bussiness_logic.bridge import (
+from bussiness_logic.bridge.embedding import (
     TextEmbeddingProviderKind,
     TextEmbeddingRequest,
     TextEmbeddingResponse,

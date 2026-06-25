@@ -246,9 +246,6 @@ def _find_measure(measures: list[dict[str, Any]], needles: tuple[str, ...]) -> d
 
 
 def package_context(pkg: dict[str, Any]) -> dict[str, Any]:
-    view_context = document_view_context(pkg)
-    if view_context:
-        return view_context
     raw_context = raw_package_context(pkg)
     if raw_context:
         return raw_context
@@ -407,84 +404,16 @@ def raw_package_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
         "product_pre": product_pre,
         "product_post": product_post,
         "related_declarations": {},
-        "document_view": {},
         "source": "raw_document_package",
-    }
-
-
-def document_view_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
-    """Use DocumentAgent's view model when a pipeline package provides it.
-
-    Pipeline detail pages are display-only consumers of Document_Agent output.
-    """
-    view = pkg.get("_document_view") or pkg.get("document_view")
-    if not isinstance(view, dict):
-        return None
-    sections = view.get("sections") or {}
-    if not isinstance(sections, dict):
-        return None
-    metrics = view.get("metrics") or {}
-    if not isinstance(metrics, dict):
-        metrics = {}
-
-    overview = sections.get("overview") or {}
-    customs = sections.get("customs_check_items") or {}
-    basic = sections.get("basic_duty") or {}
-    preferential = sections.get("preferential_evidence") or {}
-    required_docs = sections.get("required_documents") or {}
-    product = sections.get("product_regulations") or {}
-    baseline_section = sections.get("baseline_documents") or {}
-    if not isinstance(baseline_section, dict):
-        baseline_section = {}
-    checklist = baseline_section or sections.get("document_checklist") or pkg.get("checklist_summary") or {}
-    if not isinstance(checklist, dict):
-        checklist = {}
-    pre_taric_checks = sections.get("pre_taric_checks") or {}
-
-    reqs = pkg.get("requirements") or []
-    kr = [r for r in reqs if r.get("applies_to_korea")]
-    non_kr = [r for r in reqs if not r.get("applies_to_korea")]
-    controls = customs.get("render_bucket") or customs.get("agent_bucket") or []
-    base_duty_measures = basic.get("render_bucket") or basic.get("agent_bucket") or []
-    preferential_measures = preferential.get("render_bucket") or preferential.get("agent_bucket") or []
-    groups = required_docs.get("document_groups") or []
-    product_reqs = product.get("requirements") or []
-
-    return {
-        "kr": kr,
-        "non_kr": non_kr,
-        "controls": controls,
-        "duties": list(base_duty_measures) + list(preferential_measures),
-        "base_duty_measures": base_duty_measures,
-        "preferential_measures": preferential_measures,
-        "third_country": overview.get("third_country_duty"),
-        "fta_pref": overview.get("fta_preference"),
-        "additional_duty": overview.get("additional_duty"),
-        "groups": groups,
-        "document_checklist": checklist,
-        "baseline_documents": (
-            checklist.get("documents")
-            if isinstance(checklist.get("documents"), list)
-            else checklist.get("document_binding_cards") or _documents_from_checklist(checklist)
-        ),
-        "pre_taric_checks": pre_taric_checks.get("checks") or checklist.get("pre_taric_checks") or [],
-        "counts": overview.get("counts") or {},
-        "metrics": metrics,
-        "missing": overview.get("missing_facts") or [],
-        "product_reqs": product_reqs,
-        "product_pre": product.get("pre") or [],
-        "product_post": product.get("post") or [],
-        "related_declarations": product.get("related_declarations") or {},
-        "document_view": view,
-        "source": "document_view",
     }
 
 
 def render_result(pkg, panel, options):
     if not pkg:
         return "TARIC 코드를 입력하거나 좌측 예제를 선택하세요."
-    hasDocumentView = isinstance(pkg.get("document_view") or pkg.get("_document_view"), dict)
-    if not hasDocumentView and not pkg.get("has_data"):
+    if not pkg.get("has_data") and not pkg.get("requirements") and pkg.get("backtracking_signals"):
+        return render_unresolved(pkg, options or [])
+    if not pkg.get("has_data") and not pkg.get("requirements"):
         return html.Div("이 코드에 대한 현재 적용 measure가 없습니다.", className="empty")
 
     cx = package_context(pkg)
@@ -660,13 +589,13 @@ def render_unresolved(pkg: dict[str, Any], options: list[str]):
     children = [
         html.Div(
             [
-                html.Div("⚠ document_view missing", className="metric-label", style={"color": "#b91c1c"}),
+                html.Div("⚠ document package unresolved", className="metric-label", style={"color": "#b91c1c"}),
                 html.Div(
                     f"TARIC10 {taric10} 의 분류 결과를 받지 못했습니다.",
                     style={"fontSize": "15px", "fontWeight": 600, "marginTop": "6px"},
                 ),
                 html.Div(
-                    "DocumentAgent 가 sections 을 채우지 못했거나, direct TARIC 조회로 pipeline 을 거치지 않았습니다. 관리자에게 pipeline 재실행을 요청하세요.",
+                    "후보 분류가 미확정이거나 해당 코드에 연결 가능한 TARIC measure 패키지가 없습니다. 후보 코드와 TARIC branch를 다시 확인하세요.",
                     style={"fontSize": "13px", "color": "#475569", "marginTop": "4px"},
                 ),
             ],

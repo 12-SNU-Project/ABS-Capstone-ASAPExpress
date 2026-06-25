@@ -553,27 +553,37 @@ for _path in (ASAP_PROJECT_ROOT, ASAP_SRC_ROOT):
         sys.path.insert(0, str(_path))
 
 from bussiness_logic.app_config import LoadAppConfig
-from bussiness_logic.bridge import (
-    BuildDefaultLlmRuntimeConfig,
-    BuildLlmRuntimeConfigFromEnv,
-    BuildRuntimeAdapter,
+from bussiness_logic.bridge.embedding import (
     BuildTextEmbeddingAdapter,
     BuildTextEmbeddingRuntimeConfig,
-    ProbeRuntimeDependency,
     ProbeTextEmbeddingDependency,
     TextEmbeddingAdapterBuildError,
     TextEmbeddingGenerationError,
 )
-from bussiness_logic.core import (
+from bussiness_logic.bridge.factory import BuildRuntimeAdapter
+from bussiness_logic.bridge.probe import ProbeRuntimeDependency
+from bussiness_logic.bridge.selector import (
+    BuildDefaultLlmRuntimeConfig,
+    BuildLlmRuntimeConfigFromEnv,
+)
+from bussiness_logic.core.classification.stage1 import (
     CnCandidateRetriever,
-    CnSemanticCandidateIndex,
-    OntologyContextBuilder,
     ProductClassificationInput,
-    Stage1DecisionPolicy,
     Stage1EvidencePackageBuilder,
-    Stage1RecommendationReportBuilder,
     Stage1RequestBuilder,
     Stage1ResponseValidator,
+)
+from bussiness_logic.core.context_retrieval.context_builder import (
+    OntologyContextBuilder,
+)
+from bussiness_logic.core.context_retrieval.semantic_retrieval import (
+    CnSemanticCandidateIndex,
+)
+from bussiness_logic.core.decision_flow.decision_policy import Stage1DecisionPolicy
+from bussiness_logic.core.decision_flow.recommendation import (
+    Stage1RecommendationReportBuilder,
+)
+from bussiness_logic.core.decision_flow.traversal import (
     Stage1TraversalController,
 )
 from bussiness_logic.core.classification.hierarchical_beam import (
