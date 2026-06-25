@@ -1839,60 +1839,28 @@ def render_candidate_cards(result: dict[str, Any]) -> html.Div:
         return html.Div("분류 후보가 없습니다.", style=PLACEHOLDER)
 
     rows: list[Any] = []
+    packagesByTaric: dict[str, list[dict[str, Any]]] = {}
+    for package in documentPackages:
+        if not isinstance(package, dict):
+            continue
+        packageTaric = str(package.get("taric10") or "")
+        if packageTaric:
+            packagesByTaric.setdefault(packageTaric, []).append(package)
+
     for displayRank, cand in enumerate(candidates, start=1):
         taric10 = cand.get("taric10") or ""
         branches = cand.get("taric10_branch_candidates") or []
         themeClass = _candidate_theme_class(cand)
-        candidateId = str(cand.get("candidate_id") or "")
-        candidateTarics = {
-            str(value)
-            for value in [
-                taric10,
-                *(
-                    branch.get("taric10")
-                    for branch in branches
-                    if isinstance(branch, dict)
-                ),
-            ]
-            if value
-        }
-        linkedPackages = []
-        seenPackageKeys = set()
-        for package in documentPackages:
-            if not isinstance(package, dict):
-                continue
-            packageTaric = str(package.get("taric10") or "")
-            packageCandidateId = str(package.get("candidate_id") or "")
-            if (
-                candidateId
-                and packageCandidateId == candidateId
-            ) or (
-                packageTaric
-                and packageTaric in candidateTarics
-            ):
-                packageKey = str(package.get("document_package_id") or packageTaric)
-                if packageKey in seenPackageKeys:
-                    continue
-                seenPackageKeys.add(packageKey)
-                linkedPackages.append(package)
-        linkNodes = [
-            dcc.Link(
-                [
-                    html.Span(str(package.get("taric10") or ""), className="candidate-document-code"),
-                    html.Span("서류 보기", className="candidate-document-label"),
-                ],
-                href=f"/document/{detailRunId}/{package.get('taric10')}",
-                className="candidate-document-link",
-            )
-            for package in linkedPackages
-            if package.get("taric10")
-        ]
-        packageStatus: Any = None
-        if not linkNodes:
-            packageStatus = html.Span(
-                "서류 패키지 생성 중" if result.get("job_status") in {"queued", "running"} else "연결된 서류 패키지 없음",
-                className="candidate-document-empty",
-            )
+        branchList = [
+            branch
+            for branch in branches
+            if isinstance(branch, dict) and branch.get("taric10")
+        ] or ([{"taric10": taric10, "branch_description": "primary TARIC10"}] if taric10 else [])
+        linkedBranchCount = sum(
+            1
+            for branch in branchList
+            if packagesByTaric.get(str(branch.get("taric10") or ""))
+        )
         rows.append(
             html.Tr(
                 [
@@ -1922,21 +1890,48 @@ def render_candidate_cards(result: dict[str, Any]) -> html.Div:
                         ]
                     ),
                     html.Td(
-                        cand.get("selected_taric10_reason")
-                        or _candidate_reason_text(cand)
+                        _candidate_reason_text(cand)
                         or "별도 사유 없음",
                         className="candidate-table-reason",
                     ),
                     html.Td(
-                        html.Div(linkNodes, className="candidate-document-links")
-                        if linkNodes
-                        else packageStatus,
+                        html.Div(
+                            [
+                                html.Div(f"branch {len(branchList)}개", className="candidate-document-code"),
+                                html.Div(f"서류 {linkedBranchCount}개 연결", className="candidate-document-label"),
+                            ],
+                            className="candidate-branch-summary",
+                        ),
                         className="candidate-table-action",
                     ),
                 ],
                 className=f"candidate-table-row {themeClass}",
             )
         )
+        if branchList:
+            rows.append(
+                html.Tr(
+                    html.Td(
+                        html.Details(
+                            [
+                                html.Summary(
+                                    f"TARIC branch {len(branchList)}개 펼치기 · 서류 패키지 {linkedBranchCount}개",
+                                    className="candidate-branch-toggle",
+                                ),
+                                _candidate_branch_table(
+                                    branchList,
+                                    packagesByTaric,
+                                    detailRunId,
+                                    result.get("job_status"),
+                                ),
+                            ],
+                            className="candidate-branch-details",
+                        ),
+                        colSpan=5,
+                    ),
+                    className="candidate-branch-row",
+                )
+            )
     return html.Div(
         [
             html.Div(
@@ -1995,6 +1990,61 @@ def _classification_unresolved_card(candidateSet: dict[str, Any]) -> html.Div:
             ),
         ],
         className="classification-unresolved-surface",
+    )
+
+
+def _candidate_branch_table(
+    branches: list[dict[str, Any]],
+    packagesByTaric: dict[str, list[dict[str, Any]]],
+    detailRunId: str,
+    jobStatus: Any,
+) -> html.Table:
+    bodyRows: list[Any] = []
+    for branch in branches:
+        taric10 = str(branch.get("taric10") or "")
+        packages = packagesByTaric.get(taric10) or []
+        packageLink = (
+            dcc.Link(
+                [
+                    html.Span(taric10, className="candidate-document-code"),
+                    html.Span("서류 보기", className="candidate-document-label"),
+                ],
+                href=f"/document/{detailRunId}/{taric10}",
+                className="candidate-document-link",
+            )
+            if packages
+            else html.Span(
+                "서류 패키지 생성 중" if jobStatus in {"queued", "running"} else "연결된 서류 패키지 없음",
+                className="candidate-document-empty",
+            )
+        )
+        bodyRows.append(
+            html.Tr(
+                [
+                    html.Td(taric10, className="candidate-branch-code"),
+                    html.Td(branch.get("branch_description") or "-", className="candidate-branch-description"),
+                    html.Td(", ".join((branch.get("measure_type_summary") or [])[:4]) or "-", className="candidate-branch-measures"),
+                    html.Td(str(branch.get("measure_row_count") or 0), className="candidate-branch-count"),
+                    html.Td(packageLink, className="candidate-branch-action"),
+                ]
+            )
+        )
+    return html.Table(
+        [
+            html.Thead(
+                html.Tr(
+                    [
+                        html.Th("TARIC10"),
+                        html.Th("Branch"),
+                        html.Th("Measure"),
+                        html.Th("Rows"),
+                        html.Th("서류"),
+                    ]
+                )
+            ),
+            html.Tbody(bodyRows),
+        ],
+        className="candidate-branch-table",
     )
 
 
@@ -2126,7 +2176,7 @@ def _candidate_nodes(candidate: dict[str, Any]) -> list[dict[str, Any]]:
                 "level": "cn8",
                 "label": "CN8",
                 "code": candidate.get("cn8") or "",
-                "description": candidate.get("selected_taric10_reason") or "",
+                "description": _candidate_reason_text(candidate),
                 "score": "",
                 "matched_keywords": [],
             }
@@ -2160,7 +2210,7 @@ def _candidate_static_tree_panel(candidate: dict[str, Any], displayRank: int) ->
                         className="candidate-tree-badges",
                     ),
                     html.Div(candidate.get("cn8") or "-", className="candidate-tree-code"),
-                    html.Div(candidate.get("selected_taric10_reason") or reasonText, className="candidate-tree-reason"),
+                    html.Div(reasonText, className="candidate-tree-reason"),
                 ],
                 className=f"candidate-tree-summary {_candidate_theme_class(candidate)}",
             ),
@@ -2790,66 +2840,47 @@ def render_decision(result: dict[str, Any]) -> html.Div:
     if not dec:
         return html.Div("최종 결정이 아직 없습니다.", style=PLACEHOLDER)
 
-    user_questions = result.get("user_questions") or []
-    warningTexts = _decision_warning_texts(result, dec)
+    candidateSet = result.get("candidate_code_set") or {}
+    candidates = candidateSet.get("candidates") if isinstance(candidateSet, dict) else []
+    candidates = [candidate for candidate in candidates if isinstance(candidate, dict)]
+    selectedIds = set(dec.get("selected_candidate_ids") or [])
+    selectedCandidates = [
+        candidate
+        for candidate in candidates
+        if candidate.get("candidate_id") in selectedIds
+    ]
+    primary = (
+        next((candidate for candidate in selectedCandidates if candidate.get("llm_recommended")), None)
+        or selectedCandidates[0]
+        if selectedCandidates
+        else next((candidate for candidate in candidates if candidate.get("llm_recommended")), None)
+        or (candidates[0] if candidates else {})
+    )
+    cn8 = primary.get("cn8") or "-"
+    taric10 = primary.get("taric10") or "-"
+    status = str(dec.get("decision_status") or "검토 필요")
+    title = "우선 검토 코드" if status != "accepted" else "최종 선택 후보"
+    subtitle = (
+        f"{len(selectedCandidates)}개 후보가 남아 있습니다."
+        if len(selectedCandidates) > 1
+        else "후속 서류 검토는 TARIC branch별 서류 패키지에서 확인합니다."
+    )
+    body = (
+        _short_text(_candidate_reason_text(primary), max_length=360)
+        if _candidate_reason_text(primary)
+        else "표시된 TARIC10은 CN8 후보 하위 branch 중 UI 연결을 위한 대표값입니다. 실제 검토는 펼친 branch별 서류 패키지에서 확인합니다."
+    )
 
     return html.Div(
         [
-            html.Div(
-                [
-                    _small("decision", dec.get("decision_status")),
-                    _small("selected", ", ".join(dec.get("selected_candidate_ids") or [])),
-                    _small("packages", ", ".join(dec.get("document_package_ids") or [])),
-                ],
-                style={"display": "flex", "gap": "10px", "flexWrap": "wrap", "marginBottom": "10px"},
-            ),
-            html.Div(
-                [
-                    html.Div("검토 경고 / 재탐색 신호", style={"fontSize": "13px", "fontWeight": 800, "marginBottom": "6px", "color": "#92400e"}),
-                    html.Ul(
-                        [html.Li(_short_text(warning, max_length=220)) for warning in warningTexts[:6]],
-                        style={"fontSize": "13px", "color": "#78350f", "margin": "0 0 0 18px", "padding": 0},
-                    ),
-                ],
-                style={"padding": "10px", "border": "1px solid #fcd34d", "borderRadius": "8px", "background": "#fffbeb", "marginBottom": "10px"},
-            ) if warningTexts else None,
-            html.Div(
-                [
-                    html.Div("추가 확인 필요", style={"fontSize": "13px", "fontWeight": 700, "marginBottom": "6px"}),
-                    html.Ul(
-                        [html.Li(q.get("question") or q.get("fact_key") or "") for q in user_questions],
-                        style={"fontSize": "13px", "color": "#334155", "marginTop": 0},
-                    ),
-                ]
-            ) if user_questions else html.Div("추가 확인 필요 없음", style={"fontSize": "13px", "color": "#166534"}),
+            html.Div(title, style={**LABEL, "marginBottom": "6px"}),
+            html.Div(cn8, className="classification-result-primary-code"),
+            html.Div(f"TARIC10 {taric10}", className="classification-result-secondary-code"),
+            html.P(subtitle, className="classification-result-text"),
+            html.P(body, className="classification-result-text"),
         ],
         style=CARD,
     )
-
-
-def _decision_warning_texts(result: dict[str, Any], decision: dict[str, Any]) -> list[str]:
-    warnings = [
-        str(item).strip()
-        for item in (decision.get("visible_warnings") or [])
-        if str(item).strip()
-    ]
-    documentPackages = list(result.get("document_packages") or [])
-    primaryPackage = result.get("document_package")
-    if isinstance(primaryPackage, dict):
-        documentPackages.append(primaryPackage)
-    for package in documentPackages:
-        if not isinstance(package, dict):
-            continue
-        for signal in package.get("backtracking_signals") or []:
-            if not isinstance(signal, dict):
-                continue
-            signalText = "document backtracking: {0} - {1}".format(
-                signal.get("type") or "unknown",
-                signal.get("reason") or "",
-            ).strip()
-            if signalText and signalText not in warnings:
-                warnings.append(signalText)
-    return warnings
 
 
 def render_page(

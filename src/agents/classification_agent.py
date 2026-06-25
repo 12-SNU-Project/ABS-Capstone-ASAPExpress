@@ -199,14 +199,6 @@ class ClassificationAgent(BaseAgent):
                 ),
                 "taric10_is_recommended": False,
                 "taric10_branch_count": len(taric_branches),
-                "selected_taric10_reason": (
-                    selected_branch.get("selection_reason")
-                    if taric10 else "No TARIC10 branch resolved from current master table."
-                ),
-                "primary_taric10_reason": (
-                    selected_branch.get("selection_reason")
-                    if taric10 else "No TARIC10 branch resolved from current master table."
-                ),
                 "rank": len(ccs_candidates) + 1,
                 "status": c["status"],
                 "candidate_source": "classifier",

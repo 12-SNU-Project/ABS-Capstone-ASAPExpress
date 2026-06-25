@@ -560,6 +560,20 @@ class PipelineSnapshotProjector:
     ) -> dict[str, Any]:
         baseResult = snapshot.get("result") or snapshot.get("partial_result") or {}
         resultData = self._CompactSnapshotResult(baseResult)
+        documentPackages = resultData.get("document_packages")
+        if isinstance(documentPackages, list):
+            resultData["document_packages"] = [
+                DocumentPackageProjector.PublicDocumentPackage(package)
+                for package in documentPackages
+                if isinstance(package, Mapping)
+            ]
+        snapshotPackages = snapshot.get("document_packages")
+        if isinstance(snapshotPackages, list) and not resultData.get("document_packages"):
+            resultData["document_packages"] = [
+                DocumentPackageProjector.PublicDocumentPackage(package)
+                for package in snapshotPackages
+                if isinstance(package, Mapping)
+            ]
         resultData["job_id"] = runId
         resultData["job_status"] = snapshot.get("status")
         resultData["events"] = snapshot.get("events") or []
@@ -582,6 +596,7 @@ class PipelineSnapshotProjector:
             "audit_ref",
             "candidate_code_set",
             "document_package",
+            "document_packages",
             "decision",
             "agent_results",
             "user_questions",

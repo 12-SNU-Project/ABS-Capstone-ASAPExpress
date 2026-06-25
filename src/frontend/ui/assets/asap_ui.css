@@ -834,6 +834,82 @@
   font-size: 10px;
 }
 
+.candidate-branch-summary {
+  display: inline-grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.candidate-branch-row td {
+  padding: 0 13px 12px;
+  background: #fbfdff;
+}
+
+.candidate-branch-details {
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.candidate-branch-toggle {
+  cursor: pointer;
+  padding: 10px 12px;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.candidate-branch-toggle:hover {
+  background: #f8fafc;
+}
+
+.candidate-branch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.candidate-branch-table th,
+.candidate-branch-table td {
+  padding: 9px 12px;
+  border-top: 1px solid #e8edf3;
+  vertical-align: middle;
+}
+
+.candidate-branch-table th {
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 900;
+  text-align: left;
+}
+
+.candidate-branch-code {
+  color: #0f172a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.candidate-branch-description,
+.candidate-branch-measures {
+  color: #475569;
+}
+
+.candidate-branch-count {
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-align: right;
+}
+
+.candidate-branch-action {
+  width: 150px;
+}
+
 .candidate-card-badge,
 .candidate-tree-pill {
   display: inline-block;
