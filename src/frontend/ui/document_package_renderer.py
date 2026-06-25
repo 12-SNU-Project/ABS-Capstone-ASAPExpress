@@ -205,10 +205,53 @@ def detail_card(detail: dict[str, Any], label: str, related_declarations: list[s
     )
 
 
+def _is_control_measure(req: dict[str, Any]) -> bool:
+    measure_type = req.get("measure_type") or ""
+    return any(
+        key in measure_type
+        for key in (
+            "Import control",
+            "Import restriction",
+            "Veterinary",
+            "CITES",
+            "GMO",
+            "Phytosanitary",
+            "REACH",
+        )
+    ) or any(
+        key in measure_type.lower()
+        for key in ("fishing", "luxury", "sanction", "restriction", "surveillance", "control")
+    )
+
+
+def _is_preferential_measure(req: dict[str, Any]) -> bool:
+    measure_type = req.get("measure_type") or ""
+    return any(key in measure_type for key in ("Tariff preference", "Customs Union", "Preferential"))
+
+
+def _is_duty_measure(req: dict[str, Any]) -> bool:
+    measure_type = req.get("measure_type") or ""
+    return any(key in measure_type for key in ("duty", "Duty", "Tariff", "Preference", "Preferential", "Customs Union", "Supplementary"))
+
+
+def _is_base_duty_measure(req: dict[str, Any]) -> bool:
+    if _is_preferential_measure(req):
+        return False
+    measure_type = req.get("measure_type") or ""
+    return any(key in measure_type for key in ("Third country duty", "Additional duties", "Supplementary unit", "duty", "Duty"))
+
+
+def _find_measure(measures: list[dict[str, Any]], needles: tuple[str, ...]) -> dict[str, Any] | None:
+    return next((m for m in measures if any(n in (m.get("measure_type") or "") for n in needles)), None)
+
+
 def package_context(pkg: dict[str, Any]) -> dict[str, Any]:
     view_context = document_view_context(pkg)
     if view_context:
         return view_context
+    raw_context = raw_package_context(pkg)
+    if raw_context:
+        return raw_context
     return _unresolved_context(pkg)
 
 
@@ -273,6 +316,102 @@ def _documents_from_checklist(checklist: dict[str, Any]) -> list[dict[str, Any]]
     return out
 
 
+def _document_counts(documents: list[dict[str, Any]], counts: dict[str, Any] | None = None) -> dict[str, Any]:
+    out = dict(counts or {})
+    out["total"] = len(documents)
+    out.setdefault("required", sum(1 for doc in documents if _doc_status(doc) == "required"))
+    out.setdefault("conditional", sum(1 for doc in documents if _doc_status(doc) == "conditional"))
+    out.setdefault("pending", sum(1 for doc in documents if _doc_status(doc) == "pending"))
+    out["with_pre_links"] = sum(1 for doc in documents if doc.get("pre_taric_links") or doc.get("pre_checks"))
+    out["with_post_links"] = sum(1 for doc in documents if doc.get("post_taric_links") or doc.get("post_requirements"))
+    return out
+
+
+def raw_package_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
+    reqs = pkg.get("requirements") or []
+    if not isinstance(reqs, list):
+        return None
+    checklist = pkg.get("checklist_summary") or {}
+    if not isinstance(checklist, dict):
+        checklist = {}
+
+    kr = [r for r in reqs if isinstance(r, dict) and r.get("applies_to_korea")]
+    non_kr = [r for r in reqs if isinstance(r, dict) and not r.get("applies_to_korea")]
+    baseline_docs = checklist.get("document_binding_cards") or _documents_from_checklist(checklist)
+    counts = _document_counts(baseline_docs, checklist.get("counts") or {})
+    groups = checklist.get("document_groups") or []
+
+    controls: list[dict[str, Any]] = []
+    duties: list[dict[str, Any]] = []
+    product_reqs: list[dict[str, Any]] = []
+    product_pre: list[dict[str, Any]] = []
+    product_post: list[dict[str, Any]] = []
+    pre_taric_checks: list[dict[str, Any]] = []
+
+    for req in kr:
+        measure_type = req.get("measure_type") or ""
+        details = req.get("detailed_requirements") or []
+        if measure_type in {
+            "Baseline document requirements",
+            "Product regulatory requirements",
+            "Pre-TARIC screening requirements",
+        }:
+            if measure_type != "Baseline document requirements":
+                product_reqs.append(req)
+            for detail in details:
+                source_layer = detail.get("source_layer") or ""
+                if source_layer in {"pre_taric_gate", "chapter_route_seed"}:
+                    product_pre.append(detail)
+                    if source_layer == "pre_taric_gate":
+                        pre_taric_checks.append(detail)
+                elif source_layer == "product_domain_seed":
+                    product_post.append(detail)
+            continue
+        if _is_control_measure(req):
+            controls.append(req)
+        elif _is_duty_measure(req):
+            duties.append(req)
+        else:
+            duties.append(req)
+
+    base_duty_measures = [r for r in duties if _is_base_duty_measure(r)]
+    preferential_measures = [r for r in duties if _is_preferential_measure(r)]
+    return {
+        "kr": kr,
+        "non_kr": non_kr,
+        "controls": controls,
+        "duties": list(base_duty_measures) + list(preferential_measures),
+        "base_duty_measures": base_duty_measures,
+        "preferential_measures": preferential_measures,
+        "third_country": _find_measure(duties, ("Third country duty",)),
+        "fta_pref": _find_measure(duties, ("Tariff preference", "Customs Union")),
+        "additional_duty": _find_measure(duties, ("Additional duties",)),
+        "groups": groups,
+        "document_checklist": checklist,
+        "baseline_documents": baseline_docs,
+        "pre_taric_checks": pre_taric_checks,
+        "counts": counts,
+        "metrics": {
+            "kr_measure_count": len(kr),
+            "non_kr_measure_count": len(non_kr),
+            "control_count": len(controls),
+            "duty_count": len(duties),
+            "base_duty_count": len(base_duty_measures),
+            "preferential_count": len(preferential_measures),
+            "document_group_count": len(groups),
+            "baseline_document_count": len(baseline_docs),
+            "missing_count": len(checklist.get("missing_facts") or []),
+        },
+        "missing": checklist.get("missing_facts") or [],
+        "product_reqs": product_reqs,
+        "product_pre": product_pre,
+        "product_post": product_post,
+        "related_declarations": {},
+        "document_view": {},
+        "source": "raw_document_package",
+    }
+
+
 def document_view_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
     """Use DocumentAgent's view model when a pipeline package provides it.
 
@@ -294,7 +433,10 @@ def document_view_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
     preferential = sections.get("preferential_evidence") or {}
     required_docs = sections.get("required_documents") or {}
     product = sections.get("product_regulations") or {}
-    checklist = sections.get("document_checklist") or pkg.get("checklist_summary") or {}
+    baseline_section = sections.get("baseline_documents") or {}
+    if not isinstance(baseline_section, dict):
+        baseline_section = {}
+    checklist = baseline_section or sections.get("document_checklist") or pkg.get("checklist_summary") or {}
     if not isinstance(checklist, dict):
         checklist = {}
     pre_taric_checks = sections.get("pre_taric_checks") or {}
@@ -320,7 +462,11 @@ def document_view_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
         "additional_duty": overview.get("additional_duty"),
         "groups": groups,
         "document_checklist": checklist,
-        "baseline_documents": _documents_from_checklist(checklist),
+        "baseline_documents": (
+            checklist.get("documents")
+            if isinstance(checklist.get("documents"), list)
+            else checklist.get("document_binding_cards") or _documents_from_checklist(checklist)
+        ),
         "pre_taric_checks": pre_taric_checks.get("checks") or checklist.get("pre_taric_checks") or [],
         "counts": overview.get("counts") or {},
         "metrics": metrics,

@@ -55,6 +55,9 @@ conflicts and warnings must be arrays of strings.
 Do not infer HS, CN, TARIC, customs, legal, or regulatory conclusions.
 Do not create product facts that are absent from the provided evidence.
 Correct OCR typos only when the surrounding evidence strongly supports the correction.
+raw_value must be copied from the cited evidence as the original OCR/VLM reading. Do not fix typos, units, labels, spacing, or malformed characters in raw_value.
+Put OCR corrections and canonical wording only in normalized_value.
+If a corrected value is useful but the original reading cannot be copied from evidence, put the fact in unresolved_facts.
 If evidence is insufficient or conflicting, use unresolved_facts or conflicts.
 The application will generate normalized_fact_texts after validation.
 Preserve table rows in reconstructed_tables even when they are not selected as product_facts.
@@ -152,11 +155,44 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                     ],
                 }
             ],
+            "product_facts": [],
+            "unresolved_facts": [],
+            "conflicts": [],
+            "warnings": [],
+        },
+    },
+    {
+        "input": {
+            "evidence": [
+                {
+                    "evidence_id": "evidence-1",
+                    "source_type": "vlm_table",
+                    "text": "원제교명 | 정제수, 율엣, 설량, 고초가루(고추·중국산)",
+                }
+            ],
+        },
+        "output": {
+            "reconstructed_tables": [
+                {
+                    "table_name": "제품 정보",
+                    "source_refs": ["evidence-1"],
+                    "rows": [
+                        {
+                            "field_name": "원재료명",
+                            "raw_value": "정제수, 율엣, 설량, 고초가루(고추·중국산)",
+                            "normalized_value": "정제수, 물엿, 설탕, 고춧가루(고추:중국산)",
+                            "unit": "",
+                            "daily_value_percent": "",
+                            "source_refs": ["evidence-1"],
+                        }
+                    ],
+                }
+            ],
             "product_facts": [
                 {
-                    "field_name": "영양성분",
-                    "raw_value": "나트류 320mg 탄수하물 40g 단백질 8g",
-                    "normalized_value": "나트륨 320mg 탄수화물 40g 단백질 8g",
+                    "field_name": "원재료명",
+                    "raw_value": "정제수, 율엣, 설량, 고초가루(고추·중국산)",
+                    "normalized_value": "정제수, 물엿, 설탕, 고춧가루(고추:중국산)",
                     "source_refs": ["evidence-1"],
                     "correction_type": "llm_reconstructed",
                     "validation_status": "accepted",
@@ -346,6 +382,32 @@ def _ExtractQuantityTokens(text: str) -> set[tuple[str, str]]:
         )
         for value, unit in QUANTITY_TOKEN_PATTERN.findall(text or "")
     }
+
+
+def _HasMeaningfulNonQuantityText(text: str) -> bool:
+    remainingText = QUANTITY_TOKEN_PATTERN.sub("", text or "")
+    return re.search(r"[A-Za-z가-힣]{2,}", remainingText) is not None
+
+
+def _ExtractMeaningfulEvidenceTokens(text: str, *, minLength: int = 2) -> set[str]:
+    remainingText = QUANTITY_TOKEN_PATTERN.sub(" ", text or "")
+    ignoredTokens = {"mg", "g", "kg", "ml", "l", "kcal"}
+    return {
+        token.lower()
+        for token in re.findall(r"[0-9A-Za-z가-힣]+", remainingText)
+        if len(token) >= minLength
+        and not token.isdigit()
+        and token.lower() not in ignoredTokens
+    }
+
+
+def _IsTokenCoveredByEvidenceParts(token: str, evidenceTokens: set[str]) -> bool:
+    if token in evidenceTokens:
+        return True
+    return any(
+        token[:splitIndex] in evidenceTokens and token[splitIndex:] in evidenceTokens
+        for splitIndex in range(1, len(token))
+    )
 
 
 def _CompactEvidenceText(text: str) -> str:
@@ -1381,7 +1443,7 @@ class ProductFactReconstructionValidator:
         sourceRefs: Sequence[str],
         evidenceById: Mapping[str, ProductInputEvidenceRecord],
     ) -> Optional[str]:
-        if _ExtractQuantityTokens(value):
+        if _ExtractQuantityTokens(value) and not _HasMeaningfulNonQuantityText(value):
             return None
         compactValue = _CompactEvidenceText(value)
         if len(compactValue) < 3:
@@ -1391,6 +1453,21 @@ class ProductFactReconstructionValidator:
             in _CompactEvidenceText(evidenceById[sourceRef].text)
             for sourceRef in sourceRefs
             if sourceRef in evidenceById
+        ):
+            return None
+        valueTokens = _ExtractMeaningfulEvidenceTokens(value)
+        evidenceTokens = {
+            token
+            for sourceRef in sourceRefs
+            if sourceRef in evidenceById
+            for token in _ExtractMeaningfulEvidenceTokens(
+                evidenceById[sourceRef].text,
+                minLength=1,
+            )
+        }
+        if valueTokens and all(
+            _IsTokenCoveredByEvidenceParts(token, evidenceTokens)
+            for token in valueTokens
         ):
             return None
         return "raw_value_not_found_in_source"
@@ -1679,6 +1756,9 @@ class LlmProductFactReconstructor:
                     "출력 key는 reconstructed_tables, product_facts, unresolved_facts, conflicts, warnings만 사용하라.",
                     "reconstructed_tables에는 structured table/raw OCR에서 복원 가능한 표 행을 가능한 한 보존하라.",
                     "product_facts에는 분류 후보 생성에 필요한 핵심 상품 fact만 넣어라.",
+                    "raw_value는 source_refs의 evidence에 있는 OCR/VLM 원문 판독값을 그대로 복사하라.",
+                    "오탈자 교정, 단위 정규화, 표준 필드명/값은 normalized_value에만 넣어라.",
+                    "원문 판독값을 evidence에서 복사할 수 없으면 해당 항목은 unresolved_facts로 보내라.",
                     "normalized_fact_texts, dictionary_matches, used_llm_reconstruction, fallback_reason은 출력하지 마라.",
                     "source_refs에는 evidence_id만 사용하라.",
                     json.dumps(contextPayload, ensure_ascii=False, separators=(",", ":")),
