@@ -15,6 +15,7 @@ def RegisterClassificationCallbacks(app: Dash) -> None:
         Output("candidate-tree-drawer-store", "data"),
         Output("classification-result-drawer-store", "data"),
         Input({"type": "pipeline-step-card", "step": ALL}, "n_clicks"),
+        Input({"type": "candidate-result-card", "candidate": ALL}, "n_clicks"),
         Input({"type": "input-detail-drawer-close", "target": ALL}, "n_clicks"),
         Input({"type": "candidate-tree-drawer-close", "target": ALL}, "n_clicks"),
         Input({"type": "classification-result-drawer-close", "target": ALL}, "n_clicks"),
@@ -25,6 +26,7 @@ def RegisterClassificationCallbacks(app: Dash) -> None:
 
 def _update_classification_drawers(
     _stepClicks: list[int | None],
+    _candidateCardClicks: list[int | None],
     _inputCloseClicks: list[int | None],
     _candidateCloseClicks: list[int | None],
     _classificationCloseClicks: list[int | None],
@@ -46,6 +48,8 @@ def _resolve_classification_drawer_state(
         return closedState
     if not isinstance(resultData, dict):
         return (no_update, no_update, no_update)
+    if isinstance(triggered, dict) and triggered.get("type") == "candidate-result-card":
+        return (False, False, triggered.get("candidate") or True)
     if not isinstance(triggered, dict) or triggered.get("type") != "pipeline-step-card":
         return (no_update, no_update, no_update)
 

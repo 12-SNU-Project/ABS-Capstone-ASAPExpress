@@ -42,7 +42,7 @@ def CreateDashApp(
                 html.Div(id="sse-bridge", style={"display": "none"}),
                 html.Div(
                     [
-                        html.Aside(id="app-sidebar", style=_SIDEBAR_STYLE),
+                        html.Header(id="app-topbar", style=_TOPBAR_STYLE),
                         html.Main(html.Div(id="page-root"), style=_MAIN_STYLE),
                     ],
                     style=_APP_SHELL_STYLE,
@@ -62,20 +62,23 @@ def CreateDashApp(
 
 
 _APP_SHELL_STYLE = {
-    "display": "grid",
-    "gridTemplateColumns": "230px minmax(0, 1fr)",
+    "display": "flex",
+    "flexDirection": "column",
     "minHeight": "100vh",
 }
 
-_SIDEBAR_STYLE = {
+_TOPBAR_STYLE = {
     "position": "sticky",
     "top": 0,
-    "height": "100vh",
+    "zIndex": 80,
+    "display": "flex",
+    "alignItems": "center",
+    "flexWrap": "wrap",
+    "gap": "16px 24px",
     "boxSizing": "border-box",
-    "padding": "22px 16px",
-    "borderRight": "1px solid #e5e7eb",
+    "padding": "18px 28px",
+    "borderBottom": "1px solid #e5e7eb",
     "background": "#ffffff",
-    "overflowY": "auto",
 }
 
 _MAIN_STYLE = {
@@ -83,5 +86,6 @@ _MAIN_STYLE = {
     "minWidth": 0,
     "width": "100%",
     "maxWidth": "1280px",
+    "margin": "0 auto",
     "padding": "24px 28px",
 }

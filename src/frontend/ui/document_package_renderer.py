@@ -44,7 +44,7 @@ def cert_color(category: str) -> str:
     if category == "preferential_origin":
         return "#166534"
     if category == "exemption_declaration":
-        return "#1d4ed8"
+        return "#6d3fd6"
     return "#475569"
 
 
@@ -517,7 +517,7 @@ def _render_drawer_toolbar(
                 [html.Div(title), html.Div(sub, style={"fontSize": "11px", "fontWeight": 750})],
                 id={"type": "panel-btn", "panel": panelId},
                 variant="filled" if selected == panelId else "light",
-                color="blue" if panelId in DRAWER_PANEL_IDS else "gray",
+                color="violet" if panelId in DRAWER_PANEL_IDS else "gray",
                 radius="sm",
                 size="sm",
                 className="drawer-action-btn",
@@ -1075,7 +1075,7 @@ def render_trade_scenario(pkg: dict[str, Any], cx: dict[str, Any]) -> html.Div:
                     html.Div(
                         [
                             html.Div("TARIC CODE", className="metric-label"),
-                            html.Div(pkg.get("taric10") or "-", className="metric-value", style={"color": "#1d4ed8", "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"}),
+                            html.Div(pkg.get("taric10") or "-", className="metric-value", style={"color": "#6d3fd6", "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"}),
                             html.Div(f"CN8: {pkg.get('cn8') or '-'}", className="card-meta"),
                         ],
                         className="scenario-code",
@@ -1182,7 +1182,7 @@ def render_customs(pkg: dict[str, Any], controls: list[dict[str, Any]]):
                 [
                     html.Div(
                         [
-                            html.Div(pkg.get("taric10"), className="card-title", style={"fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", "color": "#1d4ed8"}),
+                            html.Div(pkg.get("taric10"), className="card-title", style={"fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", "color": "#6d3fd6"}),
                             html.Div(f"CN8 {pkg.get('cn8')}", className="card-meta"),
                         ],
                         className="card",
