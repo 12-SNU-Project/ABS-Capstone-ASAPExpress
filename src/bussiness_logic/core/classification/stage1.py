@@ -128,6 +128,7 @@ LOW_VALUE_MATCH_TERMS = {
     "and",
     "animal",
     "any",
+    "as",
     "at",
     "blood",
     "by",
@@ -135,15 +136,22 @@ LOW_VALUE_MATCH_TERMS = {
     "cosmetic",
     "cosmetics",
     "crustaceans",
+    "edible",
+    "elsewhere",
     "fish",
     "food",
+    "foods",
     "for",
     "frozen",
     "heat",
+    "included",
     "in",
     "insects",
+    "meal",
     "meat",
+    "miscellaneous",
     "molluscs",
+    "not",
     "offal",
     "of",
     "or",
@@ -153,10 +161,15 @@ LOW_VALUE_MATCH_TERMS = {
     "preparations",
     "prepared",
     "preserved",
+    "product",
+    "products",
     "ready",
+    "specified",
+    "therefor",
     "toilet",
     "the",
     "to",
+    "use",
     "weight",
     "with",
 }
@@ -209,7 +222,7 @@ PREFERRED_HEADING_HINTS = {
     "오징어무국": ["2104"],
     "오징어 무국": ["2104"],
     "무국": ["2104"],
-    "꼬막장": ["2106"],
+    "꼬막장": ["1605", "2103"],
     "비빔장": ["2106"],
     "인절미": ["1905"],
     "떡류": ["1905"],
@@ -243,10 +256,12 @@ PREFERRED_HEADING_HINTS = {
     "백설기": ["1905"],
     "찰떡": ["1905"],
     "콩찰떡": ["1905"],
-    "꼬막 비빔장": ["2106"],
-    "부추 꼬막 비빔장": ["2106"],
-    "달래 꼬막장": ["2106"],
-    "꼬막장": ["2106"],
+    "꼬막 비빔장": ["1605", "2103"],
+    "부추 꼬막 비빔장": ["1605", "2103"],
+    "달래 꼬막장": ["1605", "2103"],
+    "꼬막장": ["1605", "2103"],
+    "만두": ["1902"],
+    "군만두": ["1902"],
     "김치 우동 전골": ["2106"],
     "우동 전골": ["2106"],
     "산채나물 비빔밥": ["2106"],
@@ -267,11 +282,14 @@ TERM_EXPANSION_MAP = {
     "된장국": ["soybean paste soup", "soup", "soups", "broth", "broths", "prepared soup", "prepared soups"],
     "된장찌개": ["soybean paste stew", "stew", "soup", "soups", "broth", "broths", "prepared soup", "prepared soups"],
     "추어탕": ["fish soup", "soup", "soups", "broth", "broths", "prepared soup", "prepared soups"],
-    "비빔장": ["food preparation", "food preparations", "prepared food", "prepared foods", "prepared topping", "meal topping", "miscellaneous edible preparation", "miscellaneous edible preparations"],
-    "꼬막 비빔장": ["food preparation", "food preparations", "prepared food", "prepared foods", "prepared topping", "meal topping", "miscellaneous edible preparation", "miscellaneous edible preparations"],
-    "부추 꼬막 비빔장": ["food preparation", "food preparations", "prepared food", "prepared foods", "prepared topping", "meal topping", "miscellaneous edible preparation", "miscellaneous edible preparations"],
-    "꼬막장": ["food preparation", "food preparations", "prepared food", "prepared foods", "prepared topping", "meal topping", "miscellaneous edible preparation", "miscellaneous edible preparations"],
-    "달래 꼬막장": ["food preparation", "food preparations", "prepared food", "prepared foods", "prepared topping", "meal topping", "miscellaneous edible preparation", "miscellaneous edible preparations"],
+    "비빔장": ["sauce", "sauces", "mixed condiment", "mixed condiments", "mixed seasoning", "mixed seasonings"],
+    "꼬막": ["cockle", "cockles", "clams cockles", "clams cockles arkshells"],
+    "새꼬막": ["cockle", "cockles", "clams cockles", "clams cockles arkshells"],
+    "새꼬막살": ["cockle", "cockles", "clams cockles", "clams cockles arkshells"],
+    "꼬막 비빔장": ["cockle", "cockles", "clams cockles", "prepared molluscs", "prepared or preserved molluscs"],
+    "부추 꼬막 비빔장": ["cockle", "cockles", "clams cockles", "prepared molluscs", "prepared or preserved molluscs"],
+    "꼬막장": ["cockle", "cockles", "clams cockles", "prepared molluscs", "prepared or preserved molluscs"],
+    "달래 꼬막장": ["cockle", "cockles", "clams cockles", "prepared molluscs", "prepared or preserved molluscs"],
     "고등어": ["mackerel", "mackerels", "scomber", "scomber scombrus", "scomber japonicus", "prepared fish", "preserved fish", "prepared", "preserved", "fish"],
     "무국": ["soup", "soups", "broth", "broths", "prepared soup", "prepared soups"],
     "오징어무국": ["soup", "soups", "broth", "broths", "prepared soup", "prepared soups"],
@@ -286,6 +304,8 @@ TERM_EXPANSION_MAP = {
     "떡볶이": ["rice cake", "rice cakes", "rice pasta", "pasta", "noodles"],
     "밀떡": ["uncooked pasta", "pasta not stuffed", "pasta", "noodles"],
     "쫄면": ["uncooked pasta", "pasta not stuffed", "pasta", "noodles"],
+    "만두": ["dumpling", "dumplings", "stuffed pasta", "cooked stuffed pasta", "pasta"],
+    "군만두": ["dumpling", "dumplings", "stuffed pasta", "cooked stuffed pasta", "cooked pasta", "pasta"],
     "생선매운탕": ["fish", "prepared fish", "preserved fish", "prepared preserved fish"],
     "간편 생선구이": ["prepared fish", "preserved fish", "grilled fish", "fish whole pieces", "not minced"],
     "생선구이 2종": ["prepared fish", "preserved fish", "grilled fish", "fish whole pieces", "not minced"],
@@ -305,8 +325,8 @@ TERM_EXPANSION_MAP = {
     "가자미": ["flatfish", "flat fish", "flounder", "sole", "fish", "prepared fish", "preserved fish"],
     "생선구이": ["grilled fish", "fish", "prepared fish", "preserved fish"],
     "전골": ["hot pot", "prepared meal", "prepared food"],
-    "비빔밥": ["food preparations not elsewhere specified or included", "other food preparations", "miscellaneous edible preparation", "miscellaneous edible preparations", "prepared meal", "prepared rice meal", "prepared food"],
-    "유부초밥": ["food preparations not elsewhere specified or included", "other food preparations", "miscellaneous edible preparation", "miscellaneous edible preparations", "prepared meal", "prepared rice meal", "prepared food"],
+    "비빔밥": ["food preparations not elsewhere specified or included", "other food preparations", "miscellaneous edible preparation", "miscellaneous edible preparations", "prepared meal", "prepared food"],
+    "유부초밥": ["food preparations not elsewhere specified or included", "other food preparations", "miscellaneous edible preparation", "miscellaneous edible preparations", "prepared meal", "prepared food"],
     "갈비": ["ribs", "cuts", "swine", "pork"],
     "고기": ["meat"],
     "돼지": ["pork", "swine", "domestic swine", "meat"],
@@ -340,7 +360,8 @@ TERM_EXPANSION_MAP = {
         "prepared or preserved molluscs",
         "aquatic invertebrates",
     ],
-    "새우": ["shrimp", "crustaceans"],
+    "새우": ["shrimp", "shrimps", "prawn", "prawns", "shrimps prawns", "crustaceans"],
+    "새우살": ["shrimp", "shrimps", "prawn", "prawns", "shrimps prawns", "crustaceans"],
     "멘보샤": ["shrimps", "prawns", "shrimps prawns"],
     "새우볶음밥": ["shrimp", "shrimps", "prawn", "prawns", "shrimps and prawns", "prepared crustaceans", "preserved crustaceans", "prepared preserved", "rice", "fried rice", "prepared fried rice"],
     "낙지": ["octopus", "molluscs", "aquatic invertebrates", "prepared", "preserved"],
@@ -617,7 +638,6 @@ class ProductClassificationInput(BaseModel):
         return self._BuildSearchTextFromParts(
             [
                 self.productName or "",
-                self.shortDescription or "",
                 self.brandName or "",
             ]
         )
@@ -1611,6 +1631,8 @@ class CnCandidateRetriever:
     ) -> List[CnCandidate]:
         if topK <= 0:
             return []
+        if not self._HasClassifiableProductEvidence(productInput):
+            return []
 
         hierarchyIndex = self._LoadHierarchyIndex()
         searchText, searchTextByTier, searchTermsByTier = self._BuildSearchProfile(
@@ -1692,6 +1714,27 @@ class CnCandidateRetriever:
                 candidates.append(self._BuildCandidateFromPath(candidatePath))
 
         return self._SelectHierarchicalLeafCandidates(candidates, topK)
+
+    def _HasClassifiableProductEvidence(
+        self,
+        productInput: ProductClassificationInput,
+    ) -> bool:
+        if (
+            productInput.normalizedOcrFactTexts
+            or productInput.structuredProductFacts
+            or productInput.noticeFieldTexts
+            or productInput.productNoticeText.strip()
+        ):
+            return True
+        productName = NormalizeWhiteSpace(productInput.productName or "")
+        if not productName:
+            return False
+        loweredProductName = productName.lower()
+        return (
+            "://" not in loweredProductName
+            and "/products/" not in loweredProductName
+            and not loweredProductName.startswith("www.")
+        )
 
     def FindBacktrackingCandidates(
         self,
@@ -1836,9 +1879,13 @@ class CnCandidateRetriever:
 
         candidatesByCode: Dict[str, CnCandidate] = {}
         for candidate in heuristicCandidates:
+            if not self._HasPositiveScore(candidate):
+                continue
             candidatesByCode[candidate.hs8] = candidate
 
         for semanticCandidate in semanticCandidates:
+            if not self._HasPositiveScore(semanticCandidate):
+                continue
             existingCandidate = candidatesByCode.get(semanticCandidate.hs8)
             if existingCandidate is None:
                 candidatesByCode[semanticCandidate.hs8] = semanticCandidate
@@ -2287,6 +2334,13 @@ class CnCandidateRetriever:
             descriptionText,
             searchTermsByTier,
         )
+        keywordTierMatches, descriptionTierMatches = (
+            self._FilterHs6ParentGenericMatches(
+                node,
+                keywordTierMatches,
+                descriptionTierMatches,
+            )
+        )
         excludeTierMatches = self._FindTieredCellMatches(
             excludeText,
             searchTextByTier,
@@ -2308,6 +2362,22 @@ class CnCandidateRetriever:
             node,
             searchText,
         )
+        if (
+            node.level == HIERARCHY_LEVEL_CN8
+            and NormalizeWhiteSpace(node.row.get("hard_conditions", ""))
+            and hardConditionStatus != HARD_CONDITION_STATUS_SATISFIED
+        ):
+            includeTierMatches = {
+                EVIDENCE_TIER_PRIMARY: [],
+                EVIDENCE_TIER_SECONDARY: [],
+                EVIDENCE_TIER_WEAK: [],
+            }
+            evidenceTierMatches = self._MergeTierMatches(
+                includeTierMatches,
+                keywordTierMatches,
+                descriptionTierMatches,
+            )
+            includeMatches = []
         includePoints = self._ScoreTierMatches(
             includeTierMatches,
             TIER_INCLUDE_RULE_WEIGHTS,
@@ -2351,6 +2421,78 @@ class CnCandidateRetriever:
             hardConditionStatus=hardConditionStatus,
             hardConditionEvidence=tuple(hardConditionEvidence),
         )
+
+    def _FilterHs6ParentGenericMatches(
+        self,
+        node: CnHierarchyNode,
+        keywordTierMatches: Mapping[str, Sequence[str]],
+        descriptionTierMatches: Mapping[str, Sequence[str]],
+    ) -> tuple[Dict[str, List[str]], Dict[str, List[str]]]:
+        if node.level != HIERARCHY_LEVEL_HS6:
+            return (
+                {tier: list(matches) for tier, matches in keywordTierMatches.items()},
+                {tier: list(matches) for tier, matches in descriptionTierMatches.items()},
+            )
+
+        parentTerms = {
+            term
+            for term in self._ExtractTerms(
+                self._JoinTextValues(
+                    node.row.get("heading_description", ""),
+                    node.row.get("heading_keywords", ""),
+                )
+            )
+            if self._IsMatchableTerm(term)
+        }
+        if not parentTerms:
+            return (
+                {tier: list(matches) for tier, matches in keywordTierMatches.items()},
+                {tier: list(matches) for tier, matches in descriptionTierMatches.items()},
+            )
+
+        allMatches = (
+            self._FlattenTierMatches(keywordTierMatches)
+            + self._FlattenTierMatches(descriptionTierMatches)
+        )
+        if any(
+            self._HasBranchSpecificMatchTerm(match, parentTerms)
+            for match in allMatches
+        ):
+            return (
+                {tier: list(matches) for tier, matches in keywordTierMatches.items()},
+                {tier: list(matches) for tier, matches in descriptionTierMatches.items()},
+            )
+
+        return (
+            self._DropParentGenericOnlyMatches(keywordTierMatches, parentTerms),
+            self._DropParentGenericOnlyMatches(descriptionTierMatches, parentTerms),
+        )
+
+    def _HasBranchSpecificMatchTerm(
+        self,
+        match: str,
+        parentTerms: Set[str],
+    ) -> bool:
+        terms = [
+            term
+            for term in self._ExtractTerms(match)
+            if self._IsMatchableTerm(term)
+        ]
+        return any(term not in parentTerms for term in terms)
+
+    def _DropParentGenericOnlyMatches(
+        self,
+        tierMatches: Mapping[str, Sequence[str]],
+        parentTerms: Set[str],
+    ) -> Dict[str, List[str]]:
+        return {
+            tier: [
+                match
+                for match in matches
+                if self._HasBranchSpecificMatchTerm(match, parentTerms)
+            ]
+            for tier, matches in tierMatches.items()
+        }
 
     def _ReadHierarchyNodeTexts(
         self,
@@ -2591,11 +2733,14 @@ class CnCandidateRetriever:
         candidates: Sequence[CnCandidate],
         topK: int,
     ) -> List[CnCandidate]:
-        sortedCandidates = self._SortCandidates(candidates)
+        positiveCandidates = [
+            candidate for candidate in candidates if self._HasPositiveScore(candidate)
+        ]
+        sortedCandidates = self._SortCandidates(positiveCandidates)
         semanticCandidates = sorted(
             [
                 candidate
-                for candidate in candidates
+                for candidate in positiveCandidates
                 if RETRIEVAL_SOURCE_SEMANTIC in candidate.retrievalSources
             ],
             key=lambda candidate: (
@@ -3166,6 +3311,12 @@ class CnCandidateRetriever:
             or candidate.secondaryEvidenceMatches
         )
 
+    def _HasPositiveScore(
+        self,
+        candidate: CnCandidate,
+    ) -> bool:
+        return candidate.score > 0
+
     def _SortCandidates(
         self,
         candidates: Sequence[CnCandidate],
@@ -3192,6 +3343,8 @@ class CnCandidateRetriever:
         candidate: CnCandidate,
         enforceHs4Limit: bool,
     ) -> bool:
+        if not self._HasPositiveScore(candidate):
+            return False
         if candidate.hs8 in selectedHs8Codes:
             return False
         hs4Code = candidate.hs4Code or "unknown"

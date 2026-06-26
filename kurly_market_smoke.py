@@ -116,6 +116,14 @@ def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="현재 Dash Reconstruction Drawer 바인딩 가능 여부를 함께 검사합니다.",
     )
+    parser.add_argument(
+        "--classify-reconstruction",
+        action="store_true",
+        help=(
+            "LLM reconstruction 결과를 입력으로 정적 CN 후보 산출, "
+            "Classification LLM 판단, backtracking 결정을 함께 검사합니다."
+        ),
+    )
     parsedArguments = parser.parse_args(arguments)
     if parsedArguments.compare_max_images < 0:
         parser.error("--compare-max-images must be greater than or equal to 0")
@@ -497,6 +505,7 @@ class KurlyMarketSmokeRunner:
         compareOcr: bool = False,
         compareMaxImages: int = 1,
         checkUiBinding: bool = False,
+        classifyReconstruction: bool = False,
     ) -> None:
         appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
         pathConfig = appConfig.paths
@@ -509,6 +518,7 @@ class KurlyMarketSmokeRunner:
         self._compareOcr = compareOcr
         self._compareMaxImages = compareMaxImages
         self._checkUiBinding = checkUiBinding
+        self._classifyReconstruction = classifyReconstruction
         self._runOcrFallback = smokeConfig.run_ocr_fallback
         self._useStructuredOcr = smokeConfig.use_structured_ocr
         self._maxOcrImageCount = smokeConfig.max_ocr_image_count
@@ -570,12 +580,14 @@ class KurlyMarketSmokeRunner:
         runLogger.info(
             (
                 "KurlyMarket 상품 수집 smoke를 시작합니다 url_count={} "
-                "run_ocr_fallback={} browser_mode={} compare_ocr={}"
+                "run_ocr_fallback={} browser_mode={} compare_ocr={} "
+                "classify_reconstruction={}"
             ),
             len(self._productUrls),
             self._runOcrFallback,
             "headless" if self._headless else "headed",
             self._compareOcr,
+            self._classifyReconstruction,
         )
         if not self._productUrls:
             runLogger.warning(
@@ -704,15 +716,24 @@ class KurlyMarketSmokeRunner:
                     maxOcrImageCount=self._maxOcrImageCount,
                 )
             )
-            publicResult = pipelineResult.BuildPublicResult()
             resultData = self._BuildResult(
                 productUrl,
                 pipelineResult.model_dump(mode="json", by_alias=True),
             )
+            uiFacts = (
+                self._BuildDashFactsFromPipelineResult(productUrl, pipelineResult)
+                if (self._checkUiBinding or self._classifyReconstruction)
+                else {}
+            )
             if self._checkUiBinding:
                 resultData["ui_binding_smoke"] = BuildUiBindingSmoke(
-                    self._BuildUiFactsFromPublicResult(productUrl, publicResult),
+                    uiFacts,
                     sourceLabel=productUrl,
+                )
+            if self._classifyReconstruction:
+                resultData["classification_smoke"] = self._RunClassificationSmoke(
+                    productUrl,
+                    uiFacts,
                 )
             if self._compareOcr:
                 resultData["ocr_comparison"] = self._RunOcrComparison(
@@ -730,6 +751,214 @@ class KurlyMarketSmokeRunner:
                     "runtime_error": str(error),
                 },
             }
+
+    def _BuildDashFactsFromPipelineResult(
+        self,
+        productUrl: str,
+        pipelineResult: Any,
+    ) -> Dict[str, Any]:
+        from agents.document_pipeline import build_kurly_url_facts_from_pipeline_result
+
+        return build_kurly_url_facts_from_pipeline_result(
+            productUrl,
+            pipelineResult,
+            artifact_root=self._artifactRootPath,
+        )
+
+    def _RunClassificationSmoke(
+        self,
+        productUrl: str,
+        uiFacts: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        from agents.blackboard import BlackboardStore
+        from agents.classification_agent import ClassificationAgent
+        from agents.document_pipeline import build_raw_input_from_ui
+        from agents.evidence_intake_agent import EvidenceIntakeAgent
+
+        rawInput = build_raw_input_from_ui(
+            query=str(uiFacts.get("product_name") or productUrl),
+            facts=dict(uiFacts),
+        )
+        productId = str(uiFacts.get("product_id") or ExtractProductIdFromUrl(productUrl))
+        runDirectory = (
+            self._artifactRootPath
+            / productId
+            / "classification-smoke"
+            / datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        )
+        store = BlackboardStore.create(
+            runtime_mode="smoke",
+            run_id="run_001",
+            run_dir=runDirectory,
+            validate_on_write=False,
+        )
+        agentResults = []
+        for agent in (EvidenceIntakeAgent(rawInput), ClassificationAgent()):
+            result = agent.execute(store)
+            agentResults.append({
+                "agent_name": agent.agent_name,
+                "success": result.success,
+                "error": result.error,
+                "outputs_written": result.outputs_written,
+            })
+            if not result.success:
+                break
+
+        blackboard = store.load()
+        productEvidenceState = blackboard.get("product_evidence_state") or {}
+        observedFacts = productEvidenceState.get("observed_facts") or {}
+        candidateCodeSet = (blackboard.get("candidate_code_sets") or [None])[-1]
+        if not isinstance(candidateCodeSet, Mapping):
+            candidateCodeSet = {}
+        trace = candidateCodeSet.get("classification_trace") or {}
+        if not isinstance(trace, Mapping):
+            trace = {}
+        candidates = self._BuildClassificationCandidateSmokeRows(candidateCodeSet)
+        zeroScoreCodes = [
+            candidate["cn8"]
+            for candidate in candidates
+            if float(candidate.get("score") or 0) <= 0
+        ]
+        classificationAgentResult = (
+            agentResults[1]
+            if len(agentResults) > 1
+            else {"success": False, "error": "classification_agent_not_executed"}
+        )
+        return {
+            "source": productUrl,
+            "dash_equivalence": {
+                "scope": (
+                    "Dash pipeline up to Classification_Agent; "
+                    "Document_Agent and Orchestrator_Agent are intentionally skipped."
+                ),
+                "path": [
+                    "KurlyProductPipeline.Run",
+                    "build_kurly_url_facts_from_pipeline_result",
+                    "build_raw_input_from_ui",
+                    "EvidenceIntakeAgent",
+                    "ClassificationAgent",
+                ],
+                "document_recommendation_executed": False,
+                "raw_input_matches_evidence_intake": (
+                    self._DoesRawInputMatchObservedFacts(rawInput, observedFacts)
+                ),
+                "run_dir": str(runDirectory),
+                "blackboard_path": str(store.bb_path),
+            },
+            "input": {
+                "product_name": observedFacts.get("product_name") or "",
+                "classification_fact_count": (
+                    len(observedFacts.get("classification_input_product_facts") or [])
+                    if isinstance(
+                        observedFacts.get("classification_input_product_facts"),
+                        list,
+                    )
+                    else 0
+                ),
+                "classification_text_line_count": (
+                    len(observedFacts.get("classification_input_fact_texts") or [])
+                    if isinstance(
+                        observedFacts.get("classification_input_fact_texts"),
+                        list,
+                    )
+                    else 0
+                ),
+                "unresolved_fact_count": (
+                    len(observedFacts.get("unresolved_product_facts") or [])
+                    if isinstance(observedFacts.get("unresolved_product_facts"), list)
+                    else 0
+                ),
+                "classification_input_text_lines": list(
+                    observedFacts.get("classification_input_fact_texts") or [],
+                )
+                if isinstance(observedFacts.get("classification_input_fact_texts"), list)
+                else [],
+            },
+            "status": {
+                "error": classificationAgentResult.get("error"),
+                "agent_success": bool(classificationAgentResult.get("success")),
+                "llm_model": self._FindAgentRunModel(store, "Classification_Agent"),
+                "candidate_count": len(candidates),
+                "zero_score_candidate_codes": zeroScoreCodes,
+            },
+            "candidates": candidates,
+            "candidate_code_set": {
+                "candidate_set_id": candidateCodeSet.get("candidate_set_id"),
+                "product_id": candidateCodeSet.get("product_id"),
+            },
+            "decision": {
+                "decision_status": trace.get("decision_status"),
+                "backtracking_recommended": trace.get("backtracking_recommended"),
+                "backtracking_occurred": trace.get("backtracking_occurred"),
+            },
+            "traversal": {
+                "traversal_status": trace.get("traversal_status"),
+                "next_action": trace.get("next_action"),
+                "backtracking_target_level": trace.get("backtracking_target_level"),
+                "backtracking_reason": trace.get("backtracking_reason"),
+            },
+            "traversal_history": list(trace.get("traversal_history") or []),
+            "agent_results": agentResults,
+            "agent_runs": list(store.iter_agent_runs()),
+        }
+
+    @staticmethod
+    def _BuildClassificationCandidateSmokeRows(
+        candidateCodeSet: Mapping[str, Any],
+    ) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        candidates = candidateCodeSet.get("candidates") or []
+        if not isinstance(candidates, list):
+            return out
+        for candidate in candidates:
+            if not isinstance(candidate, Mapping):
+                continue
+            staticTree = candidate.get("candidate_static_tree") or {}
+            if not isinstance(staticTree, Mapping):
+                staticTree = {}
+            out.append({
+                "rank": candidate.get("rank"),
+                "cn8": candidate.get("cn8"),
+                "hs6": candidate.get("hs6"),
+                "taric10": candidate.get("taric10"),
+                "score": staticTree.get("total_score"),
+                "llm_recommended": candidate.get("llm_recommended"),
+                "hard_condition_status": candidate.get("hard_condition_status"),
+                "taric10_branch_count": candidate.get("taric10_branch_count"),
+                "retrieval_sources": staticTree.get("retrieval_sources") or [],
+                "matched_keywords": staticTree.get("matched_keywords") or [],
+                "score_breakdown": staticTree.get("score_breakdown") or {},
+                "classification_basis": candidate.get("classification_basis") or [],
+            })
+        return out
+
+    @staticmethod
+    def _DoesRawInputMatchObservedFacts(
+        rawInput: Mapping[str, Any],
+        observedFacts: Mapping[str, Any],
+    ) -> bool:
+        keys = (
+            "product_name",
+            "description",
+            "classification_input_product_facts",
+            "classification_input_fact_texts",
+            "unresolved_product_facts",
+            "product_fact_conflicts",
+            "ocr_text",
+            "source_urls",
+            "origin_country",
+            "intended_use",
+            "warnings",
+            "input_reconstruction",
+        )
+        return all(rawInput.get(key) == observedFacts.get(key) for key in keys)
+
+    @staticmethod
+    def _FindAgentRunModel(store: Any, agentName: str) -> str | None:
+        for agentRun in store.iter_agent_runs():
+            if agentRun.get("agent_name") == agentName:
+                return agentRun.get("llm_model")
+        return None
 
     def _BuildResult(
         self,
@@ -858,56 +1087,6 @@ class KurlyMarketSmokeRunner:
             "pipeline_steps": pipelineResultData["steps"],
             "warnings": collectionResult["warnings"],
             "errors": pipelineResultData["errors"],
-        }
-
-    @staticmethod
-    def _BuildUiFactsFromPublicResult(
-        productUrl: str,
-        publicResult: Mapping[str, Any],
-    ) -> Dict[str, Any]:
-        sourceProductPage = publicResult.get("source_product_page") or {}
-        if not isinstance(sourceProductPage, Mapping):
-            sourceProductPage = {}
-        inputReconstruction = publicResult.get("input_reconstruction") or {}
-        if not isinstance(inputReconstruction, Mapping):
-            inputReconstruction = {}
-        collection = publicResult.get("collection") or {}
-        if not isinstance(collection, Mapping):
-            collection = {}
-        ocr = publicResult.get("ocr") or {}
-        if not isinstance(ocr, Mapping):
-            ocr = {}
-        productId = ExtractProductIdFromUrl(productUrl)
-        return {
-            "url": productUrl,
-            "source_urls": [productUrl],
-            "product_id": productId,
-            "product_name": sourceProductPage.get("product_name") or "",
-            "description": (
-                sourceProductPage.get("short_description")
-                or sourceProductPage.get("raw_product_notice_text")
-                or ""
-            ),
-            "product_domain": sourceProductPage.get("product_domain") or "unknown",
-            "source_product_page": dict(sourceProductPage),
-            "classification_input_product_facts": (
-                inputReconstruction.get("classification_input_product_facts") or []
-            ),
-            "unresolved_product_facts": (
-                inputReconstruction.get("unresolved_product_facts") or []
-            ),
-            "product_fact_conflicts": (
-                inputReconstruction.get("product_fact_conflicts") or []
-            ),
-            "classification_input_fact_texts": (
-                inputReconstruction.get("classification_input_fact_texts") or []
-            ),
-            "input_reconstruction": dict(inputReconstruction),
-            "url_intake": {
-                "collection": dict(collection),
-                "ocr": dict(ocr),
-                "ocr_image_count": ocr.get("image_result_count", 0),
-            },
         }
 
     def _RunOcrComparison(
@@ -1288,6 +1467,7 @@ class KurlyMarketSmokeRunner:
         self._LogOcrSummary(resultData)
         self._LogInputReconstruction(resultData)
         self._LogWarningsAndErrors(resultData)
+        self._LogClassificationSmoke(resultData)
 
     def _LogPipelineSteps(self, resultData: Dict[str, Any]) -> None:
         stepLogger = self._Logger("_LogPipelineSteps")
@@ -1437,6 +1617,43 @@ class KurlyMarketSmokeRunner:
                 diagnostics.get("ingredient_row_count", 0),
                 diagnostics.get("nutrition_row_count", 0),
                 diagnostics.get("issues", []),
+            )
+
+    def _LogClassificationSmoke(self, resultData: Dict[str, Any]) -> None:
+        classificationData = resultData.get("classification_smoke")
+        if not isinstance(classificationData, dict):
+            return
+        classificationLogger = self._Logger("_LogClassificationSmoke")
+        status = classificationData.get("status") or {}
+        decision = classificationData.get("decision") or {}
+        traversal = classificationData.get("traversal") or {}
+        classificationLogger.info(
+            (
+                "classification_smoke error={} candidates={} zero_score={} "
+                "decision={} backtracking={} traversal={} raw_input_match={}"
+            ),
+            status.get("error"),
+            status.get("candidate_count"),
+            status.get("zero_score_candidate_codes"),
+            decision.get("decision_status"),
+            decision.get("backtracking_recommended"),
+            traversal.get("traversal_status"),
+            (classificationData.get("dash_equivalence") or {}).get(
+                "raw_input_matches_evidence_intake",
+            ),
+        )
+        for candidate in classificationData.get("candidates") or []:
+            classificationLogger.info(
+                (
+                    "classification_candidate rank={} cn8={} hs6={} "
+                    "score={} llm_recommended={} taric_branches={}"
+                ),
+                candidate.get("rank"),
+                candidate.get("cn8"),
+                candidate.get("hs6"),
+                candidate.get("score"),
+                candidate.get("llm_recommended"),
+                candidate.get("taric10_branch_count"),
             )
 
     def _LogSummary(self, results: List[Dict[str, Any]]) -> None:
@@ -1616,4 +1833,5 @@ if __name__ == "__main__":
         compareOcr=cliArguments.compare_ocr,
         compareMaxImages=cliArguments.compare_max_images,
         checkUiBinding=cliArguments.check_ui_binding,
+        classifyReconstruction=cliArguments.classify_reconstruction,
     ).Run()

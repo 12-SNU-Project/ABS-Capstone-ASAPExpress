@@ -43,6 +43,10 @@ class ClassificationDecisionHandler(BaseModel):
         default_factory=list,
         alias="insufficient_information_hs8_codes",
     )
+    deterministicEvidenceRetainedHs8Codes: List[str] = Field(
+        default_factory=list,
+        alias="deterministic_evidence_retained_hs8_codes",
+    )
     candidateStatusByHs8: Dict[str, str] = Field(
         default_factory=dict,
         alias="candidate_status_by_hs8",
@@ -152,6 +156,7 @@ class Stage1DecisionPolicy:
             candidateOrder,
             "insufficient_information",
         )
+        deterministicEvidenceRetainedCodes: List[str] = []
 
         if len(strongCandidates) == 1:
             decisionStatus = "single_strong_candidate_for_human_review"
@@ -172,25 +177,79 @@ class Stage1DecisionPolicy:
             backtrackingTargetLevel = None
             backtrackingReason = None
         elif insufficientInformationCandidates:
-            decisionStatus = "insufficient_information_before_code_selection"
-            recommendedCandidateHs8 = None
+            deterministicEvidenceRetainedCodes = (
+                self._FindDeterministicGeneralFallbackCodes(
+                    candidates,
+                    candidateOrder,
+                    insufficientInformationCandidates,
+                )
+            )
+            if deterministicEvidenceRetainedCodes:
+                decisionStatus = "deterministic_general_candidate_needs_review"
+                recommendedCandidateHs8 = deterministicEvidenceRetainedCodes[0]
+                self._ExtendUniqueStrings(
+                    missingInformation,
+                    [
+                        (
+                            "LLM review left candidates as insufficient, but "
+                            "these hard-condition-free general fallback "
+                            "candidates have positive deterministic evidence: "
+                            "{0}. Keep them for human review instead of "
+                            "leaving code selection empty."
+                        ).format(", ".join(deterministicEvidenceRetainedCodes)),
+                    ],
+                )
+            else:
+                decisionStatus = "insufficient_information_before_code_selection"
+                recommendedCandidateHs8 = None
             backtrackingRecommended = False
             backtrackingTargetLevel = None
             backtrackingReason = None
         else:
-            decisionStatus = "backtracking_recommended"
-            recommendedCandidateHs8 = None
-            backtrackingRecommended = True
-            backtrackingTargetLevel = self._FindBacktrackingTargetLevel(
-                classificationResult,
-                unlikelyCandidates,
-            )
-            backtrackingReason = (
-                "No reviewed CN8 candidate remained plausible; regenerate "
-                "once from the bounded {0} scope.".format(
-                    backtrackingTargetLevel,
+            deterministicEvidenceRetainedCodes = (
+                self._FindDeterministicEvidenceRetainedCodes(
+                    candidates,
+                    candidateOrder,
                 )
             )
+            if deterministicEvidenceRetainedCodes:
+                decisionStatus = "deterministic_evidence_conflict_needs_review"
+                recommendedCandidateHs8 = deterministicEvidenceRetainedCodes[0]
+                backtrackingRecommended = False
+                backtrackingTargetLevel = None
+                backtrackingReason = None
+                retainedCodeSet = set(deterministicEvidenceRetainedCodes)
+                unlikelyCandidates = [
+                    hs8
+                    for hs8 in unlikelyCandidates
+                    if hs8 not in retainedCodeSet
+                ]
+                self._ExtendUniqueStrings(
+                    missingInformation,
+                    [
+                        (
+                            "LLM review rejected all candidates, but these "
+                            "candidates still have positive deterministic "
+                            "score and primary/secondary source evidence: "
+                            "{0}. Keep them for human review instead of "
+                            "immediate backtracking."
+                        ).format(", ".join(deterministicEvidenceRetainedCodes)),
+                    ],
+                )
+            else:
+                decisionStatus = "backtracking_recommended"
+                recommendedCandidateHs8 = None
+                backtrackingRecommended = True
+                backtrackingTargetLevel = self._FindBacktrackingTargetLevel(
+                    classificationResult,
+                    unlikelyCandidates,
+                )
+                backtrackingReason = (
+                    "No reviewed CN8 candidate remained plausible; regenerate "
+                    "once from the bounded {0} scope.".format(
+                        backtrackingTargetLevel,
+                    )
+                )
 
         return ClassificationDecisionHandler(
             decisionStatus=decisionStatus,
@@ -199,6 +258,9 @@ class Stage1DecisionPolicy:
             possibleCandidateHs8Codes=possibleCandidates,
             unlikelyCandidateHs8Codes=unlikelyCandidates,
             insufficientInformationHs8Codes=insufficientInformationCandidates,
+            deterministicEvidenceRetainedHs8Codes=(
+                deterministicEvidenceRetainedCodes
+            ),
             candidateStatusByHs8=candidateStatusByHs8,
             backtrackingRecommended=backtrackingRecommended,
             backtrackingTargetLevel=backtrackingTargetLevel,
@@ -251,6 +313,73 @@ class Stage1DecisionPolicy:
             if level in conflictingLevels:
                 return level
         return "hs6_or_parent_candidate_scope"
+
+    def _FindDeterministicEvidenceRetainedCodes(
+        self,
+        candidates: Sequence[CnCandidate],
+        candidateOrder: Mapping[str, int],
+    ) -> List[str]:
+        supportedCandidates = [
+            candidate
+            for candidate in candidates
+            if candidate.score > 0
+            and (
+                candidate.primaryEvidenceMatches
+                or candidate.secondaryEvidenceMatches
+            )
+        ]
+        sortedCandidates = sorted(
+            supportedCandidates,
+            key=lambda candidate: (
+                -candidate.score,
+                candidateOrder.get(candidate.hs8, 9999),
+                candidate.hs8,
+            ),
+        )
+        return [candidate.hs8 for candidate in sortedCandidates]
+
+    def _FindDeterministicGeneralFallbackCodes(
+        self,
+        candidates: Sequence[CnCandidate],
+        candidateOrder: Mapping[str, int],
+        insufficientInformationCandidates: Sequence[str],
+    ) -> List[str]:
+        insufficientCodeSet = set(insufficientInformationCandidates)
+        supportedCandidates = [
+            candidate
+            for candidate in candidates
+            if candidate.hs8 in insufficientCodeSet
+            and candidate.score > 0
+            and candidate.hardConditionStatus == "not_applicable"
+            and self._HasPrimaryOrSecondaryEvidence(candidate)
+            and self._IsGeneralFallbackCandidate(candidate)
+        ]
+        sortedCandidates = sorted(
+            supportedCandidates,
+            key=lambda candidate: (
+                -candidate.score,
+                candidateOrder.get(candidate.hs8, 9999),
+                candidate.hs8,
+            ),
+        )
+        return [candidate.hs8 for candidate in sortedCandidates]
+
+    @staticmethod
+    def _HasPrimaryOrSecondaryEvidence(candidate: CnCandidate) -> bool:
+        return bool(
+            candidate.primaryEvidenceMatches
+            or candidate.secondaryEvidenceMatches
+        )
+
+    @staticmethod
+    def _IsGeneralFallbackCandidate(candidate: CnCandidate) -> bool:
+        hs6Description = NormalizeWhiteSpace(candidate.hs6Description or "").lower()
+        hs8Description = NormalizeWhiteSpace(candidate.hs8Description or "").lower()
+        return (
+            hs6Description.startswith("other")
+            or hs8Description in {"other"}
+            or hs8Description.startswith("of other")
+        )
 
     def _BuildOrderedStatusCodes(
         self,
