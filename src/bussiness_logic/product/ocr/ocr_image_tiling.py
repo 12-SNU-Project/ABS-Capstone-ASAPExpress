@@ -2,10 +2,12 @@
 
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Tuple
+
 import numpy as np
 import numpy.typing as npt
 
 ImageArray = npt.NDArray[np.uint8]
+
 
 @dataclass(frozen=True)
 class ProductOcrImageTile:
@@ -13,6 +15,8 @@ class ProductOcrImageTile:
 
     tileIndex: Optional[int]
     image: ImageArray
+    originX: int = 0
+    originY: int = 0
 
 
 @dataclass(frozen=True)
@@ -59,76 +63,89 @@ class ProductOcrImageTilePlanner:
             )
 
         imageHeight, imageWidth = self._ReadImageSize(image)
-        verticalImages, verticalWarnings, verticalTransformed = (self._BuildHeightLimitedImages(image, imageHeight))
-        sideLimitedImages: List[Any] = []
+        sourceTile = ProductOcrImageTile(tileIndex=None, image=image)
+        verticalTiles, verticalWarnings, verticalTransformed = (
+            self._BuildHeightLimitedTiles(sourceTile, imageHeight)
+        )
+        sideLimitedTiles: List[ProductOcrImageTile] = []
         warnings = list(verticalWarnings)
         sideTransformed = False
-        for verticalImage in verticalImages:
-            trimmedImage, trimmed, trimWarning = self._TrimHorizontalOuterMargins(verticalImage,)
+        for verticalTile in verticalTiles:
+            trimmedTile, trimmed, trimWarning = self._TrimHorizontalOuterMargins(
+                verticalTile,
+            )
             if trimWarning:
                 warnings.append(trimWarning)
             sideTransformed = sideTransformed or trimmed
 
-            widthLimitedImages, widthWarnings, widthTransformed = (self._BuildWidthLimitedImages(trimmedImage))
-            sideLimitedImages.extend(widthLimitedImages)
+            widthLimitedTiles, widthWarnings, widthTransformed = (
+                self._BuildWidthLimitedTiles(trimmedTile)
+            )
+            sideLimitedTiles.extend(widthLimitedTiles)
             warnings.extend(widthWarnings)
             sideTransformed = sideTransformed or widthTransformed
 
         transformed = verticalTransformed or sideTransformed
-        if len(sideLimitedImages) == 1 and not transformed:
+        if len(sideLimitedTiles) == 1 and not transformed:
             return ProductOcrImageTilePlan(
-                tiles=[ProductOcrImageTile(tileIndex=None, image=sideLimitedImages[0])],
+                tiles=[sideLimitedTiles[0]],
                 warnings=warnings,
             )
 
         return ProductOcrImageTilePlan(
             tiles=[
-                ProductOcrImageTile(tileIndex=tileIndex, image=tileImage)
-                for tileIndex, tileImage in enumerate(sideLimitedImages, start=1)
+                ProductOcrImageTile(
+                    tileIndex=tileIndex,
+                    image=tile.image,
+                    originX=tile.originX,
+                    originY=tile.originY,
+                )
+                for tileIndex, tile in enumerate(sideLimitedTiles, start=1)
             ],
             warnings=warnings,
         )
 
-    def _BuildHeightLimitedImages(
+    def _BuildHeightLimitedTiles(
         self,
-        image: Any,
+        tile: ProductOcrImageTile,
         imageHeight: int,
-    ) -> Tuple[List[Any], List[str], bool]:
-        if imageHeight <= self._maxTileHeightPixels: return [image], [], False
+    ) -> Tuple[List[ProductOcrImageTile], List[str], bool]:
+        if imageHeight <= self._maxTileHeightPixels:
+            return [tile], [], False
 
         if self._useProjectionTiling:
-            projectionImages = self._BuildProjectionImages(
-                image=image,
+            projectionTiles = self._BuildProjectionTiles(
+                tile=tile,
                 dimensionSize=imageHeight,
                 maxTileSize=self._maxTileHeightPixels,
                 axisName="height",
             )
-            if projectionImages:
+            if projectionTiles:
                 return (
-                    projectionImages,
+                    projectionTiles,
                     [
                         "height_projection_split_applied original_height={0} "
                         "tile_count={1}".format(
                             imageHeight,
-                            len(projectionImages),
+                            len(projectionTiles),
                         )
                     ],
                     True,
                 )
 
         if self._allowHardCutFallback:
-            fixedImages = self._BuildFixedHeightImages(image, imageHeight)
+            fixedTiles = self._BuildFixedHeightTiles(tile, imageHeight)
             return (
-                fixedImages,
+                fixedTiles,
                 [
                     "height_hard_cut_fallback_used original_height={0} "
-                    "tile_count={1}".format(imageHeight, len(fixedImages))
+                    "tile_count={1}".format(imageHeight, len(fixedTiles))
                 ],
-                len(fixedImages) > 1,
+                len(fixedTiles) > 1,
             )
 
         return (
-            [image],
+            [tile],
             [
                 "height_projection_not_found_preserved_original "
                 "height={0} max_height={1}".format(
@@ -139,44 +156,44 @@ class ProductOcrImageTilePlanner:
             False,
         )
 
-    def _BuildWidthLimitedImages(
+    def _BuildWidthLimitedTiles(
         self,
-        image: Any,
-    ) -> Tuple[List[Any], List[str], bool]:
-        _, imageWidth = self._ReadImageSize(image)
+        tile: ProductOcrImageTile,
+    ) -> Tuple[List[ProductOcrImageTile], List[str], bool]:
+        _, imageWidth = self._ReadImageSize(tile.image)
         if imageWidth <= self._maxTileSidePixels:
-            return [image], [], False
+            return [tile], [], False
 
         if self._useProjectionTiling:
-            projectionImages = self._BuildProjectionImages(
-                image=image,
+            projectionTiles = self._BuildProjectionTiles(
+                tile=tile,
                 dimensionSize=imageWidth,
                 maxTileSize=self._maxTileSidePixels,
                 axisName="width",
             )
-            if projectionImages:
+            if projectionTiles:
                 return (
-                    projectionImages,
+                    projectionTiles,
                     [
                         "width_projection_split_applied original_width={0} "
-                        "tile_count={1}".format(imageWidth, len(projectionImages))
+                        "tile_count={1}".format(imageWidth, len(projectionTiles))
                     ],
                     True,
                 )
 
         if self._allowHardCutFallback:
-            fixedImages = self._BuildFixedWidthImages(image, imageWidth)
+            fixedTiles = self._BuildFixedWidthTiles(tile, imageWidth)
             return (
-                fixedImages,
+                fixedTiles,
                 [
                     "width_hard_cut_fallback_used original_width={0} "
-                    "tile_count={1}".format(imageWidth, len(fixedImages))
+                    "tile_count={1}".format(imageWidth, len(fixedTiles))
                 ],
-                len(fixedImages) > 1,
+                len(fixedTiles) > 1,
             )
 
         return (
-            [image],
+            [tile],
             [
                 "width_projection_not_found_preserved_original "
                 "width={0} max_side={1}".format(
@@ -187,17 +204,17 @@ class ProductOcrImageTilePlanner:
             False,
         )
 
-    def _BuildProjectionImages(
+    def _BuildProjectionTiles(
         self,
-        image: Any,
+        tile: ProductOcrImageTile,
         dimensionSize: int,
         maxTileSize: int,
         axisName: str,
-    ) -> List[Any]:
+    ) -> List[ProductOcrImageTile]:
         if axisName == "height":
-            lowActivityBands = self._FindHorizontalLowActivityBands(image)
+            lowActivityBands = self._FindHorizontalLowActivityBands(tile.image)
         else:
-            lowActivityBands = self._FindVerticalLowActivityBands(image)
+            lowActivityBands = self._FindVerticalLowActivityBands(tile.image)
         if not lowActivityBands:
             return []
 
@@ -209,7 +226,7 @@ class ProductOcrImageTilePlanner:
         if not cutPoints:
             return []
 
-        images: List[Any] = []
+        tiles: List[ProductOcrImageTile] = []
         previousCutPoint = 0
         for cutPoint in [*cutPoints, dimensionSize]:
             tileStart, tileEnd = self._BuildOverlappedTileRange(
@@ -219,68 +236,103 @@ class ProductOcrImageTilePlanner:
                 coreEnd=cutPoint,
             )
             if tileEnd > tileStart:
-                images.append(
-                    self._SliceImage(
-                        image=image,
-                        axisName=axisName,
-                        start=tileStart,
-                        end=tileEnd,
+                tiles.append(
+                    ProductOcrImageTile(
+                        tileIndex=None,
+                        image=self._SliceImage(
+                            image=tile.image,
+                            axisName=axisName,
+                            start=tileStart,
+                            end=tileEnd,
+                        ),
+                        originX=(
+                            tile.originX + tileStart
+                            if axisName == "width"
+                            else tile.originX
+                        ),
+                        originY=(
+                            tile.originY + tileStart
+                            if axisName == "height"
+                            else tile.originY
+                        ),
                     )
                 )
             previousCutPoint = cutPoint
-        return images
+        return tiles
 
-    def _BuildFixedHeightImages(self, image: Any, imageHeight: int) -> List[Any]:
+    def _BuildFixedHeightTiles(
+        self,
+        tile: ProductOcrImageTile,
+        imageHeight: int,
+    ) -> List[ProductOcrImageTile]:
         stride = self._maxTileHeightPixels - self._tileOverlapPixels
         if stride <= 0:
-            return [image]
+            return [tile]
 
-        images: List[Any] = []
+        tiles: List[ProductOcrImageTile] = []
         startY = 0
         while startY < imageHeight:
             endY = min(startY + self._maxTileHeightPixels, imageHeight)
-            images.append(image[startY:endY, :])
+            tiles.append(
+                ProductOcrImageTile(
+                    tileIndex=None,
+                    image=tile.image[startY:endY, :],
+                    originX=tile.originX,
+                    originY=tile.originY + startY,
+                )
+            )
             if endY >= imageHeight:
                 break
             startY = max(0, endY - self._tileOverlapPixels)
-        return images
+        return tiles
 
-    def _BuildFixedWidthImages(self, image: Any, imageWidth: int) -> List[Any]:
+    def _BuildFixedWidthTiles(
+        self,
+        tile: ProductOcrImageTile,
+        imageWidth: int,
+    ) -> List[ProductOcrImageTile]:
         stride = self._maxTileSidePixels - self._tileOverlapPixels
         if stride <= 0:
-            return [image]
+            return [tile]
 
-        images: List[Any] = []
+        tiles: List[ProductOcrImageTile] = []
         startX = 0
         while startX < imageWidth:
             endX = min(startX + self._maxTileSidePixels, imageWidth)
-            images.append(image[:, startX:endX])
+            tiles.append(
+                ProductOcrImageTile(
+                    tileIndex=None,
+                    image=tile.image[:, startX:endX],
+                    originX=tile.originX + startX,
+                    originY=tile.originY,
+                )
+            )
             if endX >= imageWidth:
                 break
             startX = max(0, endX - self._tileOverlapPixels)
-        return images
+        return tiles
 
     def _TrimHorizontalOuterMargins(
         self,
-        image: Any,
-    ) -> Tuple[Any, bool, Optional[str]]:
-        imageHeight, imageWidth = self._ReadImageSize(image)
+        tile: ProductOcrImageTile,
+    ) -> Tuple[ProductOcrImageTile, bool, Optional[str]]:
+        imageHeight, imageWidth = self._ReadImageSize(tile.image)
         if imageWidth <= 0 or imageHeight <= 0:
-            return image, False, None
+            return tile, False, None
 
-        densityProfiles = self._BuildDensityProfiles(image=image, axis=0)
+        densityProfiles = self._BuildDensityProfiles(image=tile.image, axis=0)
         if densityProfiles is None:
-            return image, False, None
+            return tile, False, None
         inkDensity, edgeDensity = densityProfiles
 
         try:
             import numpy as np
         except ImportError:
-            return image, False, None
+            return tile, False, None
 
         activeIndexes = np.where((inkDensity > 0.003) | (edgeDensity > 0.001))[0]
         if len(activeIndexes) == 0:
-            return image, False, None
+            return tile, False, None
 
         paddingPixels = max(32, self._tileOverlapPixels // 2)
         left = max(0, int(activeIndexes[0]) - paddingPixels)
@@ -288,20 +340,25 @@ class ProductOcrImageTilePlanner:
 
         minimumMarginPixels = max(24, imageWidth // 100)
         if left < minimumMarginPixels and imageWidth - right < minimumMarginPixels:
-            return image, False, None
+            return tile, False, None
 
         trimmedWidth = right - left
         minimumTrimmedWidth = max(128, imageWidth // 5)
         if trimmedWidth < minimumTrimmedWidth:
             return (
-                image,
+                tile,
                 False,
                 "outer_margin_trim_skipped_suspicious_bbox width={0} left={1} "
                 "right={2}".format(imageWidth, left, right),
             )
 
         return (
-            image[:, left:right],
+            ProductOcrImageTile(
+                tileIndex=tile.tileIndex,
+                image=tile.image[:, left:right],
+                originX=tile.originX + left,
+                originY=tile.originY,
+            ),
             True,
             "outer_margin_trim_applied original_width={0} trimmed_width={1} "
             "left={2} right={3}".format(

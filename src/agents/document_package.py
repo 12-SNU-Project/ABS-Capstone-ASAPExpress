@@ -10,24 +10,16 @@ Document Package Resolver — TARIC10 코드 → EU 수입 시 요구 서류 패
   - A2M처럼 입력 TARIC10 exact row뿐 아니라 상위 code-level measure도 함께 조회.
     예: 2103901000 -> 2103900000 -> 2103000000 -> 2100000000
 
-사용:
-    PYTHONPATH=src python -m agents.document_package 0101210000
-    PYTHONPATH=src python -m agents.document_package 0101210000 --format json
-    PYTHONPATH=src python -m agents.document_package 0101210000 --format text
-    PYTHONPATH=src python -m agents.document_package 0101210000 --include-celex-excerpt
-
 입력 코드는 10자리 TARIC. 8자리만 주면 자동으로 '00' 패딩 + 모든 TARIC10 변형 그룹.
 """
 from __future__ import annotations
 
-import argparse
-import json
 import os
 import re
 import sys
 import threading
 from collections import defaultdict
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Optional
 
 try:
@@ -263,6 +255,11 @@ def _truthy(value) -> bool:
 def _split_semicolon(value) -> list[str]:
     if not value:
         return []
+    if isinstance(value, (list, tuple, set)):
+        out: list[str] = []
+        for item in value:
+            out.extend(_split_semicolon(item))
+        return out
     return [x.strip() for x in str(value).split(";") if x.strip()]
 
 
@@ -472,6 +469,241 @@ def _checklist_summary(requirements: list["Requirement"]) -> dict:
     }
 
 
+def _binding_source_layer(detail: "DetailedRequirement") -> str:
+    if detail.source_layer == "baseline_document":
+        return "baseline"
+    if detail.source_layer == "pre_taric_gate":
+        return "pre_taric"
+    return "post_taric"
+
+
+def _normalize_binding_level(value: str) -> str:
+    level = str(value or "").strip().lower()
+    if level in {"required", "mandatory", "mandatory_check"}:
+        return "required"
+    if level in {"conditional", "condition"}:
+        return "conditional"
+    if level in {"support", "supporting"}:
+        return "support"
+    if level in {"optional", "exempted"}:
+        return "optional"
+    if level in {"pending", "needs_review"}:
+        return "pending"
+    return "conditional"
+
+
+def _merge_binding_level(current: str, incoming: str) -> str:
+    rank = {"required": 0, "conditional": 1, "pending": 2, "support": 3, "optional": 4}
+    current = _normalize_binding_level(current)
+    incoming = _normalize_binding_level(incoming)
+    return current if rank.get(current, 9) <= rank.get(incoming, 9) else incoming
+
+
+def _binding_field_status(missing_facts: list[str], required_level: str) -> str:
+    if missing_facts:
+        return "pending" if _normalize_binding_level(required_level) == "required" else "conditional"
+    return "satisfied"
+
+
+def _fetch_document_binding_cards(
+    cur,
+    requirements: list["Requirement"],
+    product_facts: dict,
+) -> list[dict]:
+    if not _table_exists(cur, "document_binding"):
+        return []
+    if not (
+        _table_exists(cur, "baseline_document_master")
+        and _column_exists(cur, "baseline_document_master", "document_id")
+    ):
+        return []
+
+    source_ids: dict[str, set[str]] = defaultdict(set)
+    details_by_ref: dict[tuple[str, str], list[DetailedRequirement]] = defaultdict(list)
+    for req in requirements:
+        if not req.applies_to_korea:
+            continue
+        for detail in req.detailed_requirements:
+            source_id = detail.requirement_master_id
+            if not source_id:
+                continue
+            source_layer = _binding_source_layer(detail)
+            source_ids[source_layer].add(source_id)
+            details_by_ref[(source_layer, source_id)].append(detail)
+
+    clauses: list[str] = []
+    params: list[object] = []
+    for source_layer in ("baseline", "pre_taric", "post_taric"):
+        ids = sorted(source_ids.get(source_layer) or [])
+        if not ids:
+            continue
+        clauses.append("(source_layer = %s AND source_id = ANY(%s))")
+        params.extend([source_layer, ids])
+    if not clauses:
+        return []
+
+    cur.execute(
+        f"""
+        SELECT binding_id, document_id, source_layer, source_id, binding_action,
+               required_level, field_key, required_fact_key, sort_order
+        FROM document_binding
+        WHERE {" OR ".join(clauses)}
+        ORDER BY
+          CASE
+            WHEN sort_order::text ~ '^[0-9]+$' THEN sort_order::int
+            ELSE 999999
+          END,
+          document_id,
+          binding_id
+        """,
+        params,
+    )
+    cols = [d[0] for d in cur.description]
+    binding_rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+    if not binding_rows:
+        return []
+
+    document_ids = sorted({
+        str(row.get("document_id") or "").strip()
+        for row in binding_rows
+        if str(row.get("document_id") or "").strip()
+    })
+    if not document_ids:
+        return []
+
+    cur.execute(
+        """
+        SELECT *
+        FROM baseline_document_master
+        WHERE document_id = ANY(%s)
+        """,
+        (document_ids,),
+    )
+    baseline_cols = [d[0] for d in cur.description]
+    baseline_rows = [dict(zip(baseline_cols, row)) for row in cur.fetchall()]
+    baseline_by_id = {
+        str(row.get("document_id") or "").strip(): row
+        for row in baseline_rows
+        if str(row.get("document_id") or "").strip()
+    }
+
+    cards: dict[str, dict] = {}
+    field_maps: dict[str, dict[str, dict]] = defaultdict(dict)
+    for row in binding_rows:
+        document_id = str(row.get("document_id") or "").strip()
+        if not document_id:
+            continue
+        baseline = baseline_by_id.get(document_id) or {}
+        card = cards.setdefault(document_id, {
+            "document_id": document_id,
+            "document_code": baseline.get("document_code") or document_id.upper(),
+            "document_name": baseline.get("document_name") or document_id.replace("_", " ").title(),
+            "document_name_ko": baseline.get("document_name_ko") or baseline.get("document_name") or document_id,
+            "document_family": baseline.get("document_family") or "",
+            "required_level": "optional",
+            "decision_status": "optional",
+            "prepared_by": baseline.get("prepared_by") or "",
+            "submitted_to": baseline.get("submitted_to") or "",
+            "fields": [],
+            "pre_checks": [],
+            "post_requirements": [],
+            "pre_taric_links": [],
+            "post_taric_links": [],
+            "taric_certificates": [],
+            "missing_facts": [],
+            "source_bindings": [],
+        })
+
+        source_layer = str(row.get("source_layer") or "")
+        source_id = str(row.get("source_id") or "")
+        binding_level = _normalize_binding_level(str(row.get("required_level") or ""))
+        card["required_level"] = _merge_binding_level(card.get("required_level") or "optional", binding_level)
+
+        required_fact = str(row.get("required_fact_key") or "").strip()
+        binding_missing = [required_fact] if required_fact and not _fact_is_known(product_facts, required_fact) else []
+        for fact in binding_missing:
+            if fact not in card["missing_facts"]:
+                card["missing_facts"].append(fact)
+
+        card["source_bindings"].append({
+            "binding_id": row.get("binding_id") or "",
+            "source_layer": source_layer,
+            "source_id": source_id,
+            "binding_action": row.get("binding_action") or "",
+            "required_level": binding_level,
+            "field_key": row.get("field_key") or "",
+            "required_fact_key": required_fact,
+            "missing_facts": binding_missing,
+        })
+
+        field_key = str(row.get("field_key") or "").strip()
+        if (row.get("binding_action") or "") == "add_field" and field_key:
+            field = field_maps[document_id].setdefault(field_key, {
+                "field_key": field_key,
+                "label": field_key.replace("_", " "),
+                "required_by": [],
+                "missing_facts": [],
+                "status": "satisfied",
+            })
+            if source_layer not in field["required_by"]:
+                field["required_by"].append(source_layer)
+            for fact in binding_missing:
+                if fact not in field["missing_facts"]:
+                    field["missing_facts"].append(fact)
+            field["status"] = _binding_field_status(field["missing_facts"], card["required_level"])
+
+        source_details = details_by_ref.get((source_layer, source_id)) or []
+        for detail in source_details:
+            for fact in detail.missing_facts or []:
+                if fact not in card["missing_facts"]:
+                    card["missing_facts"].append(fact)
+            if detail.trigger_certificate_code and detail.trigger_certificate_code not in card["taric_certificates"]:
+                card["taric_certificates"].append(detail.trigger_certificate_code)
+            item = {
+                "source_id": source_id,
+                "requirement_type": detail.requirement_type,
+                "required_action": detail.required_action,
+                "required_level": detail.required_level,
+                "decision_status": detail.decision_status,
+                "missing_facts": list(detail.missing_facts or []),
+                "required_document": detail.required_document,
+                "domain": detail.domain_route or detail.domain,
+            }
+            if source_layer == "pre_taric":
+                card["pre_checks"].append(item)
+                if source_id not in card["pre_taric_links"]:
+                    card["pre_taric_links"].append(source_id)
+            elif source_layer == "post_taric":
+                card["post_requirements"].append(item)
+                if source_id not in card["post_taric_links"]:
+                    card["post_taric_links"].append(source_id)
+
+        card["decision_status"] = card["required_level"]
+
+    def sort_key(card: dict) -> tuple[int, str]:
+        raw = baseline_by_id.get(card.get("document_id") or "", {}).get("runtime_sort_order") or ""
+        try:
+            order = int(str(raw))
+        except ValueError:
+            order = 9999
+        return order, str(card.get("document_id") or "")
+
+    for document_id, card in cards.items():
+        fields = list(field_maps.get(document_id, {}).values())
+        fields.sort(key=lambda f: f.get("field_key") or "")
+        card["fields"] = fields
+        card["pre_checks"] = list({x["source_id"]: x for x in card["pre_checks"]}.values())
+        card["post_requirements"] = list({x["source_id"]: x for x in card["post_requirements"]}.values())
+        card["taric_certificates"] = sorted(card["taric_certificates"])
+        card["missing_facts"] = sorted(card["missing_facts"])
+        card["source_bindings"] = sorted(
+            card["source_bindings"],
+            key=lambda b: (b.get("source_layer") or "", b.get("source_id") or "", b.get("binding_id") or ""),
+        )
+
+    return sorted(cards.values(), key=sort_key)
+
+
 def _merge_status(current: str, incoming: str) -> str:
     rank = {"required": 0, "conditional": 1, "pending": 2, "exempted": 3}
     return current if rank.get(current, 9) <= rank.get(incoming, 9) else incoming
@@ -558,6 +790,60 @@ def _detail_from_post_req_row(row: dict, reason: str, product_facts: dict) -> De
     return detail
 
 
+def _detail_from_pre_req_row(row: dict, reason: str, product_facts: dict, source_count: int = 1) -> DetailedRequirement:
+    domain = row.get("domain_scope") or row.get("domain") or ""
+    action = row.get("required_action") or row.get("requirement_type") or "pre_taric_screening"
+    title = row.get("trigger_title") or ""
+    required_document = {
+        "sanctions": "Pre-TARIC sanctions screening",
+        "cites": "Pre-TARIC CITES/species screening",
+    }.get(domain, f"Pre-TARIC {domain or 'domain'} screening")
+    condition = row.get("condition_text") or ""
+    if source_count > 1:
+        condition = (condition + " " if condition else "") + f"{source_count} source legal acts matched; sample: {title[:220]}"
+    elif title:
+        condition = (condition + " " if condition else "") + f"Source: {title[:260]}"
+
+    detail = DetailedRequirement(
+        requirement_master_id=row.get("pre_requirement_master_id") or "",
+        match_reason=reason,
+        trigger_certificate_code="",
+        source_layer="pre_taric_gate",
+        domain_route=domain,
+        domain=domain,
+        requirement_type=row.get("requirement_type") or "",
+        required_document=required_document,
+        required_action=action,
+        required_level=row.get("required_level") or "conditional",
+        condition_text=condition,
+        exemption_text=row.get("prohibition_or_restriction_text") or "",
+        required_facts=_split_semicolon(row.get("required_facts")),
+        blocking_facts=_split_semicolon(row.get("blocking_facts")),
+        external_lookup_required="true" if any(_truthy(row.get(k)) for k in (
+            "needs_sanctions_party_lookup",
+            "needs_origin_country_lookup",
+            "needs_end_use_lookup",
+        )) else "",
+        external_dataset_ids=_split_semicolon(row.get("trigger_celex_id")),
+        external_lookup_mode=row.get("runtime_gate") or "",
+        user_fallback_evidence=_split_semicolon(row.get("user_fallback_evidence")),
+        data_gap_status="pre_gate",
+        needs_review=_truthy(row.get("needs_review")),
+        decision_status="pending",
+        decision_label="판단보류",
+        decision_reason="pre_taric_gate_requires_screening",
+        missing_facts=[],
+        satisfied_facts=[],
+    )
+    decision = _decision_for_detail(detail, product_facts)
+    detail.decision_status = decision["decision_status"]
+    detail.decision_label = decision["decision_label"]
+    detail.decision_reason = decision["decision_reason"]
+    detail.missing_facts = decision["missing_facts"]
+    detail.satisfied_facts = decision["satisfied_facts"]
+    return detail
+
+
 def _ancestor_goods_codes(goods_code_10: str) -> list[str]:
     """Return exact + broader zero-padded TARIC/CN ancestors.
 
@@ -588,6 +874,21 @@ def _table_exists(cur, table_name: str) -> bool:
     exists = bool(row and row[0])
     _TABLE_EXISTS_CACHE[table_name] = exists
     return exists
+
+
+def _column_exists(cur, table_name: str, column_name: str) -> bool:
+    cur.execute(
+        """
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = %s
+          AND column_name = %s
+        LIMIT 1
+        """,
+        (table_name, column_name),
+    )
+    return bool(cur.fetchone())
 
 
 def _fetch_certificate_guidance(cur, certificate_codes: list[str]) -> dict[str, dict]:
@@ -633,6 +934,233 @@ POST_REQ_FIELDS = [
     "trigger_legal_base",
     "trigger_celex_id",
 ]
+
+PRE_REQ_FIELDS = [
+    "pre_requirement_master_id",
+    "pre_gate_family",
+    "domain",
+    "domain_scope",
+    "chapter_scope",
+    "requirement_type",
+    "required_action",
+    "required_level",
+    "trigger_celex_id",
+    "trigger_title",
+    "runtime_gate",
+    "pre_gate_priority",
+    "applies_to_product_scope",
+    "applies_to_origin_scope",
+    "applies_to_destination_scope",
+    "condition_text",
+    "prohibition_or_restriction_text",
+    "required_facts",
+    "blocking_facts",
+    "user_question_hint",
+    "user_fallback_evidence",
+    "needs_sanctions_party_lookup",
+    "needs_origin_country_lookup",
+    "needs_end_use_lookup",
+    "needs_review",
+]
+
+BASELINE_DOC_FIELDS = [
+    "document_code",
+    "document_name",
+    "document_name_ko",
+    "document_family",
+    "stage",
+    "default_required_level",
+    "applies_to_domain_scope",
+    "applies_to_chapter_scope",
+    "applies_to_transaction_scope",
+    "required_facts",
+    "field_keys",
+    "linked_pre_gate_families",
+    "linked_pre_requirement_types",
+    "linked_post_requirement_types",
+    "linked_certificate_prefixes",
+    "linked_certificate_codes",
+    "linked_required_document_keywords",
+    "prepared_by",
+    "submitted_to",
+    "source_basis",
+    "runtime_sort_order",
+    "needs_review",
+]
+
+
+def _split_scope_values(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        out: list[str] = []
+        for item in value:
+            out.extend(_split_scope_values(item))
+        return out
+    return [x.strip() for x in re.split(r"[;,]", str(value)) if x.strip()]
+
+
+def _baseline_domain_scopes(product_facts: dict, chapter: str) -> set[str]:
+    scopes: set[str] = set()
+
+    def add(value) -> None:
+        for token in _split_scope_values(value):
+            norm = token.strip().lower()
+            if not norm or norm in UNKNOWN_FACT_VALUES:
+                continue
+            scopes.add(norm)
+            if norm in {"food_feed_non_animal", "beverage", "noodle", "pasta", "sauce"}:
+                scopes.add("food")
+            if norm in {"animal_origin_food", "fishery", "seafood", "meat", "dairy", "egg"}:
+                scopes.add("animal_origin")
+            if norm in {"chemical", "chemicals"}:
+                scopes.add("hazardous")
+
+    for key in (
+        "regulatory_domains",
+        "domain_scopes",
+        "domain_scope",
+        "domains",
+        "domain",
+        "product_domain",
+        "product_category",
+        "pre_gate_domains",
+    ):
+        if key in product_facts:
+            add(product_facts.get(key))
+
+    if scopes:
+        return scopes
+    if chapter in {str(i).zfill(2) for i in range(1, 25)}:
+        scopes.add("food")
+    if chapter in {"01", "02", "03", "04", "05", "16", "23"}:
+        scopes.add("animal_origin")
+    if chapter in {"33", "34"}:
+        scopes.add("cosmetics")
+    return scopes
+
+
+def _domain_scope_matches(scope_text: str, routed_domains: set[str]) -> bool:
+    scopes = [s.lower() for s in _split_scope_values(scope_text)]
+    if not scopes:
+        return False
+    if "all" in scopes:
+        return True
+    return bool(routed_domains.intersection(scopes))
+
+
+def _chapter_scope_matches(scope_text: str, chapter: str) -> bool:
+    chapter = chapter.zfill(2)
+    scopes = _split_scope_values(scope_text)
+    if not scopes:
+        return False
+    for raw in scopes:
+        token = raw.strip().upper()
+        if token == "ALL":
+            return True
+        if re.fullmatch(r"\d{2}", token) and token == chapter:
+            return True
+        match = re.fullmatch(r"(\d{2})-(\d{2})", token)
+        if match and match.group(1) <= chapter <= match.group(2):
+            return True
+    return False
+
+
+def _detail_from_baseline_doc_row(row: dict, reason: str, product_facts: dict) -> DetailedRequirement:
+    default_level = (row.get("default_required_level") or "").strip().lower()
+    required_level = "mandatory" if default_level == "required" else default_level or "conditional"
+    document_name = row.get("document_name") or row.get("document_code") or "Baseline document"
+    document_code = row.get("document_code") or ""
+    field_keys = _split_semicolon(row.get("field_keys"))
+    linked_pre = _split_semicolon(row.get("linked_pre_requirement_types"))
+    linked_post = _split_semicolon(row.get("linked_post_requirement_types"))
+    linked_certs = _split_semicolon(row.get("linked_certificate_codes"))
+
+    condition_parts = [
+        f"document_code={document_code}" if document_code else "",
+        f"prepared_by={row.get('prepared_by')}" if row.get("prepared_by") else "",
+        f"submitted_to={row.get('submitted_to')}" if row.get("submitted_to") else "",
+        f"linked_pre={';'.join(linked_pre)}" if linked_pre else "",
+        f"linked_post={';'.join(linked_post)}" if linked_post else "",
+        f"linked_certificates={';'.join(linked_certs)}" if linked_certs else "",
+    ]
+    condition = " | ".join(part for part in condition_parts if part)
+
+    detail = DetailedRequirement(
+        requirement_master_id=document_code,
+        match_reason=reason,
+        trigger_certificate_code="",
+        source_layer="baseline_document",
+        domain_route=row.get("document_family") or "baseline",
+        domain=row.get("applies_to_domain_scope") or "all",
+        requirement_type=row.get("document_family") or "baseline_document",
+        required_document=document_name,
+        required_action=f"prepare_{document_code.lower()}" if document_code else "prepare_baseline_document",
+        required_level=required_level,
+        condition_text=condition,
+        exemption_text="",
+        required_facts=_split_semicolon(row.get("required_facts")),
+        blocking_facts=[],
+        external_lookup_required="",
+        external_dataset_ids=linked_certs,
+        external_lookup_mode="",
+        user_fallback_evidence=field_keys,
+        data_gap_status="baseline_document",
+        needs_review=_truthy(row.get("needs_review")),
+        decision_status="pending",
+        decision_label="판단보류",
+        decision_reason="not_evaluated",
+        missing_facts=[],
+        satisfied_facts=[],
+    )
+    decision = _decision_for_detail(detail, product_facts)
+    detail.decision_status = decision["decision_status"]
+    detail.decision_label = decision["decision_label"]
+    detail.decision_reason = decision["decision_reason"]
+    detail.missing_facts = decision["missing_facts"]
+    detail.satisfied_facts = decision["satisfied_facts"]
+    return detail
+
+
+def _fetch_baseline_documents(
+    cur,
+    goods_code_10: str,
+    product_facts: dict,
+) -> list[DetailedRequirement]:
+    if not _table_exists(cur, "baseline_document_master"):
+        return []
+
+    chapter = (product_facts.get("chapter") or goods_code_10[:2] or "").zfill(2)
+    routed_domains = _baseline_domain_scopes(product_facts, chapter)
+
+    cur.execute(
+        f"""
+        SELECT {", ".join(BASELINE_DOC_FIELDS)}
+        FROM baseline_document_master
+        WHERE lower(coalesce(stage, '')) = 'baseline'
+        ORDER BY
+          CASE
+            WHEN runtime_sort_order::text ~ '^[0-9]+$' THEN runtime_sort_order::int
+            ELSE 9999
+          END,
+          document_code
+        """
+    )
+    cols = [d[0] for d in cur.description]
+    rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+
+    detailed: list[DetailedRequirement] = []
+    for row in rows:
+        if not _domain_scope_matches(row.get("applies_to_domain_scope") or "", routed_domains):
+            continue
+        if not _chapter_scope_matches(row.get("applies_to_chapter_scope") or "", chapter):
+            continue
+        reason = (
+            "baseline_document_master:"
+            f"chapter:{chapter};domains:{','.join(sorted(routed_domains)) or 'unknown'}"
+        )
+        detailed.append(_detail_from_baseline_doc_row(row, reason, product_facts))
+    return detailed
 
 
 def _fetch_detailed_requirements(
@@ -785,6 +1313,62 @@ def _fetch_product_domain_requirements(
         seen.add(req_id)
         reason = f"{row.get('source_layer')}:chapter:{chapter}"
         detailed.append(_detail_from_post_req_row(row, reason, product_facts))
+    return detailed
+
+
+def _fetch_pre_taric_requirements(
+    cur,
+    goods_code_10: str,
+    product_facts: dict,
+) -> list[DetailedRequirement]:
+    if not _table_exists(cur, "pre_taric_requirement_master"):
+        return []
+    if not (
+        _column_exists(cur, "pre_taric_requirement_master", "chapter_scope")
+        and _column_exists(cur, "pre_taric_requirement_master", "domain_scope")
+    ):
+        return []
+
+    chapter = (product_facts.get("chapter") or goods_code_10[:2] or "").zfill(2)
+    pre_gate_domains = _split_semicolon(product_facts.get("pre_gate_domains"))
+    if not pre_gate_domains:
+        pre_gate_domains = ["sanctions"]
+
+    cur.execute(
+        f"""
+        SELECT {", ".join(PRE_REQ_FIELDS)}
+        FROM pre_taric_requirement_master
+        WHERE lower(coalesce(runtime_gate::text, '')) = 'true'
+          AND (
+            upper(coalesce(chapter_scope, '')) = 'ALL'
+            OR %s = ANY(string_to_array(replace(coalesce(chapter_scope, ''), ' ', ''), ';'))
+          )
+          AND (
+            NULLIF(domain_scope, '') = ANY(%s)
+            OR NULLIF(domain, '') = ANY(%s)
+          )
+        ORDER BY domain_scope, pre_gate_priority, trigger_title
+        """,
+        (chapter, pre_gate_domains, pre_gate_domains),
+    )
+    cols = [d[0] for d in cur.description]
+    rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+
+    grouped: dict[tuple[str, str, str, str], list[dict]] = defaultdict(list)
+    for row in rows:
+        key = (
+            row.get("domain_scope") or row.get("domain") or "",
+            row.get("pre_gate_family") or "",
+            row.get("requirement_type") or "",
+            row.get("required_action") or "",
+        )
+        grouped[key].append(row)
+
+    detailed: list[DetailedRequirement] = []
+    for key in sorted(grouped):
+        group = grouped[key]
+        reason = f"pre_taric_requirement_master:chapter:{chapter};domain:{key[0]}"
+        detailed.append(_detail_from_pre_req_row(group[0], reason, product_facts, source_count=len(group)))
     return detailed
 
 
@@ -999,15 +1583,7 @@ def get_document_package(
         )
 
     if not rows:
-        cur.close()
-        _release_db(conn)
         notes.append("No current measure rows found for this TARIC10.")
-        return DocumentPackage(
-            taric10=code, cn8=cn8, total_measure_rows=0, has_data=False,
-            requirements=[], verification_urls=_verification_urls(code),
-            data_source=DB_SOURCE_NAME, notes=notes, product_facts=product_facts,
-            checklist_summary=_checklist_summary([]),
-        )
 
     # 2. (measure_type, legal_base) 그룹핑
     grouped = defaultdict(list)
@@ -1115,6 +1691,53 @@ def get_document_package(
             detailed_requirements=detailed_requirements,
         ))
 
+    baseline_details = _fetch_baseline_documents(cur, code, product_facts)
+    if baseline_details:
+        requirements.append(Requirement(
+            measure_type="Baseline document requirements",
+            applies_to_korea=True,
+            origins=["All third countries"],
+            source_goods_codes=[f"CN chapter {code[:2]}"],
+            duty={"raw": "", "rate": None, "conditions": []},
+            certificates=[],
+            conditions_count=len(baseline_details),
+            footnotes=[],
+            legal_base=None,
+            celex=None,
+            needs_review=any(d.needs_review for d in baseline_details),
+            detailed_requirements=baseline_details,
+        ))
+        notes.append(
+            "Included baseline document requirements from baseline_document_master: "
+            + str(len(baseline_details))
+            + " documents"
+        )
+
+    pre_taric_details = _fetch_pre_taric_requirements(cur, code, product_facts)
+    if pre_taric_details:
+        pre_domains = sorted({
+            d.domain_route or d.domain for d in pre_taric_details
+            if d.domain_route or d.domain
+        })
+        requirements.append(Requirement(
+            measure_type="Pre-TARIC screening requirements",
+            applies_to_korea=True,
+            origins=["All third countries"],
+            source_goods_codes=[f"CN chapter {code[:2]}"],
+            duty={"raw": "", "rate": None, "conditions": []},
+            certificates=[],
+            conditions_count=len(pre_taric_details),
+            footnotes=[],
+            legal_base=None,
+            celex=None,
+            needs_review=any(d.needs_review for d in pre_taric_details),
+            detailed_requirements=pre_taric_details,
+        ))
+        notes.append(
+            "Included pre-TARIC screening requirements from pre_taric_requirement_master: "
+            + ", ".join(pre_domains)
+        )
+
     product_domain_details = _fetch_product_domain_requirements(cur, code, product_facts)
     if product_domain_details:
         domain_names = sorted({
@@ -1140,18 +1763,23 @@ def get_document_package(
             + ", ".join(domain_names)
         )
 
+    # KR 적용 measure 먼저 정렬
+    requirements.sort(key=lambda r: (not r.applies_to_korea, r.measure_type))
+    checklist_summary = _checklist_summary(requirements)
+    binding_cards = _fetch_document_binding_cards(cur, requirements, product_facts)
+    if binding_cards:
+        checklist_summary["document_binding_cards"] = binding_cards
+        checklist_summary["document_binding_count"] = len(binding_cards)
+
     cur.close()
     _release_db(conn)
 
-    # KR 적용 measure 먼저 정렬
-    requirements.sort(key=lambda r: (not r.applies_to_korea, r.measure_type))
-
     return DocumentPackage(
         taric10=code, cn8=cn8, total_measure_rows=len(rows),
-        has_data=True, requirements=requirements,
+        has_data=bool(rows or requirements), requirements=requirements,
         verification_urls=_verification_urls(code), data_source=DB_SOURCE_NAME,
         notes=notes, product_facts=product_facts,
-        checklist_summary=_checklist_summary(requirements),
+        checklist_summary=checklist_summary,
     )
 
 
@@ -1167,159 +1795,3 @@ def _verification_urls(taric10: str) -> dict:
             f"&Taric={taric10}"
         ),
     }
-
-
-# ---------------------------------------------------------------------------
-# 출력 포맷터
-# ---------------------------------------------------------------------------
-def render_text(pkg: DocumentPackage) -> str:
-    lines: list[str] = []
-    push = lines.append
-
-    push("=" * 78)
-    push(f"  TARIC10: {pkg.taric10}    CN8: {pkg.cn8}    measure rows: {pkg.total_measure_rows}")
-    push("=" * 78)
-
-    if pkg.notes:
-        for n in pkg.notes:
-            push(f"  ⚠️  {n}")
-        push("")
-
-    if not pkg.has_data:
-        push("  (no current measures)")
-        return "\n".join(lines)
-
-    if pkg.checklist_summary:
-        counts = pkg.checklist_summary.get("counts", {})
-        push(
-            "  checklist: "
-            f"필요 {counts.get('required', 0)} · "
-            f"조건부 {counts.get('conditional', 0)} · "
-            f"면제 {counts.get('exempted', 0)} · "
-            f"판단보류 {counts.get('pending', 0)}"
-        )
-        missing = pkg.checklist_summary.get("missing_facts") or []
-        if missing:
-            push(f"  missing facts: {', '.join(missing[:12])}")
-        push("")
-
-    for i, req in enumerate(pkg.requirements, 1):
-        kr = "✓ KR" if req.applies_to_korea else "✗ KR"
-        push("")
-        push(f"  [{i}] {req.measure_type}     [{kr}]")
-        if req.source_goods_codes and req.source_goods_codes != [pkg.taric10]:
-            push(f"      source goods_code(s): {', '.join(req.source_goods_codes)}")
-        push(f"      origins: {', '.join(req.origins[:4])}{' ...' if len(req.origins) > 4 else ''}")
-        if req.duty.get("rate"):
-            push(f"      duty rate: {req.duty['rate']}")
-        if req.duty.get("conditions"):
-            for c in req.duty["conditions"][:3]:
-                push(f"      condition: {c['condition_code']} → cert {c['certificate']} action {c['action_code']}")
-
-        mand = [c for c in req.certificates if c.category == "mandatory_certificate"]
-        exemp = [c for c in req.certificates if c.category == "exemption_declaration"]
-        other = [c for c in req.certificates if c.category not in ("mandatory_certificate", "exemption_declaration")]
-
-        if mand:
-            push(f"      📋 필수 서류 ({len(mand)}):")
-            for c in mand[:6]:
-                push(f"            {c.code} — {c.description[:90]}")
-            if len(mand) > 6:
-                push(f"            ... +{len(mand)-6} more")
-        if exemp:
-            push(f"      📝 면제 사유 선언 가능 ({len(exemp)}):")
-            for c in exemp[:4]:
-                push(f"            {c.code} — {c.description[:90]}")
-            if len(exemp) > 4:
-                push(f"            ... +{len(exemp)-4} more")
-        if other:
-            push(f"      🔗 기타 ({len(other)}): {', '.join(c.code for c in other)}")
-        if req.detailed_requirements:
-            push(f"      detailed requirements ({len(req.detailed_requirements)}):")
-            for detail in req.detailed_requirements[:5]:
-                lookup = ""
-                if detail.external_lookup_required in {"true", "conditional"}:
-                    lookup = f" | external: {detail.external_lookup_required}"
-                missing = f" | missing: {', '.join(detail.missing_facts[:3])}" if detail.missing_facts else ""
-                push(
-                    f"            [{detail.decision_label}] {detail.required_document[:80]}"
-                    f" [{detail.domain_route or detail.domain}{lookup}{missing}]"
-                )
-            if len(req.detailed_requirements) > 5:
-                push(f"            ... +{len(req.detailed_requirements)-5} more")
-        if req.footnotes:
-            push(f"      footnotes: {', '.join(req.footnotes[:5])}")
-        if req.legal_base:
-            push(f"      📜 법규: {req.legal_base}")
-            if req.celex:
-                push(f"            CELEX {req.celex.celex_id} [{req.celex.match_status}]")
-                if req.celex.title:
-                    push(f"            \"{req.celex.title[:110]}\"")
-                if req.celex.excerpt:
-                    push(f"            본문 발췌: {req.celex.excerpt[:200]}...")
-        if req.needs_review:
-            push(f"      ⚠️  needs_review")
-
-    push("")
-    push("-" * 78)
-    push("  검증 URL:")
-    push(f"    Access2Markets: {pkg.verification_urls['access2markets']}")
-    push(f"    TARIC consult:  {pkg.verification_urls['taric_consultation']}")
-    push("=" * 78)
-    return "\n".join(lines)
-
-
-def _dc_to_dict(obj) -> dict:
-    return asdict(obj)
-
-
-def _load_facts_json(value: str) -> dict:
-    if not value:
-        return {}
-    try:
-        data = json.loads(value)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid facts JSON: {exc}") from exc
-    if not isinstance(data, dict):
-        raise ValueError("Facts JSON must be an object/dict.")
-    return data
-
-
-def _load_facts_file(path: str) -> dict:
-    if not path:
-        return {}
-    with open(path, encoding="utf-8") as f:
-        return _load_facts_json(f.read())
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("taric10", help="10-digit TARIC code (or 8-digit CN8 — auto-padded)")
-    p.add_argument("--format", choices=["text", "json"], default="text")
-    p.add_argument("--include-celex-excerpt", action="store_true",
-                   help="Include first ~600 chars of CELEX body for each legal base")
-    p.add_argument("--facts-json", default="", help="Product facts JSON object.")
-    p.add_argument("--facts-file", default="", help="Path to product facts JSON file.")
-    args = p.parse_args()
-
-    try:
-        product_facts = _load_facts_file(args.facts_file) if args.facts_file else _load_facts_json(args.facts_json)
-        pkg = get_document_package(
-            args.taric10,
-            include_celex_excerpt=args.include_celex_excerpt,
-            product_facts=product_facts,
-        )
-    except ValueError as e:
-        sys.exit(f"[fatal] {e}")
-
-    if args.format == "json":
-        print(json.dumps(_dc_to_dict(pkg), ensure_ascii=False, indent=2))
-    else:
-        print(render_text(pkg))
-
-
-if __name__ == "__main__":
-    main()

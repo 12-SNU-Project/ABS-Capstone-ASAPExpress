@@ -480,6 +480,13 @@ class HierarchyBeamSearch:
         preferredHs4Codes: Sequence[str] = (),
         boundary: HierarchySearchBoundary | None = None,
     ) -> list[HierarchyBeamPath]:
+        preferredHs2Codes = tuple(
+            dict.fromkeys(
+                code[:2]
+                for code in preferredHs4Codes
+                if len(code) >= 2
+            )
+        )
         paths = [
             HierarchyBeamPath(domainScope=domainScope)
             for domainScope in domainScopes
@@ -532,6 +539,9 @@ class HierarchyBeamSearch:
                         semanticSlots=self._config.semanticSlotsPerParent,
                         residualCodes=residualCodes,
                         preferredCodes=(
+                            preferredHs2Codes
+                            if level == HIERARCHY_LEVEL_HS2
+                            else
                             preferredHs4Codes
                             if level == HIERARCHY_LEVEL_HS4
                             else ()

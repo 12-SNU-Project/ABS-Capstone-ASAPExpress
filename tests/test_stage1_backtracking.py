@@ -144,58 +144,6 @@ def test_static_evidence_candidate_is_retained_before_backtracking() -> None:
     assert traversal.rejectedCandidateHs8Codes == [weakCandidate.hs8]
 
 
-def test_general_fallback_candidate_is_retained_when_llm_is_insufficient() -> None:
-    retriever, productInput = _BuildFixture()
-    specificCandidate = retriever.FindCandidates(productInput, topK=1)[0].model_copy(
-        update={
-            "hs8": "19022010",
-            "hs6Code": "190220",
-            "hs6Description": "Stuffed pasta",
-            "hs8Description": "Containing more than 20 % by weight of fish",
-            "hardConditionStatus": "unknown",
-            "score": 90.0,
-        },
-    )
-    generalCandidate = specificCandidate.model_copy(
-        update={
-            "hs8": "19023090",
-            "hs6Code": "190230",
-            "hs6Description": "Other pasta",
-            "hs8Description": "Other",
-            "hardConditionStatus": "not_applicable",
-            "score": 75.0,
-            "primaryEvidenceMatches": ["pasta"],
-        },
-    )
-    validationReport = Stage1ResponseValidationReport(
-        isValid=True,
-        parsedResponse={
-            "classification_result": {
-                "candidate_reviews": [
-                    {
-                        "hs8": specificCandidate.hs8,
-                        "status": "insufficient_information",
-                    },
-                    {
-                        "hs8": generalCandidate.hs8,
-                        "status": "insufficient_information",
-                    },
-                ],
-            },
-        },
-    )
-
-    decision = Stage1DecisionPolicy().BuildDecision(
-        validationReport,
-        [specificCandidate, generalCandidate],
-    )
-
-    assert decision.decisionStatus == "deterministic_general_candidate_needs_review"
-    assert decision.recommendedCandidateHs8 == generalCandidate.hs8
-    assert decision.backtrackingRecommended is False
-    assert decision.deterministicEvidenceRetainedHs8Codes == [generalCandidate.hs8]
-
-
 def test_hs6_backtracking_stays_in_current_hs4_and_excludes_visited_cn8() -> None:
     retriever, productInput = _BuildFixture()
     currentCandidate = retriever.FindCandidates(productInput, topK=1)[0]

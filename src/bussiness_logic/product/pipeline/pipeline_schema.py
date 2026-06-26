@@ -28,7 +28,8 @@ class KurlyPipelineInput(BaseModel):
     artifactRootPath: Path = DEFAULT_PRODUCT_OCR_IMAGE_ARTIFACT_ROOT_PATH
     maxOcrImageCount: int = Field(
         default=20,
-        description="OCR fallback image batch size. All candidate images are processed in batches.",
+        ge=0,
+        description="Maximum number of OCR candidate images processed per product.",
     )
     downloadTimeoutSeconds: int = DEFAULT_PRODUCT_OCR_IMAGE_DOWNLOAD_TIMEOUT_SECONDS
 
@@ -273,6 +274,7 @@ class KurlyPipelineResult(BaseModel):
                             imageResult.structuredOcr.rawTileTexts
                         ),
                         "raw_text_length": len(imageResult.structuredOcr.rawText),
+                        "processing_times": dict(imageResult.processingTimes),
                         "error": imageResult.error,
                     }
                     for imageIndex, imageResult in enumerate(

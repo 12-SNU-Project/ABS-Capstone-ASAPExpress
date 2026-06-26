@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
+import socket
+import subprocess
 import sys
+import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 ASAP_ROOT = Path(
@@ -30,7 +36,72 @@ app = CreateBackendApp(
 server = app
 
 
+def _CanConnect(host: str, port: int) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _WaitForPort(host: str, port: int, timeoutSeconds: float = 60.0) -> bool:
+    deadline = time.monotonic() + timeoutSeconds
+    while time.monotonic() < deadline:
+        if _CanConnect(host, port):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def _StartMlxVlmServerIfNeeded() -> subprocess.Popen[bytes] | None:
+    smokeConfig = appConfig.kurly_smoke
+    if smokeConfig.structured_ocr_vl_rec_backend != "mlx-vlm-server":
+        return None
+
+    serverUrl = smokeConfig.structured_ocr_vl_rec_server_url or "http://localhost:8111/"
+    parsedUrl = urlparse(serverUrl)
+    host = parsedUrl.hostname or "localhost"
+    if host not in {"localhost", "127.0.0.1", "::1"}:
+        print("MLX-VLM server auto-start skipped: non-local server url")
+        return None
+    port = parsedUrl.port or 8111
+    if _CanConnect(host, port):
+        print("MLX-VLM server already running: {0}:{1}".format(host, port))
+        return None
+
+    executable = shutil.which("mlx_vlm.server")
+    if executable is None:
+        print("MLX-VLM server auto-start skipped: mlx_vlm.server not found")
+        return None
+
+    process = subprocess.Popen([executable, "--port", str(port)])
+    if _WaitForPort(host, port):
+        print("MLX-VLM server started: {0}:{1}".format(host, port))
+    elif process.poll() is None:
+        print("MLX-VLM server starting in background: {0}:{1}".format(host, port))
+    else:
+        print("MLX-VLM server failed: exit_code={0}".format(process.returncode))
+        return None
+    return process
+
+
+def _RegisterProcessCleanup(process: subprocess.Popen[bytes]) -> None:
+    def cleanup() -> None:
+        if process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+    atexit.register(cleanup)
+
+
 if __name__ == "__main__":
+    mlxVlmProcess = _StartMlxVlmServerIfNeeded()
+    if mlxVlmProcess is not None:
+        _RegisterProcessCleanup(mlxVlmProcess)
     app.run(
         debug=False,
         host=appConfig.web.backend_host,

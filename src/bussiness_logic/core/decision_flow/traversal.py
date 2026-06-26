@@ -43,6 +43,10 @@ class Stage1TraversalReport(BaseModel):
         default_factory=list,
         alias="rejected_candidate_hs8_codes",
     )
+    deterministicEvidenceRetainedHs8Codes: List[str] = Field(
+        default_factory=list,
+        alias="deterministic_evidence_retained_hs8_codes",
+    )
     backtrackingRecommended: bool = Field(
         default=False,
         alias="backtracking_recommended",
@@ -90,6 +94,7 @@ class Stage1TraversalController:
                     decisionReport.strongCandidateHs8Codes,
                     decisionReport.possibleCandidateHs8Codes,
                     decisionReport.insufficientInformationHs8Codes,
+                    decisionReport.deterministicEvidenceRetainedHs8Codes,
                     decisionReport.unlikelyCandidateHs8Codes,
                 ]
             )
@@ -99,8 +104,15 @@ class Stage1TraversalController:
                 decisionReport.strongCandidateHs8Codes,
                 decisionReport.possibleCandidateHs8Codes,
                 decisionReport.insufficientInformationHs8Codes,
+                decisionReport.deterministicEvidenceRetainedHs8Codes,
             ]
         )
+        retainedCandidateHs8CodeSet = set(retainedCandidateHs8Codes)
+        rejectedCandidateHs8Codes = [
+            hs8
+            for hs8 in decisionReport.unlikelyCandidateHs8Codes
+            if hs8 not in retainedCandidateHs8CodeSet
+        ]
 
         if decisionReport.decisionStatus == "invalid_response_requires_retry":
             traversalStatus = "retry_required"
@@ -127,7 +139,10 @@ class Stage1TraversalController:
             decisionStatus=decisionReport.decisionStatus,
             currentCandidateHs8Codes=currentCandidateHs8Codes,
             retainedCandidateHs8Codes=retainedCandidateHs8Codes,
-            rejectedCandidateHs8Codes=list(decisionReport.unlikelyCandidateHs8Codes),
+            rejectedCandidateHs8Codes=rejectedCandidateHs8Codes,
+            deterministicEvidenceRetainedHs8Codes=list(
+                decisionReport.deterministicEvidenceRetainedHs8Codes,
+            ),
             backtrackingRecommended=decisionReport.backtrackingRecommended,
             backtrackingTargetLevel=decisionReport.backtrackingTargetLevel,
             backtrackingReason=decisionReport.backtrackingReason,

@@ -280,9 +280,12 @@ def _build_compact_decision_request(
         "classification_input_text_lines_json is OCR/detail-text evidence, not a substitute for structured facts.",
         "Do not infer facts that are not explicitly present in classification_input_facts_json.",
         "Use product type, physical form, processing state, storage state, ingredients, composition ratios, content weight, and origin facts when they are explicit.",
+        "Use unlikely_candidate only when reconstructed product facts clearly contradict the candidate, or when the candidate requires an explicit essential condition that is absent from reconstructed facts.",
+        "Do not mark a candidate as unlikely only because another candidate scores higher.",
+        "If quantity, percentage, processing state, or composition condition is missing, use insufficient_information instead of unlikely_candidate.",
         "If a fact line appears contradictory or looks like OCR/reconstruction noise, mark the affected candidate as possible_candidate or insufficient_information instead of forcing a strong_candidate.",
         "Allowed status values: strong_candidate, possible_candidate, unlikely_candidate, insufficient_information.",
-        "Review the strongest few candidates; unreviewed candidates will be filled deterministically as unlikely/insufficient.",
+        "Review the strongest few candidates; unreviewed candidates will be filled deterministically as insufficient_information.",
         "product_name: {0}".format(product_input.productName or "unknown"),
         "product_domain: {0}".format(product_input.productDomain),
         "classification_input_text_line_count: {0}".format(
@@ -466,12 +469,10 @@ def _expand_compact_decision_to_stage1_json(
             status = _normalize_compact_status(
                 compact_review.get("status") or "strong_candidate"
             )
-            if status in {"unlikely_candidate", "insufficient_information"}:
-                status = "possible_candidate"
         elif compact_review:
             status = _normalize_compact_status(compact_review.get("status"))
         else:
-            status = "unlikely_candidate" if selected_hs8 else "insufficient_information"
+            status = "insufficient_information"
 
         supporting = _list_of_strings(compact_review.get("supporting_product_facts"))
         conflicts = _list_of_strings(compact_review.get("conflicting_or_exclusion_facts"))
@@ -553,27 +554,37 @@ for _path in (ASAP_PROJECT_ROOT, ASAP_SRC_ROOT):
         sys.path.insert(0, str(_path))
 
 from bussiness_logic.app_config import LoadAppConfig
-from bussiness_logic.bridge import (
-    BuildDefaultLlmRuntimeConfig,
-    BuildLlmRuntimeConfigFromEnv,
-    BuildRuntimeAdapter,
+from bussiness_logic.bridge.embedding import (
     BuildTextEmbeddingAdapter,
     BuildTextEmbeddingRuntimeConfig,
-    ProbeRuntimeDependency,
     ProbeTextEmbeddingDependency,
     TextEmbeddingAdapterBuildError,
     TextEmbeddingGenerationError,
 )
-from bussiness_logic.core import (
+from bussiness_logic.bridge.factory import BuildRuntimeAdapter
+from bussiness_logic.bridge.probe import ProbeRuntimeDependency
+from bussiness_logic.bridge.selector import (
+    BuildDefaultLlmRuntimeConfig,
+    BuildLlmRuntimeConfigFromEnv,
+)
+from bussiness_logic.core.classification.stage1 import (
     CnCandidateRetriever,
-    CnSemanticCandidateIndex,
-    OntologyContextBuilder,
     ProductClassificationInput,
-    Stage1DecisionPolicy,
     Stage1EvidencePackageBuilder,
-    Stage1RecommendationReportBuilder,
     Stage1RequestBuilder,
     Stage1ResponseValidator,
+)
+from bussiness_logic.core.context_retrieval.context_builder import (
+    OntologyContextBuilder,
+)
+from bussiness_logic.core.context_retrieval.semantic_retrieval import (
+    CnSemanticCandidateIndex,
+)
+from bussiness_logic.core.decision_flow.decision_policy import Stage1DecisionPolicy
+from bussiness_logic.core.decision_flow.recommendation import (
+    Stage1RecommendationReportBuilder,
+)
+from bussiness_logic.core.decision_flow.traversal import (
     Stage1TraversalController,
 )
 from bussiness_logic.core.classification.hierarchical_beam import (

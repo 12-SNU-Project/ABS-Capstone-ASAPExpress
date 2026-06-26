@@ -18,6 +18,7 @@ from bussiness_logic.product.ocr.ocr_image_tiling import (
 )
 from bussiness_logic.product.ocr.paddle_ocr import (
     PaddleOcrEngine,
+    PaddleOcrVlEngine,
     PaddleStructureOcrEngine,
     ProductOcrEngine,
     ProductOcrError,
@@ -28,6 +29,7 @@ from bussiness_logic.product.ocr.paddle_ocr import (
 
 __all__ = [
     "PaddleOcrEngine",
+    "PaddleOcrVlEngine",
     "PaddleStructureOcrEngine",
     "ProductOcrEngine",
     "ProductOcrError",

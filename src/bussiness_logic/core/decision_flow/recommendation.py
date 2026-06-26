@@ -90,12 +90,22 @@ class Stage1RecommendationReportBuilder:
         recommendedCandidate = None
         retainedCandidates: List[Dict[str, Any]] = []
         rejectedCandidatesSummary: List[Dict[str, Any]] = []
+        deterministicEvidenceRetainedCodeSet = set(
+            decisionReport.deterministicEvidenceRetainedHs8Codes,
+        )
 
         for candidateCode in traversalReport.retainedCandidateHs8Codes:
             candidateRecord = self._BuildCandidateRecord(
                 candidateByHs8.get(candidateCode),
                 reviewByHs8.get(candidateCode, {}),
             )
+            if candidateCode in deterministicEvidenceRetainedCodeSet:
+                candidateRecord["retention_basis"] = "deterministic_evidence"
+                candidateRecord["retention_note"] = (
+                    "LLM review did not accept this candidate, but positive "
+                    "static score and primary/secondary evidence keep it in "
+                    "human review scope."
+                )
             if candidateCode == decisionReport.recommendedCandidateHs8:
                 recommendedCandidate = candidateRecord
             else:
@@ -349,6 +359,8 @@ class Stage1RecommendationReportBuilder:
         if decisionReport.decisionStatus == "single_strong_candidate_for_human_review":
             return "single_priority_candidate_for_human_review"
         if decisionReport.decisionStatus == "possible_candidates_need_review":
+            return "priority_candidate_for_human_review"
+        if decisionReport.decisionStatus == "deterministic_evidence_conflict_needs_review":
             return "priority_candidate_for_human_review"
         if decisionReport.decisionStatus == "multiple_strong_candidates_need_review":
             return "candidate_comparison_required"

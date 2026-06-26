@@ -4,7 +4,7 @@
   --line: #e5e7eb;
   --muted: #64748b;
   --text: #111827;
-  --blue: #2563eb;
+  --accent: #6d3fd6;
   --red: #b91c1c;
   --green: #166534;
   --amber: #9a3412;
@@ -96,9 +96,9 @@ button {
 
 .primary-btn {
   width: 100%;
-  border: 1px solid var(--blue);
+  border: 1px solid var(--accent);
   border-radius: 9px;
-  background: var(--blue);
+  background: var(--accent);
   color: #ffffff;
   font-weight: 900;
   padding: 12px 13px;
@@ -118,8 +118,8 @@ button {
 }
 
 .example-btn:hover {
-  border-color: var(--blue);
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(109, 63, 214, 0.08);
 }
 
 .example-code {
@@ -176,7 +176,7 @@ button {
 }
 
 .document-result-eyebrow {
-  color: #93c5fd;
+  color: #c4b5fd;
   font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.11em;
@@ -192,7 +192,7 @@ button {
 
 .document-result-cn {
   margin-top: 4px;
-  color: #bfdbfe;
+  color: #ddd6fe;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   font-weight: 800;
@@ -313,13 +313,13 @@ button {
 }
 
 .panel-btn:hover {
-  border-color: var(--blue);
-  color: #1d4ed8;
+  border-color: var(--accent);
+  color: #6d3fd6;
 }
 
 .panel-btn.active {
-  background: var(--blue);
-  border-color: var(--blue);
+  background: var(--accent);
+  border-color: var(--accent);
   color: #ffffff;
 }
 
@@ -387,7 +387,7 @@ button {
 
 .document-overview-table .document-overview-count {
   width: 170px;
-  color: #1d4ed8;
+  color: #6d3fd6;
   font-weight: 900;
 }
 
@@ -485,7 +485,7 @@ button {
 }
 
 .scenario-code .metric-label {
-  color: #93c5fd;
+  color: #c4b5fd;
 }
 
 .scenario-code .metric-value {
@@ -493,7 +493,7 @@ button {
 }
 
 .scenario-code .card-meta {
-  color: #bfdbfe;
+  color: #ddd6fe;
 }
 
 .scenario-checks {
@@ -660,7 +660,7 @@ button {
 }
 
 .scenario-detail summary {
-  color: #1d4ed8;
+  color: #6d3fd6;
   font-size: 11px;
   font-weight: 900;
 }
@@ -746,7 +746,7 @@ button {
 }
 
 .document-checklist-count-value.linked {
-  color: #1d4ed8;
+  color: #6d3fd6;
 }
 
 .document-checklist-description {
@@ -842,7 +842,7 @@ button {
 
 .document-cell-link {
   margin-top: 3px;
-  color: #1d4ed8;
+  color: #6d3fd6;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 9px;
 }
@@ -873,7 +873,7 @@ button {
 }
 
 .document-row-details summary {
-  color: #1d4ed8;
+  color: #6d3fd6;
   font-size: 10px;
   white-space: nowrap;
 }
@@ -972,7 +972,7 @@ button {
 
 .cert-detail summary {
   cursor: pointer;
-  color: #1d4ed8;
+  color: #6d3fd6;
   font-size: 11px;
   font-weight: 850;
   margin-top: 8px;
@@ -1043,7 +1043,7 @@ summary {
 }
 
 a {
-  color: #1d4ed8;
+  color: #6d3fd6;
   text-decoration: none;
   font-weight: 850;
 }

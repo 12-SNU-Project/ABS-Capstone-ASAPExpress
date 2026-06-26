@@ -31,7 +31,7 @@ def RegisterRoutingCallbacks(
         document_panel: str | None,
         input_detail_drawer_mode: str | bool | None,
         candidate_tree_drawer_open: bool | None,
-        classification_result_drawer_open: bool | None,
+        classification_result_drawer_open: bool | str | dict[str, Any] | None,
     ) -> Any:
         parts = SplitPath(pathname)
         if not parts:
@@ -39,7 +39,7 @@ def RegisterRoutingCallbacks(
                 result_data,
                 input_detail_drawer_mode=input_detail_drawer_mode,
                 candidate_tree_drawer_open=bool(candidate_tree_drawer_open),
-                classification_result_drawer_open=bool(classification_result_drawer_open),
+                classification_result_drawer_open=classification_result_drawer_open,
             )
 
         page = parts[0]
@@ -81,7 +81,7 @@ def RegisterRoutingCallbacks(
             result_data,
             input_detail_drawer_mode=input_detail_drawer_mode,
             candidate_tree_drawer_open=bool(candidate_tree_drawer_open),
-            classification_result_drawer_open=bool(classification_result_drawer_open),
+            classification_result_drawer_open=classification_result_drawer_open,
         )
 
 

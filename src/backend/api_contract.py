@@ -137,14 +137,6 @@ class CandidateCodeView(ApiContractModel):
         default=None,
         alias="taric10_branch_count",
     )
-    selectedTaric10Reason: str | None = Field(
-        default=None,
-        alias="selected_taric10_reason",
-    )
-    primaryTaric10Reason: str | None = Field(
-        default=None,
-        alias="primary_taric10_reason",
-    )
     rank: int | None = None
     status: str | None = None
     candidateSource: str | None = Field(default=None, alias="candidate_source")
@@ -172,6 +164,16 @@ class CandidateCodeView(ApiContractModel):
     )
     requiredFacts: list[str] = Field(default_factory=list, alias="required_facts")
     unknowns: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def DropLegacyTaricReasonFields(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        cleanedValue = dict(value)
+        cleanedValue.pop("selected_taric10_reason", None)
+        cleanedValue.pop("primary_taric10_reason", None)
+        return cleanedValue
 
 
 class CandidateCodeSetView(ApiContractModel):
@@ -274,6 +276,10 @@ class RunSnapshotResponse(ApiContractModel):
     documentPackage: DocumentPackageView | None = Field(
         default=None,
         alias="document_package",
+    )
+    documentPackages: list[DocumentPackageView] = Field(
+        default_factory=list,
+        alias="document_packages",
     )
     decision: dict[str, Any] | None = None
     agentResults: list[dict[str, Any]] | None = Field(

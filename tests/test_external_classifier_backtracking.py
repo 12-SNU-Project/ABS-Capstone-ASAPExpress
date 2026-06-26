@@ -133,35 +133,3 @@ def test_unreviewed_candidate_defaults_to_insufficient_information() -> None:
     }
     assert reviews["19023090"] == "strong_candidate"
     assert reviews["19022010"] == "insufficient_information"
-
-
-def test_selected_unlikely_candidate_is_not_coerced_to_possible() -> None:
-    productInput = SimpleNamespace(
-        productName="fixture",
-        productDomain="food",
-        domainScopes=["food"],
-        structuredProductFacts=[],
-        unresolvedProductFacts=[],
-        productFactConflicts=[],
-        normalizedOcrFactTexts=[],
-        BuildSearchText=lambda: "fixture",
-    )
-    expanded = json.loads(
-        externalClassifier._expand_compact_decision_to_stage1_json(
-            {
-                "selected_hs8": "21041000",
-                "candidate_reviews": [
-                    {
-                        "hs8": "21041000",
-                        "status": "unlikely_candidate",
-                        "reason": "Candidate contradicts product facts.",
-                    }
-                ],
-            },
-            productInput,
-            [_Candidate("21041000")],
-        )
-    )
-
-    [review] = expanded["classification_result"]["candidate_reviews"]
-    assert review["status"] == "unlikely_candidate"

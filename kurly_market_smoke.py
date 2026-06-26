@@ -1,41 +1,512 @@
 """KurlyMarket 상품 페이지 parser/OCR fallback runtime smoke."""
 
+import argparse
 import json
+import logging
 import sys
+from collections import Counter
+from collections.abc import Mapping, Sequence
+from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Dict, List
-
-from loguru import logger
-
 
 PROJECT_ROOT_PATH = Path(__file__).resolve().parent
 SOURCE_ROOT_PATH = PROJECT_ROOT_PATH / "src"
 if str(SOURCE_ROOT_PATH) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT_PATH))
 
-from bussiness_logic.product import (  # noqa: E402
-    KurlyGlobalPageParser,
-    KurlyPageAdapter,
-    KurlyPageCollector,
-    KurlyDomesticPageParser,
-    KurlyProductPipeline,
-    KurlyPipelineInput,
-    PaddleOcrEngine,
-    PaddleStructureOcrEngine,
-)
 from bussiness_logic.app_config import LoadAppConfig  # noqa: E402
-from bussiness_logic.bridge import (  # noqa: E402
-    BuildLlmRuntimeConfigFromEnv,
+from bussiness_logic.artifact_paths import ExtractProductIdFromUrl  # noqa: E402
+from bussiness_logic.bridge.factory import (  # noqa: E402
     BuildRuntimeAdapter,
     RuntimeAdapterBuildError,
 )
-from bussiness_logic.input_process import ProductInputReconstructionService  # noqa: E402
+from bussiness_logic.bridge.selector import BuildLlmRuntimeConfigFromEnv  # noqa: E402
+from bussiness_logic.input_process.reconstruction import (  # noqa: E402
+    ProductInputReconstructionService,
+)
+from bussiness_logic.product.ocr.paddle_ocr import (  # noqa: E402
+    PaddleOcrEngine,
+    PaddleOcrVlEngine,
+)
+from bussiness_logic.product.ocr.ocr_fallback import (  # noqa: E402
+    ProductOcrImageDownloader,
+    ProductOcrImageResult,
+)
+from bussiness_logic.product.pipeline.pipeline import KurlyProductPipeline  # noqa: E402
+from bussiness_logic.product.pipeline.pipeline_schema import KurlyPipelineInput  # noqa: E402
+from bussiness_logic.product.web_parser.kurly_domestic import (  # noqa: E402
+    KurlyDomesticPageParser,
+)
+from bussiness_logic.product.web_parser.kurly_global import KurlyGlobalPageParser  # noqa: E402
+from bussiness_logic.product.web_parser.kurly_market_collector import (  # noqa: E402
+    KurlyPageCollector,
+)
+from bussiness_logic.product.web_parser.kurly_page_adapter import (  # noqa: E402
+    KurlyPageAdapter,
+)
+from backend.pipeline_projection import InputProcessingViewProjector  # noqa: E402
+
+
+VLM_SOURCE_TYPES = {"vlm_table", "pp_table"}
+NUTRITION_MARKERS = (
+    "영양",
+    "열량",
+    "나트",
+    "탄수",
+    "당류",
+    "지방",
+    "트랜스",
+    "포화",
+    "콜레스",
+    "단백",
+    "kcal",
+    "mg",
+)
+INGREDIENT_MARKERS = ("원재료", "원료", "원제", "함량", "함유", "ingredients")
+LOGGER = logging.getLogger("kurly_market_smoke")
+
+
+class _BoundLogger:
+    def __init__(self, logger: logging.Logger, className: str, functionName: str) -> None:
+        self._logger = logger
+        self._prefix = f"{className}::{functionName}: "
+
+    def info(self, message: str, *args: Any) -> None:
+        self._log(logging.INFO, message, *args)
+
+    def warning(self, message: str, *args: Any) -> None:
+        self._log(logging.WARNING, message, *args)
+
+    def error(self, message: str, *args: Any) -> None:
+        self._log(logging.ERROR, message, *args)
+
+    def _log(self, level: int, message: str, *args: Any) -> None:
+        try:
+            renderedMessage = message.format(*args)
+        except Exception:
+            renderedMessage = " ".join([message, *[str(arg) for arg in args]])
+        self._logger.log(level, "%s%s", self._prefix, renderedMessage)
+
+
+def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Kurly web scroll/OCR/LLM reconstruction smoke CLI",
+    )
+    parser.add_argument(
+        "--headed",
+        action="store_true",
+        help="브라우저를 열어 appconfig URL의 스크롤 과정을 표시합니다.",
+    )
+    parser.add_argument(
+        "--compare-ocr",
+        action="store_true",
+        help="동일 이미지의 raw OCR, PP-StructureV3, PaddleOCR-VL 결과를 비교합니다.",
+    )
+    parser.add_argument(
+        "--compare-max-images",
+        type=int,
+        default=1,
+        metavar="N",
+        help="상품별 비교 이미지 수입니다. 기본 1, 0이면 전체입니다.",
+    )
+    parser.add_argument(
+        "--check-ui-binding",
+        action="store_true",
+        help="현재 Dash Reconstruction Drawer 바인딩 가능 여부를 함께 검사합니다.",
+    )
+    parser.add_argument(
+        "--classify-reconstruction",
+        action="store_true",
+        help=(
+            "LLM reconstruction 결과를 입력으로 정적 CN 후보 산출, "
+            "Classification LLM 판단, backtracking 결정을 함께 검사합니다."
+        ),
+    )
+    parsedArguments = parser.parse_args(arguments)
+    if parsedArguments.compare_max_images < 0:
+        parser.error("--compare-max-images must be greater than or equal to 0")
+    return parsedArguments
+
+
+def _ShortText(value: Any, limit: int = 700) -> str:
+    text = str(value or "").strip()
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _CompactText(value: Any) -> str:
+    return str(value or "").replace(" ", "").lower()
+
+
+def _ContainsMarker(value: Any, markers: Sequence[str]) -> bool:
+    text = _CompactText(value)
+    return any(marker.replace(" ", "").lower() in text for marker in markers)
+
+
+def _EvidenceId(row: Mapping[str, Any]) -> str:
+    return str(row.get("evidence_id") or row.get("id") or "").strip()
+
+
+def _SourceRefsForTable(table: Mapping[str, Any]) -> list[str]:
+    refs = [
+        str(ref).strip()
+        for ref in table.get("source_refs") or []
+        if str(ref).strip()
+    ]
+    for row in table.get("rows") or []:
+        if not isinstance(row, Mapping):
+            continue
+        refs.extend(
+            str(ref).strip()
+            for ref in row.get("source_refs") or []
+            if str(ref).strip()
+        )
+    return list(dict.fromkeys(refs))
+
+
+def _RowText(table: Mapping[str, Any], row: Mapping[str, Any]) -> str:
+    return " ".join(
+        str(value or "")
+        for value in (
+            table.get("table_name"),
+            row.get("field_name"),
+            row.get("raw_value"),
+            row.get("normalized_value"),
+            row.get("unit"),
+            row.get("daily_value_percent"),
+        )
+    )
+
+
+def _ProductContextForTable(
+    table: Mapping[str, Any],
+    evidenceRows: list[Any],
+) -> str:
+    evidenceById = {
+        evidenceId: row
+        for row in evidenceRows
+        if isinstance(row, Mapping) and (evidenceId := _EvidenceId(row))
+    }
+    optionLabels = {
+        str(row.get("option_key") or "").strip(): _ShortText(
+            row.get("text") or row.get("source_label") or row.get("option_key"),
+            limit=120,
+        )
+        for row in evidenceRows
+        if (
+            isinstance(row, Mapping)
+            and str(row.get("source_type") or "") == "notice_option"
+            and str(row.get("option_key") or "").strip()
+        )
+    }
+    optionKeys = []
+    for sourceRef in _SourceRefsForTable(table):
+        row = evidenceById.get(sourceRef)
+        if row is None:
+            continue
+        optionKey = str(row.get("option_key") or "").strip()
+        if optionKey:
+            optionKeys.append(optionKey)
+    return ", ".join(
+        optionLabels.get(optionKey, optionKey)
+        for optionKey in dict.fromkeys(optionKeys)
+    )
+
+
+def _CompactReconstructedTables(
+    tables: list[Any],
+    evidenceRows: list[Any],
+) -> list[dict[str, Any]]:
+    compactTables: list[dict[str, Any]] = []
+    for table in tables:
+        if not isinstance(table, Mapping):
+            continue
+        rows = []
+        for row in table.get("rows") or []:
+            if not isinstance(row, Mapping):
+                continue
+            rows.append({
+                "field_name": str(row.get("field_name") or ""),
+                "raw_value": _ShortText(row.get("raw_value")),
+                "normalized_value": _ShortText(
+                    row.get("normalized_value") or row.get("raw_value"),
+                ),
+                "unit": str(row.get("unit") or ""),
+                "daily_value_percent": str(row.get("daily_value_percent") or ""),
+                "source_refs": [
+                    str(ref)
+                    for ref in (row.get("source_refs") or [])
+                    if str(ref).strip()
+                ],
+                "validation_status": str(row.get("validation_status") or ""),
+            })
+        compactTables.append({
+            "table_name": str(table.get("table_name") or ""),
+            "product_context": _ProductContextForTable(table, evidenceRows),
+            "source_refs": [
+                str(ref)
+                for ref in (table.get("source_refs") or [])
+                if str(ref).strip()
+            ],
+            "rows": rows,
+        })
+    return compactTables
+
+
+def _CompactFacts(facts: list[Any]) -> list[dict[str, Any]]:
+    compactFacts: list[dict[str, Any]] = []
+    for fact in facts:
+        if not isinstance(fact, Mapping):
+            continue
+        compactFacts.append({
+            "field_name": str(fact.get("field_name") or ""),
+            "raw_value": _ShortText(fact.get("raw_value")),
+            "normalized_value": _ShortText(
+                fact.get("normalized_value") or fact.get("raw_value"),
+            ),
+            "source_refs": [
+                str(ref)
+                for ref in (fact.get("source_refs") or [])
+                if str(ref).strip()
+            ],
+            "validation_status": str(fact.get("validation_status") or ""),
+            "correction_type": str(fact.get("correction_type") or ""),
+        })
+    return compactFacts
+
+
+def _IngredientFacts(facts: list[Any]) -> list[dict[str, Any]]:
+    return [
+        dict(fact)
+        for fact in facts
+        if (
+            isinstance(fact, Mapping)
+            and _ContainsMarker(fact.get("field_name"), INGREDIENT_MARKERS)
+        )
+    ]
+
+
+def _BuildCurrentReconstructionDrawerBinding(
+    inputProcessingView: Mapping[str, Any],
+) -> dict[str, Any]:
+    reconstructedTables = inputProcessingView.get("reconstructed_detail_tables") or []
+    evidenceRows = inputProcessingView.get("detail_evidence_rows") or []
+    productFacts = inputProcessingView.get("classification_input_facts") or []
+    factTexts = inputProcessingView.get("classification_input_text_lines") or []
+    unresolvedFacts = inputProcessingView.get("unresolved_input_facts") or []
+    conflicts = inputProcessingView.get("input_fact_conflicts") or []
+    return {
+        "render_mode": "reconstructed_tables",
+        "status_table": inputProcessingView.get("reconstruction_status") or {},
+        "reconstructed_tables": _CompactReconstructedTables(
+            reconstructedTables if isinstance(reconstructedTables, list) else [],
+            evidenceRows if isinstance(evidenceRows, list) else [],
+        ),
+        "classification_input_facts": _CompactFacts(
+            productFacts if isinstance(productFacts, list) else [],
+        ),
+        "classification_input_text_lines": [
+            _ShortText(text) for text in factTexts
+        ] if isinstance(factTexts, list) else [],
+        "unresolved_input_facts": _CompactFacts(
+            unresolvedFacts if isinstance(unresolvedFacts, list) else [],
+        ),
+        "input_fact_conflicts": [
+            _ShortText(conflict) for conflict in conflicts
+        ] if isinstance(conflicts, list) else [],
+    }
+
+
+def _BuildPipelineChecks(
+    facts: Mapping[str, Any],
+    inputProcessingView: Mapping[str, Any],
+) -> dict[str, Any]:
+    urlIntake = facts.get("url_intake") or {}
+    if not isinstance(urlIntake, Mapping):
+        urlIntake = {}
+    ocrSummary = urlIntake.get("ocr") or {}
+    if not isinstance(ocrSummary, Mapping):
+        ocrSummary = {}
+    status = inputProcessingView.get("reconstruction_status") or {}
+    if not isinstance(status, Mapping):
+        status = {}
+    evidenceRows = inputProcessingView.get("detail_evidence_rows") or []
+    if not isinstance(evidenceRows, list):
+        evidenceRows = []
+    sourceTypes = [
+        str(record.get("source_type") or "")
+        for record in evidenceRows
+        if isinstance(record, Mapping)
+    ]
+    binding = _BuildCurrentReconstructionDrawerBinding(inputProcessingView)
+    hasBoundFacts = bool(
+        binding.get("classification_input_facts")
+        or binding.get("unresolved_input_facts")
+    )
+    return {
+        "url_collection": bool(urlIntake),
+        "ocr_image_count": (
+            ocrSummary.get("image_result_count")
+            or urlIntake.get("ocr_image_count")
+            or 0
+        ),
+        "structured_table_count": ocrSummary.get("structured_table_count") or 0,
+        "has_raw_ocr_evidence": "raw_ocr_tile" in sourceTypes,
+        "has_vlm_evidence": any(sourceType in VLM_SOURCE_TYPES for sourceType in sourceTypes),
+        "used_llm_reconstruction": bool(status.get("used_llm_reconstruction")),
+        "ui_binding_ready": bool(binding.get("reconstructed_tables") or hasBoundFacts),
+    }
+
+
+def _BuildUiBindingDiagnostics(
+    inputProcessingView: Mapping[str, Any],
+) -> dict[str, Any]:
+    reconstructedTables = inputProcessingView.get("reconstructed_detail_tables") or []
+    evidenceRows = inputProcessingView.get("detail_evidence_rows") or []
+    productFacts = inputProcessingView.get("classification_input_facts") or []
+    unresolvedFacts = inputProcessingView.get("unresolved_input_facts") or []
+    if not isinstance(reconstructedTables, list):
+        reconstructedTables = []
+    if not isinstance(evidenceRows, list):
+        evidenceRows = []
+    if not isinstance(productFacts, list):
+        productFacts = []
+    if not isinstance(unresolvedFacts, list):
+        unresolvedFacts = []
+
+    sourceTypeCounts = Counter(
+        str(record.get("source_type") or "")
+        for record in evidenceRows
+        if isinstance(record, Mapping)
+    )
+    blankNormalizedRows = []
+    blankRawRows = []
+    skeletonRows = []
+    nutritionTables = []
+    ingredientTables = []
+    perTableSummary = []
+    tableCount = 0
+    rowCount = 0
+    nutritionRowCount = 0
+    ingredientRowCount = 0
+    ingredientFacts = _IngredientFacts([*productFacts, *unresolvedFacts])
+
+    for table in reconstructedTables:
+        if not isinstance(table, Mapping):
+            continue
+        tableCount += 1
+        tableRows = [
+            row for row in table.get("rows") or [] if isinstance(row, Mapping)
+        ]
+        rowCount += len(tableRows)
+        tableNutritionRows = []
+        tableIngredientRows = []
+        for row in tableRows:
+            rowSummary = {
+                "table_name": table.get("table_name") or "",
+                "field_name": row.get("field_name") or "",
+                "raw_value": _ShortText(row.get("raw_value"), limit=220),
+                "normalized_value": _ShortText(row.get("normalized_value"), limit=220),
+                "validation_status": row.get("validation_status") or "",
+            }
+            if not str(row.get("raw_value") or "").strip():
+                blankRawRows.append(rowSummary)
+            if not str(row.get("normalized_value") or "").strip():
+                blankNormalizedRows.append(rowSummary)
+            if row.get("validation_status") == "vlm_skeleton":
+                skeletonRows.append(rowSummary)
+            text = _RowText(table, row)
+            if _ContainsMarker(text, NUTRITION_MARKERS):
+                tableNutritionRows.append(rowSummary)
+            if _ContainsMarker(text, INGREDIENT_MARKERS):
+                tableIngredientRows.append(rowSummary)
+        if tableNutritionRows:
+            nutritionRowCount += len(tableNutritionRows)
+            nutritionTables.append({
+                "table_name": table.get("table_name") or "",
+                "row_count": len(tableNutritionRows),
+                "sample_rows": tableNutritionRows[:5],
+            })
+        if tableIngredientRows:
+            ingredientRowCount += len(tableIngredientRows)
+            ingredientTables.append({
+                "table_name": table.get("table_name") or "",
+                "row_count": len(tableIngredientRows),
+                "sample_rows": tableIngredientRows[:3],
+            })
+        perTableSummary.append({
+            "table_name": table.get("table_name") or "",
+            "row_count": len(tableRows),
+            "nutrition_row_count": len(tableNutritionRows),
+            "ingredient_row_count": len(tableIngredientRows),
+        })
+
+    issues = []
+    if tableCount == 0:
+        issues.append("no_reconstructed_tables")
+    if nutritionRowCount == 0:
+        issues.append("no_nutrition_rows_in_reconstructed_tables")
+    if ingredientRowCount == 0 and not ingredientFacts:
+        issues.append("no_ingredient_binding_rows")
+    if blankNormalizedRows:
+        issues.append("blank_normalized_rows")
+    if skeletonRows:
+        issues.append("vlm_skeleton_rows_present")
+
+    return {
+        "source_type_counts": dict(sourceTypeCounts),
+        "reconstructed_table_count": tableCount,
+        "reconstructed_row_count": rowCount,
+        "nutrition_table_count": len(nutritionTables),
+        "nutrition_row_count": nutritionRowCount,
+        "ingredient_table_count": len(ingredientTables),
+        "ingredient_row_count": ingredientRowCount,
+        "ingredient_fact_count": len(ingredientFacts),
+        "per_table_summary": perTableSummary,
+        "nutrition_tables": nutritionTables,
+        "ingredient_tables": ingredientTables,
+        "ingredient_facts": _CompactFacts(ingredientFacts)[:8],
+        "blank_raw_rows": blankRawRows,
+        "blank_normalized_rows": blankNormalizedRows,
+        "vlm_skeleton_rows": skeletonRows,
+        "issues": issues,
+    }
+
+
+def BuildUiBindingSmoke(
+    facts: Mapping[str, Any],
+    *,
+    sourceLabel: str,
+) -> dict[str, Any]:
+    inputProcessingView = InputProcessingViewProjector().BuildInputProcessingViewFromFacts(
+        facts,
+    )
+    return {
+        "source": sourceLabel,
+        "product_id": facts.get("product_id") or "",
+        "input_processing_view_keys": list(inputProcessingView.keys()),
+        "reconstruction_status": inputProcessingView.get("reconstruction_status") or {},
+        "pipeline_checks": _BuildPipelineChecks(facts, inputProcessingView),
+        "current_ui_reconstruction_drawer_binding": (
+            _BuildCurrentReconstructionDrawerBinding(inputProcessingView)
+        ),
+        "diagnostics": _BuildUiBindingDiagnostics(inputProcessingView),
+    }
 
 
 class KurlyMarketSmokeRunner:
     """실제 KurlyMarket URL에서 parser와 선택적 OCR fallback을 확인한다."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        showBrowser: bool = False,
+        compareOcr: bool = False,
+        compareMaxImages: int = 1,
+        checkUiBinding: bool = False,
+        classifyReconstruction: bool = False,
+    ) -> None:
         appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
         pathConfig = appConfig.paths
         smokeConfig = appConfig.kurly_smoke
@@ -43,7 +514,11 @@ class KurlyMarketSmokeRunner:
         self._productUrls = list(smokeConfig.product_urls)
         self._timeoutSeconds = smokeConfig.timeout_seconds
         self._scrollCount = smokeConfig.scroll_count
-        self._headless = smokeConfig.headless
+        self._headless = False if showBrowser else smokeConfig.headless
+        self._compareOcr = compareOcr
+        self._compareMaxImages = compareMaxImages
+        self._checkUiBinding = checkUiBinding
+        self._classifyReconstruction = classifyReconstruction
         self._runOcrFallback = smokeConfig.run_ocr_fallback
         self._useStructuredOcr = smokeConfig.use_structured_ocr
         self._maxOcrImageCount = smokeConfig.max_ocr_image_count
@@ -61,6 +536,9 @@ class KurlyMarketSmokeRunner:
         )
         self._structuredOcrAllowHardCutFallback = (
             smokeConfig.structured_ocr_allow_hard_cut_fallback
+        )
+        self._structuredOcrVlExtraOptions = (
+            smokeConfig.BuildStructuredOcrVlExtraOptions()
         )
         self._useInputReconstruction = smokeConfig.use_input_reconstruction
         self._useLlmInputReconstruction = smokeConfig.use_llm_input_reconstruction
@@ -93,14 +571,23 @@ class KurlyMarketSmokeRunner:
         self._maxLoggedOcrCandidateUrls = smokeConfig.max_logged_ocr_candidate_urls
         self._fieldValuePreviewCharacters = smokeConfig.field_value_preview_characters
         self._ocrTextPreviewCharacters = smokeConfig.ocr_text_preview_characters
+        self._pipelineOcrEngine: Any = None
+        self._pipelineRawOcrEngine: Any = None
 
     def Run(self) -> None:
         self._ConfigureLogger()
         runLogger = self._Logger("Run")
         runLogger.info(
-            "KurlyMarket 상품 수집 smoke를 시작합니다 url_count={} run_ocr_fallback={}",
+            (
+                "KurlyMarket 상품 수집 smoke를 시작합니다 url_count={} "
+                "run_ocr_fallback={} browser_mode={} compare_ocr={} "
+                "classify_reconstruction={}"
+            ),
             len(self._productUrls),
             self._runOcrFallback,
+            "headless" if self._headless else "headed",
+            self._compareOcr,
+            self._classifyReconstruction,
         )
         if not self._productUrls:
             runLogger.warning(
@@ -153,28 +640,29 @@ class KurlyMarketSmokeRunner:
             scrollCount=self._scrollCount,
         )
         inputReconstructionService = self._BuildInputReconstructionService()
-        if not self._runOcrFallback:
-            return KurlyProductPipeline(
-                collector=collector,
-                inputReconstructionService=inputReconstructionService,
-            )
-
-        if self._useStructuredOcr:
-            return KurlyProductPipeline(
-                collector=collector,
-                ocrEngine=PaddleStructureOcrEngine(
+        ocrEngine = None
+        screeningOcrEngine = None
+        if self._runOcrFallback:
+            if self._useStructuredOcr:
+                screeningOcrEngine = PaddleOcrEngine()
+            ocrEngine = (
+                PaddleOcrVlEngine(
+                    vlExtraOptions=self._structuredOcrVlExtraOptions,
                     useProjectionTiling=self._structuredOcrUseProjectionTiling,
                     maxTileHeightPixels=self._structuredOcrMaxTileHeightPixels,
                     maxTileSidePixels=self._structuredOcrMaxTileSidePixels,
                     tileOverlapPixels=self._structuredOcrTileOverlapPixels,
                     allowHardCutFallback=self._structuredOcrAllowHardCutFallback,
-                ),
-                inputReconstructionService=inputReconstructionService,
+                )
+                if self._useStructuredOcr
+                else PaddleOcrEngine()
             )
-
+        self._pipelineOcrEngine = ocrEngine
+        self._pipelineRawOcrEngine = screeningOcrEngine
         return KurlyProductPipeline(
             collector=collector,
-            ocrEngine=PaddleOcrEngine(),
+            ocrEngine=ocrEngine,
+            screeningOcrEngine=screeningOcrEngine,
             inputReconstructionService=inputReconstructionService,
         )
 
@@ -228,7 +716,32 @@ class KurlyMarketSmokeRunner:
                     maxOcrImageCount=self._maxOcrImageCount,
                 )
             )
-            return self._BuildResult(productUrl, pipelineResult.model_dump(mode="json", by_alias=True))
+            resultData = self._BuildResult(
+                productUrl,
+                pipelineResult.model_dump(mode="json", by_alias=True),
+            )
+            uiFacts = (
+                self._BuildDashFactsFromPipelineResult(productUrl, pipelineResult)
+                if (self._checkUiBinding or self._classifyReconstruction)
+                else {}
+            )
+            if self._checkUiBinding:
+                resultData["ui_binding_smoke"] = BuildUiBindingSmoke(
+                    uiFacts,
+                    sourceLabel=productUrl,
+                )
+            if self._classifyReconstruction:
+                resultData["classification_smoke"] = self._RunClassificationSmoke(
+                    productUrl,
+                    uiFacts,
+                )
+            if self._compareOcr:
+                resultData["ocr_comparison"] = self._RunOcrComparison(
+                    productUrl,
+                    list(pipelineResult.collectionResult.ocrCandidateImageUrls),
+                    pipelineResult.ocrImageResults,
+                )
+            return resultData
         except Exception as error:
             return {
                 "product_page_url": productUrl,
@@ -238,6 +751,214 @@ class KurlyMarketSmokeRunner:
                     "runtime_error": str(error),
                 },
             }
+
+    def _BuildDashFactsFromPipelineResult(
+        self,
+        productUrl: str,
+        pipelineResult: Any,
+    ) -> Dict[str, Any]:
+        from agents.document_pipeline import build_kurly_url_facts_from_pipeline_result
+
+        return build_kurly_url_facts_from_pipeline_result(
+            productUrl,
+            pipelineResult,
+            artifact_root=self._artifactRootPath,
+        )
+
+    def _RunClassificationSmoke(
+        self,
+        productUrl: str,
+        uiFacts: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        from agents.blackboard import BlackboardStore
+        from agents.classification_agent import ClassificationAgent
+        from agents.document_pipeline import build_raw_input_from_ui
+        from agents.evidence_intake_agent import EvidenceIntakeAgent
+
+        rawInput = build_raw_input_from_ui(
+            query=str(uiFacts.get("product_name") or productUrl),
+            facts=dict(uiFacts),
+        )
+        productId = str(uiFacts.get("product_id") or ExtractProductIdFromUrl(productUrl))
+        runDirectory = (
+            self._artifactRootPath
+            / productId
+            / "classification-smoke"
+            / datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        )
+        store = BlackboardStore.create(
+            runtime_mode="smoke",
+            run_id="run_001",
+            run_dir=runDirectory,
+            validate_on_write=False,
+        )
+        agentResults = []
+        for agent in (EvidenceIntakeAgent(rawInput), ClassificationAgent()):
+            result = agent.execute(store)
+            agentResults.append({
+                "agent_name": agent.agent_name,
+                "success": result.success,
+                "error": result.error,
+                "outputs_written": result.outputs_written,
+            })
+            if not result.success:
+                break
+
+        blackboard = store.load()
+        productEvidenceState = blackboard.get("product_evidence_state") or {}
+        observedFacts = productEvidenceState.get("observed_facts") or {}
+        candidateCodeSet = (blackboard.get("candidate_code_sets") or [None])[-1]
+        if not isinstance(candidateCodeSet, Mapping):
+            candidateCodeSet = {}
+        trace = candidateCodeSet.get("classification_trace") or {}
+        if not isinstance(trace, Mapping):
+            trace = {}
+        candidates = self._BuildClassificationCandidateSmokeRows(candidateCodeSet)
+        zeroScoreCodes = [
+            candidate["cn8"]
+            for candidate in candidates
+            if float(candidate.get("score") or 0) <= 0
+        ]
+        classificationAgentResult = (
+            agentResults[1]
+            if len(agentResults) > 1
+            else {"success": False, "error": "classification_agent_not_executed"}
+        )
+        return {
+            "source": productUrl,
+            "dash_equivalence": {
+                "scope": (
+                    "Dash pipeline up to Classification_Agent; "
+                    "Document_Agent and Orchestrator_Agent are intentionally skipped."
+                ),
+                "path": [
+                    "KurlyProductPipeline.Run",
+                    "build_kurly_url_facts_from_pipeline_result",
+                    "build_raw_input_from_ui",
+                    "EvidenceIntakeAgent",
+                    "ClassificationAgent",
+                ],
+                "document_recommendation_executed": False,
+                "raw_input_matches_evidence_intake": (
+                    self._DoesRawInputMatchObservedFacts(rawInput, observedFacts)
+                ),
+                "run_dir": str(runDirectory),
+                "blackboard_path": str(store.bb_path),
+            },
+            "input": {
+                "product_name": observedFacts.get("product_name") or "",
+                "classification_fact_count": (
+                    len(observedFacts.get("classification_input_product_facts") or [])
+                    if isinstance(
+                        observedFacts.get("classification_input_product_facts"),
+                        list,
+                    )
+                    else 0
+                ),
+                "classification_text_line_count": (
+                    len(observedFacts.get("classification_input_fact_texts") or [])
+                    if isinstance(
+                        observedFacts.get("classification_input_fact_texts"),
+                        list,
+                    )
+                    else 0
+                ),
+                "unresolved_fact_count": (
+                    len(observedFacts.get("unresolved_product_facts") or [])
+                    if isinstance(observedFacts.get("unresolved_product_facts"), list)
+                    else 0
+                ),
+                "classification_input_text_lines": list(
+                    observedFacts.get("classification_input_fact_texts") or [],
+                )
+                if isinstance(observedFacts.get("classification_input_fact_texts"), list)
+                else [],
+            },
+            "status": {
+                "error": classificationAgentResult.get("error"),
+                "agent_success": bool(classificationAgentResult.get("success")),
+                "llm_model": self._FindAgentRunModel(store, "Classification_Agent"),
+                "candidate_count": len(candidates),
+                "zero_score_candidate_codes": zeroScoreCodes,
+            },
+            "candidates": candidates,
+            "candidate_code_set": {
+                "candidate_set_id": candidateCodeSet.get("candidate_set_id"),
+                "product_id": candidateCodeSet.get("product_id"),
+            },
+            "decision": {
+                "decision_status": trace.get("decision_status"),
+                "backtracking_recommended": trace.get("backtracking_recommended"),
+                "backtracking_occurred": trace.get("backtracking_occurred"),
+            },
+            "traversal": {
+                "traversal_status": trace.get("traversal_status"),
+                "next_action": trace.get("next_action"),
+                "backtracking_target_level": trace.get("backtracking_target_level"),
+                "backtracking_reason": trace.get("backtracking_reason"),
+            },
+            "traversal_history": list(trace.get("traversal_history") or []),
+            "agent_results": agentResults,
+            "agent_runs": list(store.iter_agent_runs()),
+        }
+
+    @staticmethod
+    def _BuildClassificationCandidateSmokeRows(
+        candidateCodeSet: Mapping[str, Any],
+    ) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        candidates = candidateCodeSet.get("candidates") or []
+        if not isinstance(candidates, list):
+            return out
+        for candidate in candidates:
+            if not isinstance(candidate, Mapping):
+                continue
+            staticTree = candidate.get("candidate_static_tree") or {}
+            if not isinstance(staticTree, Mapping):
+                staticTree = {}
+            out.append({
+                "rank": candidate.get("rank"),
+                "cn8": candidate.get("cn8"),
+                "hs6": candidate.get("hs6"),
+                "taric10": candidate.get("taric10"),
+                "score": staticTree.get("total_score"),
+                "llm_recommended": candidate.get("llm_recommended"),
+                "hard_condition_status": candidate.get("hard_condition_status"),
+                "taric10_branch_count": candidate.get("taric10_branch_count"),
+                "retrieval_sources": staticTree.get("retrieval_sources") or [],
+                "matched_keywords": staticTree.get("matched_keywords") or [],
+                "score_breakdown": staticTree.get("score_breakdown") or {},
+                "classification_basis": candidate.get("classification_basis") or [],
+            })
+        return out
+
+    @staticmethod
+    def _DoesRawInputMatchObservedFacts(
+        rawInput: Mapping[str, Any],
+        observedFacts: Mapping[str, Any],
+    ) -> bool:
+        keys = (
+            "product_name",
+            "description",
+            "classification_input_product_facts",
+            "classification_input_fact_texts",
+            "unresolved_product_facts",
+            "product_fact_conflicts",
+            "ocr_text",
+            "source_urls",
+            "origin_country",
+            "intended_use",
+            "warnings",
+            "input_reconstruction",
+        )
+        return all(rawInput.get(key) == observedFacts.get(key) for key in keys)
+
+    @staticmethod
+    def _FindAgentRunModel(store: Any, agentName: str) -> str | None:
+        for agentRun in store.iter_agent_runs():
+            if agentRun.get("agent_name") == agentName:
+                return agentRun.get("llm_model")
+        return None
 
     def _BuildResult(
         self,
@@ -258,7 +979,6 @@ class KurlyMarketSmokeRunner:
             inputReconstruction = ocrSummary.get("input_reconstruction", {})
         if not isinstance(inputReconstruction, dict):
             inputReconstruction = {}
-        ocrImageResults = pipelineResultData.get("ocr_image_results", [])
         combinedOcrText = pipelineResultData["combined_ocr_text"]
         requiresOcrFallback = parsedProductPage["requires_ocr_fallback"]
         productNoticeFieldCount = parsedProductPage.get(
@@ -269,13 +989,8 @@ class KurlyMarketSmokeRunner:
                 parsedProductPage.get("product_notice_options", []),
             )
 
-        successfulOcrResults = [
-            imageResult
-            for imageResult in ocrImageResults
-            if imageResult["error"] is None and len(imageResult["ocr_text"]) > 0
-        ]
         successfulOcrImageCount = int(
-            ocrSummary.get("successful_image_count", len(successfulOcrResults)),
+            ocrSummary.get("successful_image_count", 0),
         )
         isOcrFallbackOk = (
             not requiresOcrFallback
@@ -313,11 +1028,11 @@ class KurlyMarketSmokeRunner:
             )[:self._maxLoggedOcrCandidateUrls],
             "image_result_count": ocrSummary.get(
                 "image_result_count",
-                len(ocrImageResults),
+                0,
             ),
             "successful_image_count": ocrSummary.get(
                 "successful_image_count",
-                len(successfulOcrResults),
+                0,
             ),
             "structured_table_image_count": ocrSummary.get(
                 "structured_table_image_count",
@@ -335,10 +1050,7 @@ class KurlyMarketSmokeRunner:
                 "raw_text_length",
                 0,
             ),
-            "image_artifacts": ocrSummary.get(
-                "image_artifacts",
-                self._BuildOcrImageArtifacts(ocrImageResults),
-            ),
+            "image_artifacts": ocrSummary.get("image_artifacts", []),
             "combined_text_length": len(combinedOcrText),
             "combined_ocr_text": combinedOcrText,
         }
@@ -376,6 +1088,328 @@ class KurlyMarketSmokeRunner:
             "warnings": collectionResult["warnings"],
             "errors": pipelineResultData["errors"],
         }
+
+    def _RunOcrComparison(
+        self,
+        productUrl: str,
+        imageUrls: List[str],
+        pipelineOcrImageResults: List[ProductOcrImageResult],
+    ) -> Dict[str, Any]:
+        selectedImageUrls = (
+            imageUrls
+            if self._compareMaxImages == 0
+            else imageUrls[:self._compareMaxImages]
+        )
+        reusablePipelineResults = {
+            result.imageUrl: result
+            for result in pipelineOcrImageResults
+            if result.error is None
+        }
+        engines: Dict[str, Any] = {}
+        if selectedImageUrls:
+            from paddleocr import PPStructureV3
+
+            engines = {
+                "only_raw_ocr": (
+                    self._pipelineRawOcrEngine
+                    if isinstance(self._pipelineRawOcrEngine, PaddleOcrEngine)
+                    else self._pipelineOcrEngine
+                    if isinstance(self._pipelineOcrEngine, PaddleOcrEngine)
+                    else PaddleOcrEngine()
+                ),
+                "only_pp_structure": PPStructureV3(
+                    lang="korean",
+                    use_doc_orientation_classify=False,
+                    use_doc_unwarping=False,
+                    use_textline_orientation=False,
+                    use_seal_recognition=False,
+                    use_table_recognition=True,
+                    use_formula_recognition=False,
+                    use_chart_recognition=False,
+                    use_region_detection=False,
+                    format_block_content=False,
+                ),
+                "only_vlm": (
+                    self._pipelineOcrEngine
+                    if isinstance(self._pipelineOcrEngine, PaddleOcrVlEngine)
+                    else PaddleOcrVlEngine(
+                        vlExtraOptions=self._structuredOcrVlExtraOptions,
+                        useProjectionTiling=(
+                            self._structuredOcrUseProjectionTiling
+                        ),
+                        maxTileHeightPixels=(
+                            self._structuredOcrMaxTileHeightPixels
+                        ),
+                        maxTileSidePixels=(
+                            self._structuredOcrMaxTileSidePixels
+                        ),
+                        tileOverlapPixels=self._structuredOcrTileOverlapPixels,
+                        allowHardCutFallback=(
+                            self._structuredOcrAllowHardCutFallback
+                        ),
+                    )
+                ),
+            }
+        downloader = ProductOcrImageDownloader()
+        imageResults: List[Dict[str, Any]] = []
+        for imageIndex, imageUrl in enumerate(selectedImageUrls, start=1):
+            try:
+                imageBytes = downloader.Download(
+                    imageUrl,
+                    self._timeoutSeconds,
+                )
+            except Exception as error:
+                imageResults.append(
+                    {
+                        "index": imageIndex,
+                        "image_url": imageUrl,
+                        "download_error": str(error),
+                        "engines": {},
+                    }
+                )
+                continue
+            engineResults = {
+                engineName: self._CompareOcrEngine(
+                    engineName,
+                    engines[engineName],
+                    imageBytes,
+                )
+                for engineName in (
+                    "only_raw_ocr",
+                    "only_pp_structure",
+                    "only_vlm",
+                )
+            }
+            engineResults["production_hybrid"] = (
+                self._BuildProductionHybridComparison(
+                    reusablePipelineResults[imageUrl]
+                )
+                if imageUrl in reusablePipelineResults
+                else self._BuildSkippedOcrComparison(
+                    "pipeline_result_unavailable",
+                )
+            )
+            imageResults.append(
+                {
+                    "index": imageIndex,
+                    "image_url": imageUrl,
+                    "image_byte_count": len(imageBytes),
+                    "engines": engineResults,
+                }
+            )
+
+        artifactPath = (
+            self._artifactRootPath
+            / ExtractProductIdFromUrl(productUrl)
+            / "ocr-comparison.json"
+        )
+        engineTotals: Dict[str, Dict[str, Any]] = {}
+        for imageResult in imageResults:
+            for engineName, engineResult in (
+                imageResult.get("engines", {}) or {}
+            ).items():
+                total = engineTotals.setdefault(
+                    engineName,
+                    {
+                        "ok_count": 0,
+                        "error_count": 0,
+                        "skipped_count": 0,
+                        "elapsed_seconds": 0.0,
+                    },
+                )
+                status = engineResult.get("status")
+                if status == "ok":
+                    total["ok_count"] += 1
+                    total["elapsed_seconds"] = round(
+                        total["elapsed_seconds"]
+                        + float(engineResult.get("elapsed_seconds") or 0.0),
+                        3,
+                    )
+                elif status == "skipped":
+                    total["skipped_count"] += 1
+                else:
+                    total["error_count"] += 1
+        comparisonData = {
+            "product_page_url": productUrl,
+            "generated_at": datetime.now().astimezone().isoformat(),
+            "comparison_modes": [
+                "only_raw_ocr",
+                "only_pp_structure",
+                "only_vlm",
+                "production_hybrid",
+            ],
+            "vl_backend": self._structuredOcrVlExtraOptions.get("vl_rec_backend"),
+            "candidate_image_count": len(imageUrls),
+            "image_count": len(imageResults),
+            "engine_totals": engineTotals,
+            "artifact_path": str(artifactPath),
+            "images": imageResults,
+        }
+        artifactPath.parent.mkdir(parents=True, exist_ok=True)
+        artifactPath.write_text(
+            json.dumps(comparisonData, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        comparisonLogger = self._Logger("_RunOcrComparison")
+        comparisonLogger.info(
+            "ocr_comparison_artifact={} engine_totals={}",
+            artifactPath,
+            engineTotals,
+        )
+        return {
+            "image_count": len(imageResults),
+            "engine_totals": engineTotals,
+            "artifact_path": str(artifactPath),
+        }
+
+    def _BuildProductionHybridComparison(
+        self,
+        imageResult: ProductOcrImageResult,
+    ) -> Dict[str, Any]:
+        structuredResult = imageResult.structuredOcr
+        text = structuredResult.text
+        tableTexts = [table.plainText for table in structuredResult.tables]
+        stageTimes = {
+            key: value
+            for key, value in imageResult.processingTimes.items()
+            if key != "download"
+        }
+        return {
+            "status": "ok",
+            "elapsed_seconds": round(sum(stageTimes.values()), 3),
+            "pipeline_stage_times": stageTimes,
+            "text_length": len(text),
+            "line_count": len(
+                [line for line in text.splitlines() if line.strip()]
+            ),
+            "table_count": len(tableTexts),
+            "text_preview": self._BuildTextPreview(
+                text,
+                self._ocrTextPreviewCharacters,
+            ),
+            "text": text,
+            "table_texts": tableTexts,
+            "warnings": list(structuredResult.warnings),
+            "fallback_reason": structuredResult.fallbackReason,
+            "table_sources": [
+                table.sourceName
+                for table in structuredResult.tables
+            ],
+            "reused_pipeline_result": True,
+            "error": None,
+        }
+
+    @staticmethod
+    def _BuildSkippedOcrComparison(reason: str) -> Dict[str, Any]:
+        return {
+            "status": "skipped",
+            "elapsed_seconds": 0.0,
+            "text_length": 0,
+            "line_count": 0,
+            "table_count": 0,
+            "text_preview": "",
+            "text": "",
+            "table_texts": [],
+            "warnings": [],
+            "error": reason,
+        }
+
+    def _CompareOcrEngine(
+        self,
+        engineName: str,
+        engine: Any,
+        imageBytes: bytes,
+    ) -> Dict[str, Any]:
+        startedAt = perf_counter()
+        text = ""
+        tableTexts: List[str] = []
+        warnings: List[str] = []
+        extra: Dict[str, Any] = {}
+        try:
+            if engineName == "only_raw_ocr":
+                text = engine.ExtractTextFromImage(imageBytes)
+            elif engineName == "only_vlm":
+                result = engine.ExtractStructuredTextFromImage(imageBytes)
+                text = result.text
+                tableTexts = [table.plainText for table in result.tables]
+                warnings = list(result.warnings)
+                extra = {
+                    "fallback_reason": result.fallbackReason,
+                    "table_sources": [table.sourceName for table in result.tables],
+                }
+            else:
+                import cv2
+                import numpy as np
+
+                image = cv2.imdecode(
+                    np.frombuffer(imageBytes, dtype=np.uint8),
+                    cv2.IMREAD_COLOR,
+                )
+                if image is None:
+                    raise ValueError("failed to decode comparison image")
+                textParts: List[str] = []
+                for result in engine.predict(image):
+                    payload = self._ReadPaddleResultPayload(result)
+                    markdownText = self._ReadPaddleMarkdownText(result)
+                    if markdownText:
+                        textParts.append(markdownText)
+                    for block in payload.get("parsing_res_list", []) or []:
+                        if not isinstance(block, dict):
+                            continue
+                        content = block.get("block_content")
+                        if not isinstance(content, str) or not content.strip():
+                            continue
+                        if not markdownText:
+                            textParts.append(content.strip())
+                        if block.get("block_label") == "table":
+                            tableTexts.append(content.strip())
+                text = "\n\n".join(textParts)
+        except Exception as error:
+            return {
+                "status": "error",
+                "elapsed_seconds": round(perf_counter() - startedAt, 3),
+                "text_length": 0,
+                "table_count": 0,
+                "text_preview": "",
+                "text": "",
+                "table_texts": [],
+                "warnings": [],
+                "error": str(error),
+            }
+        comparisonResult = {
+            "status": "ok",
+            "elapsed_seconds": round(perf_counter() - startedAt, 3),
+            "text_length": len(text),
+            "line_count": len([line for line in text.splitlines() if line.strip()]),
+            "table_count": len(tableTexts),
+            "text_preview": self._BuildTextPreview(
+                text,
+                self._ocrTextPreviewCharacters,
+            ),
+            "text": text,
+            "table_texts": tableTexts,
+            "warnings": warnings,
+            "error": None,
+        }
+        comparisonResult.update(extra)
+        return comparisonResult
+
+    @staticmethod
+    def _ReadPaddleResultPayload(result: Any) -> Dict[str, Any]:
+        jsonPayload = getattr(result, "json", None)
+        payload = jsonPayload if isinstance(jsonPayload, dict) else result
+        if not isinstance(payload, dict):
+            return {}
+        nestedPayload = payload.get("res")
+        return nestedPayload if isinstance(nestedPayload, dict) else payload
+
+    @staticmethod
+    def _ReadPaddleMarkdownText(result: Any) -> str:
+        markdown = getattr(result, "markdown", None)
+        if not isinstance(markdown, dict):
+            return ""
+        markdownText = markdown.get("markdown_texts")
+        return markdownText.strip() if isinstance(markdownText, str) else ""
 
     @staticmethod
     def _IsParseOk(
@@ -430,10 +1464,10 @@ class KurlyMarketSmokeRunner:
             noticeData["image_reference_detected"],
         )
         self._LogNoticeOptions(resultData)
-        self._LogNoticeFields(resultData)
         self._LogOcrSummary(resultData)
         self._LogInputReconstruction(resultData)
         self._LogWarningsAndErrors(resultData)
+        self._LogClassificationSmoke(resultData)
 
     def _LogPipelineSteps(self, resultData: Dict[str, Any]) -> None:
         stepLogger = self._Logger("_LogPipelineSteps")
@@ -478,26 +1512,31 @@ class KurlyMarketSmokeRunner:
             return
         reconstructionLogger.info(
             (
-                "llm_reconstruction method={} facts={} unresolved={} "
+                "llm_reconstruction method={} facts={} tables={} unresolved={} "
                 "conflicts={} used_llm={} fallback_reason={}"
             ),
             inputReconstruction.get("method"),
             len(inputReconstruction.get("facts", []) or []),
+            len(inputReconstruction.get("reconstructed_tables", []) or []),
             len(inputReconstruction.get("unresolved_facts", []) or []),
             len(inputReconstruction.get("conflicts", []) or []),
             inputReconstruction.get("used_llm_reconstruction"),
             inputReconstruction.get("fallback_reason"),
         )
-
-    def _LogNoticeFields(self, resultData: Dict[str, Any]) -> None:
-        noticeLogger = self._Logger("_LogNoticeFields")
-        noticeData = resultData["raw_collection"]["notice"]
-        for fieldRecord in noticeData.get("fields_preview", []):
-            noticeLogger.info(
-                "notice_field name={} value={} requires_ocr_fallback={}",
-                fieldRecord["field_name"],
-                fieldRecord["field_value"],
-                fieldRecord["requires_ocr_fallback"],
+        for factRecord in inputReconstruction.get("facts", []) or []:
+            reconstructionLogger.info(
+                "llm_fact field={} raw={} reconstructed={} status={}",
+                factRecord.get("field_name"),
+                factRecord.get("raw_evidence_value"),
+                factRecord.get("reconstructed_value"),
+                factRecord.get("validation_status"),
+            )
+        for tableRecord in inputReconstruction.get("reconstructed_tables", []) or []:
+            reconstructionLogger.info(
+                "llm_table name={} row_count={} source_refs={}",
+                tableRecord.get("table_name"),
+                len(tableRecord.get("rows", []) or []),
+                tableRecord.get("source_refs", []),
             )
 
     def _LogOcrSummary(self, resultData: Dict[str, Any]) -> None:
@@ -552,6 +1591,15 @@ class KurlyMarketSmokeRunner:
                     imageResult["index"],
                     warning,
                 )
+        combinedOcrText = ocrData.get("combined_ocr_text", "")
+        if combinedOcrText:
+            ocrLogger.info(
+                "combined_ocr_text_preview={}",
+                self._BuildTextPreview(
+                    combinedOcrText,
+                    self._ocrTextPreviewCharacters,
+                ),
+            )
 
     def _LogWarningsAndErrors(self, resultData: Dict[str, Any]) -> None:
         eventLogger = self._Logger("_LogWarningsAndErrors")
@@ -559,6 +1607,54 @@ class KurlyMarketSmokeRunner:
             eventLogger.warning("warning={}", warning)
         for error in resultData["errors"]:
             eventLogger.error("error={}", error)
+        uiBinding = resultData.get("ui_binding_smoke")
+        if isinstance(uiBinding, dict):
+            diagnostics = uiBinding.get("diagnostics") or {}
+            eventLogger.info(
+                "ui_binding_ready={} tables={} ingredient_rows={} nutrition_rows={} issues={}",
+                (uiBinding.get("pipeline_checks") or {}).get("ui_binding_ready"),
+                diagnostics.get("reconstructed_table_count", 0),
+                diagnostics.get("ingredient_row_count", 0),
+                diagnostics.get("nutrition_row_count", 0),
+                diagnostics.get("issues", []),
+            )
+
+    def _LogClassificationSmoke(self, resultData: Dict[str, Any]) -> None:
+        classificationData = resultData.get("classification_smoke")
+        if not isinstance(classificationData, dict):
+            return
+        classificationLogger = self._Logger("_LogClassificationSmoke")
+        status = classificationData.get("status") or {}
+        decision = classificationData.get("decision") or {}
+        traversal = classificationData.get("traversal") or {}
+        classificationLogger.info(
+            (
+                "classification_smoke error={} candidates={} zero_score={} "
+                "decision={} backtracking={} traversal={} raw_input_match={}"
+            ),
+            status.get("error"),
+            status.get("candidate_count"),
+            status.get("zero_score_candidate_codes"),
+            decision.get("decision_status"),
+            decision.get("backtracking_recommended"),
+            traversal.get("traversal_status"),
+            (classificationData.get("dash_equivalence") or {}).get(
+                "raw_input_matches_evidence_intake",
+            ),
+        )
+        for candidate in classificationData.get("candidates") or []:
+            classificationLogger.info(
+                (
+                    "classification_candidate rank={} cn8={} hs6={} "
+                    "score={} llm_recommended={} taric_branches={}"
+                ),
+                candidate.get("rank"),
+                candidate.get("cn8"),
+                candidate.get("hs6"),
+                candidate.get("score"),
+                candidate.get("llm_recommended"),
+                candidate.get("taric10_branch_count"),
+            )
 
     def _LogSummary(self, results: List[Dict[str, Any]]) -> None:
         summaryLogger = self._Logger("_LogSummary")
@@ -621,6 +1717,11 @@ class KurlyMarketSmokeRunner:
             "used_llm_reconstruction": usedLlmReconstruction,
             "fallback_reason": inputReconstruction.get("fallback_reason"),
             "facts": facts,
+            "reconstructed_tables": inputReconstruction.get(
+                "reconstructed_tables",
+                [],
+            )
+            or [],
             "unresolved_facts": unresolvedFacts,
             "conflicts": inputReconstruction.get("conflicts", []) or [],
             "fact_texts_for_classification": inputReconstruction.get(
@@ -654,15 +1755,6 @@ class KurlyMarketSmokeRunner:
         if len(text) <= maxCharacters:
             return text
         return "{0}...".format(text[:maxCharacters])
-
-    def _BuildFieldPreview(
-        self,
-        fieldRecords: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        return [
-            self._BuildFieldRecordPreview(fieldRecord)
-            for fieldRecord in fieldRecords[:self._maxLoggedFieldsPerOption]
-        ]
 
     def _BuildOptionPreview(
         self,
@@ -722,90 +1814,24 @@ class KurlyMarketSmokeRunner:
         }
 
     @staticmethod
-    def _BuildOcrImageArtifacts(
-        ocrImageResults: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        return [
-            {
-                "index": imageIndex,
-                "image_path": imageResult["image_path"],
-                "image_paths": list(
-                    imageResult.get("image_paths") or [imageResult["image_path"]]
-                ),
-                "text_length": len(imageResult["ocr_text"]),
-                "used_structured_tables": (
-                    imageResult.get("structured_ocr", {}).get(
-                        "used_structured_tables",
-                        False,
-                    )
-                    if isinstance(imageResult.get("structured_ocr"), dict)
-                    else False
-                ),
-                "structured_table_count": (
-                    len(imageResult.get("structured_ocr", {}).get("tables", []))
-                    if isinstance(imageResult.get("structured_ocr"), dict)
-                    else 0
-                ),
-                "structured_fallback_reason": (
-                    imageResult.get("structured_ocr", {}).get("fallback_reason")
-                    if isinstance(imageResult.get("structured_ocr"), dict)
-                    else None
-                ),
-                "structured_warnings": (
-                    list(imageResult.get("structured_ocr", {}).get("warnings", []))
-                    if isinstance(imageResult.get("structured_ocr"), dict)
-                    else []
-                ),
-                "raw_tile_text_count": (
-                    len(imageResult.get("structured_ocr", {}).get("raw_tile_texts", []))
-                    if isinstance(imageResult.get("structured_ocr"), dict)
-                    else 0
-                ),
-                "raw_text_length": (
-                    len(imageResult.get("structured_ocr", {}).get("raw_text", ""))
-                    if isinstance(imageResult.get("structured_ocr"), dict)
-                    else 0
-                ),
-                "text_merge_mode": (
-                    imageResult.get("structured_ocr", {}).get("text_merge_mode")
-                    if isinstance(imageResult.get("structured_ocr"), dict)
-                    else None
-                ),
-                "error": imageResult["error"],
-            }
-            for imageIndex, imageResult in enumerate(ocrImageResults, start=1)
-            if imageResult.get("image_path") is not None
-            and imageResult.get("ocr_text", "").strip() != ""
-        ]
-
-    @staticmethod
     def _ConfigureLogger() -> None:
-        logger.remove()
-        logger.level("INFO", color="<green>")
-        logger.level("WARNING", color="<yellow>")
-        logger.level("ERROR", color="<red>")
-        logger.configure(
-            extra={
-                "className": "KurlyMarketSmokeRunner",
-                "functionName": "Run",
-            }
-        )
-        logger.add(
-            sys.stderr,
-            format=(
-                "<level>[{level}]</level> "
-                "<cyan>{extra[className]}::{extra[functionName]}: {message}</cyan>"
-            ),
-            level="INFO",
-            colorize=True,
+        logging.basicConfig(
+            level=logging.INFO,
+            format="[%(levelname)s] %(message)s",
+            stream=sys.stderr,
+            force=True,
         )
 
-    def _Logger(self, functionName: str) -> Any:
-        return logger.bind(
-            className=self.__class__.__name__,
-            functionName=functionName,
-        )
+    def _Logger(self, functionName: str) -> _BoundLogger:
+        return _BoundLogger(LOGGER, self.__class__.__name__, functionName)
 
 
 if __name__ == "__main__":
-    KurlyMarketSmokeRunner().Run()
+    cliArguments = ParseArguments()
+    KurlyMarketSmokeRunner(
+        showBrowser=cliArguments.headed,
+        compareOcr=cliArguments.compare_ocr,
+        compareMaxImages=cliArguments.compare_max_images,
+        checkUiBinding=cliArguments.check_ui_binding,
+        classifyReconstruction=cliArguments.classify_reconstruction,
+    ).Run()

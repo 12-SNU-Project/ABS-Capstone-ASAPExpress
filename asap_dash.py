@@ -13,7 +13,7 @@ ASAP_ROOT = Path(
 ASAP_SRC_ROOT = ASAP_ROOT / "src"
 for searchPath in (ASAP_ROOT, ASAP_SRC_ROOT):
     if searchPath.exists() and str(searchPath) not in sys.path:
-        sys.path.insert(0, str(searchPath))
+       sys.path.insert(0, str(searchPath))
 
 from frontend import CreateDashApp
 from bussiness_logic.app_config import LoadAppConfig

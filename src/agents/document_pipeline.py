@@ -6,10 +6,12 @@ Document_Agent output that the Dash UI can render.
 """
 from __future__ import annotations
 
+from functools import lru_cache
 import hashlib
 import json
 import os
 import sys
+from threading import Lock
 import uuid
 from pathlib import Path
 from typing import Any
@@ -41,6 +43,35 @@ PIPELINE_OUTPUTS_ROOT = APP_CONFIG.paths.ResolvePath(
     PROJECT_ROOT,
     APP_CONFIG.paths.pipeline_outputs_root,
 )
+_KURLY_OCR_RUNTIME_LOCK = Lock()
+
+
+@lru_cache(maxsize=1)
+def _BuildKurlyOcrEngines() -> tuple[Any, Any]:
+    """프로세스 수명 동안 무거운 Paddle OCR 모델을 재사용한다."""
+
+    from bussiness_logic.product.ocr.paddle_ocr import PaddleOcrEngine, PaddleOcrVlEngine
+
+    smokeConfig = APP_CONFIG.kurly_smoke
+    if not smokeConfig.use_structured_ocr:
+        return PaddleOcrEngine(), None
+    return (
+        PaddleOcrVlEngine(
+            vlExtraOptions=smokeConfig.BuildStructuredOcrVlExtraOptions(),
+            useProjectionTiling=(
+                smokeConfig.structured_ocr_use_projection_tiling
+            ),
+            maxTileHeightPixels=(
+                smokeConfig.structured_ocr_max_tile_height_pixels
+            ),
+            maxTileSidePixels=smokeConfig.structured_ocr_max_tile_side_pixels,
+            tileOverlapPixels=smokeConfig.structured_ocr_tile_overlap_pixels,
+            allowHardCutFallback=(
+                smokeConfig.structured_ocr_allow_hard_cut_fallback
+            ),
+        ),
+        PaddleOcrEngine(),
+    )
 
 
 def _read_agent_runs(store: BlackboardStore) -> list[dict[str, Any]]:
@@ -59,147 +90,17 @@ def _read_agent_runs(store: BlackboardStore) -> list[dict[str, Any]]:
     return out
 
 
-def collect_kurly_url_facts(
+def build_kurly_url_facts_from_pipeline_result(
     url: str,
+    result: Any,
     *,
-    run_ocr: bool | None = None,
-    headless: bool | None = None,
-    timeout_seconds: int | None = None,
-    scroll_count: int | None = None,
-    max_ocr_images: int | None = None,
+    artifact_root: Path,
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Collect product facts from a Kurly product URL.
+    """Project a Kurly pipeline result into the exact Dash Product facts shape."""
 
-    This keeps URL/OCR intake outside the Dash callback and before
-    Evidence_Intake_Agent, so the Blackboard still starts from normalized
-    product facts.
-    """
-    from bussiness_logic.product import (
-        KurlyGlobalPageParser,
-        KurlyPageAdapter,
-        KurlyPageCollector,
-        KurlyDomesticPageParser,
-        KurlyPipelineInput,
-        KurlyProductPipeline,
-        PaddleOcrEngine,
-        PaddleStructureOcrEngine,
-    )
-    from bussiness_logic.bridge import (
-        BuildLlmRuntimeConfigFromEnv,
-        BuildRuntimeAdapter,
-        RuntimeAdapterBuildError,
-    )
-    from bussiness_logic.input_process import (
-        ProductInputAdapter,
-        ProductInputReconstructionService,
-    )
+    from bussiness_logic.input_process.product_input_adapter import ProductInputAdapter
 
-    warnings: list[str] = []
-    smoke_config = APP_CONFIG.kurly_smoke
-    run_ocr = smoke_config.run_ocr_fallback if run_ocr is None else run_ocr
-    headless = smoke_config.headless if headless is None else headless
-    timeout_seconds = (
-        smoke_config.timeout_seconds if timeout_seconds is None else timeout_seconds
-    )
-    scroll_count = smoke_config.scroll_count if scroll_count is None else scroll_count
-    max_ocr_images = (
-        smoke_config.max_ocr_image_count
-        if max_ocr_images is None
-        else max_ocr_images
-    )
-
-    pageAdapter = KurlyPageAdapter(
-        domesticParser=KurlyDomesticPageParser(),
-        globalParser=KurlyGlobalPageParser(),
-    )
-    collector = KurlyPageCollector(
-        parser=pageAdapter,
-        headless=headless,
-        timeoutMilliseconds=timeout_seconds * 1000,
-        scrollCount=scroll_count,
-    )
-    input_reconstruction_service = None
-    if smoke_config.use_input_reconstruction:
-        runtime_adapter = None
-        if smoke_config.use_llm_input_reconstruction:
-            try:
-                runtime_adapter = BuildRuntimeAdapter(
-                    BuildLlmRuntimeConfigFromEnv(projectRootPath=PROJECT_ROOT),
-                    requireAvailable=True,
-                )
-            except RuntimeAdapterBuildError as exc:
-                warnings.append(f"llm_input_reconstruction_unavailable: {exc}")
-        input_reconstruction_service = ProductInputReconstructionService(
-            dictionaryPath=(
-                str(
-                    APP_CONFIG.paths.ResolvePath(
-                        PROJECT_ROOT,
-                        smoke_config.input_dictionary_path,
-                    )
-                )
-                if smoke_config.input_dictionary_path is not None
-                else None
-            ),
-            runtimeAdapter=runtime_adapter,
-            fuzzyMinRatio=smoke_config.input_dictionary_fuzzy_min_ratio,
-            llmMaxTokens=smoke_config.llm_input_reconstruction_max_tokens,
-            llmDebugArtifactRootPath=(
-                PRODUCT_INPUT_ARTIFACT_ROOT
-                if (
-                    runtime_adapter is not None
-                    and smoke_config.write_llm_input_reconstruction_debug_artifacts
-                )
-                else None
-            ),
-        )
-
-    if run_ocr:
-        try:
-            ocr_engine = (
-                PaddleStructureOcrEngine(
-                    useProjectionTiling=(
-                        smoke_config.structured_ocr_use_projection_tiling
-                    ),
-                    maxTileHeightPixels=(
-                        smoke_config.structured_ocr_max_tile_height_pixels
-                    ),
-                    maxTileSidePixels=smoke_config.structured_ocr_max_tile_side_pixels,
-                    tileOverlapPixels=smoke_config.structured_ocr_tile_overlap_pixels,
-                    allowHardCutFallback=(
-                        smoke_config.structured_ocr_allow_hard_cut_fallback
-                    ),
-                )
-                if smoke_config.use_structured_ocr
-                else PaddleOcrEngine()
-            )
-            pipeline = KurlyProductPipeline(
-                collector=collector,
-                ocrEngine=ocr_engine,
-                inputReconstructionService=input_reconstruction_service,
-            )
-        except Exception as exc:  # noqa: BLE001
-            warnings.append(f"ocr_engine_unavailable: {exc}")
-            pipeline = KurlyProductPipeline(
-                collector=collector,
-                inputReconstructionService=input_reconstruction_service,
-            )
-            run_ocr = False
-    else:
-        pipeline = KurlyProductPipeline(
-            collector=collector,
-            inputReconstructionService=input_reconstruction_service,
-        )
-
-    artifact_root = PRODUCT_INPUT_ARTIFACT_ROOT
-    artifact_root.mkdir(parents=True, exist_ok=True)
-    result = pipeline.Run(
-        KurlyPipelineInput(
-            productPageUrl=url,
-            runOcrFallback=run_ocr,
-            artifactRootPath=artifact_root,
-            maxOcrImageCount=max_ocr_images,
-        )
-    )
     product_input = ProductInputAdapter().BuildFromObject(result)
     public_result = result.BuildPublicResult()
     source_product_page = public_result.get("source_product_page") or {}
@@ -208,7 +109,7 @@ def collect_kurly_url_facts(
     pipeline_steps = public_result.get("pipeline_steps") or []
     input_reconstruction = public_result.get("input_reconstruction") or {}
     productId = ExtractProductIdFromUrl(url)
-    productArtifactDirectory = artifact_root / productId
+    productArtifactDirectory = Path(artifact_root) / productId
     if not isinstance(source_product_page, dict):
         source_product_page = {}
     if not isinstance(collection_summary, dict):
@@ -219,12 +120,15 @@ def collect_kurly_url_facts(
         pipeline_steps = []
     if not isinstance(input_reconstruction, dict):
         input_reconstruction = {}
-    warnings.extend(
+
+    mergedWarnings = list(warnings or [])
+    mergedWarnings.extend(
         str(warning)
         for warning in public_result.get("warnings", [])
         if str(warning).strip()
     )
-    warnings = list(dict.fromkeys(warnings))
+    mergedWarnings = list(dict.fromkeys(mergedWarnings))
+
     classification_input_product_facts = (
         input_reconstruction.get("classification_input_product_facts") or []
     )
@@ -253,7 +157,7 @@ def collect_kurly_url_facts(
         "classification_input_fact_texts": classification_input_text_lines,
         "origin_country": "KR",
         "intended_use": "human consumption",
-        "warnings": warnings,
+        "warnings": mergedWarnings,
         "url_intake": {
             "artifact_root": str(productArtifactDirectory),
             "pipeline_steps": pipeline_steps,
@@ -277,6 +181,306 @@ def collect_kurly_url_facts(
     return facts
 
 
+def collect_kurly_url_facts(
+    url: str,
+    *,
+    run_ocr: bool | None = None,
+    headless: bool | None = None,
+    timeout_seconds: int | None = None,
+    scroll_count: int | None = None,
+    max_ocr_images: int | None = None,
+) -> dict[str, Any]:
+    """Collect product facts from a Kurly product URL.
+
+    This keeps URL/OCR intake outside the Dash callback and before
+    Evidence_Intake_Agent, so the Blackboard still starts from normalized
+    product facts.
+    """
+    from bussiness_logic.product.pipeline.pipeline import KurlyProductPipeline
+    from bussiness_logic.product.pipeline.pipeline_schema import KurlyPipelineInput
+    from bussiness_logic.product.web_parser.kurly_domestic import KurlyDomesticPageParser
+    from bussiness_logic.product.web_parser.kurly_global import KurlyGlobalPageParser
+    from bussiness_logic.product.web_parser.kurly_market_collector import KurlyPageCollector
+    from bussiness_logic.product.web_parser.kurly_page_adapter import KurlyPageAdapter
+
+    warnings: list[str] = []
+    smoke_config = APP_CONFIG.kurly_smoke
+    run_ocr = smoke_config.run_ocr_fallback if run_ocr is None else run_ocr
+    headless = smoke_config.headless if headless is None else headless
+    timeout_seconds = (
+        smoke_config.timeout_seconds if timeout_seconds is None else timeout_seconds
+    )
+    scroll_count = smoke_config.scroll_count if scroll_count is None else scroll_count
+    max_ocr_images = (
+        smoke_config.max_ocr_image_count
+        if max_ocr_images is None
+        else max_ocr_images
+    )
+
+    pageAdapter = KurlyPageAdapter(
+        domesticParser=KurlyDomesticPageParser(),
+        globalParser=KurlyGlobalPageParser(),
+    )
+    collector = KurlyPageCollector(
+        parser=pageAdapter,
+        headless=headless,
+        timeoutMilliseconds=timeout_seconds * 1000,
+        scrollCount=scroll_count,
+    )
+    input_reconstruction_service = _BuildInputReconstructionService(warnings)
+
+    if run_ocr:
+        try:
+            ocr_engine, screening_ocr_engine = _BuildKurlyOcrEngines()
+            pipeline = KurlyProductPipeline(
+                collector=collector,
+                ocrEngine=ocr_engine,
+                screeningOcrEngine=screening_ocr_engine,
+                inputReconstructionService=input_reconstruction_service,
+            )
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"ocr_engine_unavailable: {exc}")
+            pipeline = KurlyProductPipeline(
+                collector=collector,
+                inputReconstructionService=input_reconstruction_service,
+            )
+            run_ocr = False
+    else:
+        pipeline = KurlyProductPipeline(
+            collector=collector,
+            inputReconstructionService=input_reconstruction_service,
+        )
+
+    artifact_root = PRODUCT_INPUT_ARTIFACT_ROOT
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    pipelineInput = KurlyPipelineInput(
+        productPageUrl=url,
+        runOcrFallback=run_ocr,
+        artifactRootPath=artifact_root,
+        maxOcrImageCount=max_ocr_images,
+    )
+    if run_ocr:
+        # ponytail: 로컬 Paddle 모델은 직렬 재사용한다. 동시 처리량이 필요하면
+        # 별도 OCR worker로 옮긴다.
+        with _KURLY_OCR_RUNTIME_LOCK:
+            result = pipeline.Run(pipelineInput)
+    else:
+        result = pipeline.Run(pipelineInput)
+    return build_kurly_url_facts_from_pipeline_result(
+        url,
+        result,
+        artifact_root=artifact_root,
+        warnings=warnings,
+    )
+
+
+def rerun_cached_input_reconstruction(product_identifier: str) -> dict[str, Any]:
+    """저장된 OCR evidence request를 재사용해 LLM reconstruction만 다시 실행한다."""
+
+    from bussiness_logic.input_process.reconstruction import ProductInputEvidencePackage
+
+    warnings: list[str] = []
+    productId = ExtractProductIdFromUrl(product_identifier)
+    artifactDirectory = PRODUCT_INPUT_ARTIFACT_ROOT / productId
+    requestArtifactPath = artifactDirectory / "llm-input-reconstruction-request.json"
+    if not requestArtifactPath.exists():
+        raise FileNotFoundError(
+            "cached_llm_reconstruction_request_not_found: {0}".format(
+                requestArtifactPath,
+            )
+        )
+
+    requestArtifact = json.loads(requestArtifactPath.read_text(encoding="utf-8"))
+    requestPayload = requestArtifact.get("request") or {}
+    userPrompt = requestPayload.get("user_prompt") or requestPayload.get("userPrompt")
+    if not isinstance(userPrompt, str) or not userPrompt.strip():
+        raise ValueError("cached reconstruction request has no user_prompt.")
+    contextPayload = json.loads(userPrompt.strip().splitlines()[-1])
+    evidencePackage = ProductInputEvidencePackage.model_validate(
+        {
+            "product_page_url": (
+                requestArtifact.get("product_page_url")
+                or product_identifier
+            ),
+            "records": contextPayload.get("evidence") or [],
+        }
+    )
+
+    reconstructionService = _BuildInputReconstructionService(warnings)
+    if reconstructionService is None:
+        raise RuntimeError("input_reconstruction is disabled by app config.")
+    reconstructionResult = reconstructionService.ReconstructFromEvidencePackage(
+        evidencePackage,
+    )
+    cachedFacts = _ReadCachedProductInputFacts(artifactDirectory)
+    inputReconstruction = _BuildPublicInputReconstruction(reconstructionResult)
+    cachedFacts.update(
+        {
+            "url": (
+                cachedFacts.get("url")
+                or requestArtifact.get("product_page_url")
+                or product_identifier
+            ),
+            "source_urls": cachedFacts.get("source_urls")
+            or [requestArtifact.get("product_page_url") or product_identifier],
+            "product_id": productId,
+            "input_reconstruction": inputReconstruction,
+            "classification_input_product_facts": inputReconstruction[
+                "classification_input_product_facts"
+            ],
+            "unresolved_product_facts": inputReconstruction[
+                "unresolved_product_facts"
+            ],
+            "product_fact_conflicts": inputReconstruction["product_fact_conflicts"],
+            "classification_input_fact_texts": inputReconstruction[
+                "classification_input_fact_texts"
+            ],
+            "warnings": list(
+                dict.fromkeys(
+                    [
+                        *warnings,
+                        *cachedFacts.get("warnings", []),
+                        *inputReconstruction.get("warnings", []),
+                    ]
+                )
+            ),
+        }
+    )
+    return cachedFacts
+
+
+def _BuildInputReconstructionService(warnings: list[str]) -> Any:
+    from bussiness_logic.bridge.factory import (
+        BuildRuntimeAdapter,
+        RuntimeAdapterBuildError,
+    )
+    from bussiness_logic.bridge.selector import BuildLlmRuntimeConfigFromEnv
+    from bussiness_logic.input_process.reconstruction import (
+        ProductInputReconstructionService,
+    )
+
+    smoke_config = APP_CONFIG.kurly_smoke
+    if not smoke_config.use_input_reconstruction:
+        return None
+    runtime_adapter = None
+    if smoke_config.use_llm_input_reconstruction:
+        try:
+            runtime_adapter = BuildRuntimeAdapter(
+                BuildLlmRuntimeConfigFromEnv(projectRootPath=PROJECT_ROOT),
+                requireAvailable=True,
+            )
+        except RuntimeAdapterBuildError as exc:
+            warnings.append(f"llm_input_reconstruction_unavailable: {exc}")
+    return ProductInputReconstructionService(
+        dictionaryPath=(
+            str(
+                APP_CONFIG.paths.ResolvePath(
+                    PROJECT_ROOT,
+                    smoke_config.input_dictionary_path,
+                )
+            )
+            if smoke_config.input_dictionary_path is not None
+            else None
+        ),
+        runtimeAdapter=runtime_adapter,
+        fuzzyMinRatio=smoke_config.input_dictionary_fuzzy_min_ratio,
+        llmMaxTokens=smoke_config.llm_input_reconstruction_max_tokens,
+        llmDebugArtifactRootPath=(
+            PRODUCT_INPUT_ARTIFACT_ROOT
+            if (
+                runtime_adapter is not None
+                and smoke_config.write_llm_input_reconstruction_debug_artifacts
+            )
+            else None
+        ),
+    )
+
+
+def _ReadCachedProductInputFacts(artifactDirectory: Path) -> dict[str, Any]:
+    artifactPath = artifactDirectory / "product-input.json"
+    if not artifactPath.exists():
+        return {}
+    payload = json.loads(artifactPath.read_text(encoding="utf-8"))
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def load_cached_product_input_facts(product_identifier: str) -> dict[str, Any]:
+    """저장된 product-input.json을 읽어 downstream pipeline 입력으로 재사용한다."""
+
+    productId = ExtractProductIdFromUrl(product_identifier)
+    artifactDirectory = PRODUCT_INPUT_ARTIFACT_ROOT / productId
+    facts = _ReadCachedProductInputFacts(artifactDirectory)
+    if not facts:
+        raise FileNotFoundError(
+            "cached product-input.json not found: {0}".format(
+                artifactDirectory / "product-input.json",
+            )
+        )
+    facts.setdefault("product_id", productId)
+    if product_identifier.startswith("http"):
+        facts.setdefault("url", product_identifier)
+        facts.setdefault("source_urls", [product_identifier])
+    return facts
+
+
+def _BuildPublicInputReconstruction(reconstructionResult: Any) -> dict[str, Any]:
+    reconstructionData = reconstructionResult.model_dump(
+        mode="json",
+        by_alias=True,
+        include={
+            "productFacts",
+            "reconstructedTables",
+            "unresolvedFacts",
+            "conflicts",
+            "normalizedFactTexts",
+            "warnings",
+            "usedLlmReconstruction",
+            "fallbackReason",
+            "sourceRefLabels",
+            "sourceEvidencePreview",
+        },
+    )
+    productFacts = list(reconstructionData.get("product_facts", []))
+    reconstructedTables = list(reconstructionData.get("reconstructed_tables", []))
+    unresolvedFacts = list(reconstructionData.get("unresolved_facts", []))
+    factTexts = list(reconstructionData.get("normalized_fact_texts", []))
+    usedLlm = bool(reconstructionData.get("used_llm_reconstruction"))
+    fallbackReason = reconstructionData.get("fallback_reason")
+    return {
+        "mode": (
+            "llm_reconstruction"
+            if usedLlm
+            else "fallback_reconstruction"
+            if productFacts or factTexts
+            else "unavailable"
+        ),
+        "used_llm_reconstruction": usedLlm,
+        "fallback_reason": fallbackReason,
+        "error": (
+            fallbackReason
+            if fallbackReason
+            and fallbackReason not in {"llm_reconstruction_not_used"}
+            else None
+        ),
+        "fact_count": len(productFacts),
+        "reconstructed_table_count": len(reconstructedTables),
+        "unresolved_count": len(unresolvedFacts),
+        "conflict_count": len(reconstructionData.get("conflicts", [])),
+        "fact_text_count": len(factTexts),
+        "classification_input_product_facts": productFacts,
+        "reconstructed_tables": reconstructedTables,
+        "unresolved_product_facts": unresolvedFacts,
+        "product_fact_conflicts": list(reconstructionData.get("conflicts", [])),
+        "classification_input_fact_texts": factTexts,
+        "source_ref_labels": dict(reconstructionData.get("source_ref_labels", {})),
+        "source_evidence_preview": list(
+            reconstructionData.get("source_evidence_preview", [])
+        ),
+        "warnings": list(reconstructionData.get("warnings", [])),
+        "debug_artifact_count": len(reconstructionResult.debugArtifacts),
+    }
+
+
 def build_raw_input_from_ui(
     *,
     query: str,
@@ -285,10 +489,31 @@ def build_raw_input_from_ui(
     """Map Dash text + Product facts JSON into EvidenceIntakeAgent input."""
     facts = _normalize_product_facts(facts or {})
     url = str(facts.get("url") or "").strip()
-    if url and (
-        "kurly.com/goods/" in url
-        or "kurlyglobal.com/products/" in url
-        or "kurlyglobal.com/en/products/" in url
+    if facts.get("use_cached_product_input"):
+        productIdentifier = str(
+            facts.get("url")
+            or facts.get("product_id")
+            or query
+            or ""
+        ).strip()
+        try:
+            cachedFacts = load_cached_product_input_facts(productIdentifier)
+            merged = dict(facts)
+            for key, value in cachedFacts.items():
+                if value not in ("", [], None):
+                    merged[key] = value
+            merged["use_cached_product_input"] = True
+            facts = _normalize_product_facts(merged)
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(f"cached_product_input_not_found: {exc}") from exc
+    elif (
+        url
+        and not _HasCollectedKurlyFacts(facts)
+        and (
+            "kurly.com/goods/" in url
+            or "kurlyglobal.com/products/" in url
+            or "kurlyglobal.com/en/products/" in url
+        )
     ):
         try:
             collected = collect_kurly_url_facts(url)
@@ -348,6 +573,19 @@ def build_raw_input_from_ui(
         "url_intake": facts.get("url_intake") or {},
         "input_reconstruction": input_reconstruction,
     }
+
+
+def _HasCollectedKurlyFacts(facts: dict[str, Any]) -> bool:
+    input_reconstruction = facts.get("input_reconstruction") or {}
+    if not isinstance(input_reconstruction, dict):
+        input_reconstruction = {}
+    return bool(
+        facts.get("classification_input_product_facts")
+        or facts.get("classification_input_fact_texts")
+        or input_reconstruction.get("classification_input_product_facts")
+        or input_reconstruction.get("classification_input_fact_texts")
+        or facts.get("url_intake")
+    )
 
 
 def _normalize_product_facts(facts: dict[str, Any]) -> dict[str, Any]:

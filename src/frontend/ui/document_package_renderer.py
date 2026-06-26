@@ -44,7 +44,7 @@ def cert_color(category: str) -> str:
     if category == "preferential_origin":
         return "#166534"
     if category == "exemption_declaration":
-        return "#1d4ed8"
+        return "#6d3fd6"
     return "#475569"
 
 
@@ -205,10 +205,50 @@ def detail_card(detail: dict[str, Any], label: str, related_declarations: list[s
     )
 
 
+def _is_control_measure(req: dict[str, Any]) -> bool:
+    measure_type = req.get("measure_type") or ""
+    return any(
+        key in measure_type
+        for key in (
+            "Import control",
+            "Import restriction",
+            "Veterinary",
+            "CITES",
+            "GMO",
+            "Phytosanitary",
+            "REACH",
+        )
+    ) or any(
+        key in measure_type.lower()
+        for key in ("fishing", "luxury", "sanction", "restriction", "surveillance", "control")
+    )
+
+
+def _is_preferential_measure(req: dict[str, Any]) -> bool:
+    measure_type = req.get("measure_type") or ""
+    return any(key in measure_type for key in ("Tariff preference", "Customs Union", "Preferential"))
+
+
+def _is_duty_measure(req: dict[str, Any]) -> bool:
+    measure_type = req.get("measure_type") or ""
+    return any(key in measure_type for key in ("duty", "Duty", "Tariff", "Preference", "Preferential", "Customs Union", "Supplementary"))
+
+
+def _is_base_duty_measure(req: dict[str, Any]) -> bool:
+    if _is_preferential_measure(req):
+        return False
+    measure_type = req.get("measure_type") or ""
+    return any(key in measure_type for key in ("Third country duty", "Additional duties", "Supplementary unit", "duty", "Duty"))
+
+
+def _find_measure(measures: list[dict[str, Any]], needles: tuple[str, ...]) -> dict[str, Any] | None:
+    return next((m for m in measures if any(n in (m.get("measure_type") or "") for n in needles)), None)
+
+
 def package_context(pkg: dict[str, Any]) -> dict[str, Any]:
-    view_context = document_view_context(pkg)
-    if view_context:
-        return view_context
+    raw_context = raw_package_context(pkg)
+    if raw_context:
+        return raw_context
     return _unresolved_context(pkg)
 
 
@@ -273,41 +313,66 @@ def _documents_from_checklist(checklist: dict[str, Any]) -> list[dict[str, Any]]
     return out
 
 
-def document_view_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
-    """Use DocumentAgent's view model when a pipeline package provides it.
+def _document_counts(documents: list[dict[str, Any]], counts: dict[str, Any] | None = None) -> dict[str, Any]:
+    out = dict(counts or {})
+    out["total"] = len(documents)
+    out.setdefault("required", sum(1 for doc in documents if _doc_status(doc) == "required"))
+    out.setdefault("conditional", sum(1 for doc in documents if _doc_status(doc) == "conditional"))
+    out.setdefault("pending", sum(1 for doc in documents if _doc_status(doc) == "pending"))
+    out["with_pre_links"] = sum(1 for doc in documents if doc.get("pre_taric_links") or doc.get("pre_checks"))
+    out["with_post_links"] = sum(1 for doc in documents if doc.get("post_taric_links") or doc.get("post_requirements"))
+    return out
 
-    Pipeline detail pages are display-only consumers of Document_Agent output.
-    """
-    view = pkg.get("_document_view") or pkg.get("document_view")
-    if not isinstance(view, dict):
-        return None
-    sections = view.get("sections") or {}
-    if not isinstance(sections, dict):
-        return None
-    metrics = view.get("metrics") or {}
-    if not isinstance(metrics, dict):
-        metrics = {}
 
-    overview = sections.get("overview") or {}
-    customs = sections.get("customs_check_items") or {}
-    basic = sections.get("basic_duty") or {}
-    preferential = sections.get("preferential_evidence") or {}
-    required_docs = sections.get("required_documents") or {}
-    product = sections.get("product_regulations") or {}
-    checklist = sections.get("document_checklist") or pkg.get("checklist_summary") or {}
+def raw_package_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
+    reqs = pkg.get("requirements") or []
+    if not isinstance(reqs, list):
+        return None
+    checklist = pkg.get("checklist_summary") or {}
     if not isinstance(checklist, dict):
         checklist = {}
-    pre_taric_checks = sections.get("pre_taric_checks") or {}
 
-    reqs = pkg.get("requirements") or []
-    kr = [r for r in reqs if r.get("applies_to_korea")]
-    non_kr = [r for r in reqs if not r.get("applies_to_korea")]
-    controls = customs.get("render_bucket") or customs.get("agent_bucket") or []
-    base_duty_measures = basic.get("render_bucket") or basic.get("agent_bucket") or []
-    preferential_measures = preferential.get("render_bucket") or preferential.get("agent_bucket") or []
-    groups = required_docs.get("document_groups") or []
-    product_reqs = product.get("requirements") or []
+    kr = [r for r in reqs if isinstance(r, dict) and r.get("applies_to_korea")]
+    non_kr = [r for r in reqs if isinstance(r, dict) and not r.get("applies_to_korea")]
+    baseline_docs = checklist.get("document_binding_cards") or _documents_from_checklist(checklist)
+    counts = _document_counts(baseline_docs, checklist.get("counts") or {})
+    groups = checklist.get("document_groups") or []
 
+    controls: list[dict[str, Any]] = []
+    duties: list[dict[str, Any]] = []
+    product_reqs: list[dict[str, Any]] = []
+    product_pre: list[dict[str, Any]] = []
+    product_post: list[dict[str, Any]] = []
+    pre_taric_checks: list[dict[str, Any]] = []
+
+    for req in kr:
+        measure_type = req.get("measure_type") or ""
+        details = req.get("detailed_requirements") or []
+        if measure_type in {
+            "Baseline document requirements",
+            "Product regulatory requirements",
+            "Pre-TARIC screening requirements",
+        }:
+            if measure_type != "Baseline document requirements":
+                product_reqs.append(req)
+            for detail in details:
+                source_layer = detail.get("source_layer") or ""
+                if source_layer in {"pre_taric_gate", "chapter_route_seed"}:
+                    product_pre.append(detail)
+                    if source_layer == "pre_taric_gate":
+                        pre_taric_checks.append(detail)
+                elif source_layer == "product_domain_seed":
+                    product_post.append(detail)
+            continue
+        if _is_control_measure(req):
+            controls.append(req)
+        elif _is_duty_measure(req):
+            duties.append(req)
+        else:
+            duties.append(req)
+
+    base_duty_measures = [r for r in duties if _is_base_duty_measure(r)]
+    preferential_measures = [r for r in duties if _is_preferential_measure(r)]
     return {
         "kr": kr,
         "non_kr": non_kr,
@@ -315,30 +380,40 @@ def document_view_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
         "duties": list(base_duty_measures) + list(preferential_measures),
         "base_duty_measures": base_duty_measures,
         "preferential_measures": preferential_measures,
-        "third_country": overview.get("third_country_duty"),
-        "fta_pref": overview.get("fta_preference"),
-        "additional_duty": overview.get("additional_duty"),
+        "third_country": _find_measure(duties, ("Third country duty",)),
+        "fta_pref": _find_measure(duties, ("Tariff preference", "Customs Union")),
+        "additional_duty": _find_measure(duties, ("Additional duties",)),
         "groups": groups,
         "document_checklist": checklist,
-        "baseline_documents": _documents_from_checklist(checklist),
-        "pre_taric_checks": pre_taric_checks.get("checks") or checklist.get("pre_taric_checks") or [],
-        "counts": overview.get("counts") or {},
-        "metrics": metrics,
-        "missing": overview.get("missing_facts") or [],
+        "baseline_documents": baseline_docs,
+        "pre_taric_checks": pre_taric_checks,
+        "counts": counts,
+        "metrics": {
+            "kr_measure_count": len(kr),
+            "non_kr_measure_count": len(non_kr),
+            "control_count": len(controls),
+            "duty_count": len(duties),
+            "base_duty_count": len(base_duty_measures),
+            "preferential_count": len(preferential_measures),
+            "document_group_count": len(groups),
+            "baseline_document_count": len(baseline_docs),
+            "missing_count": len(checklist.get("missing_facts") or []),
+        },
+        "missing": checklist.get("missing_facts") or [],
         "product_reqs": product_reqs,
-        "product_pre": product.get("pre") or [],
-        "product_post": product.get("post") or [],
-        "related_declarations": product.get("related_declarations") or {},
-        "document_view": view,
-        "source": "document_view",
+        "product_pre": product_pre,
+        "product_post": product_post,
+        "related_declarations": {},
+        "source": "raw_document_package",
     }
 
 
 def render_result(pkg, panel, options):
     if not pkg:
         return "TARIC 코드를 입력하거나 좌측 예제를 선택하세요."
-    hasDocumentView = isinstance(pkg.get("document_view") or pkg.get("_document_view"), dict)
-    if not hasDocumentView and not pkg.get("has_data"):
+    if not pkg.get("has_data") and not pkg.get("requirements") and pkg.get("backtracking_signals"):
+        return render_unresolved(pkg, options or [])
+    if not pkg.get("has_data") and not pkg.get("requirements"):
         return html.Div("이 코드에 대한 현재 적용 measure가 없습니다.", className="empty")
 
     cx = package_context(pkg)
@@ -442,7 +517,7 @@ def _render_drawer_toolbar(
                 [html.Div(title), html.Div(sub, style={"fontSize": "11px", "fontWeight": 750})],
                 id={"type": "panel-btn", "panel": panelId},
                 variant="filled" if selected == panelId else "light",
-                color="blue" if panelId in DRAWER_PANEL_IDS else "gray",
+                color="violet" if panelId in DRAWER_PANEL_IDS else "gray",
                 radius="sm",
                 size="sm",
                 className="drawer-action-btn",
@@ -514,13 +589,13 @@ def render_unresolved(pkg: dict[str, Any], options: list[str]):
     children = [
         html.Div(
             [
-                html.Div("⚠ document_view missing", className="metric-label", style={"color": "#b91c1c"}),
+                html.Div("⚠ document package unresolved", className="metric-label", style={"color": "#b91c1c"}),
                 html.Div(
                     f"TARIC10 {taric10} 의 분류 결과를 받지 못했습니다.",
                     style={"fontSize": "15px", "fontWeight": 600, "marginTop": "6px"},
                 ),
                 html.Div(
-                    "DocumentAgent 가 sections 을 채우지 못했거나, direct TARIC 조회로 pipeline 을 거치지 않았습니다. 관리자에게 pipeline 재실행을 요청하세요.",
+                    "후보 분류가 미확정이거나 해당 코드에 연결 가능한 TARIC measure 패키지가 없습니다. 후보 코드와 TARIC branch를 다시 확인하세요.",
                     style={"fontSize": "13px", "color": "#475569", "marginTop": "4px"},
                 ),
             ],
@@ -1000,7 +1075,7 @@ def render_trade_scenario(pkg: dict[str, Any], cx: dict[str, Any]) -> html.Div:
                     html.Div(
                         [
                             html.Div("TARIC CODE", className="metric-label"),
-                            html.Div(pkg.get("taric10") or "-", className="metric-value", style={"color": "#1d4ed8", "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"}),
+                            html.Div(pkg.get("taric10") or "-", className="metric-value", style={"color": "#6d3fd6", "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"}),
                             html.Div(f"CN8: {pkg.get('cn8') or '-'}", className="card-meta"),
                         ],
                         className="scenario-code",
@@ -1107,7 +1182,7 @@ def render_customs(pkg: dict[str, Any], controls: list[dict[str, Any]]):
                 [
                     html.Div(
                         [
-                            html.Div(pkg.get("taric10"), className="card-title", style={"fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", "color": "#1d4ed8"}),
+                            html.Div(pkg.get("taric10"), className="card-title", style={"fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", "color": "#6d3fd6"}),
                             html.Div(f"CN8 {pkg.get('cn8')}", className="card-meta"),
                         ],
                         className="card",

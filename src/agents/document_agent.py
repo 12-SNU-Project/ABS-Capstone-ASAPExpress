@@ -3,7 +3,7 @@ Document_Agent — candidate TARIC10 branch(es) → 5-section document package,
 regulatory domain, and backtracking signals.
 
 Owned tools:
-  - DocumentPackageTool   (taric10 → raw measures/certs/duty/CELEX)
+  - document_package resolver (taric10 → raw measures/certs/duty/CELEX)
   - DomainRouterTool      (cn8 + product facts → regulatory domain)
 
 Output schema (Blackboard.document_packages, schema unconfirmed — minimal
@@ -28,10 +28,12 @@ LLM 호출 없음 — current MVP. CELEX 본문 해석/카드 생성 LLM 통합�
 """
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 from agents.agent_base import BaseAgent
-from agents.tools import DocumentPackageTool, DomainRouterTool
+from agents.document_package import get_document_package
+from agents.tools.domain_router import DomainRouterTool
 from agents.blackboard import BlackboardStore, now_iso
 
 
@@ -92,120 +94,6 @@ def _compact_text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _first_text(*values: Any) -> str:
-    for value in values:
-        text = _compact_text(value)
-        if text:
-            return text
-    return ""
-
-
-def _view_is_control_measure(req: dict[str, Any]) -> bool:
-    mt = req.get("measure_type") or ""
-    return any(
-        k in mt
-        for k in (
-            "Import control",
-            "Import restriction",
-            "Veterinary",
-            "CITES",
-            "GMO",
-            "Phytosanitary",
-            "REACH",
-        )
-    ) or any(
-        k in mt.lower()
-        for k in ("fishing", "luxury", "sanction", "restriction", "surveillance", "control")
-    )
-
-
-def _view_is_duty_measure(req: dict[str, Any]) -> bool:
-    mt = req.get("measure_type") or ""
-    return any(k in mt for k in ("duty", "Duty", "Tariff", "Preference", "Preferential", "Customs Union", "Supplementary"))
-
-
-def _view_is_preferential_measure(req: dict[str, Any]) -> bool:
-    mt = req.get("measure_type") or ""
-    return any(k in mt for k in ("Tariff preference", "Customs Union", "Preferential"))
-
-
-def _view_is_base_duty_measure(req: dict[str, Any]) -> bool:
-    mt = req.get("measure_type") or ""
-    if _view_is_preferential_measure(req):
-        return False
-    return any(k in mt for k in ("Third country duty", "Additional duties", "Supplementary unit", "duty", "Duty"))
-
-
-def _view_find_measure(measures: list[dict[str, Any]], needles: tuple[str, ...]) -> dict[str, Any] | None:
-    return next((m for m in measures if any(n in (m.get("measure_type") or "") for n in needles)), None)
-
-
-def _domain_aliases(domain: str) -> set[str]:
-    aliases = {
-        "animal_origin_food": {"animal_origin", "fishery"},
-        "animal_origin": {"animal_origin_food", "fishery"},
-        "fishery": {"animal_origin", "animal_origin_food"},
-        "cites": {"cites"},
-        "organic": {"organic", "food_feed_non_animal", "animal_origin_food"},
-        "plant_health": {"plant_health", "food_feed_non_animal"},
-        "food_feed_non_animal": {"organic", "plant_health"},
-    }
-    return {domain, *aliases.get(domain, set())} if domain else set()
-
-
-def _declaration_label(cert: dict[str, Any]) -> str:
-    code = (cert.get("code") or "").upper()
-    guidance = cert.get("guidance") or {}
-    title = _first_text(guidance.get("guidance_title"), guidance.get("certificate_description"), cert.get("description"))
-    return f"{code} {title}".strip() if title else code
-
-
-def _related_declarations_by_domain(product_reqs: list[dict[str, Any]], kr_reqs: list[dict[str, Any]]) -> dict[str, list[str]]:
-    product_domains = {
-        d.get("domain_route") or d.get("domain") or ""
-        for req in product_reqs
-        for d in (req.get("detailed_requirements") or [])
-    }
-    product_domains = {d for d in product_domains if d}
-    if not product_domains:
-        return {}
-
-    cert_by_code = {
-        (cert.get("code") or "").upper(): cert
-        for req in kr_reqs
-        for cert in (req.get("certificates") or [])
-        if cert.get("code")
-    }
-    out: dict[str, list[str]] = {domain: [] for domain in product_domains}
-    seen: set[tuple[str, str]] = set()
-    for req in kr_reqs:
-        if req.get("measure_type") == "Product regulatory requirements":
-            continue
-        for detail in req.get("detailed_requirements") or []:
-            detail_domain = detail.get("domain_route") or detail.get("domain") or ""
-            code = (detail.get("trigger_certificate_code") or "").upper()
-            cert = cert_by_code.get(code)
-            if not code or not cert:
-                continue
-            is_declaration = (
-                code.startswith("Y")
-                or cert.get("category") == "exemption_declaration"
-                or "exemption declaration" in (detail.get("required_document") or "").lower()
-            )
-            if not is_declaration:
-                continue
-            label = _declaration_label(cert)
-            for product_domain in product_domains:
-                if detail_domain not in _domain_aliases(product_domain):
-                    continue
-                key = (product_domain, label)
-                if key in seen:
-                    continue
-                seen.add(key)
-                out[product_domain].append(label)
-    return out
-
-
 # ---------------------------------------------------------------------------
 # Document_Agent
 # ---------------------------------------------------------------------------
@@ -216,7 +104,7 @@ class DocumentAgent(BaseAgent):
 
     def __init__(self, *, include_celex_excerpt: bool = False) -> None:
         super().__init__()
-        self._doc_tool = DocumentPackageTool(include_celex_excerpt=include_celex_excerpt)
+        self._include_celex_excerpt = include_celex_excerpt
         self._domain_tool = DomainRouterTool()
 
     def run(self, store: BlackboardStore) -> None:
@@ -249,9 +137,12 @@ class DocumentAgent(BaseAgent):
 
                 # 1. Raw TARIC measure package
                 try:
-                    raw = self._doc_tool.resolve(taric10=taric10)
+                    raw = asdict(get_document_package(
+                        taric10,
+                        include_celex_excerpt=self._include_celex_excerpt,
+                    ))
                 except Exception as e:  # noqa: BLE001
-                    self.reason(f"DocumentPackageTool error for {taric10}: {e}")
+                    self.reason(f"document package resolver error for {taric10}: {e}")
                     self._emit_unresolved_package(store, cand_for_target, reason=f"tool_error: {e}")
                     continue
 
@@ -261,7 +152,7 @@ class DocumentAgent(BaseAgent):
                     f"goods_code_10={taric10}",
                     snippet=f"{raw.get('total_measure_rows')} measure rows / "
                             f"{len(requirements_raw)} requirement groups",
-                    reason="DocumentPackageTool source.",
+                    reason="document package resolver source.",
                 )
 
                 # 2. Regulatory domain (fast-path)
@@ -279,16 +170,6 @@ class DocumentAgent(BaseAgent):
                 required_documents = self._extract_required_documents(requirements_raw)
                 product_regulations = self._build_product_regulations(dom)
                 basic_duty = self._pick_basic_duty(duties, raw)
-                document_view = self._build_document_view(
-                    raw=raw,
-                    dom=dom,
-                    customs=customs,
-                    duties=duties,
-                    preferential=preferential,
-                    required_documents=required_documents,
-                    product_regulations=product_regulations,
-                    basic_duty=basic_duty,
-                )
 
                 # 4. CELEX basis (collect all legal bases referenced)
                 celex_basis = self._collect_celex(requirements_raw)
@@ -305,6 +186,7 @@ class DocumentAgent(BaseAgent):
 
                 dp_id = store.next_id("dp")
                 dp = {
+                    **self._public_raw_package_fields(raw),
                     "object_type": "DocumentPackage",
                     "created_by": self.agent_name,
                     "created_at": now_iso(),
@@ -323,8 +205,6 @@ class DocumentAgent(BaseAgent):
                     "preferential_evidence": preferential,
                     "required_documents": required_documents,
                     "product_regulations": product_regulations,
-                    "document_view": document_view,
-                    "raw_document_package": raw,
 
                     "missing_facts": missing_facts,
                     "external_lookup": self._suggest_external(dom),
@@ -336,7 +216,6 @@ class DocumentAgent(BaseAgent):
                         "main_requirements": [d["title"] for d in required_documents[:5]],
                         "domains": dom.domains,
                         "unknowns": list(missing_facts),
-                        "view_counts": document_view.get("metrics") or {},
                     },
                     "conflicts": [],
                 }
@@ -351,7 +230,7 @@ class DocumentAgent(BaseAgent):
                     f"DocumentPackage {dp_id} for cand={cand['candidate_id']} "
                     f"({taric10}, {branch_label}): customs={len(customs)} duties={len(duties)} "
                     f"pref={len(preferential)} reqs={len(required_documents)} "
-                    f"product_rules={document_view.get('metrics', {}).get('product_rule_count', 0)} "
+                    f"product_rules={len(product_regulations)} "
                     f"domains={dom.domains}"
                     + (f" backtrack={len(backtracking)}" if backtracking else "")
                 )
@@ -387,120 +266,12 @@ class DocumentAgent(BaseAgent):
             target["branch_count"] = count
         return targets
 
-    def _split_requirements_for_view(
-        self,
-        raw: dict[str, Any],
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-        reqs = raw.get("requirements") or []
-        kr = [r for r in reqs if r.get("applies_to_korea")]
-        non_kr = [r for r in reqs if not r.get("applies_to_korea")]
-        controls: list[dict[str, Any]] = []
-        duties: list[dict[str, Any]] = []
-        for req in kr:
-            if req.get("measure_type") == "Product regulatory requirements":
-                continue
-            if _view_is_control_measure(req):
-                controls.append(req)
-            elif _view_is_duty_measure(req):
-                duties.append(req)
-            else:
-                duties.append(req)
-        return kr, non_kr, controls, duties
-
-    def _build_document_view(
-        self,
-        *,
-        raw: dict[str, Any],
-        dom,
-        customs: list[dict],
-        duties: list[dict],
-        preferential: list[dict],
-        required_documents: list[dict],
-        product_regulations: list[dict],
-        basic_duty: dict,
-    ) -> dict[str, Any]:
-        """Render-independent document package view model.
-
-        This mirrors the newer Dash bucketing logic, but keeps it in the
-        Document_Agent so the UI can eventually become display-only.
-        """
-        kr, non_kr, view_controls, view_duties = self._split_requirements_for_view(raw)
-        product_reqs = [r for r in kr if r.get("measure_type") == "Product regulatory requirements"]
-        product_details = [
-            detail
-            for req in product_reqs
-            for detail in (req.get("detailed_requirements") or [])
-        ]
-        pre_details = [d for d in product_details if d.get("source_layer") == "chapter_route_seed"]
-        post_details = [d for d in product_details if d.get("source_layer") == "product_domain_seed"]
-        related_declarations = _related_declarations_by_domain(product_reqs, kr)
-
-        third_country = _view_find_measure(view_duties, ("Third country duty",))
-        fta_pref = _view_find_measure(view_duties, ("Tariff preference", "Customs Union"))
-        additional_duty = _view_find_measure(view_duties, ("Additional duties",))
-        base_duty_measures = [r for r in view_duties if _view_is_base_duty_measure(r)]
-        preferential_measures = [r for r in view_duties if _view_is_preferential_measure(r)]
-
-        checklist = raw.get("checklist_summary") or {}
-        document_groups = checklist.get("document_groups") or []
-        missing = raw.get("missing_facts") or checklist.get("missing_facts") or []
-
+    @staticmethod
+    def _public_raw_package_fields(raw: dict[str, Any]) -> dict[str, Any]:
         return {
-            "source": "DocumentAgent.document_view.v1",
-            "taric10": raw.get("taric10"),
-            "cn8": raw.get("cn8"),
-            "total_measure_rows": raw.get("total_measure_rows"),
-            "domains": list(getattr(dom, "domains", []) or []),
-            "domain_confidence": getattr(dom, "confidence", None),
-            "metrics": {
-                "kr_measure_count": len(kr),
-                "non_kr_measure_count": len(non_kr),
-                "control_count": len(view_controls),
-                "duty_count": len(view_duties),
-                "base_duty_count": len(base_duty_measures),
-                "preferential_count": len(preferential_measures),
-                "document_group_count": len(document_groups),
-                "required_document_count": len(required_documents),
-                "product_rule_count": len(product_details),
-                "product_pre_count": len(pre_details),
-                "product_post_count": len(post_details),
-                "missing_count": len(missing),
-            },
-            "sections": {
-                "overview": {
-                    "counts": checklist.get("counts") or {},
-                    "missing_facts": missing,
-                    "third_country_duty": third_country,
-                    "fta_preference": fta_pref,
-                    "additional_duty": additional_duty,
-                    "basic_duty": basic_duty,
-                },
-                "customs_check_items": {
-                    "agent_bucket": customs,
-                    "render_bucket": view_controls,
-                },
-                "basic_duty": {
-                    "agent_bucket": duties,
-                    "render_bucket": base_duty_measures,
-                    "selected": basic_duty,
-                },
-                "preferential_evidence": {
-                    "agent_bucket": preferential,
-                    "render_bucket": preferential_measures,
-                },
-                "required_documents": {
-                    "agent_bucket": required_documents,
-                    "document_groups": document_groups,
-                },
-                "document_checklist": checklist,
-                "product_regulations": {
-                    "agent_bucket": product_regulations,
-                    "requirements": product_reqs,
-                    "pre": pre_details,
-                    "post": post_details,
-                    "related_declarations": related_declarations,
-                },
-            },
+            key: value
+            for key, value in raw.items()
+            if key not in {"object_type", "created_by", "created_at", "document_package_id", "candidate_id"}
         }
 
     def _bucket_requirements(self, raw_requirements: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
@@ -676,20 +447,9 @@ class DocumentAgent(BaseAgent):
             "preferential_evidence": [],
             "required_documents": [],
             "product_regulations": [],
-            "document_view": {
-                "source": "DocumentAgent.document_view.v1",
-                "taric10": cand.get("taric10"),
-                "cn8": cand.get("cn8"),
-                "metrics": {
-                    "kr_measure_count": 0,
-                    "control_count": 0,
-                    "duty_count": 0,
-                    "document_group_count": 0,
-                    "product_rule_count": 0,
-                    "missing_count": 1,
-                },
-                "sections": {},
-            },
+            "has_data": False,
+            "requirements": [],
+            "checklist_summary": {},
             "missing_facts": ["candidate_unresolved"],
             "external_lookup": [],
             "celex_basis": [],
