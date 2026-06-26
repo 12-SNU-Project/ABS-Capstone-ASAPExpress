@@ -268,6 +268,17 @@ def _CompactFacts(facts: list[Any]) -> list[dict[str, Any]]:
     return compactFacts
 
 
+def _IngredientFacts(facts: list[Any]) -> list[dict[str, Any]]:
+    return [
+        dict(fact)
+        for fact in facts
+        if (
+            isinstance(fact, Mapping)
+            and _ContainsMarker(fact.get("field_name"), INGREDIENT_MARKERS)
+        )
+    ]
+
+
 def _BuildCurrentReconstructionDrawerBinding(
     inputProcessingView: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -321,6 +332,10 @@ def _BuildPipelineChecks(
         if isinstance(record, Mapping)
     ]
     binding = _BuildCurrentReconstructionDrawerBinding(inputProcessingView)
+    hasBoundFacts = bool(
+        binding.get("classification_input_facts")
+        or binding.get("unresolved_input_facts")
+    )
     return {
         "url_collection": bool(urlIntake),
         "ocr_image_count": (
@@ -332,7 +347,7 @@ def _BuildPipelineChecks(
         "has_raw_ocr_evidence": "raw_ocr_tile" in sourceTypes,
         "has_vlm_evidence": any(sourceType in VLM_SOURCE_TYPES for sourceType in sourceTypes),
         "used_llm_reconstruction": bool(status.get("used_llm_reconstruction")),
-        "ui_binding_ready": bool(binding.get("reconstructed_tables")),
+        "ui_binding_ready": bool(binding.get("reconstructed_tables") or hasBoundFacts),
     }
 
 
@@ -341,10 +356,16 @@ def _BuildUiBindingDiagnostics(
 ) -> dict[str, Any]:
     reconstructedTables = inputProcessingView.get("reconstructed_detail_tables") or []
     evidenceRows = inputProcessingView.get("detail_evidence_rows") or []
+    productFacts = inputProcessingView.get("classification_input_facts") or []
+    unresolvedFacts = inputProcessingView.get("unresolved_input_facts") or []
     if not isinstance(reconstructedTables, list):
         reconstructedTables = []
     if not isinstance(evidenceRows, list):
         evidenceRows = []
+    if not isinstance(productFacts, list):
+        productFacts = []
+    if not isinstance(unresolvedFacts, list):
+        unresolvedFacts = []
 
     sourceTypeCounts = Counter(
         str(record.get("source_type") or "")
@@ -361,6 +382,7 @@ def _BuildUiBindingDiagnostics(
     rowCount = 0
     nutritionRowCount = 0
     ingredientRowCount = 0
+    ingredientFacts = _IngredientFacts([*productFacts, *unresolvedFacts])
 
     for table in reconstructedTables:
         if not isinstance(table, Mapping):
@@ -417,8 +439,8 @@ def _BuildUiBindingDiagnostics(
         issues.append("no_reconstructed_tables")
     if nutritionRowCount == 0:
         issues.append("no_nutrition_rows_in_reconstructed_tables")
-    if ingredientRowCount == 0:
-        issues.append("no_ingredient_rows_in_reconstructed_tables")
+    if ingredientRowCount == 0 and not ingredientFacts:
+        issues.append("no_ingredient_binding_rows")
     if blankNormalizedRows:
         issues.append("blank_normalized_rows")
     if skeletonRows:
@@ -432,9 +454,11 @@ def _BuildUiBindingDiagnostics(
         "nutrition_row_count": nutritionRowCount,
         "ingredient_table_count": len(ingredientTables),
         "ingredient_row_count": ingredientRowCount,
+        "ingredient_fact_count": len(ingredientFacts),
         "per_table_summary": perTableSummary,
         "nutrition_tables": nutritionTables,
         "ingredient_tables": ingredientTables,
+        "ingredient_facts": _CompactFacts(ingredientFacts)[:8],
         "blank_raw_rows": blankRawRows,
         "blank_normalized_rows": blankNormalizedRows,
         "vlm_skeleton_rows": skeletonRows,

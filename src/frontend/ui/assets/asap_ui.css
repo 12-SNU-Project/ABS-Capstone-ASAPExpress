@@ -990,10 +990,10 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-auto-rows: 82px;
   row-gap: 10px;
-  column-gap: 25px;
-  width: 74%;
+  column-gap: 20%;
+  width: 80%;
   margin-inline: auto;
-  padding: 10px 14px 14px;
+  padding: 10px 14px 28px;
 }
 
 .candidate-result-card-wrap {
@@ -1062,13 +1062,6 @@
   -webkit-mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent);
   mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent);
   scrollbar-width: none;
-}
-
-.candidate-result-card-wrap:nth-child(odd) .candidate-branch-menu {
-  inset-inline-start: auto;
-  inset-inline-end: 100%;
-  margin-inline-start: 0;
-  margin-inline-end: 2%;
 }
 
 .candidate-branch-menu::-webkit-scrollbar {
@@ -1409,13 +1402,6 @@
   .candidate-result-card-grid {
     grid-template-columns: 1fr;
     width: 100%;
-  }
-
-  .candidate-result-card-wrap:nth-child(odd) .candidate-branch-menu {
-    inset-inline-start: 100%;
-    inset-inline-end: auto;
-    margin-inline-start: 2%;
-    margin-inline-end: 0;
   }
 }
 

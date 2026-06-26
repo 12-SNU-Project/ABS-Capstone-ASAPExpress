@@ -383,6 +383,25 @@ def _ReadCachedProductInputFacts(artifactDirectory: Path) -> dict[str, Any]:
     return dict(payload) if isinstance(payload, dict) else {}
 
 
+def load_cached_product_input_facts(product_identifier: str) -> dict[str, Any]:
+    """저장된 product-input.json을 읽어 downstream pipeline 입력으로 재사용한다."""
+
+    productId = ExtractProductIdFromUrl(product_identifier)
+    artifactDirectory = PRODUCT_INPUT_ARTIFACT_ROOT / productId
+    facts = _ReadCachedProductInputFacts(artifactDirectory)
+    if not facts:
+        raise FileNotFoundError(
+            "cached product-input.json not found: {0}".format(
+                artifactDirectory / "product-input.json",
+            )
+        )
+    facts.setdefault("product_id", productId)
+    if product_identifier.startswith("http"):
+        facts.setdefault("url", product_identifier)
+        facts.setdefault("source_urls", [product_identifier])
+    return facts
+
+
 def _BuildPublicInputReconstruction(reconstructionResult: Any) -> dict[str, Any]:
     reconstructionData = reconstructionResult.model_dump(
         mode="json",
@@ -449,7 +468,24 @@ def build_raw_input_from_ui(
     """Map Dash text + Product facts JSON into EvidenceIntakeAgent input."""
     facts = _normalize_product_facts(facts or {})
     url = str(facts.get("url") or "").strip()
-    if url and (
+    if facts.get("use_cached_product_input"):
+        productIdentifier = str(
+            facts.get("url")
+            or facts.get("product_id")
+            or query
+            or ""
+        ).strip()
+        try:
+            cachedFacts = load_cached_product_input_facts(productIdentifier)
+            merged = dict(facts)
+            for key, value in cachedFacts.items():
+                if value not in ("", [], None):
+                    merged[key] = value
+            merged["use_cached_product_input"] = True
+            facts = _normalize_product_facts(merged)
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(f"cached_product_input_not_found: {exc}") from exc
+    elif url and (
         "kurly.com/goods/" in url
         or "kurlyglobal.com/products/" in url
         or "kurlyglobal.com/en/products/" in url
