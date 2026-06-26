@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from typing import Any
+import json
 
 from agents import _external_classifier as externalClassifier
 
@@ -97,3 +98,38 @@ def test_external_classifier_runs_one_bounded_backtracking_round(
     assert roundCalls == [["19021910"], ["19022010"]]
     assert [candidate.hs8 for candidate in result.candidates] == ["19022010"]
     assert result.error is None
+
+
+def test_unreviewed_candidate_defaults_to_insufficient_information() -> None:
+    productInput = SimpleNamespace(
+        productName="fixture pasta",
+        productDomain="food",
+        domainScopes=["food"],
+        structuredProductFacts=[],
+        unresolvedProductFacts=[],
+        productFactConflicts=[],
+        normalizedOcrFactTexts=[],
+        BuildSearchText=lambda: "fixture pasta",
+    )
+    expanded = json.loads(
+        externalClassifier._expand_compact_decision_to_stage1_json(
+            {
+                "selected_hs8": "19023090",
+                "candidate_reviews": [
+                    {
+                        "hs8": "19023090",
+                        "status": "strong_candidate",
+                    }
+                ],
+            },
+            productInput,
+            [_Candidate("19023090"), _Candidate("19022010")],
+        )
+    )
+
+    reviews = {
+        review["hs8"]: review["status"]
+        for review in expanded["classification_result"]["candidate_reviews"]
+    }
+    assert reviews["19023090"] == "strong_candidate"
+    assert reviews["19022010"] == "insufficient_information"

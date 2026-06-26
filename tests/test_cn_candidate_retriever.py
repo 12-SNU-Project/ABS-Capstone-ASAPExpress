@@ -159,7 +159,7 @@ class SemanticHintIndex(CnSemanticCandidateIndex):
         )
 
 
-def test_semantic_hint_uses_same_beam_without_adding_to_static_score() -> None:
+def test_semantic_hint_does_not_surface_zero_score_candidate() -> None:
     config = HierarchyBeamConfig(
         hs2PerParent=1,
         hs4PerParent=1,
@@ -185,6 +185,4 @@ def test_semantic_hint_uses_same_beam_without_adding_to_static_score() -> None:
         finalCandidateLimit=1,
     )
 
-    assert [candidate.hs8 for candidate in candidates] == ["19021910"]
-    assert candidates[0].score == 0
-    assert candidates[0].retrievalSources == ["heuristic", "semantic"]
+    assert candidates == []
