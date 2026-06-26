@@ -1308,30 +1308,6 @@ def input_processing_detail_card(
     )
 
 
-def input_processing_view_card(
-    input_processing_view: dict[str, Any] | None,
-    *,
-    drawerMode: str | bool | None = None,
-) -> html.Div | None:
-    if not isinstance(input_processing_view, dict) or not input_processing_view:
-        return None
-
-    basicInfo = input_processing_view.get("page_product_facts") or {}
-    if not isinstance(basicInfo, dict):
-        basicInfo = {}
-    basicPanel = _product_page_basic_card(basicInfo)
-    detailDrawer = input_processing_detail_drawer(input_processing_view, drawerMode)
-    panels = [panel for panel in [basicPanel, detailDrawer] if panel is not None]
-    if not panels:
-        return None
-    return html.Div(
-        panels,
-        style={
-            "marginBottom": "20px",
-        },
-    )
-
-
 def input_processing_detail_drawer(
     input_processing_view: dict[str, Any],
     drawerMode: str | bool | None,
@@ -1424,7 +1400,6 @@ def render_input_form(
                 value=facts.get("description") or "",
                 style={"display": "none"},
             ),
-            html.Div("새 분석 생성", className="input-launch-title"),
             html.Div(
                 [
                     html.Div(
@@ -1457,6 +1432,16 @@ def render_input_form(
                                 n_clicks=0,
                                 disabled=runDisabled,
                                 className="run-pipeline-button input-launch-button",
+                            ),
+                            html.Button(
+                                "캐시 실행",
+                                id="btn-run-cached-input",
+                                n_clicks=0,
+                                disabled=runDisabled,
+                                className=(
+                                    "run-pipeline-button input-launch-button "
+                                    "input-cache-button"
+                                ),
                             ),
                             html.Button(
                                 "재복원",
@@ -1849,8 +1834,6 @@ def render_candidate_cards(result: dict[str, Any]) -> html.Div:
 
     cards: list[Any] = []
     packagesByTaric = _document_packages_by_taric(result)
-    maxScore = max((_candidate_total_score(cand) for cand in candidates if isinstance(cand, dict)), default=0.0)
-    candidateCount = len(candidates)
 
     for displayRank, cand in enumerate(candidates, start=1):
         if not isinstance(cand, dict):
@@ -1859,8 +1842,6 @@ def render_candidate_cards(result: dict[str, Any]) -> html.Div:
             _candidate_result_card(
                 cand,
                 displayRank=displayRank,
-                candidateCount=candidateCount,
-                maxScore=maxScore,
                 packagesByTaric=packagesByTaric,
                 interactive=True,
                 jobStatus=result.get("job_status"),
@@ -1891,8 +1872,6 @@ def _candidate_result_card(
     candidate: dict[str, Any],
     *,
     displayRank: int,
-    candidateCount: int,
-    maxScore: float,
     packagesByTaric: dict[str, list[dict[str, Any]]],
     interactive: bool,
     jobStatus: Any = None,
@@ -1904,7 +1883,6 @@ def _candidate_result_card(
         for branch in branchList
         if _document_packages_for_taric(packagesByTaric, branch.get("taric10"))
     )
-    scoreRatio = _candidate_score_ratio(candidate, displayRank, candidateCount, maxScore)
     isLinkingDocument = jobStatus in {"queued", "running"} and linkedBranchCount < len(branchList)
     linkedPackageCounts = [
         _document_package_counts(packages[0])
@@ -1915,11 +1893,13 @@ def _candidate_result_card(
     requiredCount = sum(counts["required"] for counts in linkedPackageCounts)
     checkCount = sum(counts["customs"] + counts["regulations"] for counts in linkedPackageCounts)
     missingCount = sum(counts["missing"] for counts in linkedPackageCounts)
+    candidateKey = _candidate_key(candidate, displayRank)
+    displayCode = _candidate_card_display_code(candidate)
     children = [
         html.Div(
             [
-                html.Div(className="candidate-dashboard-folder", title="문서 패키지"),
-                html.Div(f"{round(scoreRatio * 100)}%", className="candidate-dashboard-score"),
+                html.Span(className="document-icon candidate-dashboard-document-icon", title="문서 패키지"),
+                html.Div("연결 중", className="candidate-linking-badge") if isLinkingDocument else None,
             ],
             className="candidate-dashboard-side",
         ),
@@ -1927,26 +1907,14 @@ def _candidate_result_card(
             [
                 html.Div(
                     [
-                        html.Div(candidate.get("taric10") or candidate.get("cn8") or "-", className="candidate-card-code"),
+                        html.Div(displayCode, className="candidate-card-code"),
                         html.Span(_candidate_theme_label(candidate), className=f"candidate-card-badge {themeClass}"),
                     ],
                     className="candidate-card-top",
                 ),
                 html.Div(
-                    _candidate_hierarchy_text(candidate),
-                    className="candidate-card-route",
-                    title=_candidate_hierarchy_text(candidate),
-                ),
-                html.Div(
-                    _candidate_score_segments(scoreRatio),
-                    className="candidate-card-score-bars",
-                    title=f"score ratio {scoreRatio:.2f}",
-                ),
-                html.Div(
                     [
-                        html.Span(f"CN8 {candidate.get('cn8') or '-'} · branch {len(branchList)} · "),
-                        html.Span(className="document-icon", title="문서"),
-                        html.Span(f" {linkedBranchCount}", className="candidate-card-doc-count"),
+                        html.Span(f"branch {len(branchList)} · 문서 {linkedBranchCount}"),
                     ],
                     className="candidate-card-meta",
                 ),
@@ -1966,16 +1934,50 @@ def _candidate_result_card(
     className = f"candidate-result-card {themeClass}" + (" linking" if isLinkingDocument else "")
     if not interactive:
         return html.Div(children, className=f"{className} static")
-    return html.Button(
-        children,
-        id={
-            "type": "candidate-result-card",
-            "candidate": _candidate_key(candidate, displayRank),
-        },
-        type="button",
-        n_clicks=0,
-        className=className,
+    return html.Details(
+        [
+            html.Summary(
+                html.Div(children, className=className),
+                className="candidate-result-summary",
+            ),
+            _candidate_branch_flyout_menu(branchList, candidateKey),
+        ],
+        className="candidate-result-card-wrap",
     )
+
+
+def _candidate_branch_flyout_menu(
+    branchList: list[dict[str, Any]],
+    candidateKey: str,
+) -> html.Div | None:
+    if not branchList:
+        return None
+    return html.Div(
+        [
+            html.Button(
+                _clean_code(branch.get("taric10")) or "-",
+                id={
+                    "type": "taric-branch-package-row",
+                    "candidate": candidateKey,
+                    "taric10": _clean_code(branch.get("taric10")),
+                },
+                type="button",
+                n_clicks=0,
+                className="candidate-branch-menu-button",
+                title=str(branch.get("branch_description") or ""),
+            )
+            for branch in branchList
+        ],
+        className="candidate-branch-menu",
+    )
+
+
+def _candidate_card_display_code(candidate: dict[str, Any]) -> str:
+    cn8 = _clean_code(candidate.get("cn8"))
+    if cn8:
+        return f"CN8 {cn8}"
+    taric10 = _clean_code(candidate.get("taric10"))
+    return f"TARIC {taric10}" if taric10 else "-"
 
 
 def _candidate_branch_list(candidate: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1993,6 +1995,7 @@ def _candidate_branch_list(candidate: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _document_packages_by_taric(result: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     packagesByTaric: dict[str, list[dict[str, Any]]] = {}
+    seenPackageKeys: set[tuple[str, str]] = set()
     documentPackages = list(result.get("document_packages") or [])
     primaryDocumentPackage = result.get("document_package")
     if isinstance(primaryDocumentPackage, dict):
@@ -2004,8 +2007,16 @@ def _document_packages_by_taric(result: dict[str, Any]) -> dict[str, list[dict[s
         packageKeys = {packageTaric, _clean_code(packageTaric)}
         for packageKey in packageKeys:
             if packageKey:
+                seenKey = (packageKey, _document_package_identity(package))
+                if seenKey in seenPackageKeys:
+                    continue
+                seenPackageKeys.add(seenKey)
                 packagesByTaric.setdefault(packageKey, []).append(package)
     return packagesByTaric
+
+
+def _document_package_identity(package: dict[str, Any]) -> str:
+    return str(package.get("document_package_id") or _clean_code(package.get("taric10")) or id(package))
 
 
 def _document_packages_for_taric(
@@ -2027,38 +2038,6 @@ def _candidate_key(candidate: dict[str, Any], displayRank: int) -> str:
         or candidate.get("cn8")
         or displayRank
     )
-
-
-def _candidate_total_score(candidate: dict[str, Any]) -> float:
-    tree = candidate.get("candidate_static_tree") or {}
-    if not isinstance(tree, dict):
-        return 0.0
-    try:
-        return float(tree.get("total_score") or 0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _candidate_score_ratio(
-    candidate: dict[str, Any],
-    displayRank: int,
-    candidateCount: int,
-    maxScore: float,
-) -> float:
-    score = _candidate_total_score(candidate)
-    if maxScore > 0 and score > 0:
-        return max(0.12, min(1.0, score / maxScore))
-    if candidateCount <= 1:
-        return 1.0
-    return max(0.12, 1.0 - ((displayRank - 1) / candidateCount))
-
-
-def _candidate_score_segments(scoreRatio: float, segmentCount: int = 8) -> list[html.Span]:
-    filled = max(1, min(segmentCount, round(scoreRatio * segmentCount)))
-    return [
-        html.Span(className=f"candidate-card-score-segment {'filled' if index < filled else ''}".strip())
-        for index in range(segmentCount)
-    ]
 
 
 def _candidate_hierarchy_text(candidate: dict[str, Any]) -> str:
@@ -2732,7 +2711,7 @@ def _candidate_merged_node(node: dict[str, Any]) -> html.Div:
 
 def classification_result_drawer(
     result: dict[str, Any],
-    drawerOpened: bool | str | None,
+    drawerOpened: bool | str | dict[str, Any] | None,
 ) -> html.Div | None:
     candidateSet = result.get("candidate_code_set") or {}
     candidates = candidateSet.get("candidates") if isinstance(candidateSet, dict) else []
@@ -2742,13 +2721,18 @@ def classification_result_drawer(
         isinstance(candidateSet, dict) and candidateSet.get("classification_status")
     ):
         return None
-    selectedKey = str(drawerOpened) if isinstance(drawerOpened, str) else ""
+    selectedKey, selectedTaric10 = _drawer_candidate_selection(drawerOpened)
     selectedCandidate = _selected_candidate(
         [candidate for candidate in candidates if isinstance(candidate, dict)],
         selectedKey,
     )
     drawerBody = (
-        _taric_candidate_detail_panel(selectedCandidate, result)
+        _taric_candidate_detail_panel(
+            selectedCandidate,
+            result,
+            selectedTaric10=selectedTaric10,
+            selectedKey=selectedKey,
+        )
         if selectedCandidate
         else _classification_result_panel(candidateSet, candidates[:5])
         if candidates
@@ -2792,6 +2776,16 @@ def classification_result_drawer(
     )
 
 
+def _drawer_candidate_selection(
+    drawerOpened: bool | str | dict[str, Any] | None,
+) -> tuple[str, str]:
+    if isinstance(drawerOpened, dict):
+        return str(drawerOpened.get("candidate") or ""), _clean_code(drawerOpened.get("taric10"))
+    if isinstance(drawerOpened, str):
+        return drawerOpened, ""
+    return "", ""
+
+
 def _classification_result_panel(
     candidateSet: dict[str, Any],
     candidates: list[Any],
@@ -2826,29 +2820,135 @@ def _selected_candidate(
 def _taric_candidate_detail_panel(
     candidate: dict[str, Any],
     result: dict[str, Any],
+    *,
+    selectedTaric10: str = "",
+    selectedKey: str = "",
 ) -> html.Div:
-    taric10, package = _selected_document_package(candidate, result)
+    branchPackages = _candidate_branch_document_packages(candidate, result)
+    taric10, package = _selected_branch_package(
+        branchPackages,
+        selectedTaric10=selectedTaric10,
+        fallbackTaric=_clean_code(candidate.get("taric10")),
+    )
     jobStatus = result.get("job_status")
-    isConnecting = not package and jobStatus in {"queued", "running"}
+    isConnecting = jobStatus in {"queued", "running"} and package is None
     return html.Div(
-        _embedded_document_package_panel(taric10, package, isConnecting),
+        [
+            _candidate_branch_package_list(
+                branchPackages,
+                jobStatus,
+                selectedTaric10=taric10,
+                selectedKey=selectedKey or _candidate_key(candidate, 1),
+            ),
+            _embedded_document_package_panel(taric10, package, isConnecting),
+        ],
         className="taric-candidate-detail",
     )
 
 
-def _selected_document_package(
+def _selected_branch_package(
+    branchPackages: list[tuple[str, dict[str, Any] | None]],
+    *,
+    selectedTaric10: str,
+    fallbackTaric: str,
+) -> tuple[str, dict[str, Any] | None]:
+    if selectedTaric10:
+        selected = next(
+            ((taric10, package) for taric10, package in branchPackages if taric10 == selectedTaric10),
+            None,
+        )
+        if selected:
+            return selected
+    return next(
+        ((branchTaric, branchPackage) for branchTaric, branchPackage in branchPackages if branchPackage),
+        branchPackages[0] if branchPackages else (fallbackTaric, None),
+    )
+
+
+def _candidate_branch_document_packages(
     candidate: dict[str, Any],
     result: dict[str, Any],
-) -> tuple[str, dict[str, Any] | None]:
+) -> list[tuple[str, dict[str, Any] | None]]:
     branchList = _candidate_branch_list(candidate)
     packagesByTaric = _document_packages_by_taric(result)
+    branchPackages: list[tuple[str, dict[str, Any] | None]] = []
+    seenTaricCodes: set[str] = set()
     for branch in branchList:
         taric10 = _clean_code(branch.get("taric10"))
+        if not taric10 or taric10 in seenTaricCodes:
+            continue
+        seenTaricCodes.add(taric10)
         packages = _document_packages_for_taric(packagesByTaric, branch.get("taric10"))
-        if packages and isinstance(packages[0], dict):
-            return taric10, packages[0]
+        package = packages[0] if packages and isinstance(packages[0], dict) else None
+        branchPackages.append((taric10, package))
     fallbackTaric = _clean_code(candidate.get("taric10"))
-    return fallbackTaric, None
+    return branchPackages or ([(fallbackTaric, None)] if fallbackTaric else [])
+
+
+def _candidate_branch_package_list(
+    branchPackages: list[tuple[str, dict[str, Any] | None]],
+    jobStatus: Any,
+    *,
+    selectedTaric10: str,
+    selectedKey: str,
+) -> html.Div | None:
+    if not branchPackages:
+        return None
+    isRunning = jobStatus in {"queued", "running"}
+    return html.Div(
+        [
+            html.Div("TARIC branch 후보", className="candidate-tree-section-title"),
+            html.Div(
+                [
+                    _candidate_branch_package_row(
+                        taric10,
+                        package,
+                        isRunning,
+                        selected=taric10 == selectedTaric10,
+                        selectedKey=selectedKey,
+                    )
+                    for taric10, package in branchPackages
+                ],
+                className="taric-branch-package-list",
+            ),
+        ],
+        className="taric-branch-package-panel",
+    )
+
+
+def _candidate_branch_package_row(
+    taric10: str,
+    package: dict[str, Any] | None,
+    isRunning: bool,
+    *,
+    selected: bool,
+    selectedKey: str,
+) -> html.Button:
+    counts = _document_package_counts(package) if package else {}
+    status = "연결됨" if package else "연결 중" if isRunning else "미연결"
+    return html.Button(
+        [
+            html.Div(taric10 or "-", className="taric-branch-package-code"),
+            html.Div(status, className=f"taric-branch-package-status {'linked' if package else 'pending'}"),
+            html.Div(
+                (
+                    f"서류 {counts.get('required', 0)} · 확인 {counts.get('customs', 0) + counts.get('regulations', 0)} · "
+                    f"미확인 {counts.get('missing', 0)}"
+                    if package
+                    else "문서 패키지 대기"
+                ),
+                className="taric-branch-package-meta",
+            ),
+        ],
+        id={
+            "type": "taric-branch-package-row",
+            "candidate": selectedKey,
+            "taric10": taric10,
+        },
+        type="button",
+        n_clicks=0,
+        className=f"taric-branch-package-row {'selected' if selected else ''}".strip(),
+    )
 
 
 def _embedded_document_package_panel(
@@ -2972,12 +3072,14 @@ def render_page(
     *,
     input_detail_drawer_mode: str | bool | None = None,
     candidate_tree_drawer_open: bool = False,
-    classification_result_drawer_open: bool | str | None = False,
+    classification_result_drawer_open: bool | str | dict[str, Any] | None = False,
 ) -> html.Div:
     result = result or {}
-    inputProcessingView = input_processing_view_card(
-        result.get("input_processing_view"),
-        drawerMode=input_detail_drawer_mode,
+    inputProcessingSource = result.get("input_processing_view")
+    inputProcessingDrawer = (
+        input_processing_detail_drawer(inputProcessingSource, input_detail_drawer_mode)
+        if isinstance(inputProcessingSource, dict) and inputProcessingSource
+        else None
     )
     candidateTreeDrawer = candidate_tree_drawer(result, candidate_tree_drawer_open)
     classificationResultDrawer = classification_result_drawer(
@@ -2992,12 +3094,11 @@ def render_page(
     return html.Div(
         [
             render_input_form(requestFacts, runDisabled=runDisabled),
-            html.Div("입력 수집/복원 결과", style=LABEL) if inputProcessingView else None,
-            inputProcessingView,
             html.Div("진행 상태", style=LABEL),
             html.Div(render_progress(result), id="out-progress"),
             html.Div("분류 결과", style={**LABEL, "marginTop": "22px"}),
             html.Div(render_candidate_cards(result) if result else html.Div("분류 결과가 여기에 표시됩니다.", style=PLACEHOLDER), id="out-classification"),
+            inputProcessingDrawer,
             candidateTreeDrawer,
             classificationResultDrawer,
             html.Div("최종 결정", style={**LABEL, "marginTop": "22px"}),

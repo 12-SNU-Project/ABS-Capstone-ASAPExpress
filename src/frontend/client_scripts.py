@@ -1,9 +1,9 @@
 """Clientside Dash callback scripts."""
 
 RUN_CREATE_CALLBACK = """
-async function(nClicks, rerunClicks, productName, description, kurlyUrl, currentRunId, resultData, apiBaseUrl) {
+async function(nClicks, rerunClicks, cachedRunClicks, productName, description, kurlyUrl, currentRunId, resultData, apiBaseUrl) {
     const dc = window.dash_clientside || dash_clientside;
-    if (!nClicks && !rerunClicks) {
+    if (!nClicks && !rerunClicks && !cachedRunClicks) {
         return [dc.no_update, dc.no_update];
     }
     const triggered = (
@@ -12,8 +12,10 @@ async function(nClicks, rerunClicks, productName, description, kurlyUrl, current
         dc.callback_context.triggered.length
     ) ? dc.callback_context.triggered[0].prop_id : "";
     const reconstructionOnly = triggered.indexOf("btn-rerun-reconstruction.") === 0;
+    const cachedRunOnly = triggered.indexOf("btn-run-cached-input.") === 0;
     if (
         !reconstructionOnly &&
+        !cachedRunOnly &&
         currentRunId &&
         resultData &&
         resultData.job_id === currentRunId &&
@@ -64,6 +66,114 @@ async function(nClicks, rerunClicks, productName, description, kurlyUrl, current
         window.asapPipelineSse = null;
     }
     resetRunViews();
+
+    if (cachedRunOnly) {
+        const cachedIdentifier = facts.url || clean(previousFacts.product_id);
+        if (!cachedIdentifier) {
+            setStore({
+                job_id: null,
+                job_status: "failed",
+                request: {query: query, facts: facts},
+                error: "캐시 실행에는 URL 또는 product_id가 필요합니다.",
+                events: [{
+                    stage: "Cached_Run",
+                    status: "failed",
+                    message: "캐시 실행에는 URL 또는 product_id가 필요합니다."
+                }]
+            });
+            return [dc.no_update, "/classification"];
+        }
+        if (!backendBaseUrl) {
+            setStore({
+                job_id: null,
+                job_status: "failed",
+                request: {query: query, facts: facts},
+                error: "Backend API URL이 설정되지 않았습니다.",
+                events: [{
+                    stage: "Cached_Run",
+                    status: "failed",
+                    message: "Backend API URL이 설정되지 않았습니다."
+                }]
+            });
+            return [dc.no_update, "/classification"];
+        }
+        if (dc.set_props) {
+            dc.set_props("btn-run-cached-input", {disabled: true});
+        }
+        const cachedProductId = clean(previousFacts.product_id) || clean(facts.product_id);
+        const cachedFacts = Object.assign({}, facts, {
+            use_cached_product_input: true
+        });
+        if (cachedProductId) {
+            cachedFacts.product_id = cachedProductId;
+        }
+        setStore({
+            job_id: null,
+            job_status: "submitting",
+            request: {query: query || cachedIdentifier, facts: cachedFacts},
+            events: [{
+                stage: "Cached_Run",
+                status: "submitting",
+                message: "저장된 입력 복원 결과로 분류/문서 파이프라인을 실행합니다."
+            }]
+        });
+        try {
+            const response = await fetch(`${backendBaseUrl}/api/runs`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    query: query || cachedIdentifier,
+                    product_name: nextProductName,
+                    description: nextDescription,
+                    url: facts.url,
+                    facts: cachedFacts
+                })
+            });
+            const payload = await response.json();
+            if (!response.ok) {
+                throw new Error(payload.message || payload.error || "cached_pipeline_run_failed");
+            }
+            const queuedResult = {
+                job_id: payload.job_id,
+                job_status: payload.status || "queued",
+                request: {query: query || cachedIdentifier, facts: cachedFacts},
+                events: [{
+                    stage: "Cached_Run",
+                    status: payload.status || "queued",
+                    message: payload.reused ? "기존 실행 중인 작업에 연결했습니다." : "캐시 입력 기반 작업이 등록되었습니다."
+                }]
+            };
+            setStore(queuedResult);
+
+            try {
+                const snapshotUrl = new URL(payload.result_url, `${backendBaseUrl}/`).toString();
+                const snapshotResponse = await fetch(snapshotUrl);
+                if (snapshotResponse.ok) {
+                    setStore(await snapshotResponse.json());
+                }
+            } catch (snapshotError) {
+                // queuedResult is already enough to render initial progress.
+            }
+            return [payload.job_id, "/classification"];
+        } catch (error) {
+            setStore({
+                job_id: null,
+                job_status: "failed",
+                request: {query: query || cachedIdentifier, facts: cachedFacts},
+                error: String(error && error.message ? error.message : error),
+                events: [{
+                    stage: "Cached_Run",
+                    status: "failed",
+                    message: String(error && error.message ? error.message : error)
+                }]
+            });
+            return [dc.no_update, "/classification"];
+        } finally {
+            if (dc.set_props) {
+                dc.set_props("btn-run-cached-input", {disabled: false});
+            }
+        }
+    }
 
     if (reconstructionOnly) {
         const cachedIdentifier = facts.url || clean(previousFacts.product_id);

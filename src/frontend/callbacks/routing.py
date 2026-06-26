@@ -31,7 +31,7 @@ def RegisterRoutingCallbacks(
         document_panel: str | None,
         input_detail_drawer_mode: str | bool | None,
         candidate_tree_drawer_open: bool | None,
-        classification_result_drawer_open: bool | None,
+        classification_result_drawer_open: bool | str | dict[str, Any] | None,
     ) -> Any:
         parts = SplitPath(pathname)
         if not parts:

@@ -50,7 +50,6 @@ def RenderTopbar(
                     href="/classification",
                     className="app-topbar-logo-link",
                 ),
-                html.Span("회원 서비스", className="app-topbar-service"),
             ],
             className="app-topbar-brand",
         ),
