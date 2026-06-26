@@ -1170,8 +1170,10 @@ def input_processing_detail_card(
     if not isinstance(sourceLabels, dict):
         sourceLabels = {}
     reconstructionMode = status.get("mode") or "unknown"
-    reconstructionError = status.get("error")
-    fallbackReason = status.get("fallback_reason")
+    reconstructionNotice = _input_reconstruction_notice(
+        input_processing_view,
+        status,
+    )
     ingredientComparePanel = _reconstruction_option_compare_widget(
         _ingredient_fact_compare_sections([*productFacts, *unresolvedFacts]),
     )
@@ -1252,17 +1254,17 @@ def input_processing_detail_card(
             ),
             html.Div(
                 [
-                    html.Div("Input reconstruction issue", className="drawer-notice-title"),
                     html.Div(
-                        reconstructionError or fallbackReason or "fallback reconstruction is being used",
+                        reconstructionNotice["title"],
+                        className="drawer-notice-title",
+                    ),
+                    html.Div(
+                        reconstructionNotice["message"],
                         className="drawer-notice-text",
                     ),
                 ],
-                className="drawer-notice warning",
-            ) if reconstructionError or (
-                fallbackReason
-                and not status.get("used_llm_reconstruction")
-            ) else None,
+                className=f"drawer-notice {reconstructionNotice['kind']}",
+            ) if reconstructionNotice else None,
             ingredientComparePanel,
             afterPanel,
             _reconstruction_fact_table(
@@ -1657,6 +1659,54 @@ def _event_status(events: list[Any], stageNames: set[str]) -> str:
     return str(matched[-1].get("status") or "idle")
 
 
+def _has_classification_input(inputView: dict[str, Any]) -> bool:
+    facts = inputView.get("classification_input_facts")
+    textLines = inputView.get("classification_input_text_lines")
+    return bool(
+        (isinstance(facts, list) and facts)
+        or (isinstance(textLines, list) and textLines)
+    )
+
+
+def _input_reconstruction_notice(
+    inputView: dict[str, Any],
+    reconstructionStatus: dict[str, Any],
+) -> dict[str, str] | None:
+    error = str(reconstructionStatus.get("error") or "").strip()
+    if error:
+        return {
+            "kind": "danger",
+            "title": "입력 복원 중단",
+            "message": error,
+        }
+    if inputView and not _has_classification_input(inputView):
+        return {
+            "kind": "danger",
+            "title": "분류 입력 없음",
+            "message": (
+                "상품 상세 이미지, OCR 텍스트, 페이지 정보에서 "
+                "분류 가능한 입력을 찾지 못했습니다."
+            ),
+        }
+    fallbackReason = str(reconstructionStatus.get("fallback_reason") or "").strip()
+    if fallbackReason:
+        return {
+            "kind": "warning",
+            "title": "입력 복원 fallback",
+            "message": fallbackReason,
+        }
+    return None
+
+
+def _pipeline_notify_label(status: str) -> str:
+    return {
+        "completed": "완료됨",
+        "warning": "주의",
+        "failed": "중단",
+        "skipped": "건너뜀",
+    }.get(status, "")
+
+
 def _pipeline_step_statuses(result: dict[str, Any]) -> dict[str, dict[str, str]]:
     events = result.get("events") or []
     if not isinstance(events, list):
@@ -1684,22 +1734,34 @@ def _pipeline_step_statuses(result: dict[str, Any]) -> dict[str, dict[str, str]]
     if collectStatus == "idle" and jobStatus in {"queued", "running"}:
         collectStatus = "running"
 
+    reconstructionNotice = _input_reconstruction_notice(inputView, reconstructionStatus)
+
     reconstructStatus = "idle"
-    if reconstructionStatus.get("error"):
+    if reconstructionNotice and reconstructionNotice["kind"] == "danger":
         reconstructStatus = "failed"
+    elif reconstructionNotice:
+        reconstructStatus = "warning"
     elif inputView:
         reconstructStatus = "completed"
     elif collectStatus == "completed" and jobStatus in {"queued", "running"}:
         reconstructStatus = "running"
 
     candidateEventStatus = _event_status(events, {"Classification_Agent", "Classification"})
-    candidateStatus = "completed" if candidates else candidateEventStatus
-    if candidateStatus == "idle" and reconstructStatus == "completed" and jobStatus in {"queued", "running"}:
+    hasClassificationStatus = bool(candidateSet.get("classification_status"))
+    classificationUnresolved = hasClassificationStatus and not candidates
+    if reconstructStatus == "failed":
+        candidateStatus = "skipped"
+    elif classificationUnresolved:
+        candidateStatus = "failed"
+    else:
+        candidateStatus = "completed" if candidates else candidateEventStatus
+    if candidateStatus == "idle" and reconstructStatus in {"completed", "warning"} and jobStatus in {"queued", "running"}:
         candidateStatus = "running"
 
-    hasClassificationStatus = bool(candidateSet.get("classification_status"))
     validationStatus = "idle"
-    if candidateEventStatus == "failed":
+    if reconstructStatus == "failed" or classificationUnresolved:
+        validationStatus = "skipped"
+    elif candidateEventStatus == "failed":
         validationStatus = "failed"
     elif candidateEventStatus == "completed" and candidates:
         validationStatus = "completed"
@@ -1719,7 +1781,10 @@ def _pipeline_step_statuses(result: dict[str, Any]) -> dict[str, dict[str, str]]
         "reconstruct": {
             "status": reconstructStatus,
             "detail": "PaddleOCR-VL 표/OCR 결과를 구조화하고 LLM reconstruction 반영",
-            "meta": _progress_reconstruction_meta(reconstructionStatus),
+            "meta": _progress_reconstruction_meta(
+                reconstructionStatus,
+                reconstructionNotice,
+            ),
         },
         "candidate": {
             "status": candidateStatus,
@@ -1748,11 +1813,18 @@ def _progress_collect_meta(inputView: dict[str, Any]) -> str:
     return "waiting for input"
 
 
-def _progress_reconstruction_meta(reconstructionStatus: dict[str, Any]) -> str:
+def _progress_reconstruction_meta(
+    reconstructionStatus: dict[str, Any],
+    reconstructionNotice: dict[str, str] | None,
+) -> str:
+    if reconstructionNotice:
+        return reconstructionNotice["message"][:80]
     if not reconstructionStatus:
         return "waiting"
     if reconstructionStatus.get("error"):
         return str(reconstructionStatus.get("error") or "failed")[:80]
+    if reconstructionStatus.get("fallback_reason"):
+        return str(reconstructionStatus.get("fallback_reason") or "fallback")[:80]
     mode = reconstructionStatus.get("mode") or "unknown"
     llm = "LLM on" if reconstructionStatus.get("used_llm_reconstruction") else "LLM off"
     tableCount = reconstructionStatus.get("detail_table_count") or 0
@@ -1789,10 +1861,10 @@ def render_progress(result: dict[str, Any]) -> html.Div:
                             ),
                             html.Div(step["title"], className="pipeline-step-title"),
                             html.Div(
-                                "완료됨",
+                                _pipeline_notify_label(state["status"]),
                                 className=f"pipeline-step-notify {state['status']}",
                             )
-                            if state["status"] == "completed"
+                            if _pipeline_notify_label(state["status"])
                             else None,
                         ],
                         id={"type": "pipeline-step-card", "step": step["key"]},
@@ -1807,7 +1879,7 @@ def render_progress(result: dict[str, Any]) -> html.Div:
                                     "candidate",
                                     "validation",
                                 }
-                                and state["status"] == "completed"
+                                and state["status"] in {"completed", "warning", "failed"}
                                 else ""
                             )
                         ),

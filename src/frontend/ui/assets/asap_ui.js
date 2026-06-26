@@ -42,12 +42,49 @@
     window.setTimeout(function () {
       menu.removeAttribute("open");
       delete menu.dataset.closing;
-    }, 380);
+    }, 680);
+  }
+
+  function openMenu(menu) {
+    if (!menu) {
+      return;
+    }
+    delete menu.dataset.closing;
+    menu.setAttribute("open", "");
+    window.setTimeout(function () {
+      updateWheel(menu);
+    }, 0);
+  }
+
+  function replayMenu(menu) {
+    if (!menu) {
+      return;
+    }
+    menu.removeAttribute("open");
+    delete menu.dataset.closing;
+    window.requestAnimationFrame(function () {
+      openMenu(menu);
+    });
   }
 
   document.addEventListener("click", function (event) {
     const openMenus = document.querySelectorAll(".candidate-result-card-wrap[open]");
     const currentMenu = event.target.closest(".candidate-result-card-wrap");
+    const clickedSummary = event.target.closest(".candidate-result-summary");
+    if (clickedSummary && currentMenu) {
+      event.preventDefault();
+      openMenus.forEach(function (menu) {
+        if (menu !== currentMenu) {
+          closeMenu(menu);
+        }
+      });
+      if (currentMenu.hasAttribute("open")) {
+        replayMenu(currentMenu);
+      } else {
+        openMenu(currentMenu);
+      }
+      return;
+    }
     openMenus.forEach(function (menu) {
       if (menu !== currentMenu) {
         closeMenu(menu);

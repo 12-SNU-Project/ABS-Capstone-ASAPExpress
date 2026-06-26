@@ -762,6 +762,20 @@ def run_document_pipeline(
         )
         if not result.success:
             break
+        latestCandidateCodeSet = partial.get("candidate_code_set")
+        if (
+            agent.agent_name == "Classification_Agent"
+            and isinstance(latestCandidateCodeSet, dict)
+            and latestCandidateCodeSet.get("classification_status")
+            and not latestCandidateCodeSet.get("candidates")
+        ):
+            emit(
+                "Document_Agent",
+                "skipped",
+                message="분류 후보가 없어 문서 추천을 건너뜁니다.",
+                partial_result=partial,
+            )
+            break
 
     bb = store.load()
     document_package = (bb.get("document_packages") or [None])[-1]

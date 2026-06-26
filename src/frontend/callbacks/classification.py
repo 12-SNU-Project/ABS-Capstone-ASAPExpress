@@ -73,7 +73,7 @@ def _resolve_classification_drawer_state(
 
     step = triggered.get("step")
     stepStates = classification_dash.pipeline_step_statuses(resultData)
-    if stepStates.get(step, {}).get("status") != "completed":
+    if stepStates.get(step, {}).get("status") not in {"completed", "warning", "failed"}:
         return (no_update, no_update, no_update)
 
     if step in {"collect", "reconstruct"}:
