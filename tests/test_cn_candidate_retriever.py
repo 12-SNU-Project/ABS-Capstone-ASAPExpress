@@ -111,6 +111,58 @@ def test_static_terms_match_basic_singular_plural_variants() -> None:
     assert candidates[0].hs4Code == "2103"
 
 
+def test_url_only_input_does_not_surface_generic_candidates() -> None:
+    retriever = _Retriever([
+        _Row("19", "1902", "190220", "19022099", "products pasta"),
+    ])
+    productInput = ProductClassificationInput(
+        productName="https://www.kurlyglobal.com/products/m00000056840?",
+        shortDescription="Korean food, ramen, meal kits, and groceries.",
+        productDomain="food",
+        domainScopes=["food"],
+    )
+
+    assert retriever.FindCandidates(productInput, topK=5) == []
+
+
+def test_low_value_meal_word_does_not_score_mustard_candidate() -> None:
+    retriever = _Retriever([
+        _Row("21", "2103", "210330", "21033010", "mustard flour meal"),
+    ])
+
+    assert retriever.FindCandidates(_Product("산채나물 비빔밥"), topK=5) == []
+
+
+def test_unknown_hard_condition_does_not_promote_generic_include_match() -> None:
+    plainPasta = _Row("19", "1902", "190219", "19021910", "pasta")
+    cookedStuffed = _Row("19", "1902", "190220", "19022091", "pasta")
+    cookedStuffed["include_rule_keywords"] = "pre-cooked pasta; pasta"
+    cookedStuffed["hard_conditions"] = "cooked"
+    retriever = _Retriever([plainPasta, cookedStuffed])
+
+    candidates = retriever.FindCandidates(_Product("우동"), topK=5)
+
+    assert candidates[0].hs8 == "19021910"
+    assert all(
+        candidate.includeRuleMatches == []
+        for candidate in candidates
+        if candidate.hs8 == "19022091"
+    )
+
+
+def test_preferred_heading_keeps_parent_hs2_in_beam() -> None:
+    riceCandidate = _Row("19", "1905", "190590", "19059020", "rice")
+    bibimbapCandidate = _Row("21", "2106", "210690", "21069098", "food")
+    bibimbapCandidate["heading_keywords"] = "food"
+    bibimbapCandidate["subheading_keywords"] = ""
+    bibimbapCandidate["cn_keywords"] = "비빔밥"
+    retriever = _Retriever([riceCandidate, bibimbapCandidate])
+
+    candidates = retriever.FindCandidates(_Product("산채나물 비빔밥"), topK=1)
+
+    assert candidates[0].hs8 == "21069098"
+
+
 def test_quantitative_hard_condition_remains_unknown_without_structured_proof() -> None:
     row = _Row("21", "2103", "210390", "21039090", "salt sauce")
     row["hard_conditions"] = "at least 5 g/l of salt"
