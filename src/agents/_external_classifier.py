@@ -280,9 +280,12 @@ def _build_compact_decision_request(
         "classification_input_text_lines_json is OCR/detail-text evidence, not a substitute for structured facts.",
         "Do not infer facts that are not explicitly present in classification_input_facts_json.",
         "Use product type, physical form, processing state, storage state, ingredients, composition ratios, content weight, and origin facts when they are explicit.",
+        "Use unlikely_candidate only when reconstructed product facts clearly contradict the candidate, or when the candidate requires an explicit essential condition that is absent from reconstructed facts.",
+        "Do not mark a candidate as unlikely only because another candidate scores higher.",
+        "If quantity, percentage, processing state, or composition condition is missing, use insufficient_information instead of unlikely_candidate.",
         "If a fact line appears contradictory or looks like OCR/reconstruction noise, mark the affected candidate as possible_candidate or insufficient_information instead of forcing a strong_candidate.",
         "Allowed status values: strong_candidate, possible_candidate, unlikely_candidate, insufficient_information.",
-        "Review the strongest few candidates; unreviewed candidates will be filled deterministically as unlikely/insufficient.",
+        "Review the strongest few candidates; unreviewed candidates will be filled deterministically as insufficient_information.",
         "product_name: {0}".format(product_input.productName or "unknown"),
         "product_domain: {0}".format(product_input.productDomain),
         "classification_input_text_line_count: {0}".format(
@@ -466,12 +469,10 @@ def _expand_compact_decision_to_stage1_json(
             status = _normalize_compact_status(
                 compact_review.get("status") or "strong_candidate"
             )
-            if status in {"unlikely_candidate", "insufficient_information"}:
-                status = "possible_candidate"
         elif compact_review:
             status = _normalize_compact_status(compact_review.get("status"))
         else:
-            status = "unlikely_candidate" if selected_hs8 else "insufficient_information"
+            status = "insufficient_information"
 
         supporting = _list_of_strings(compact_review.get("supporting_product_facts"))
         conflicts = _list_of_strings(compact_review.get("conflicting_or_exclusion_facts"))

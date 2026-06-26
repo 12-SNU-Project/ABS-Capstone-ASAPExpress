@@ -90,6 +90,97 @@ def _read_agent_runs(store: BlackboardStore) -> list[dict[str, Any]]:
     return out
 
 
+def build_kurly_url_facts_from_pipeline_result(
+    url: str,
+    result: Any,
+    *,
+    artifact_root: Path,
+    warnings: list[str] | None = None,
+) -> dict[str, Any]:
+    """Project a Kurly pipeline result into the exact Dash Product facts shape."""
+
+    from bussiness_logic.input_process.product_input_adapter import ProductInputAdapter
+
+    product_input = ProductInputAdapter().BuildFromObject(result)
+    public_result = result.BuildPublicResult()
+    source_product_page = public_result.get("source_product_page") or {}
+    collection_summary = public_result.get("collection") or {}
+    ocr_summary = public_result.get("ocr") or {}
+    pipeline_steps = public_result.get("pipeline_steps") or []
+    input_reconstruction = public_result.get("input_reconstruction") or {}
+    productId = ExtractProductIdFromUrl(url)
+    productArtifactDirectory = Path(artifact_root) / productId
+    if not isinstance(source_product_page, dict):
+        source_product_page = {}
+    if not isinstance(collection_summary, dict):
+        collection_summary = {}
+    if not isinstance(ocr_summary, dict):
+        ocr_summary = {}
+    if not isinstance(pipeline_steps, list):
+        pipeline_steps = []
+    if not isinstance(input_reconstruction, dict):
+        input_reconstruction = {}
+
+    mergedWarnings = list(warnings or [])
+    mergedWarnings.extend(
+        str(warning)
+        for warning in public_result.get("warnings", [])
+        if str(warning).strip()
+    )
+    mergedWarnings = list(dict.fromkeys(mergedWarnings))
+
+    classification_input_product_facts = (
+        input_reconstruction.get("classification_input_product_facts") or []
+    )
+    unresolved_product_facts = (
+        input_reconstruction.get("unresolved_product_facts") or []
+    )
+    product_fact_conflicts = (
+        input_reconstruction.get("product_fact_conflicts") or []
+    )
+    classification_input_text_lines = (
+        input_reconstruction.get("classification_input_fact_texts") or []
+    )
+    facts = {
+        "url": url,
+        "source_urls": [url],
+        "product_id": productId,
+        "product_name": product_input.productName or "",
+        "description": product_input.shortDescription or product_input.productNoticeText or "",
+        "short_description": product_input.shortDescription or "",
+        "product_domain": product_input.productDomain or "unknown",
+        "source_product_page": source_product_page,
+        "ocr_text": [product_input.ocrText] if product_input.ocrText else [],
+        "classification_input_product_facts": classification_input_product_facts,
+        "unresolved_product_facts": unresolved_product_facts,
+        "product_fact_conflicts": product_fact_conflicts,
+        "classification_input_fact_texts": classification_input_text_lines,
+        "origin_country": "KR",
+        "intended_use": "human consumption",
+        "warnings": mergedWarnings,
+        "url_intake": {
+            "artifact_root": str(productArtifactDirectory),
+            "pipeline_steps": pipeline_steps,
+            "collection": collection_summary,
+            "ocr": ocr_summary,
+            "ocr_image_count": ocr_summary.get("image_result_count", 0),
+            "combined_ocr_text_length": ocr_summary.get("combined_text_length", 0),
+            "parse_warning_count": collection_summary.get("warning_count", 0),
+        },
+        "input_reconstruction": input_reconstruction,
+    }
+    productArtifactDirectory.mkdir(parents=True, exist_ok=True)
+    productInputArtifactPath = productArtifactDirectory / "product-input.json"
+    facts["url_intake"]["product_input_artifact"] = str(productInputArtifactPath)
+    temporaryArtifactPath = productInputArtifactPath.with_suffix(".json.tmp")
+    temporaryArtifactPath.write_text(
+        json.dumps(facts, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temporaryArtifactPath.replace(productInputArtifactPath)
+    return facts
+
+
 def collect_kurly_url_facts(
     url: str,
     *,
@@ -105,7 +196,6 @@ def collect_kurly_url_facts(
     Evidence_Intake_Agent, so the Blackboard still starts from normalized
     product facts.
     """
-    from bussiness_logic.input_process.product_input_adapter import ProductInputAdapter
     from bussiness_logic.product.pipeline.pipeline import KurlyProductPipeline
     from bussiness_logic.product.pipeline.pipeline_schema import KurlyPipelineInput
     from bussiness_logic.product.web_parser.kurly_domestic import KurlyDomesticPageParser
@@ -176,81 +266,12 @@ def collect_kurly_url_facts(
             result = pipeline.Run(pipelineInput)
     else:
         result = pipeline.Run(pipelineInput)
-    product_input = ProductInputAdapter().BuildFromObject(result)
-    public_result = result.BuildPublicResult()
-    source_product_page = public_result.get("source_product_page") or {}
-    collection_summary = public_result.get("collection") or {}
-    ocr_summary = public_result.get("ocr") or {}
-    pipeline_steps = public_result.get("pipeline_steps") or []
-    input_reconstruction = public_result.get("input_reconstruction") or {}
-    productId = ExtractProductIdFromUrl(url)
-    productArtifactDirectory = artifact_root / productId
-    if not isinstance(source_product_page, dict):
-        source_product_page = {}
-    if not isinstance(collection_summary, dict):
-        collection_summary = {}
-    if not isinstance(ocr_summary, dict):
-        ocr_summary = {}
-    if not isinstance(pipeline_steps, list):
-        pipeline_steps = []
-    if not isinstance(input_reconstruction, dict):
-        input_reconstruction = {}
-    warnings.extend(
-        str(warning)
-        for warning in public_result.get("warnings", [])
-        if str(warning).strip()
+    return build_kurly_url_facts_from_pipeline_result(
+        url,
+        result,
+        artifact_root=artifact_root,
+        warnings=warnings,
     )
-    warnings = list(dict.fromkeys(warnings))
-    classification_input_product_facts = (
-        input_reconstruction.get("classification_input_product_facts") or []
-    )
-    unresolved_product_facts = (
-        input_reconstruction.get("unresolved_product_facts") or []
-    )
-    product_fact_conflicts = (
-        input_reconstruction.get("product_fact_conflicts") or []
-    )
-    classification_input_text_lines = (
-        input_reconstruction.get("classification_input_fact_texts") or []
-    )
-    facts = {
-        "url": url,
-        "source_urls": [url],
-        "product_id": productId,
-        "product_name": product_input.productName or "",
-        "description": product_input.shortDescription or product_input.productNoticeText or "",
-        "short_description": product_input.shortDescription or "",
-        "product_domain": product_input.productDomain or "unknown",
-        "source_product_page": source_product_page,
-        "ocr_text": [product_input.ocrText] if product_input.ocrText else [],
-        "classification_input_product_facts": classification_input_product_facts,
-        "unresolved_product_facts": unresolved_product_facts,
-        "product_fact_conflicts": product_fact_conflicts,
-        "classification_input_fact_texts": classification_input_text_lines,
-        "origin_country": "KR",
-        "intended_use": "human consumption",
-        "warnings": warnings,
-        "url_intake": {
-            "artifact_root": str(productArtifactDirectory),
-            "pipeline_steps": pipeline_steps,
-            "collection": collection_summary,
-            "ocr": ocr_summary,
-            "ocr_image_count": ocr_summary.get("image_result_count", 0),
-            "combined_ocr_text_length": ocr_summary.get("combined_text_length", 0),
-            "parse_warning_count": collection_summary.get("warning_count", 0),
-        },
-        "input_reconstruction": input_reconstruction,
-    }
-    productArtifactDirectory.mkdir(parents=True, exist_ok=True)
-    productInputArtifactPath = productArtifactDirectory / "product-input.json"
-    facts["url_intake"]["product_input_artifact"] = str(productInputArtifactPath)
-    temporaryArtifactPath = productInputArtifactPath.with_suffix(".json.tmp")
-    temporaryArtifactPath.write_text(
-        json.dumps(facts, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    temporaryArtifactPath.replace(productInputArtifactPath)
-    return facts
 
 
 def rerun_cached_input_reconstruction(product_identifier: str) -> dict[str, Any]:
@@ -485,10 +506,14 @@ def build_raw_input_from_ui(
             facts = _normalize_product_facts(merged)
         except FileNotFoundError as exc:
             raise FileNotFoundError(f"cached_product_input_not_found: {exc}") from exc
-    elif url and (
-        "kurly.com/goods/" in url
-        or "kurlyglobal.com/products/" in url
-        or "kurlyglobal.com/en/products/" in url
+    elif (
+        url
+        and not _HasCollectedKurlyFacts(facts)
+        and (
+            "kurly.com/goods/" in url
+            or "kurlyglobal.com/products/" in url
+            or "kurlyglobal.com/en/products/" in url
+        )
     ):
         try:
             collected = collect_kurly_url_facts(url)
@@ -548,6 +573,19 @@ def build_raw_input_from_ui(
         "url_intake": facts.get("url_intake") or {},
         "input_reconstruction": input_reconstruction,
     }
+
+
+def _HasCollectedKurlyFacts(facts: dict[str, Any]) -> bool:
+    input_reconstruction = facts.get("input_reconstruction") or {}
+    if not isinstance(input_reconstruction, dict):
+        input_reconstruction = {}
+    return bool(
+        facts.get("classification_input_product_facts")
+        or facts.get("classification_input_fact_texts")
+        or input_reconstruction.get("classification_input_product_facts")
+        or input_reconstruction.get("classification_input_fact_texts")
+        or facts.get("url_intake")
+    )
 
 
 def _normalize_product_facts(facts: dict[str, Any]) -> dict[str, Any]:
