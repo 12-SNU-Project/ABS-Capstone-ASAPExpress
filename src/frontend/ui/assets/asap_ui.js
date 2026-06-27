@@ -1,4 +1,14 @@
 (function () {
+  function asElement(target) {
+    if (!target) {
+      return null;
+    }
+    if (target.nodeType === 1) {
+      return target;
+    }
+    return target.parentElement || null;
+  }
+
   function updateWheel(menu) {
     if (!menu) {
       return;
@@ -42,7 +52,7 @@
     window.setTimeout(function () {
       menu.removeAttribute("open");
       delete menu.dataset.closing;
-    }, 680);
+    }, 420);
   }
 
   function openMenu(menu) {
@@ -67,10 +77,35 @@
     });
   }
 
+  function scrollMenu(event) {
+    const target = asElement(event.target);
+    const menu = target ? target.closest(".candidate-branch-menu") : null;
+    if (!menu) {
+      return;
+    }
+    const maxScroll = menu.scrollHeight - menu.clientHeight;
+    if (maxScroll <= 0) {
+      return;
+    }
+    const nextScroll = Math.max(0, Math.min(maxScroll, menu.scrollTop + event.deltaY));
+    if (nextScroll === menu.scrollTop) {
+      return;
+    }
+    event.preventDefault();
+    menu.scrollTop = nextScroll;
+    window.requestAnimationFrame(function () {
+      updateWheel(menu);
+    });
+  }
+
   document.addEventListener("click", function (event) {
+    const target = asElement(event.target);
+    if (!target) {
+      return;
+    }
     const openMenus = document.querySelectorAll(".candidate-result-card-wrap[open]");
-    const currentMenu = event.target.closest(".candidate-result-card-wrap");
-    const clickedSummary = event.target.closest(".candidate-result-summary");
+    const currentMenu = target.closest(".candidate-result-card-wrap");
+    const clickedSummary = target.closest(".candidate-result-summary");
     if (clickedSummary && currentMenu) {
       event.preventDefault();
       openMenus.forEach(function (menu) {
@@ -90,7 +125,7 @@
         closeMenu(menu);
       }
     });
-    if (event.target.closest(".candidate-branch-menu-button") && currentMenu) {
+    if (target.closest(".candidate-branch-menu-button") && currentMenu) {
       window.setTimeout(function () {
         closeMenu(currentMenu);
       }, 0);
@@ -111,10 +146,11 @@
     });
   }, true);
 
+  document.addEventListener("wheel", scrollMenu, { passive: false });
+
   document.addEventListener("focusin", function (event) {
-    const menu = event.target.closest
-      ? event.target.closest(".candidate-branch-menu")
-      : null;
+    const target = asElement(event.target);
+    const menu = target ? target.closest(".candidate-branch-menu") : null;
     if (menu) {
       updateWheel(menu);
     }

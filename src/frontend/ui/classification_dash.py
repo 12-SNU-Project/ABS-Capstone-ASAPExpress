@@ -2026,19 +2026,22 @@ def _candidate_branch_flyout_menu(
         return None
     return html.Div(
         [
-            html.Button(
-                _clean_code(branch.get("taric10")) or "-",
-                id={
-                    "type": "taric-branch-package-row",
-                    "candidate": candidateKey,
-                    "taric10": _clean_code(branch.get("taric10")),
-                },
-                type="button",
-                n_clicks=0,
-                className="candidate-branch-menu-button",
-                title=str(branch.get("branch_description") or ""),
-            )
-            for branch in branchList
+            html.Div("TARIC 후보", className="candidate-branch-menu-caption"),
+            *[
+                html.Button(
+                    _clean_code(branch.get("taric10")) or "-",
+                    id={
+                        "type": "taric-branch-package-row",
+                        "candidate": candidateKey,
+                        "taric10": _clean_code(branch.get("taric10")),
+                    },
+                    type="button",
+                    n_clicks=0,
+                    className="candidate-branch-menu-button",
+                    title=str(branch.get("branch_description") or ""),
+                )
+                for branch in branchList
+            ],
         ],
         className="candidate-branch-menu",
     )
@@ -3091,14 +3094,138 @@ def _candidate_reason_text(candidate: dict[str, Any]) -> str:
     return str(basis or "").strip()
 
 
+def _has_korean_text(value: str) -> bool:
+    return any("\uac00" <= char <= "\ud7a3" for char in value)
+
+
+def _candidate_code_path(candidate: dict[str, Any]) -> str:
+    parts = []
+    for node in _candidate_nodes(candidate):
+        level = str(node.get("level") or "").strip().upper()
+        code = str(node.get("code") or "").strip()
+        if level and code:
+            parts.append(f"{level} {code}")
+    return " → ".join(parts)
+
+
+def _candidate_matched_keyword_text(candidate: dict[str, Any]) -> str:
+    tree = candidate.get("candidate_static_tree") or {}
+    keywords = tree.get("matched_keywords") if isinstance(tree, dict) else []
+    if not isinstance(keywords, list):
+        keywords = []
+    return ", ".join(str(keyword) for keyword in keywords[:6] if str(keyword).strip())
+
+
+def _candidate_recommendation_description(candidate: dict[str, Any]) -> str:
+    reasonText = _candidate_reason_text(candidate)
+    if _has_korean_text(reasonText):
+        return _short_text(reasonText, max_length=430)
+
+    cn8 = str(candidate.get("cn8") or candidate.get("hs8") or "-")[:8]
+    hs6 = str(candidate.get("hs6") or cn8[:6] or "-")
+    pathText = _candidate_code_path(candidate)
+    keywordText = _candidate_matched_keyword_text(candidate)
+    sentences = [
+        f"LLM은 정적 후보군 중 CN8 {cn8}을 우선 검토 후보로 선택했습니다.",
+        f"HS6 {hs6} 계층에서 상품명, 원재료/설명 정보와 후보 카드의 계층 근거가 가장 잘 맞는 것으로 판단했습니다.",
+    ]
+    if pathText:
+        sentences.append(f"검토 경로는 {pathText}입니다.")
+    if keywordText:
+        sentences.append(f"주요 매칭 근거는 {keywordText}입니다.")
+    return " ".join(sentences)
+
+
+def _candidate_text_list(candidate: dict[str, Any], field: str, *, limit: int) -> list[str]:
+    value = candidate.get(field)
+    if not isinstance(value, list):
+        return []
+    return [
+        _short_text(item, max_length=180)
+        for item in value[:limit]
+        if str(item or "").strip()
+    ]
+
+
+def _candidate_decision_support_blocks(candidate: dict[str, Any]) -> list[Any]:
+    facts = _candidate_text_list(candidate, "supporting_product_facts", limit=3)
+    evidenceRefs = _candidate_text_list(
+        candidate,
+        "classification_evidence_refs",
+        limit=6,
+    )
+    similarCases = [
+        case
+        for case in (candidate.get("similar_ebti_cases") or [])[:2]
+        if isinstance(case, dict)
+    ]
+    blocks: list[Any] = []
+    if facts:
+        blocks.append(
+            html.Div(
+                [
+                    html.Div("LLM이 사용한 상품 근거", className="classification-result-support-title"),
+                    html.Ul(
+                        [html.Li(fact) for fact in facts],
+                        className="classification-result-support-list",
+                    ),
+                ],
+                className="classification-result-support-block",
+            )
+        )
+    if similarCases:
+        blocks.append(
+            html.Div(
+                [
+                    html.Div("유사 EBTI 사례", className="classification-result-support-title"),
+                    *[
+                        html.Div(
+                            [
+                                html.Div(
+                                    str(case.get("evidence_ref") or "-"),
+                                    className="classification-result-ebti-ref",
+                                ),
+                                html.Div(
+                                    _short_text(case.get("similarity_comment"), max_length=180),
+                                    className="classification-result-ebti-text",
+                                ),
+                                html.Div(
+                                    _short_text(case.get("difference_comment"), max_length=180),
+                                    className="classification-result-ebti-text muted",
+                                ),
+                            ],
+                            className="classification-result-ebti-case",
+                        )
+                        for case in similarCases
+                    ],
+                ],
+                className="classification-result-support-block",
+            )
+        )
+    elif evidenceRefs:
+        blocks.append(
+            html.Div(
+                [
+                    html.Div("LLM 검토 evidence", className="classification-result-support-title"),
+                    html.Div(
+                        [html.Span(ref, className="classification-result-evidence-chip") for ref in evidenceRefs],
+                        className="classification-result-evidence-chips",
+                    ),
+                ],
+                className="classification-result-support-block",
+            )
+        )
+    return blocks
+
+
 def render_decision(result: dict[str, Any]) -> html.Div:
     dec = result.get("decision") or {}
-    if not dec:
-        return html.Div("최종 결정이 아직 없습니다.", style=PLACEHOLDER)
-
     candidateSet = result.get("candidate_code_set") or {}
-    candidates = candidateSet.get("candidates") if isinstance(candidateSet, dict) else []
+    candidates = (candidateSet.get("candidates") if isinstance(candidateSet, dict) else []) or []
     candidates = [candidate for candidate in candidates if isinstance(candidate, dict)]
+    if not dec and not candidates:
+        return html.Div("최종 결론이 아직 없습니다.", style=PLACEHOLDER)
+
     selectedIds = set(dec.get("selected_candidate_ids") or [])
     selectedCandidates = [
         candidate
@@ -3113,29 +3240,36 @@ def render_decision(result: dict[str, Any]) -> html.Div:
         or (candidates[0] if candidates else {})
     )
     cn8 = primary.get("cn8") or "-"
-    taric10 = primary.get("taric10") or "-"
     status = str(dec.get("decision_status") or "검토 필요")
-    title = "우선 검토 코드" if status != "accepted" else "최종 선택 후보"
+    title = "LLM 추천 CN8" if primary.get("llm_recommended") else "우선 검토 CN8"
     subtitle = (
         f"{len(selectedCandidates)}개 후보가 남아 있습니다."
         if len(selectedCandidates) > 1
-        else "후속 서류 검토는 TARIC branch별 서류 패키지에서 확인합니다."
+        else "TARIC 후보와 연결 서류는 아래 후보 카드에서 별도로 확인합니다."
     )
-    body = (
-        _short_text(_candidate_reason_text(primary), max_length=360)
-        if _candidate_reason_text(primary)
-        else "표시된 TARIC10은 CN8 후보 하위 branch 중 UI 연결을 위한 대표값입니다. 실제 검토는 펼친 branch별 서류 패키지에서 확인합니다."
-    )
+    body = _candidate_recommendation_description(primary)
+    supportBlocks = _candidate_decision_support_blocks(primary)
 
     return html.Div(
         [
-            html.Div(title, style={**LABEL, "marginBottom": "6px"}),
-            html.Div(cn8, className="classification-result-primary-code"),
-            html.Div(f"TARIC10 {taric10}", className="classification-result-secondary-code"),
+            html.Div(
+                [
+                    html.Div(title, className="classification-result-title"),
+                    html.Span(status, className="classification-result-status"),
+                ],
+                className="classification-result-heading-row",
+            ),
+            html.Div(
+                [
+                    html.Div(cn8, className="classification-result-primary-code"),
+                ],
+                className="classification-result-code-row",
+            ),
             html.P(subtitle, className="classification-result-text"),
             html.P(body, className="classification-result-text"),
+            html.Div(supportBlocks, className="classification-result-support-grid") if supportBlocks else None,
         ],
-        style=CARD,
+        className="classification-result-summary-card",
     )
 
 
@@ -3168,12 +3302,12 @@ def render_page(
             render_input_form(requestFacts, runDisabled=runDisabled),
             html.Div("진행 상태", style=LABEL),
             html.Div(render_progress(result), id="out-progress"),
-            html.Div("분류 결과", style={**LABEL, "marginTop": "22px"}),
-            html.Div(render_candidate_cards(result) if result else html.Div("분류 결과가 여기에 표시됩니다.", style=PLACEHOLDER), id="out-classification"),
+            html.Div("최종 결론", style={**LABEL, "marginTop": "22px"}),
+            html.Div(render_decision(result) if result else html.Div("최종 결론이 여기에 표시됩니다.", style=PLACEHOLDER), id="out-decision"),
+            html.Div("TARIC 후보", style={**LABEL, "marginTop": "22px"}),
+            html.Div(render_candidate_cards(result) if result else html.Div("TARIC 후보가 여기에 표시됩니다.", style=PLACEHOLDER), id="out-classification"),
             inputProcessingDrawer,
             candidateTreeDrawer,
             classificationResultDrawer,
-            html.Div("최종 결정", style={**LABEL, "marginTop": "22px"}),
-            html.Div(render_decision(result) if result else html.Div("Orchestrator 결정이 여기에 표시됩니다.", style=PLACEHOLDER), id="out-decision"),
         ]
     )

@@ -133,11 +133,8 @@ class ClassificationAgent(BaseAgent):
             hardCondition = self._build_hard_condition_projection(candidate)
             isRecommended = bool(recommendedCn8 and candidateCn8 == recommendedCn8)
             retainedCandidate = retainedByCn8.get(candidateCn8)
-            reason = (
-                _read_field(recommended, "reason", "rationale", default="")
-                if isRecommended
-                else _read_field(retainedCandidate, "reason", "rationale", default="")
-            )
+            reviewPayload = recommended if isRecommended else retainedCandidate or {}
+            reason = _read_field(reviewPayload, "reason", "rationale", default="")
             emitted.append({
                 "hs8": candidateHs8,
                 "reason": reason or (
@@ -152,6 +149,33 @@ class ClassificationAgent(BaseAgent):
                 "hard_conditions": hardCondition["conditions"],
                 "hard_condition_status": hardCondition["status"],
                 "hard_condition_evidence": hardCondition["evidence"],
+                "supporting_product_facts": self._read_text_list(
+                    _read_field(
+                        reviewPayload,
+                        "supporting_product_facts",
+                        "supportingProductFacts",
+                        default=[],
+                    ),
+                    limit=5,
+                ),
+                "classification_evidence_refs": self._read_text_list(
+                    _read_field(
+                        reviewPayload,
+                        "evidence_refs",
+                        "evidenceRefs",
+                        default=[],
+                    ),
+                    limit=8,
+                ),
+                "similar_ebti_cases": self._read_dict_list(
+                    _read_field(
+                        reviewPayload,
+                        "similar_ebti_cases",
+                        "similarEbtiCases",
+                        default=[],
+                    ),
+                    limit=3,
+                ),
             })
 
         decision_status = _read_field(result.decision_report, "decisionStatus", default="unknown")
@@ -211,7 +235,14 @@ class ClassificationAgent(BaseAgent):
                 "hard_condition_evidence": list(
                     c.get("hard_condition_evidence") or [],
                 ),
-                "classification_basis": [str(c["reason"])[:300]],
+                "classification_basis": [str(c["reason"])[:600]],
+                "supporting_product_facts": list(
+                    c.get("supporting_product_facts") or [],
+                ),
+                "classification_evidence_refs": list(
+                    c.get("classification_evidence_refs") or [],
+                ),
+                "similar_ebti_cases": list(c.get("similar_ebti_cases") or []),
                 "classification_citations": list(self._ontology_reads),
                 "required_facts": [],
                 "unknowns": [],
@@ -461,6 +492,16 @@ class ClassificationAgent(BaseAgent):
             str(item).strip()
             for item in value[:limit]
             if str(item).strip()
+        ]
+
+    @staticmethod
+    def _read_dict_list(value, *, limit: int) -> list[dict[str, Any]]:
+        if not isinstance(value, (list, tuple)):
+            return []
+        return [
+            dict(item)
+            for item in value[:limit]
+            if isinstance(item, dict)
         ]
 
     def _resolve_taric_branches(self, cn8: str) -> list[dict]:
