@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import os
 import sys
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -122,6 +123,15 @@ def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
         help=(
             "LLM reconstruction 결과를 입력으로 정적 CN 후보 산출, "
             "Classification LLM 판단, backtracking 결정을 함께 검사합니다."
+        ),
+    )
+    parser.add_argument(
+        "--stage1-review-mode",
+        choices=("compact", "full"),
+        default="compact",
+        help=(
+            "Classification LLM 검증 모드입니다. 기본 compact, "
+            "full은 후보별 evidence/EBTI 검토 JSON을 직접 요청합니다."
         ),
     )
     parsedArguments = parser.parse_args(arguments)
@@ -506,6 +516,7 @@ class KurlyMarketSmokeRunner:
         compareMaxImages: int = 1,
         checkUiBinding: bool = False,
         classifyReconstruction: bool = False,
+        stage1ReviewMode: str = "compact",
     ) -> None:
         appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
         pathConfig = appConfig.paths
@@ -519,6 +530,7 @@ class KurlyMarketSmokeRunner:
         self._compareMaxImages = compareMaxImages
         self._checkUiBinding = checkUiBinding
         self._classifyReconstruction = classifyReconstruction
+        self._stage1ReviewMode = stage1ReviewMode
         self._runOcrFallback = smokeConfig.run_ocr_fallback
         self._useStructuredOcr = smokeConfig.use_structured_ocr
         self._maxOcrImageCount = smokeConfig.max_ocr_image_count
@@ -581,13 +593,14 @@ class KurlyMarketSmokeRunner:
             (
                 "KurlyMarket 상품 수집 smoke를 시작합니다 url_count={} "
                 "run_ocr_fallback={} browser_mode={} compare_ocr={} "
-                "classify_reconstruction={}"
+                "classify_reconstruction={} stage1_review_mode={}"
             ),
             len(self._productUrls),
             self._runOcrFallback,
             "headless" if self._headless else "headed",
             self._compareOcr,
             self._classifyReconstruction,
+            self._stage1ReviewMode,
         )
         if not self._productUrls:
             runLogger.warning(
@@ -793,16 +806,24 @@ class KurlyMarketSmokeRunner:
             validate_on_write=False,
         )
         agentResults = []
-        for agent in (EvidenceIntakeAgent(rawInput), ClassificationAgent()):
-            result = agent.execute(store)
-            agentResults.append({
-                "agent_name": agent.agent_name,
-                "success": result.success,
-                "error": result.error,
-                "outputs_written": result.outputs_written,
-            })
-            if not result.success:
-                break
+        previousReviewMode = os.environ.get("ASAP_STAGE1_REVIEW_MODE")
+        os.environ["ASAP_STAGE1_REVIEW_MODE"] = self._stage1ReviewMode
+        try:
+            for agent in (EvidenceIntakeAgent(rawInput), ClassificationAgent()):
+                result = agent.execute(store)
+                agentResults.append({
+                    "agent_name": agent.agent_name,
+                    "success": result.success,
+                    "error": result.error,
+                    "outputs_written": result.outputs_written,
+                })
+                if not result.success:
+                    break
+        finally:
+            if previousReviewMode is None:
+                os.environ.pop("ASAP_STAGE1_REVIEW_MODE", None)
+            else:
+                os.environ["ASAP_STAGE1_REVIEW_MODE"] = previousReviewMode
 
         blackboard = store.load()
         productEvidenceState = blackboard.get("product_evidence_state") or {}
@@ -878,6 +899,7 @@ class KurlyMarketSmokeRunner:
                 "error": classificationAgentResult.get("error"),
                 "agent_success": bool(classificationAgentResult.get("success")),
                 "llm_model": self._FindAgentRunModel(store, "Classification_Agent"),
+                "stage1_review_mode": self._stage1ReviewMode,
                 "candidate_count": len(candidates),
                 "zero_score_candidate_codes": zeroScoreCodes,
             },
@@ -929,6 +951,10 @@ class KurlyMarketSmokeRunner:
                 "matched_keywords": staticTree.get("matched_keywords") or [],
                 "score_breakdown": staticTree.get("score_breakdown") or {},
                 "classification_basis": candidate.get("classification_basis") or [],
+                "classification_evidence_refs": (
+                    candidate.get("classification_evidence_refs") or []
+                ),
+                "similar_ebti_cases": candidate.get("similar_ebti_cases") or [],
             })
         return out
 
@@ -1646,7 +1672,8 @@ class KurlyMarketSmokeRunner:
             classificationLogger.info(
                 (
                     "classification_candidate rank={} cn8={} hs6={} "
-                    "score={} llm_recommended={} taric_branches={}"
+                    "score={} llm_recommended={} taric_branches={} "
+                    "evidence_refs={} ebti_cases={}"
                 ),
                 candidate.get("rank"),
                 candidate.get("cn8"),
@@ -1654,6 +1681,8 @@ class KurlyMarketSmokeRunner:
                 candidate.get("score"),
                 candidate.get("llm_recommended"),
                 candidate.get("taric10_branch_count"),
+                len(candidate.get("classification_evidence_refs") or []),
+                len(candidate.get("similar_ebti_cases") or []),
             )
 
     def _LogSummary(self, results: List[Dict[str, Any]]) -> None:
@@ -1834,4 +1863,5 @@ if __name__ == "__main__":
         compareMaxImages=cliArguments.compare_max_images,
         checkUiBinding=cliArguments.check_ui_binding,
         classifyReconstruction=cliArguments.classify_reconstruction,
+        stage1ReviewMode=cliArguments.stage1_review_mode,
     ).Run()

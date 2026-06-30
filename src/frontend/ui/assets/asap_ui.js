@@ -23,6 +23,12 @@
     if (!buttons.length) {
       return;
     }
+    buttons.forEach(function (button) {
+      button.classList.remove("wheel-center", "wheel-near");
+    });
+    if (list.scrollHeight <= list.clientHeight + 1) {
+      return;
+    }
     const centerY = list.getBoundingClientRect().top + (list.clientHeight / 2);
     const ranked = buttons
       .map(function (button) {
@@ -35,9 +41,6 @@
       .sort(function (a, b) {
         return a.distance - b.distance;
       });
-    buttons.forEach(function (button) {
-      button.classList.remove("wheel-center", "wheel-near");
-    });
     ranked[0].button.classList.add("wheel-center");
     ranked.slice(1, 3).forEach(function (entry) {
       entry.button.classList.add("wheel-near");
@@ -83,16 +86,6 @@
     if (!menu) {
       return;
     }
-    const maxScroll = menu.scrollHeight - menu.clientHeight;
-    if (maxScroll <= 0) {
-      return;
-    }
-    const nextScroll = Math.max(0, Math.min(maxScroll, menu.scrollTop + event.deltaY));
-    if (nextScroll === menu.scrollTop) {
-      return;
-    }
-    event.preventDefault();
-    menu.scrollTop = nextScroll;
     window.requestAnimationFrame(function () {
       updateWheel(menu);
     });
@@ -146,7 +139,7 @@
     });
   }, true);
 
-  document.addEventListener("wheel", scrollMenu, { passive: false });
+  document.addEventListener("wheel", scrollMenu, { passive: true });
 
   document.addEventListener("focusin", function (event) {
     const target = asElement(event.target);

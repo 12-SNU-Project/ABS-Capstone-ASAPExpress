@@ -3116,6 +3116,69 @@ def _candidate_matched_keyword_text(candidate: dict[str, Any]) -> str:
     return ", ".join(str(keyword) for keyword in keywords[:6] if str(keyword).strip())
 
 
+def _score_text(value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "0점"
+    if number.is_integer():
+        return f"{int(number)}점"
+    return f"{number:.1f}점"
+
+
+def _candidate_score_breakdown(candidate: dict[str, Any]) -> dict[str, Any]:
+    directBreakdown = candidate.get("score_breakdown")
+    if isinstance(directBreakdown, dict):
+        return directBreakdown
+    tree = candidate.get("candidate_static_tree") or {}
+    treeBreakdown = tree.get("score_breakdown") if isinstance(tree, dict) else {}
+    return treeBreakdown if isinstance(treeBreakdown, dict) else {}
+
+
+def _candidate_hierarchy_score_text(candidate: dict[str, Any]) -> str:
+    parts = []
+    for node in _candidate_nodes(candidate):
+        level = str(node.get("level") or node.get("label") or "").strip().upper()
+        score = node.get("score")
+        if level and score is not None:
+            parts.append(f"{level}:{_score_text(score)}")
+    return " · ".join(parts) or "HS2:0점 · HS4:0점 · HS6:0점"
+
+
+def _candidate_score_summary(candidate: dict[str, Any]) -> html.Div:
+    breakdown = _candidate_score_breakdown(candidate)
+    items = [
+        ("강한 조건", _score_text(breakdown.get("include_rule_points"))),
+        ("설명 일치", _score_text(breakdown.get("description_points"))),
+        ("키워드 일치", _score_text(breakdown.get("search_keyword_points"))),
+    ]
+    return html.Div(
+        [
+            *[
+                html.Div(
+                    [
+                        html.Div(label, className="classification-result-score-label"),
+                        html.Div(value, className="classification-result-score-value"),
+                    ],
+                    className="classification-result-score-item",
+                )
+                for label, value in items
+            ],
+            html.Div(
+                [
+                    html.Div("계층 점수", className="classification-result-score-label"),
+                    html.Div(
+                        _candidate_hierarchy_score_text(candidate),
+                        className="classification-result-score-value hierarchy",
+                    ),
+                ],
+                className="classification-result-score-item wide",
+            ),
+        ],
+        className="classification-result-score-grid",
+    )
+
+
 def _candidate_recommendation_description(candidate: dict[str, Any]) -> str:
     reasonText = _candidate_reason_text(candidate)
     if _has_korean_text(reasonText):
@@ -3241,7 +3304,7 @@ def render_decision(result: dict[str, Any]) -> html.Div:
     )
     cn8 = primary.get("cn8") or "-"
     status = str(dec.get("decision_status") or "검토 필요")
-    title = "LLM 추천 CN8" if primary.get("llm_recommended") else "우선 검토 CN8"
+    title = "LLM 추천 CN8 코드" if primary.get("llm_recommended") else "우선 검토 CN8 코드"
     subtitle = (
         f"{len(selectedCandidates)}개 후보가 남아 있습니다."
         if len(selectedCandidates) > 1
@@ -3267,6 +3330,7 @@ def render_decision(result: dict[str, Any]) -> html.Div:
             ),
             html.P(subtitle, className="classification-result-text"),
             html.P(body, className="classification-result-text"),
+            _candidate_score_summary(primary),
             html.Div(supportBlocks, className="classification-result-support-grid") if supportBlocks else None,
         ],
         className="classification-result-summary-card",
@@ -3302,8 +3366,8 @@ def render_page(
             render_input_form(requestFacts, runDisabled=runDisabled),
             html.Div("진행 상태", style=LABEL),
             html.Div(render_progress(result), id="out-progress"),
-            html.Div("최종 결론", style={**LABEL, "marginTop": "22px"}),
-            html.Div(render_decision(result) if result else html.Div("최종 결론이 여기에 표시됩니다.", style=PLACEHOLDER), id="out-decision"),
+            html.Div("LLM 추천 CN8 코드", style={**LABEL, "marginTop": "22px"}),
+            html.Div(render_decision(result) if result else html.Div("LLM 추천 CN8 코드가 여기에 표시됩니다.", style=PLACEHOLDER), id="out-decision"),
             html.Div("TARIC 후보", style={**LABEL, "marginTop": "22px"}),
             html.Div(render_candidate_cards(result) if result else html.Div("TARIC 후보가 여기에 표시됩니다.", style=PLACEHOLDER), id="out-classification"),
             inputProcessingDrawer,

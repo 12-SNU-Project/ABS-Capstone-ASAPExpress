@@ -546,6 +546,7 @@ def _expand_compact_decision_to_stage1_json(
 # stream. With an 8192-context model (gemma4-ctx Modelfile override),
 # 2048 leaves comfortable headroom for prompt + response.
 LLM_MAX_TOKENS = 2048
+STAGE1_REVIEW_MODE_FULL = "full"
 
 ASAP_PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
 ASAP_SRC_ROOT = ASAP_PROJECT_ROOT / "src"
@@ -842,6 +843,7 @@ def _RunStage1ReviewRound(
     candidates: Sequence[Any],
     adapter: Any,
 ) -> _Stage1ReviewRound:
+    reviewMode = os.environ.get("ASAP_STAGE1_REVIEW_MODE", "compact").strip().lower()
     contextBuilder = OntologyContextBuilder(ASAP_ONTOLOGY_ROOT)
     packagedContext = contextBuilder.BuildContext(
         productInput.BuildSearchText(),
@@ -865,8 +867,9 @@ def _RunStage1ReviewRound(
     )
     request = _copy_with_clamped_max_tokens(request, LLM_MAX_TOKENS)
     request = _harden_stage1_request(request, productInput, candidates)
-    request = _build_compact_decision_request(request, productInput, candidates)
-    request = _copy_with_clamped_max_tokens(request, 768)
+    if reviewMode != STAGE1_REVIEW_MODE_FULL:
+        request = _build_compact_decision_request(request, productInput, candidates)
+        request = _copy_with_clamped_max_tokens(request, 768)
     promptText = (
         (request.systemPrompt or "")
         + "\n---\n"
@@ -884,19 +887,20 @@ def _RunStage1ReviewRound(
         )
 
     responseText = getattr(response, "generatedText", "") or ""
-    compactDecision = _extract_compact_decision(responseText, candidates)
-    if compactDecision is not None:
-        compactDecision = _apply_domain_selection_guard(
-            compactDecision,
-            productInput,
-            candidates,
-        )
-        responseText = _expand_compact_decision_to_stage1_json(
-            compactDecision,
-            productInput,
-            candidates,
-        )
-        response = _copy_response_with_text(response, responseText)
+    if reviewMode != STAGE1_REVIEW_MODE_FULL:
+        compactDecision = _extract_compact_decision(responseText, candidates)
+        if compactDecision is not None:
+            compactDecision = _apply_domain_selection_guard(
+                compactDecision,
+                productInput,
+                candidates,
+            )
+            responseText = _expand_compact_decision_to_stage1_json(
+                compactDecision,
+                productInput,
+                candidates,
+            )
+            response = _copy_response_with_text(response, responseText)
     modelName = (
         getattr(response, "modelName", None)
         or getattr(response, "model", None)
