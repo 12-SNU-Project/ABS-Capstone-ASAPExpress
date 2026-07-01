@@ -221,7 +221,7 @@ class OntologySmokeAppConfig(BaseModel):
     max_result_count: StrictInt = 6
     cn_candidate_top_k: StrictInt = 5
     max_product_smoke_inputs: StrictInt = 2
-    answer_csv_path: Path = Path("data/answer.csv")
+    answer_csv_path: Path = Path("data/EU_HS_test.csv")
     run_kurly_smoke_before_ontology: StrictBool = False
     write_summary_artifact: StrictBool = True
     run_llm_connection_smoke: StrictBool = False

@@ -1,16 +1,20 @@
 """KurlyMarket 상품 페이지 parser/OCR fallback runtime smoke."""
 
 import argparse
+import csv
 import json
 import logging
 import os
+import re
 import sys
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict, List
+from urllib.parse import urlsplit, urlunsplit
 
 PROJECT_ROOT_PATH = Path(__file__).resolve().parent
 SOURCE_ROOT_PATH = PROJECT_ROOT_PATH / "src"
@@ -67,6 +71,31 @@ NUTRITION_MARKERS = (
 )
 INGREDIENT_MARKERS = ("원재료", "원료", "원제", "함량", "함유", "ingredients")
 LOGGER = logging.getLogger("kurly_market_smoke")
+ANSWER_URL_COLUMNS = (
+    "링크",
+    "상품 상세",
+    "url",
+    "URL",
+    "product_url",
+    "product_page_url",
+)
+ANSWER_TARIC10_COLUMNS = (
+    "EU HS CODE",
+    "실제 taric10 코드",
+    "실제 TARIC10 코드",
+    "actual_taric10",
+    "taric10",
+    "TARIC10",
+    "미국 HS Code",
+)
+RECALL_LEVELS = (("hs2", 2), ("hs4", 4), ("hs6", 6), ("cn8", 8))
+
+
+@dataclass(frozen=True, slots=True)
+class AnswerRecord:
+    url: str
+    productId: str
+    taric10: str
 
 
 class _BoundLogger:
@@ -122,7 +151,7 @@ def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "LLM reconstruction 결과를 입력으로 ProductUnderstanding, "
-            "DomainRouter, Classification, Document 추천까지 함께 검사합니다."
+            "DomainRouter, Classification 후보와 계층 recall을 함께 검사합니다."
         ),
     )
     parser.add_argument(
@@ -578,6 +607,13 @@ class KurlyMarketSmokeRunner:
             PROJECT_ROOT_PATH,
             pathConfig.kurly_smoke_summary_artifact,
         )
+        self._answerCsvPath = pathConfig.ResolvePath(
+            PROJECT_ROOT_PATH,
+            appConfig.ontology_smoke.answer_csv_path,
+        )
+        self._answerByUrl, self._answerByProductId = self._LoadAnswerRecords(
+            self._answerCsvPath,
+        )
         self._maxLoggedNoticeOptions = smokeConfig.max_logged_notice_options
         self._maxLoggedFieldsPerOption = smokeConfig.max_logged_fields_per_option
         self._maxLoggedOcrCandidateUrls = smokeConfig.max_logged_ocr_candidate_urls
@@ -585,6 +621,71 @@ class KurlyMarketSmokeRunner:
         self._ocrTextPreviewCharacters = smokeConfig.ocr_text_preview_characters
         self._pipelineOcrEngine: Any = None
         self._pipelineRawOcrEngine: Any = None
+
+    @staticmethod
+    def _LoadAnswerRecords(
+        answerCsvPath: Path,
+    ) -> tuple[dict[str, AnswerRecord], dict[str, AnswerRecord]]:
+        if not answerCsvPath.exists():
+            return {}, {}
+        byUrl: dict[str, AnswerRecord] = {}
+        byProductId: dict[str, AnswerRecord] = {}
+        with answerCsvPath.open(newline="", encoding="utf-8-sig") as file:
+            for row in csv.DictReader(file):
+                url = KurlyMarketSmokeRunner._FirstCsvValue(row, ANSWER_URL_COLUMNS)
+                taric10 = KurlyMarketSmokeRunner._NormalizeTaric10(
+                    KurlyMarketSmokeRunner._FirstCsvValue(
+                        row,
+                        ANSWER_TARIC10_COLUMNS,
+                    )
+                )
+                if not url or not taric10:
+                    continue
+                productId = ExtractProductIdFromUrl(url)
+                record = AnswerRecord(url=url, productId=productId, taric10=taric10)
+                normalizedUrl = KurlyMarketSmokeRunner._NormalizeAnswerUrl(url)
+                if normalizedUrl:
+                    byUrl[normalizedUrl] = record
+                if productId:
+                    byProductId[productId] = record
+        return byUrl, byProductId
+
+    @staticmethod
+    def _FirstCsvValue(row: Mapping[str, str], columns: Sequence[str]) -> str:
+        for column in columns:
+            value = str(row.get(column) or "").strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
+    def _NormalizeTaric10(value: object) -> str:
+        digits = re.sub(r"\D", "", str(value or ""))
+        if 7 <= len(digits) <= 9:
+            digits = digits.zfill(10)
+        return digits[:10] if len(digits) >= 10 else ""
+
+    @staticmethod
+    def _NormalizeAnswerUrl(value: object) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        parts = urlsplit(text)
+        return urlunsplit(
+            (
+                parts.scheme.lower(),
+                parts.netloc.lower(),
+                parts.path.rstrip("/"),
+                "",
+                "",
+            )
+        )
+
+    def _FindAnswerRecord(self, productUrl: str, productId: str) -> AnswerRecord | None:
+        return (
+            self._answerByUrl.get(self._NormalizeAnswerUrl(productUrl))
+            or self._answerByProductId.get(productId)
+        )
 
     def Run(self) -> None:
         self._ConfigureLogger()
@@ -785,11 +886,9 @@ class KurlyMarketSmokeRunner:
     ) -> Dict[str, Any]:
         from agents.blackboard import BlackboardStore
         from agents.classification_agent import ClassificationAgent
-        from agents.document_agent import DocumentAgent
         from agents.document_pipeline import build_raw_input_from_ui
         from agents.domain_router_agent import DomainRouterAgent
         from agents.evidence_intake_agent import EvidenceIntakeAgent
-        from agents.orchestrator_agent import OrchestratorAgent
         from agents.product_understanding_agent import ProductUnderstandingAgent
 
         rawInput = build_raw_input_from_ui(
@@ -818,8 +917,6 @@ class KurlyMarketSmokeRunner:
                 ProductUnderstandingAgent(),
                 DomainRouterAgent(),
                 ClassificationAgent(),
-                DocumentAgent(),
-                OrchestratorAgent(),
             ):
                 result = agent.execute(store)
                 agentResults.append({
@@ -848,18 +945,6 @@ class KurlyMarketSmokeRunner:
         candidateCodeSet = (blackboard.get("candidate_code_sets") or [None])[-1]
         if not isinstance(candidateCodeSet, Mapping):
             candidateCodeSet = {}
-        documentPackages = blackboard.get("document_packages") or []
-        if not isinstance(documentPackages, list):
-            documentPackages = []
-        documentPackage = documentPackages[-1] if documentPackages else {}
-        if not isinstance(documentPackage, Mapping):
-            documentPackage = {}
-        orchestratorDecisions = blackboard.get("orchestrator_decisions") or []
-        if not isinstance(orchestratorDecisions, list):
-            orchestratorDecisions = []
-        orchestratorDecision = orchestratorDecisions[-1] if orchestratorDecisions else {}
-        if not isinstance(orchestratorDecision, Mapping):
-            orchestratorDecision = {}
         trace = candidateCodeSet.get("classification_trace") or {}
         if not isinstance(trace, Mapping):
             trace = {}
@@ -872,18 +957,21 @@ class KurlyMarketSmokeRunner:
             for candidate in candidates
             if float(candidate.get("score") or 0) <= 0
         ]
-        classificationAgentResult = (
-            agentResults[1]
-            if len(agentResults) > 1
-            else {"success": False, "error": "classification_agent_not_executed"}
+        classificationAgentResult = self._FindAgentResult(
+            agentResults,
+            "Classification_Agent",
+        )
+        answerRecord = self._FindAnswerRecord(productUrl, productId)
+        answerRecall = self._BuildAnswerRecallSmoke(answerRecord, candidates)
+        llmValidationRecommendation = self._BuildLlmValidationRecommendationSmoke(
+            candidates,
         )
         return {
             "source": productUrl,
             "dash_equivalence": {
                 "scope": (
                     "Integrated smoke path after merge: reconstruction facts feed "
-                    "ProductUnderstanding, DomainRouter, Beam Classification, "
-                    "Document recommendation, and Orchestrator."
+                    "ProductUnderstanding, DomainRouter, and Beam Classification."
                 ),
                 "path": [
                     "KurlyProductPipeline.Run",
@@ -893,10 +981,7 @@ class KurlyMarketSmokeRunner:
                     "ProductUnderstandingAgent",
                     "DomainRouterAgent",
                     "ClassificationAgent",
-                    "DocumentAgent",
-                    "OrchestratorAgent",
                 ],
-                "document_recommendation_executed": bool(documentPackage),
                 "raw_input_matches_evidence_intake": (
                     self._DoesRawInputMatchObservedFacts(rawInput, observedFacts)
                 ),
@@ -939,6 +1024,7 @@ class KurlyMarketSmokeRunner:
                 "stage1_review_mode": self._stage1ReviewMode,
                 "candidate_count": len(candidates),
                 "zero_score_candidate_codes": zeroScoreCodes,
+                "answer_found": answerRecall.get("answer_found"),
             },
             "product_understanding": self._BuildProductUnderstandingSmoke(
                 productUnderstanding,
@@ -964,17 +1050,146 @@ class KurlyMarketSmokeRunner:
                 "backtracking_reason": trace.get("backtracking_reason"),
             },
             "traversal_history": list(trace.get("traversal_history") or []),
-            "document_recommendation": self._BuildDocumentSmoke(
-                documentPackage,
-                documentPackages,
-            ),
-            "orchestrator": {
-                "decision_id": orchestratorDecision.get("decision_id"),
-                "status": orchestratorDecision.get("status"),
-                "next_action": orchestratorDecision.get("next_action"),
-            },
+            "llm_validation_recommendation": llmValidationRecommendation,
+            "answer_recall": answerRecall,
             "agent_results": agentResults,
             "agent_runs": list(store.iter_agent_runs()),
+        }
+
+    @staticmethod
+    def _FindAgentResult(
+        agentResults: Sequence[Mapping[str, object]],
+        agentName: str,
+    ) -> Mapping[str, object]:
+        for agentResult in agentResults:
+            if agentResult.get("agent_name") == agentName:
+                return agentResult
+        return {
+            "success": False,
+            "error": f"{agentName}_not_executed",
+        }
+
+    @staticmethod
+    def _BuildAnswerRecallSmoke(
+        answerRecord: AnswerRecord | None,
+        candidates: Sequence[Mapping[str, object]],
+    ) -> Dict[str, object]:
+        if answerRecord is None:
+            return {
+                "answer_found": False,
+                "reason": "answer_record_not_found",
+            }
+
+        expectedByLevel = {
+            level: answerRecord.taric10[:codeLength]
+            for level, codeLength in RECALL_LEVELS
+        }
+        llmRecommendedCandidate = next(
+            (candidate for candidate in candidates if candidate.get("llm_recommended")),
+            None,
+        )
+        candidateCodesByLevel = {
+            level: [
+                code
+                for candidate in candidates[:5]
+                for code in (
+                    KurlyMarketSmokeRunner._CandidateCodeAtLevel(
+                        candidate,
+                        codeLength,
+                    ),
+                )
+                if code
+            ]
+            for level, codeLength in RECALL_LEVELS
+        }
+        levels: dict[str, dict[str, object]] = {}
+        for level, codeLength in RECALL_LEVELS:
+            expectedCode = expectedByLevel[level]
+            top5Codes = candidateCodesByLevel[level]
+            top1Code = top5Codes[0] if top5Codes else ""
+            llmRecommendedCode = (
+                KurlyMarketSmokeRunner._CandidateCodeAtLevel(
+                    llmRecommendedCandidate,
+                    codeLength,
+                )
+                if llmRecommendedCandidate is not None
+                else ""
+            )
+            levels[level] = {
+                "expected": expectedCode,
+                "top1_code": top1Code,
+                "top5_codes": top5Codes,
+                "top1_match": bool(expectedCode and top1Code == expectedCode),
+                "top5_match": bool(expectedCode and expectedCode in top5Codes),
+                "llm_recommended_code": llmRecommendedCode,
+                "llm_recommended_match": bool(
+                    expectedCode and llmRecommendedCode == expectedCode,
+                ),
+            }
+
+        return {
+            "answer_found": True,
+            "answer": {
+                "url": answerRecord.url,
+                "product_id": answerRecord.productId,
+                "taric10": answerRecord.taric10,
+            },
+            "levels": levels,
+        }
+
+    @staticmethod
+    def _CandidateCodeAtLevel(
+        candidate: Mapping[str, object],
+        codeLength: int,
+    ) -> str:
+        cn8 = re.sub(r"\D", "", str(candidate.get("cn8") or ""))
+        if len(cn8) >= codeLength:
+            return cn8[:codeLength]
+        hs6 = re.sub(r"\D", "", str(candidate.get("hs6") or ""))
+        if len(hs6) >= codeLength:
+            return hs6[:codeLength]
+        return ""
+
+    @staticmethod
+    def _BuildLlmValidationRecommendationSmoke(
+        candidates: Sequence[Mapping[str, object]],
+    ) -> Dict[str, object]:
+        recommendedCandidate = next(
+            (candidate for candidate in candidates if candidate.get("llm_recommended")),
+            None,
+        )
+        if recommendedCandidate is None:
+            return {
+                "recommended": False,
+                "reason": "llm_validation_recommendation_not_found",
+            }
+        hierarchy = recommendedCandidate.get("hierarchy") or {}
+        if not isinstance(hierarchy, Mapping):
+            hierarchy = {}
+        classificationBasis = recommendedCandidate.get("classification_basis") or []
+        if not isinstance(classificationBasis, list):
+            classificationBasis = []
+        evidenceRefs = recommendedCandidate.get("classification_evidence_refs") or []
+        if not isinstance(evidenceRefs, list):
+            evidenceRefs = []
+        supportingFacts = recommendedCandidate.get("supporting_product_facts") or []
+        if not isinstance(supportingFacts, list):
+            supportingFacts = []
+        reason = str(classificationBasis[0]).strip() if classificationBasis else ""
+        return {
+            "recommended": True,
+            "rank": recommendedCandidate.get("rank"),
+            "hs2": hierarchy.get("hs2") or "",
+            "hs4": hierarchy.get("hs4") or "",
+            "hs6": hierarchy.get("hs6") or recommendedCandidate.get("hs6"),
+            "cn8": hierarchy.get("cn8") or recommendedCandidate.get("cn8"),
+            "taric10": recommendedCandidate.get("taric10"),
+            "hard_condition_status": recommendedCandidate.get(
+                "hard_condition_status",
+            ),
+            "reason": reason,
+            "classification_evidence_refs": evidenceRefs,
+            "supporting_product_facts": supportingFacts,
         }
 
     @staticmethod
@@ -1048,31 +1263,6 @@ class KurlyMarketSmokeRunner:
         }
 
     @staticmethod
-    def _BuildDocumentSmoke(
-        documentPackage: Mapping[str, object],
-        documentPackages: Sequence[object],
-    ) -> Dict[str, object]:
-        summary = documentPackage.get("summary") or {}
-        if not isinstance(summary, Mapping):
-            summary = {}
-        return {
-            "package_count": len(documentPackages),
-            "latest_document_package_id": documentPackage.get("document_package_id"),
-            "candidate_id": documentPackage.get("candidate_id"),
-            "cn8": documentPackage.get("cn8"),
-            "taric10": documentPackage.get("taric10"),
-            "customs_check_count": len(documentPackage.get("customs_check_items") or []),
-            "required_document_count": len(documentPackage.get("required_documents") or []),
-            "product_regulation_count": len(documentPackage.get("product_regulations") or []),
-            "missing_facts": documentPackage.get("missing_facts") or [],
-            "summary": {
-                "duty": summary.get("duty"),
-                "domains": summary.get("domains") or [],
-                "main_requirements": summary.get("main_requirements") or [],
-            },
-        }
-
-    @staticmethod
     def _BuildClassificationCandidateSmokeRows(
         candidateCodeSet: Mapping[str, Any],
     ) -> List[Dict[str, Any]]:
@@ -1086,10 +1276,14 @@ class KurlyMarketSmokeRunner:
             staticTree = candidate.get("candidate_static_tree") or {}
             if not isinstance(staticTree, Mapping):
                 staticTree = {}
+            hierarchy = KurlyMarketSmokeRunner._BuildCandidateHierarchySmoke(
+                candidate,
+            )
             out.append({
                 "rank": candidate.get("rank"),
-                "cn8": candidate.get("cn8"),
-                "hs6": candidate.get("hs6"),
+                "cn8": hierarchy.get("cn8") or candidate.get("cn8"),
+                "hs6": hierarchy.get("hs6") or candidate.get("hs6"),
+                "hierarchy": hierarchy,
                 "taric10": candidate.get("taric10"),
                 "score": staticTree.get("total_score"),
                 "llm_recommended": candidate.get("llm_recommended"),
@@ -1099,12 +1293,28 @@ class KurlyMarketSmokeRunner:
                 "matched_keywords": staticTree.get("matched_keywords") or [],
                 "score_breakdown": staticTree.get("score_breakdown") or {},
                 "classification_basis": candidate.get("classification_basis") or [],
+                "supporting_product_facts": (
+                    candidate.get("supporting_product_facts") or []
+                ),
                 "classification_evidence_refs": (
                     candidate.get("classification_evidence_refs") or []
                 ),
                 "similar_ebti_cases": candidate.get("similar_ebti_cases") or [],
             })
         return out
+
+    @staticmethod
+    def _BuildCandidateHierarchySmoke(
+        candidate: Mapping[str, object],
+    ) -> Dict[str, str]:
+        cn8 = re.sub(r"\D", "", str(candidate.get("cn8") or ""))
+        hs6 = re.sub(r"\D", "", str(candidate.get("hs6") or ""))
+        sourceCode = cn8 or hs6
+        return {
+            levelName: sourceCode[:codeLength]
+            for levelName, codeLength in RECALL_LEVELS
+            if len(sourceCode) >= codeLength
+        }
 
     @staticmethod
     def _DoesRawInputMatchObservedFacts(
@@ -1803,7 +2013,10 @@ class KurlyMarketSmokeRunner:
         domainRouting = classificationData.get("domain_routing") or {}
         decision = classificationData.get("decision") or {}
         traversal = classificationData.get("traversal") or {}
-        documentRecommendation = classificationData.get("document_recommendation") or {}
+        llmValidationRecommendation = (
+            classificationData.get("llm_validation_recommendation") or {}
+        )
+        answerRecall = classificationData.get("answer_recall") or {}
         classificationLogger.info("===== INTEGRATED PIPELINE MERGE CHECK =====")
         for agentResult in classificationData.get("agent_results") or []:
             classificationLogger.info(
@@ -1848,7 +2061,8 @@ class KurlyMarketSmokeRunner:
         classificationLogger.info(
             (
                 "classification_smoke error={} candidates={} zero_score={} "
-                "decision={} backtracking={} traversal={} raw_input_match={}"
+                "decision={} backtracking={} traversal={} raw_input_match={} "
+                "answer_found={}"
             ),
             status.get("error"),
             status.get("candidate_count"),
@@ -1859,7 +2073,22 @@ class KurlyMarketSmokeRunner:
             (classificationData.get("dash_equivalence") or {}).get(
                 "raw_input_matches_evidence_intake",
             ),
+            answerRecall.get("answer_found"),
         )
+        classificationLogger.info(
+            (
+                "llm_validation_recommendation recommended={} rank={} cn8={} "
+                "hs6={} taric10={} hard_condition={} reason={}"
+            ),
+            llmValidationRecommendation.get("recommended"),
+            llmValidationRecommendation.get("rank"),
+            llmValidationRecommendation.get("cn8"),
+            llmValidationRecommendation.get("hs6"),
+            llmValidationRecommendation.get("taric10"),
+            llmValidationRecommendation.get("hard_condition_status"),
+            llmValidationRecommendation.get("reason"),
+        )
+        self._LogAnswerRecall(classificationLogger, answerRecall)
         for candidate in classificationData.get("candidates") or []:
             classificationLogger.info(
                 (
@@ -1876,21 +2105,45 @@ class KurlyMarketSmokeRunner:
                 len(candidate.get("classification_evidence_refs") or []),
                 len(candidate.get("similar_ebti_cases") or []),
             )
-        classificationLogger.info(
-            (
-                "document_recommendation packages={} latest={} cn8={} taric10={} "
-                "customs={} required_docs={} product_rules={} missing_facts={}"
-            ),
-            documentRecommendation.get("package_count"),
-            documentRecommendation.get("latest_document_package_id"),
-            documentRecommendation.get("cn8"),
-            documentRecommendation.get("taric10"),
-            documentRecommendation.get("customs_check_count"),
-            documentRecommendation.get("required_document_count"),
-            documentRecommendation.get("product_regulation_count"),
-            documentRecommendation.get("missing_facts"),
-        )
         classificationLogger.info("===== END INTEGRATED PIPELINE MERGE CHECK =====")
+
+    def _LogAnswerRecall(
+        self,
+        logger: _BoundLogger,
+        answerRecall: Mapping[str, object],
+    ) -> None:
+        if not answerRecall.get("answer_found"):
+            logger.info("answer_recall skipped reason={}", answerRecall.get("reason"))
+            return
+        answer = answerRecall.get("answer") or {}
+        if not isinstance(answer, Mapping):
+            answer = {}
+        logger.info(
+            "answer_recall expected_taric10={} answer_product_id={}",
+            answer.get("taric10"),
+            answer.get("product_id"),
+        )
+        levels = answerRecall.get("levels") or {}
+        if not isinstance(levels, Mapping):
+            return
+        for levelName, levelData in levels.items():
+            if not isinstance(levelData, Mapping):
+                continue
+            logger.info(
+                (
+                    "answer_recall level={} expected={} top1={} top1_match={} "
+                    "top5_match={} llm_recommended={} "
+                    "llm_recommended_match={} top5_codes={}"
+                ),
+                levelName,
+                levelData.get("expected"),
+                levelData.get("top1_code"),
+                levelData.get("top1_match"),
+                levelData.get("top5_match"),
+                levelData.get("llm_recommended_code"),
+                levelData.get("llm_recommended_match"),
+                levelData.get("top5_codes"),
+            )
 
     def _LogSummary(self, results: List[Dict[str, Any]]) -> None:
         summaryLogger = self._Logger("_LogSummary")
@@ -1907,11 +2160,105 @@ class KurlyMarketSmokeRunner:
             ocrOkCount,
             len(results),
         )
+        recallSummary = self._BuildAnswerRecallSummary(results)
+        if recallSummary["evaluated_count"]:
+            for levelName, levelSummary in recallSummary["levels"].items():
+                summaryLogger.info(
+                    (
+                        "classification_recall level={} evaluated={} "
+                        "top1={}/{} ({}) top5={}/{} ({}) "
+                        "llm_recommended={}/{} ({})"
+                    ),
+                    levelName,
+                    levelSummary["evaluated_count"],
+                    levelSummary["top1_match_count"],
+                    levelSummary["evaluated_count"],
+                    levelSummary["top1_recall"],
+                    levelSummary["top5_match_count"],
+                    levelSummary["evaluated_count"],
+                    levelSummary["top5_recall"],
+                    levelSummary["llm_recommended_match_count"],
+                    levelSummary["evaluated_count"],
+                    levelSummary["llm_recommended_recall"],
+                )
+        elif any("classification_smoke" in result for result in results):
+            summaryLogger.info(
+                "classification_recall skipped answer_source={} matched_rows=0",
+                self._answerCsvPath,
+            )
         if self._logFullResult:
             summaryLogger.info(
                 "\n{}",
                 json.dumps(results, ensure_ascii=False, indent=2),
             )
+
+    @staticmethod
+    def _BuildAnswerRecallSummary(
+        results: Sequence[Mapping[str, object]],
+    ) -> Dict[str, object]:
+        levelTotals = {
+            levelName: {
+                "evaluated_count": 0,
+                "top1_match_count": 0,
+                "top5_match_count": 0,
+                "llm_recommended_match_count": 0,
+            }
+            for levelName, _ in RECALL_LEVELS
+        }
+        for result in results:
+            classificationSmoke = result.get("classification_smoke") or {}
+            if not isinstance(classificationSmoke, Mapping):
+                continue
+            answerRecall = classificationSmoke.get("answer_recall") or {}
+            if not isinstance(answerRecall, Mapping) or not answerRecall.get(
+                "answer_found"
+            ):
+                continue
+            levels = answerRecall.get("levels") or {}
+            if not isinstance(levels, Mapping):
+                continue
+            for levelName, _ in RECALL_LEVELS:
+                levelData = levels.get(levelName) or {}
+                if not isinstance(levelData, Mapping):
+                    continue
+                levelTotals[levelName]["evaluated_count"] += 1
+                if levelData.get("top1_match"):
+                    levelTotals[levelName]["top1_match_count"] += 1
+                if levelData.get("top5_match"):
+                    levelTotals[levelName]["top5_match_count"] += 1
+                if levelData.get("llm_recommended_match"):
+                    levelTotals[levelName]["llm_recommended_match_count"] += 1
+
+        levelsOut: dict[str, dict[str, object]] = {}
+        evaluatedCounts: list[int] = []
+        for levelName, totals in levelTotals.items():
+            evaluatedCount = totals["evaluated_count"]
+            evaluatedCounts.append(evaluatedCount)
+            top1Count = totals["top1_match_count"]
+            top5Count = totals["top5_match_count"]
+            llmRecommendedCount = totals["llm_recommended_match_count"]
+            levelsOut[levelName] = {
+                **totals,
+                "top1_recall": (
+                    round(top1Count / evaluatedCount, 4)
+                    if evaluatedCount
+                    else 0.0
+                ),
+                "top5_recall": (
+                    round(top5Count / evaluatedCount, 4)
+                    if evaluatedCount
+                    else 0.0
+                ),
+                "llm_recommended_recall": (
+                    round(llmRecommendedCount / evaluatedCount, 4)
+                    if evaluatedCount
+                    else 0.0
+                ),
+            }
+        return {
+            "evaluated_count": max(evaluatedCounts) if evaluatedCounts else 0,
+            "levels": levelsOut,
+        }
 
     def _WriteSummaryArtifact(self, results: List[Dict[str, Any]]) -> None:
         self._summaryArtifactPath.parent.mkdir(parents=True, exist_ok=True)
