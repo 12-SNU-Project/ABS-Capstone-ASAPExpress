@@ -5,6 +5,7 @@ from __future__ import annotations
 from agents.agent_base import BaseAgent
 from agents.blackboard import BlackboardStore, now_iso
 from agents.pipeline_dto import JsonValue, RoutingContext
+from agents.tools.chapter_index_repository import LoadPreClassificationChapterRows
 from agents.tools.pre_classification_router import (
     BuildPreClassificationRouteInput,
     PreClassificationDomainRouter,
@@ -39,7 +40,9 @@ class DomainRouterAgent(BaseAgent):
             factTexts=(*factTexts, *routingTerms),
             structuredProductFacts=structuredFacts,
         )
-        routeHint = PreClassificationDomainRouter().Route(routeInput)
+        routeHint = PreClassificationDomainRouter(
+            chapterRowsProvider=LoadPreClassificationChapterRows,
+        ).Route(routeInput)
         routingContextId = store.next_id("route")
         routingContext = RoutingContext(
             routingContextId=routingContextId,

@@ -3812,15 +3812,15 @@ class CnCandidateRetriever:
         normalizedSearchText = searchText.lower()
         for phrase in self._SplitKeywordCell(cellValue):
             normalizedPhrase = NormalizeWhiteSpace(phrase).lower()
-            if normalizedPhrase and normalizedPhrase in searchTerms:
-                matchedTerms.append(normalizedPhrase)
-                continue
             phraseTerms = [
                 term
                 for term in self._ExtractTerms(phrase)
                 if self._IsMatchableTerm(term)
             ]
             if not phraseTerms:
+                continue
+            if normalizedPhrase and normalizedPhrase in searchTerms:
+                matchedTerms.append(normalizedPhrase)
                 continue
             if normalizedPhrase and normalizedPhrase in normalizedSearchText:
                 matchedTerms.append(normalizedPhrase)

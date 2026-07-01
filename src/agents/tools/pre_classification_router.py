@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 from agents.pipeline_dto import JsonValue
+
+
+ChapterIndexRowsProvider = Callable[[], Sequence[Mapping[str, object]]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,12 +37,16 @@ class PreClassificationRoutingBasis:
     method: str
     matchedTerms: tuple[str, ...] = ()
     blockedReason: str = ""
+    sourceTable: str = ""
+    rowCount: int = 0
 
     def ToTrace(self) -> dict[str, JsonValue]:
         return {
             "method": self.method,
             "matched_terms": list(self.matchedTerms),
             "blocked_reason": self.blockedReason,
+            "source_table": self.sourceTable,
+            "row_count": self.rowCount,
         }
 
 
@@ -114,9 +121,106 @@ RAW_ANIMAL_CHAPTER_PATTERN = re.compile(
     re.I,
 )
 
+CHAPTER_DOMAIN_FALLBACK: dict[str, tuple[str, ...]] = {
+    "01": ("animal_origin",),
+    "02": ("food", "animal_origin"),
+    "03": ("food", "animal_origin"),
+    "04": ("food", "animal_origin"),
+    "05": ("animal_origin",),
+    "06": ("food",),
+    "07": ("food",),
+    "08": ("food",),
+    "09": ("food",),
+    "10": ("food",),
+    "11": ("food",),
+    "12": ("food",),
+    "13": ("food",),
+    "14": ("food",),
+    "15": ("food",),
+    "16": ("food", "animal_origin"),
+    "17": ("food",),
+    "18": ("food",),
+    "19": ("food",),
+    "20": ("food",),
+    "21": ("food",),
+    "22": ("food",),
+    "23": ("food", "animal_origin"),
+    "24": ("food",),
+    "33": ("cosmetics",),
+}
+
+PRODUCT_FORM_TO_HS2: tuple[tuple[re.Pattern[str], str, str], ...] = (
+    (
+        re.compile(
+            r"\b(stir[- ]?fried|fried|cooked|seasoned|prepared)\b.{0,40}\b(octopus|squid|mollusc|cockle|shrimp|prawn|crustacean|fish|seafood)\b"
+            r"|\b(octopus|squid|mollusc|cockle|shrimp|prawn|crustacean|fish|seafood)\b.{0,40}\b(stir[- ]?fried|fried|cooked|seasoned|prepared)\b"
+            r"|낙지.{0,12}볶음|주꾸미.{0,12}볶음|쭈꾸미.{0,12}볶음|오징어.{0,12}볶음|새우.{0,12}볶음|꼬막.{0,12}(장|무침|볶음)",
+            re.I,
+        ),
+        "16",
+        "prepared_aquatic_animal_product",
+    ),
+    (
+        re.compile(r"\b(noodle|ramen|pasta|macaroni|spaghetti)\b|라면|유탕면|국수|면류|파스타", re.I),
+        "19",
+        "cereal_noodle_preparation",
+    ),
+    (
+        re.compile(r"\b(sauce|seasoning|condiment|soup|broth|stock)\b|소스|양념|조미|스프|미역국|(?<!중)국|탕|찌개|육수", re.I),
+        "21",
+        "miscellaneous_edible_preparation",
+    ),
+    (
+        re.compile(r"\b(sausage|ham|surimi)\b|소시지|햄|어묵|맛살|멘보샤", re.I),
+        "16",
+        "meat_fish_crustacean_preparation",
+    ),
+    (
+        re.compile(r"\b(dumpling|mandu|stuffed pasta|stuffed noodles)\b|만두|물만두|군만두", re.I),
+        "19",
+        "stuffed_pasta_cereal_preparation",
+    ),
+    (
+        re.compile(r"\b(jam|pickle|fruit preparation|vegetable preparation)\b|잼|절임|피클|과실가공|채소가공", re.I),
+        "20",
+        "vegetable_fruit_preparation",
+    ),
+    (
+        re.compile(r"\b(beverage|drink|juice|tea)\b|음료|주스|차음료", re.I),
+        "22",
+        "beverage",
+    ),
+    (
+        re.compile(r"\b(deodorant|antiperspirant|roll[- ]?on|cosmetic|skincare|perfume|lotion|shampoo|toner|essence)\b|데오드란트|데오도란트|롤온|화장품|스킨케어|향수|로션|샴푸|토너|에센스", re.I),
+        "33",
+        "cosmetic_toilet_preparation",
+    ),
+)
+
+GENERIC_CHAPTER_KEYWORD_STOPLIST = {
+    "animal",
+    "edible",
+    "included",
+    "miscellaneous",
+    "origin",
+    "other",
+    "prepared",
+    "preparation",
+    "preparations",
+    "product",
+    "products",
+    "specified",
+}
+
 
 class PreClassificationDomainRouter:
     """Small deterministic route DTO builder before Beam retrieval."""
+
+    def __init__(
+        self,
+        chapterRowsProvider: ChapterIndexRowsProvider | None = None,
+    ) -> None:
+        self._chapterRowsProvider = chapterRowsProvider
 
     def Route(
         self,
@@ -126,6 +230,23 @@ class PreClassificationDomainRouter:
         if not searchText.strip():
             return PreClassificationRouteHint()
 
+        chapterRows = self._LoadChapterRows()
+        if chapterRows:
+            routeHint = self._RouteWithChapterIndex(searchText, chapterRows)
+            if routeHint.candidateHs2:
+                return routeHint
+
+        return self._RouteWithRules(
+            searchText,
+            rowCount=len(chapterRows),
+        )
+
+    def _RouteWithRules(
+        self,
+        searchText: str,
+        *,
+        rowCount: int = 0,
+    ) -> PreClassificationRouteHint:
         candidateHs2: list[str] = []
         domainScopes: list[str] = []
         preGateDomains: list[str] = []
@@ -162,12 +283,202 @@ class PreClassificationDomainRouter:
             domainScopes=tuple(domainScopes),
             preGateDomains=tuple(preGateDomains),
             routingBasis=PreClassificationRoutingBasis(
-                method="deterministic_keyword_route",
+                method=(
+                    "deterministic_keyword_route"
+                    if rowCount == 0
+                    else "cn_chapter_index_no_match_fallback_keyword_route"
+                ),
                 matchedTerms=tuple(matchedTerms),
                 blockedReason=blockedReason,
+                sourceTable="cn_chapter_index" if rowCount else "",
+                rowCount=rowCount,
             ),
             missingFacts=missingFacts,
         )
+
+    def _RouteWithChapterIndex(
+        self,
+        searchText: str,
+        chapterRows: Sequence[Mapping[str, object]],
+    ) -> PreClassificationRouteHint:
+        processed = PROCESSED_SIGNAL_PATTERN.search(searchText) is not None
+        scores: dict[str, float] = {}
+        matchedByChapter: dict[str, list[str]] = {}
+        blockedHs2: list[str] = []
+        blockedReasons: list[str] = []
+        domainScopes: list[str] = []
+        preGateDomains: list[str] = []
+        rowByChapter = {
+            chapter: row
+            for row in chapterRows
+            for chapter in (self._ReadChapter(row),)
+            if chapter
+        }
+
+        for row in chapterRows:
+            chapter = self._ReadChapter(row)
+            if not chapter:
+                continue
+
+            keywordMatches = self._TermMatches(
+                self._FilterChapterKeywordTerms(
+                    self._SplitValues(row.get("chapter_keywords")),
+                ),
+                searchText,
+            )
+            rawMatches = self._TermMatches(
+                self._SplitValues(row.get("raw_scope_signals")),
+                searchText,
+            )
+            preparedMatches = self._TermMatches(
+                self._SplitValues(row.get("prepared_scope_signals")),
+                searchText,
+            )
+            formMatches = [
+                f"{match.group(0)}:{reason}"
+                for pattern, targetChapter, reason in PRODUCT_FORM_TO_HS2
+                for match in (pattern.search(searchText),)
+                if match is not None and targetChapter == chapter
+            ]
+
+            redirects = self._SplitValues(
+                row.get("prepared_food_redirect_chapters"),
+            )
+            guardrailText = str(row.get("routing_guardrails") or "").lower()
+            if (
+                processed
+                and redirects
+                and "before raw ingredient chapter" in guardrailText
+                and (keywordMatches or rawMatches)
+            ):
+                self._AppendUnique(blockedHs2, chapter)
+                self._AppendUnique(
+                    blockedReasons,
+                    "processed_product_guardrail_redirect",
+                )
+                for redirect in redirects:
+                    redirectChapter = re.sub(r"\D", "", redirect)[:2].zfill(2)
+                    if redirectChapter:
+                        scores[redirectChapter] = scores.get(redirectChapter, 0.0) + 5.0
+                        matchedByChapter.setdefault(redirectChapter, []).append(
+                            "prepared_food_redirect_bonus",
+                        )
+                continue
+
+            score = float(
+                len(keywordMatches) * 4
+                + len(rawMatches) * (1 if processed else 4)
+                + len(formMatches) * 8
+            )
+            if processed:
+                score += len(preparedMatches) * 2
+            if score <= 0:
+                continue
+            scores[chapter] = scores.get(chapter, 0.0) + score
+            matchedByChapter.setdefault(chapter, []).extend(
+                keywordMatches + rawMatches + preparedMatches + formMatches,
+            )
+
+        rankedChapters = sorted(scores, key=lambda chapter: (-scores[chapter], chapter))
+        candidateHs2 = tuple(rankedChapters[:5])
+        matchedTerms: list[str] = []
+        for chapter in candidateHs2:
+            row = rowByChapter.get(chapter, {})
+            for domain in self._ReadDomainScopes(row, chapter):
+                self._AppendUnique(domainScopes, domain)
+                if domain == "animal_origin":
+                    self._AppendUnique(preGateDomains, domain)
+            for preGate in self._SplitValues(row.get("pre_gate_domain_candidates")):
+                self._AppendUnique(preGateDomains, preGate)
+            for term in matchedByChapter.get(chapter, []):
+                self._AppendUnique(matchedTerms, term)
+
+        return PreClassificationRouteHint(
+            candidateHs2=candidateHs2,
+            blockedHs2=tuple(blockedHs2),
+            domainScopes=tuple(domainScopes),
+            preGateDomains=tuple(preGateDomains),
+            routingBasis=PreClassificationRoutingBasis(
+                method="cn_chapter_index_keyword_guardrail",
+                matchedTerms=tuple(matchedTerms),
+                blockedReason=";".join(blockedReasons),
+                sourceTable="cn_chapter_index",
+                rowCount=len(chapterRows),
+            ),
+            missingFacts=(
+                ("primary_ingredient_ratio",)
+                if "animal_origin" in preGateDomains and "%" not in searchText
+                else ()
+            ),
+        )
+
+    def _LoadChapterRows(self) -> tuple[Mapping[str, object], ...]:
+        if self._chapterRowsProvider is None:
+            return ()
+        return tuple(self._chapterRowsProvider())
+
+    @staticmethod
+    def _ReadChapter(row: Mapping[str, object]) -> str:
+        chapter = re.sub(r"\D", "", str(row.get("chapter") or ""))[:2]
+        return chapter.zfill(2) if chapter else ""
+
+    @staticmethod
+    def _ReadDomainScopes(
+        row: Mapping[str, object],
+        chapter: str,
+    ) -> tuple[str, ...]:
+        domains = PreClassificationDomainRouter._SplitValues(
+            row.get("domain_scope_candidates"),
+        )
+        if domains:
+            return tuple(domains)
+        return CHAPTER_DOMAIN_FALLBACK.get(chapter, ())
+
+    @staticmethod
+    def _SplitValues(value: object) -> list[str]:
+        values: list[str] = []
+        if value is None:
+            return values
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                for nestedItem in PreClassificationDomainRouter._SplitValues(item):
+                    if nestedItem not in values:
+                        values.append(nestedItem)
+            return values
+        for item in str(value or "").replace("|", ";").replace(",", ";").split(";"):
+            text = item.strip()
+            if text and text not in values:
+                values.append(text)
+        return values
+
+    @staticmethod
+    def _TermMatches(terms: Sequence[str], haystack: str) -> list[str]:
+        matches: list[str] = []
+        normalized = re.sub(r"\s+", " ", haystack or "").lower()
+        for term in terms:
+            termNorm = re.sub(r"\s+", " ", str(term or "").strip().lower())
+            if len(termNorm) < 2:
+                continue
+            if re.fullmatch(r"[a-z0-9][a-z0-9 /'&().-]*", termNorm, flags=re.I):
+                pattern = r"(?<![a-z0-9])" + re.escape(termNorm) + r"(?![a-z0-9])"
+                matched = re.search(pattern, normalized, flags=re.I) is not None
+            else:
+                matched = termNorm in normalized
+            if matched and term not in matches:
+                matches.append(term)
+        return matches
+
+    @staticmethod
+    def _FilterChapterKeywordTerms(terms: Sequence[str]) -> list[str]:
+        filtered: list[str] = []
+        for term in terms:
+            termNorm = re.sub(r"\s+", " ", str(term or "").strip().lower())
+            if not termNorm:
+                continue
+            if " " not in termNorm and termNorm in GENERIC_CHAPTER_KEYWORD_STOPLIST:
+                continue
+            filtered.append(term)
+        return filtered
 
     @staticmethod
     def _AppendUnique(values: list[str], value: str) -> None:

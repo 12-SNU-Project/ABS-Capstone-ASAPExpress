@@ -135,6 +135,29 @@ def test_low_value_meal_word_does_not_score_mustard_candidate() -> None:
     assert retriever.FindCandidates(_Product("산채나물 비빔밥"), topK=5) == []
 
 
+def test_low_value_expansion_phrase_does_not_score_generic_food_candidate() -> None:
+    genericFood = _Row(
+        "21",
+        "2106",
+        "210690",
+        "21069098",
+        "food preparations not elsewhere specified or included",
+    )
+    retriever = _Retriever([genericFood])
+
+    assert retriever.FindCandidates(_Product("산채나물 비빔밥"), topK=5) == []
+
+
+def test_preferred_heading_does_not_keep_zero_score_branch() -> None:
+    riceCandidate = _Row("19", "1905", "190590", "19059020", "rice")
+    genericFood = _Row("21", "2106", "210690", "21069098", "food")
+    retriever = _Retriever([riceCandidate, genericFood])
+
+    candidates = retriever.FindCandidates(_Product("산채나물 비빔밥"), topK=5)
+
+    assert candidates == []
+
+
 def test_unknown_hard_condition_does_not_promote_generic_include_match() -> None:
     plainPasta = _Row("19", "1902", "190219", "19021910", "pasta")
     cookedStuffed = _Row("19", "1902", "190220", "19022091", "pasta")

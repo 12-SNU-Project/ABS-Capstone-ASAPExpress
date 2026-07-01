@@ -379,7 +379,7 @@ class HierarchyBeamSelector:
         selectedScores = [
             nodeScore
             for nodeScore in sortedScores
-            if nodeScore.node.code in preferredCodeSet
+            if nodeScore.node.code in preferredCodeSet and nodeScore.score > 0
         ][:staticLimit]
         selectedCodes = {nodeScore.node.code for nodeScore in selectedScores}
         for nodeScore in sortedScores:
