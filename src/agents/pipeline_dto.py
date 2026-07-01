@@ -105,6 +105,36 @@ class DistilledIdentityFacts:
 
 
 @dataclass(frozen=True, slots=True)
+class CompositionLaneFacts:
+    processingState: str = "unknown"
+    principalIngredient: str = ""
+    ingredientClasses: tuple[str, ...] = ()
+    ingredientPercentages: tuple[dict[str, JsonValue], ...] = ()
+    compositionTerms: tuple[str, ...] = ()
+    processingTerms: tuple[str, ...] = ()
+    compositionBasis: str = "label"
+    containsWrapperOrDough: bool = False
+    containsSauceOrBroth: bool = False
+    allergenTermsExcluded: tuple[str, ...] = ()
+    missingCompositionFacts: tuple[str, ...] = ()
+
+    def ToTrace(self) -> dict[str, JsonValue]:
+        return {
+            "processing_state": self.processingState,
+            "principal_ingredient": self.principalIngredient,
+            "ingredient_classes": list(self.ingredientClasses),
+            "ingredient_percentages": list(self.ingredientPercentages),
+            "composition_terms": list(self.compositionTerms),
+            "processing_terms": list(self.processingTerms),
+            "composition_basis": self.compositionBasis,
+            "contains_wrapper_or_dough": self.containsWrapperOrDough,
+            "contains_sauce_or_broth": self.containsSauceOrBroth,
+            "allergen_terms_excluded": list(self.allergenTermsExcluded),
+            "missing_composition_facts": list(self.missingCompositionFacts),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ProductUnderstandingFacts:
     understandingId: str
     productId: str
@@ -115,6 +145,7 @@ class ProductUnderstandingFacts:
     classificationInputFactTexts: tuple[str, ...]
     classificationInputProductFacts: tuple[dict[str, JsonValue], ...]
     identity: DistilledIdentityFacts
+    composition: CompositionLaneFacts
     coiEvidence: CoiEvidenceSet
     encyclopediaEvidence: EncyclopediaEvidenceSet
     routingTerms: tuple[str, ...]
@@ -136,6 +167,7 @@ class ProductUnderstandingFacts:
             "classification_input_fact_texts": list(self.classificationInputFactTexts),
             "classification_input_product_facts": list(self.classificationInputProductFacts),
             "identity_lane": self.identity.ToTrace(),
+            "composition_lane": self.composition.ToTrace(),
             "coi_evidence": self.coiEvidence.ToBlackboard(
                 createdBy=createdBy,
                 createdAt=createdAt,

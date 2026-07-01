@@ -48,6 +48,10 @@ def _read_field(obj, *names, default=None):
     return default
 
 
+def _truthy_env(value) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 class ClassificationAgent(BaseAgent):
     agent_name = "Classification_Agent"
     stage = "Classification"
@@ -77,6 +81,14 @@ class ClassificationAgent(BaseAgent):
         open_challenges = self._read_open_challenges_for_me(bb)
         if open_challenges:
             self._respond_to_challenges(store, open_challenges)
+            return
+
+        # Staged narrowing (opt-in, ASAP_USE_STAGED_CLASSIFIER). Replaces the
+        # one-shot external classifier with the hs4->hs6->cn8 narrowing tool.
+        # Returns True only when it emitted a candidate set; otherwise we fall
+        # through to run_external_classifier (flag-off / missing understanding /
+        # staged failure / any error) so baseline behaviour is unchanged.
+        if self._maybe_classify_staged(store, pes, routingContext, bb):
             return
 
         result: ExternalClassificationResult = run_external_classifier(
@@ -278,6 +290,140 @@ class ClassificationAgent(BaseAgent):
         self.wrote(ccs_id)
         for c in ccs_candidates:
             self.wrote(c["candidate_id"])
+
+    # ------------------------------------------------------------------
+    # Staged narrowing (additive; opt-in). Emits a CandidateCodeSet in the
+    # exact baseline shape so the Document/Orchestrator downstream is unchanged.
+    # Any failure returns False -> run() falls back to run_external_classifier.
+    # ------------------------------------------------------------------
+    def _maybe_classify_staged(
+        self,
+        store: BlackboardStore,
+        pes: dict,
+        routingContext,
+        bb: dict,
+    ) -> bool:
+        import os
+
+        if not _truthy_env(os.environ.get("ASAP_USE_STAGED_CLASSIFIER")):
+            return False
+        try:
+            product_facts = bb.get("product_understanding") or {}
+            if not product_facts:
+                self.reason("Staged classifier: no product_understanding; using external.")
+                return False
+            routing = routingContext if isinstance(routingContext, dict) else (
+                bb.get("routing_context") or {}
+            )
+
+            from agents.tools.staged_classification import StagedClassificationTool
+
+            staged = StagedClassificationTool().classify(
+                product_facts=product_facts,
+                routing_context=routing,
+            )
+            stages = staged.get("stages") or []
+            candidates = staged.get("candidates") or []
+            if not staged.get("ok") or not candidates:
+                self.reason(
+                    "Staged classifier fell back to external "
+                    f"(error={staged.get('error') or 'no_candidates'})."
+                )
+                return False
+
+            ccs_id = store.next_id("ccs")
+            ccs_candidates: list[dict] = []
+            for candidate in candidates[:5]:
+                cn8 = str(candidate.get("cn8") or "")[:8]
+                if not cn8.isdigit() or len(cn8) != 8:
+                    continue
+                taric_branches = self._resolve_taric_branches(cn8)
+                selected_branch = self._select_taric_branch(taric_branches)
+                taric10 = selected_branch.get("taric10") or ""
+                rank = len(ccs_candidates) + 1
+                ccs_candidates.append({
+                    "candidate_id": store.next_id("cand"),
+                    "hs6": cn8[:6],
+                    "cn8": cn8,
+                    "taric10": taric10,
+                    "taric10_branch_candidates": taric_branches,
+                    "taric10_resolution_mode": (
+                        "enumerate_all_under_cn8" if taric_branches else "no_taric_branch_found"
+                    ),
+                    "taric10_is_recommended": False,
+                    "taric10_branch_count": len(taric_branches),
+                    "rank": rank,
+                    "status": "proposed",
+                    "candidate_source": "staged_classifier",
+                    "llm_recommended": rank == 1,
+                    "candidate_static_tree": self._staged_static_tree(candidate),
+                    "hard_conditions": "",
+                    "hard_condition_status": "not_applicable",
+                    "hard_condition_evidence": [],
+                    "classification_basis": [self._staged_basis(candidate)],
+                    "supporting_product_facts": [],
+                    "classification_evidence_refs": [],
+                    "similar_ebti_cases": [],
+                    "classification_citations": list(getattr(self, "_ontology_reads", []) or []),
+                    "required_facts": [],
+                    "unknowns": [],
+                })
+
+            if not ccs_candidates:
+                self.reason("Staged classifier produced no valid CN8; using external.")
+                return False
+
+            store.append("candidate_code_sets", {
+                "object_type": "CandidateCodeSet",
+                "created_by": self.agent_name,
+                "created_at": now_iso(),
+                "candidate_set_id": ccs_id,
+                "product_id": pes["product_id"],
+                "classification_trace": {
+                    "mode": "staged_narrowing",
+                    "stages": stages,
+                },
+                "candidates": ccs_candidates,
+            })
+            self.wrote(ccs_id)
+            for c in ccs_candidates:
+                self.wrote(c["candidate_id"])
+            self.reason(
+                f"Staged narrowing emitted {len(ccs_candidates)} candidate(s) "
+                f"(hs4->hs6->cn8, {len(stages)} stages)."
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001 — never break; fall back to external
+            self.reason(f"Staged classifier error ({exc!r}); using external.")
+            return False
+
+    def _staged_static_tree(self, candidate: dict) -> dict:
+        nodes: list[dict] = []
+        for level, label in (("hs4", "HS4"), ("hs6", "HS6"), ("cn8", "CN8")):
+            code = str(candidate.get(level) or "").strip()
+            if not code:
+                continue
+            nodes.append({
+                "level": level,
+                "label": label,
+                "code": code,
+                "description": str(candidate.get("description") or "") if level == "cn8" else "",
+                "score": float(candidate.get("score") or 0.0) if level == "cn8" else 0.0,
+                "matched_keywords": [],
+            })
+        return {
+            "total_score": float(candidate.get("score") or 0.0),
+            "retrieval_sources": ["staged_narrowing"],
+            "nodes": nodes,
+        }
+
+    def _staged_basis(self, candidate: dict) -> str:
+        desc = str(candidate.get("description") or "")[:160]
+        verdict = str(candidate.get("quantitative_verdict") or "")
+        base = f"Staged narrowing hs4->hs6->cn8 selected CN8={candidate.get('cn8')}: {desc}"
+        if verdict and verdict != "neutral":
+            base += f" [%-gate: {verdict}]"
+        return base[:600]
 
     def _build_candidate_static_tree(self, candidate) -> dict:
         codeHierarchy = _read_field(candidate, "codeHierarchy", "code_hierarchy", default={}) or {}

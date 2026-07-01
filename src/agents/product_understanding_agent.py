@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 
 from agents.agent_base import BaseAgent
 from agents.blackboard import BlackboardStore, now_iso
 from agents.coi_loader import LoadCoiEvidence
 from agents.pipeline_dto import (
+    CompositionLaneFacts,
     CoiEvidenceSet,
     DistilledIdentityFacts,
     EncyclopediaEvidenceSet,
@@ -16,6 +18,17 @@ from agents.pipeline_dto import (
 )
 from agents.tools.encyclopedia_lookup import LookupEncyclopediaEvidence
 from agents.tools.identity_distiller import IdentityDistillerTool
+
+
+PERCENT_RE = re.compile(
+    r"(?P<term>[A-Za-z가-힣][A-Za-z가-힣 /·._-]{0,39}?)\s*(?P<percent>\d+(?:[.,]\d+)?)\s*%",
+)
+WRAPPER_RE = re.compile(r"피|만두피|도우|반죽|wrapper|dough|pastry", re.I)
+SAUCE_BROTH_RE = re.compile(r"소스|국물|육수|스프|sauce|broth|soup|stock", re.I)
+ALLERGEN_RE = re.compile(
+    r"알레르|알러지|알레르겐|같은\s*제조시설|동일\s*제조시설|교차|allergen|may contain|cross[- ]?contact",
+    re.I,
+)
 
 
 class ProductUnderstandingAgent(BaseAgent):
@@ -73,6 +86,11 @@ class ProductUnderstandingAgent(BaseAgent):
             classificationText="\n".join([classificationText, *coiEvidence.matchedTexts]),
             encyclopediaEvidence=encyclopediaEvidence,
         )
+        composition = self._BuildCompositionLane(
+            factTexts=factTexts,
+            productFacts=productFacts,
+            identity=identity,
+        )
         understandingId = store.next_id("under")
         productUnderstanding = ProductUnderstandingFacts(
             understandingId=understandingId,
@@ -84,6 +102,7 @@ class ProductUnderstandingAgent(BaseAgent):
             classificationInputFactTexts=factTexts,
             classificationInputProductFacts=productFacts,
             identity=identity,
+            composition=composition,
             coiEvidence=coiEvidence,
             encyclopediaEvidence=encyclopediaEvidence,
             routingTerms=self._RoutingTerms(
@@ -108,7 +127,8 @@ class ProductUnderstandingAgent(BaseAgent):
         self.reason(
             "ProductUnderstandingFacts 생성: "
             f"facts={len(productFacts)}, fact_texts={len(factTexts)}, "
-            f"encyclopedia={encyclopediaEvidence.qualityStatus}."
+            f"encyclopedia={encyclopediaEvidence.qualityStatus}, "
+            f"composition_terms={len(composition.compositionTerms)}."
         )
 
     def _BuildCoiEvidenceSet(
@@ -204,6 +224,82 @@ class ProductUnderstandingAgent(BaseAgent):
             elif value:
                 texts.append(value)
         return tuple(texts)
+
+    @staticmethod
+    def _BuildCompositionLane(
+        *,
+        factTexts: tuple[str, ...],
+        productFacts: tuple[dict[str, JsonValue], ...],
+        identity: DistilledIdentityFacts,
+    ) -> CompositionLaneFacts:
+        text = "\n".join([*factTexts, *ProductUnderstandingAgent._FactTexts(productFacts)])
+        percentages: list[dict[str, JsonValue]] = []
+        seenPercentages: set[tuple[str, str]] = set()
+        for match in PERCENT_RE.finditer(text):
+            term = " ".join((match.group("term") or "").split())[-40:].strip(" ,:/")
+            percentRaw = (match.group("percent") or "").replace(",", ".")
+            try:
+                percent: JsonValue = float(percentRaw)
+            except ValueError:
+                percent = percentRaw
+            key = (term.lower(), str(percent))
+            if term and key not in seenPercentages:
+                percentages.append({"term": term, "percent": percent})
+                seenPercentages.add(key)
+
+        allergenTexts = [
+            item
+            for item in factTexts
+            if ALLERGEN_RE.search(item)
+        ]
+        missing: list[str] = []
+        if not percentages:
+            missing.append("ingredient_percentages")
+
+        compositionTerms = ProductUnderstandingAgent._DedupStrings(
+            [
+                *identity.compositionTerms,
+                *ProductUnderstandingAgent._FactTexts(productFacts),
+                *factTexts,
+            ],
+            limit=80,
+        )
+        return CompositionLaneFacts(
+            processingState=identity.processingState,
+            principalIngredient=(
+                str(percentages[0].get("term") or "")
+                if percentages
+                else identity.compositionTerms[0]
+                if identity.compositionTerms
+                else ""
+            ),
+            ingredientClasses=(identity.ingredientClass,) if identity.ingredientClass else (),
+            ingredientPercentages=tuple(percentages[:20]),
+            compositionTerms=compositionTerms,
+            processingTerms=identity.processingTerms,
+            compositionBasis="label" if percentages else "label_text_no_percent",
+            containsWrapperOrDough=bool(WRAPPER_RE.search(text)),
+            containsSauceOrBroth=bool(SAUCE_BROTH_RE.search(text)),
+            allergenTermsExcluded=tuple(allergenTexts[:20]),
+            missingCompositionFacts=tuple(missing),
+        )
+
+    @staticmethod
+    def _DedupStrings(values: list[str] | tuple[str, ...], *, limit: int) -> tuple[str, ...]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            text = str(value or "").strip()
+            if not text:
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(text)
+            if len(out) >= limit:
+                break
+        return tuple(out)
 
     @staticmethod
     def _RoutingTerms(
