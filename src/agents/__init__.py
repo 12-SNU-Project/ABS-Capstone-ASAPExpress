@@ -22,6 +22,8 @@ Agents are exposed at the package level; Tools at agents.tools.
 """
 from agents.agent_base import BaseAgent, AgentResult
 from agents.evidence_intake_agent import EvidenceIntakeAgent
+from agents.product_understanding_agent import ProductUnderstandingAgent
+from agents.domain_router_agent import DomainRouterAgent
 from agents.classification_agent import ClassificationAgent
 from agents.document_agent import DocumentAgent
 from agents.orchestrator_agent import OrchestratorAgent
@@ -30,6 +32,8 @@ __all__ = [
     "BaseAgent",
     "AgentResult",
     "EvidenceIntakeAgent",
+    "ProductUnderstandingAgent",
+    "DomainRouterAgent",
     "ClassificationAgent",
     "DocumentAgent",
     "OrchestratorAgent",

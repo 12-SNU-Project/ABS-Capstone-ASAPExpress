@@ -3,6 +3,9 @@ from typing import Any
 import json
 
 from agents import _external_classifier as externalClassifier
+from bussiness_logic.core.classification.hierarchical_beam import (
+    HierarchySearchBoundary,
+)
 
 
 def _Candidate(code: str) -> SimpleNamespace:
@@ -24,8 +27,13 @@ def test_external_classifier_runs_one_bounded_backtracking_round(
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-        def FindCandidates(self, productInput: Any, topK: int) -> list[Any]:
-            del productInput, topK
+        def FindCandidates(
+            self,
+            productInput: Any,
+            topK: int,
+            boundary: HierarchySearchBoundary | None = None,
+        ) -> list[Any]:
+            del productInput, topK, boundary
             return [initialCandidate]
 
     class FakeTraversalController:
@@ -98,6 +106,87 @@ def test_external_classifier_runs_one_bounded_backtracking_round(
     assert roundCalls == [["19021910"], ["19022010"]]
     assert [candidate.hs8 for candidate in result.candidates] == ["19022010"]
     assert result.error is None
+
+
+def test_external_classifier_falls_back_when_routed_scope_is_empty(
+    monkeypatch: Any,
+) -> None:
+    fallbackCandidate = _Candidate("21039090")
+    seenBoundaries: list[HierarchySearchBoundary | None] = []
+
+    class FakeRetriever:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def FindCandidates(
+            self,
+            productInput: Any,
+            topK: int,
+            boundary: HierarchySearchBoundary | None = None,
+        ) -> list[Any]:
+            del productInput, topK
+            seenBoundaries.append(boundary)
+            return [] if boundary is not None else [fallbackCandidate]
+
+    class FakeRecommendationBuilder:
+        def Build(self, *args: Any, **kwargs: Any) -> str:
+            return "fixture-recommendation"
+
+    def RunRound(
+        productInput: Any,
+        candidates: list[Any],
+        adapter: Any,
+    ) -> externalClassifier._Stage1ReviewRound:
+        del productInput, adapter
+        return externalClassifier._Stage1ReviewRound(
+            candidates=list(candidates),
+            evidencePackage=object(),
+            validationReport=object(),
+            decisionReport=object(),
+            traversalReport=SimpleNamespace(
+                nextAction="prepare_human_review_package",
+            ),
+            responseText="{}",
+            modelName="fixture",
+            promptText="fixture",
+        )
+
+    monkeypatch.setattr(
+        externalClassifier,
+        "CnCandidateRetriever",
+        FakeRetriever,
+    )
+    monkeypatch.setattr(
+        externalClassifier,
+        "build_semantic_candidate_index",
+        lambda retriever: (None, {"status": "disabled"}),
+    )
+    monkeypatch.setattr(
+        externalClassifier,
+        "Stage1RecommendationReportBuilder",
+        FakeRecommendationBuilder,
+    )
+    monkeypatch.setattr(externalClassifier, "_RunStage1ReviewRound", RunRound)
+
+    result = externalClassifier.run_external_classifier(
+        {"observed_facts": {"product_name": "fixture"}},
+        domain_scope="food",
+        runtime_adapter=object(),
+        top_k_candidates=1,
+        routing_context={
+            "routing_context_id": "route_001",
+            "candidate_hs2": ["19"],
+            "strict_route": True,
+            "fallback_allowed": True,
+        },
+    )
+
+    assert len(seenBoundaries) == 2
+    assert seenBoundaries[0] is not None
+    assert seenBoundaries[0].Allows("hs2", "19")
+    assert seenBoundaries[1] is None
+    assert [candidate.hs8 for candidate in result.candidates] == ["21039090"]
+    assert result.routing_context_trace["fallback_used"] is True
 
 
 def test_unreviewed_candidate_defaults_to_insufficient_information() -> None:

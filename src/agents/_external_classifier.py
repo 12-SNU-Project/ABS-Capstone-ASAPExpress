@@ -19,6 +19,7 @@ can stamp citations / reasoning / candidates onto the Blackboard.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 import json
 import os
 import re
@@ -554,6 +555,7 @@ for _path in (ASAP_PROJECT_ROOT, ASAP_SRC_ROOT):
     if _path.exists() and str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
+from agents.pipeline_dto import JsonValue
 from bussiness_logic.app_config import LoadAppConfig
 from bussiness_logic.bridge.embedding import (
     BuildTextEmbeddingAdapter,
@@ -589,7 +591,9 @@ from bussiness_logic.core.decision_flow.traversal import (
     Stage1TraversalController,
 )
 from bussiness_logic.core.classification.hierarchical_beam import (
+    HIERARCHY_LEVEL_HS2,
     HierarchyBeamConfig,
+    HierarchySearchBoundary,
 )
 
 
@@ -619,6 +623,7 @@ class ExternalClassificationResult:
     prompt_text: str = ""
     citations: list[dict] = field(default_factory=list)
     semantic_retrieval_status: dict[str, Any] = field(default_factory=dict)
+    routing_context_trace: dict[str, JsonValue] = field(default_factory=dict)
     error: str | None = None
 
 
@@ -1108,6 +1113,157 @@ def pes_to_input(pes: dict, *, domain_scope: str = "food_16_21") -> ProductClass
     )
 
 
+def _ReadRoutingCodeTuple(value: object, *, codeLength: int) -> tuple[str, ...]:
+    if isinstance(value, str):
+        items: tuple[object, ...] = (value,)
+    elif isinstance(value, (list, tuple)):
+        items = tuple(value)
+    else:
+        return ()
+    codes: list[str] = []
+    for item in items:
+        code = str(item or "").strip()
+        if len(code) == codeLength and code.isdigit() and code not in codes:
+            codes.append(code)
+    return tuple(codes)
+
+
+def _ReadRoutingFlag(value: object, *, default: bool) -> bool:
+    return value if isinstance(value, bool) else default
+
+
+def _JsonTraceValue(value: object) -> JsonValue:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, list):
+        return [_JsonTraceValue(item) for item in value]
+    if isinstance(value, tuple):
+        return [_JsonTraceValue(item) for item in value]
+    if isinstance(value, Mapping):
+        return {
+            str(key): _JsonTraceValue(item)
+            for key, item in value.items()
+            if isinstance(key, str)
+        }
+    return str(value)
+
+
+def _BuildRoutingBoundary(
+    routingContext: Mapping[str, object] | None,
+) -> HierarchySearchBoundary | None:
+    if routingContext is None:
+        return None
+    candidateHs2 = _ReadRoutingCodeTuple(
+        routingContext.get("candidate_hs2"),
+        codeLength=2,
+    )
+    blockedHs2 = _ReadRoutingCodeTuple(
+        routingContext.get("blocked_hs2"),
+        codeLength=2,
+    )
+    strictRoute = _ReadRoutingFlag(
+        routingContext.get("strict_route"),
+        default=bool(candidateHs2),
+    )
+
+    allowedCodesByLevel: dict[str, frozenset[str]] = {}
+    excludedCodesByLevel: dict[str, frozenset[str]] = {}
+    if strictRoute and candidateHs2:
+        allowedCodesByLevel[HIERARCHY_LEVEL_HS2] = frozenset(candidateHs2)
+    if blockedHs2:
+        excludedCodesByLevel[HIERARCHY_LEVEL_HS2] = frozenset(blockedHs2)
+    if not allowedCodesByLevel and not excludedCodesByLevel:
+        return None
+    return HierarchySearchBoundary(
+        allowedCodesByLevel=allowedCodesByLevel,
+        excludedCodesByLevel=excludedCodesByLevel,
+    )
+
+
+def _RoutingFallbackAllowed(
+    routingContext: Mapping[str, object] | None,
+) -> bool:
+    if routingContext is None:
+        return False
+    return _ReadRoutingFlag(routingContext.get("fallback_allowed"), default=True)
+
+
+def _BuildRoutingTrace(
+    routingContext: Mapping[str, object] | None,
+    *,
+    boundaryApplied: bool,
+    fallbackUsed: bool,
+) -> dict[str, JsonValue]:
+    if routingContext is None:
+        return {}
+    trace: dict[str, JsonValue] = {
+        "routing_context_id": str(routingContext.get("routing_context_id") or ""),
+        "candidate_hs2": list(
+            _ReadRoutingCodeTuple(
+                routingContext.get("candidate_hs2"),
+                codeLength=2,
+            )
+        ),
+        "blocked_hs2": list(
+            _ReadRoutingCodeTuple(
+                routingContext.get("blocked_hs2"),
+                codeLength=2,
+            )
+        ),
+        "strict_route": _ReadRoutingFlag(
+            routingContext.get("strict_route"),
+            default=False,
+        ),
+        "fallback_allowed": _RoutingFallbackAllowed(routingContext),
+        "boundary_applied": boundaryApplied,
+        "fallback_used": fallbackUsed,
+        "routing_basis": _JsonTraceValue(
+            routingContext.get("routing_basis") or {},
+        ),
+        "missing_facts": _JsonTraceValue(
+            routingContext.get("missing_facts") or [],
+        ),
+    }
+    return {
+        key: value
+        for key, value in trace.items()
+        if value not in ("", [], {})
+    }
+
+
+def _FindClassifierCandidates(
+    *,
+    productInput: ProductClassificationInput,
+    retriever: CnCandidateRetriever,
+    semanticIndex: CnSemanticCandidateIndex | None,
+    candidateLimit: int,
+    boundary: HierarchySearchBoundary | None,
+) -> list[Any]:
+    if semanticIndex is None:
+        return list(
+            retriever.FindCandidates(
+                productInput,
+                topK=candidateLimit,
+                boundary=boundary,
+            )
+        )[:candidateLimit]
+    return list(
+        retriever.FindCandidatesWithSemanticIndex(
+            productInput,
+            semanticIndex,
+            heuristicTopK=candidateLimit,
+            semanticTopK=APP_CONFIG.classification.semantic_candidate_top_k,
+            finalCandidateLimit=(
+                min(APP_CONFIG.classification.hybrid_candidate_limit, candidateLimit)
+                if APP_CONFIG.classification.hybrid_candidate_limit
+                else candidateLimit
+            ),
+            minSemanticScore=APP_CONFIG.classification.semantic_min_score,
+            boundary=boundary,
+        )
+    )[:candidateLimit]
+
+
 # ---------------------------------------------------------------------------
 # Main entry — 7-step orchestration
 # ---------------------------------------------------------------------------
@@ -1117,9 +1273,17 @@ def run_external_classifier(
     domain_scope: str = "food_16_21",
     runtime_adapter=None,
     top_k_candidates: int = 5,
+    routing_context: Mapping[str, object] | None = None,
 ) -> ExternalClassificationResult:
     productInput = pes_to_input(pes, domain_scope=domain_scope)
     candidateLimit = max(1, min(int(top_k_candidates), 5))
+    routeBoundary = _BuildRoutingBoundary(routing_context)
+    routeFallbackUsed = False
+    routeTrace = _BuildRoutingTrace(
+        routing_context,
+        boundaryApplied=routeBoundary is not None,
+        fallbackUsed=routeFallbackUsed,
+    )
 
     # 2. Retrieval
     classificationConfig = APP_CONFIG.classification
@@ -1139,26 +1303,36 @@ def run_external_classifier(
         ),
     )
     semanticIndex, semanticStatus = build_semantic_candidate_index(retriever)
-    if semanticIndex is None:
-        candidates = retriever.FindCandidates(productInput, topK=candidateLimit)
-    else:
-        candidates = retriever.FindCandidatesWithSemanticIndex(
-            productInput,
-            semanticIndex,
-            heuristicTopK=candidateLimit,
-            semanticTopK=APP_CONFIG.classification.semantic_candidate_top_k,
-            finalCandidateLimit=(
-                min(APP_CONFIG.classification.hybrid_candidate_limit, candidateLimit)
-                if APP_CONFIG.classification.hybrid_candidate_limit
-                else candidateLimit
-            ),
-            minSemanticScore=APP_CONFIG.classification.semantic_min_score,
+    candidates = _FindClassifierCandidates(
+        productInput=productInput,
+        retriever=retriever,
+        semanticIndex=semanticIndex,
+        candidateLimit=candidateLimit,
+        boundary=routeBoundary,
+    )
+    if (
+        not candidates
+        and routeBoundary is not None
+        and _RoutingFallbackAllowed(routing_context)
+    ):
+        routeFallbackUsed = True
+        routeTrace = _BuildRoutingTrace(
+            routing_context,
+            boundaryApplied=True,
+            fallbackUsed=routeFallbackUsed,
         )
-    candidates = list(candidates)[:candidateLimit]
+        candidates = _FindClassifierCandidates(
+            productInput=productInput,
+            retriever=retriever,
+            semanticIndex=semanticIndex,
+            candidateLimit=candidateLimit,
+            boundary=None,
+        )
     if not candidates:
         return ExternalClassificationResult(
             candidates=[],
             semantic_retrieval_status=semanticStatus,
+            routing_context_trace=routeTrace,
             error="no_candidates_from_retriever",
         )
 
@@ -1169,6 +1343,7 @@ def run_external_classifier(
             candidates=list(candidates),
             citations=_BuildCandidateCitations(candidates),
             semantic_retrieval_status=semanticStatus,
+            routing_context_trace=routeTrace,
             error=f"llm_adapter_error: {exception}",
         )
 
@@ -1183,6 +1358,7 @@ def run_external_classifier(
             citations=_BuildCandidateCitations(reviewRound.candidates),
             prompt_text=reviewRound.promptText[:2000],
             semantic_retrieval_status=semanticStatus,
+            routing_context_trace=routeTrace,
             error=reviewRound.error,
         )
 
@@ -1215,6 +1391,7 @@ def run_external_classifier(
             semanticIndex=semanticIndex,
             semanticTopK=classificationConfig.semantic_candidate_top_k,
             minSemanticScore=classificationConfig.semantic_min_score,
+            searchBoundary=routeBoundary,
         )
         if not backtrackingCandidates:
             traversalHistory.append(
@@ -1238,6 +1415,7 @@ def run_external_classifier(
                 prompt_text=reviewRound.promptText[:2000],
                 citations=_BuildCandidateCitations(reviewRound.candidates),
                 semantic_retrieval_status=semanticStatus,
+                routing_context_trace=routeTrace,
                 error="backtracking_scope_exhausted",
             )
         reviewRound = _RunStage1ReviewRound(
@@ -1263,6 +1441,7 @@ def run_external_classifier(
                 traversal_history=traversalHistory,
                 prompt_text=reviewRound.promptText[:2000],
                 semantic_retrieval_status=semanticStatus,
+                routing_context_trace=routeTrace,
                 error=error,
             )
         traversalHistory.append(
@@ -1296,4 +1475,5 @@ def run_external_classifier(
         prompt_text=reviewRound.promptText[:2000],
         citations=_BuildCandidateCitations(reviewRound.candidates),
         semantic_retrieval_status=semanticStatus,
+        routing_context_trace=routeTrace,
     )

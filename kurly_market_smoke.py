@@ -121,8 +121,8 @@ def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
         "--classify-reconstruction",
         action="store_true",
         help=(
-            "LLM reconstruction 결과를 입력으로 정적 CN 후보 산출, "
-            "Classification LLM 판단, backtracking 결정을 함께 검사합니다."
+            "LLM reconstruction 결과를 입력으로 ProductUnderstanding, "
+            "DomainRouter, Classification, Document 추천까지 함께 검사합니다."
         ),
     )
     parser.add_argument(
@@ -785,8 +785,12 @@ class KurlyMarketSmokeRunner:
     ) -> Dict[str, Any]:
         from agents.blackboard import BlackboardStore
         from agents.classification_agent import ClassificationAgent
+        from agents.document_agent import DocumentAgent
         from agents.document_pipeline import build_raw_input_from_ui
+        from agents.domain_router_agent import DomainRouterAgent
         from agents.evidence_intake_agent import EvidenceIntakeAgent
+        from agents.orchestrator_agent import OrchestratorAgent
+        from agents.product_understanding_agent import ProductUnderstandingAgent
 
         rawInput = build_raw_input_from_ui(
             query=str(uiFacts.get("product_name") or productUrl),
@@ -809,7 +813,14 @@ class KurlyMarketSmokeRunner:
         previousReviewMode = os.environ.get("ASAP_STAGE1_REVIEW_MODE")
         os.environ["ASAP_STAGE1_REVIEW_MODE"] = self._stage1ReviewMode
         try:
-            for agent in (EvidenceIntakeAgent(rawInput), ClassificationAgent()):
+            for agent in (
+                EvidenceIntakeAgent(rawInput),
+                ProductUnderstandingAgent(),
+                DomainRouterAgent(),
+                ClassificationAgent(),
+                DocumentAgent(),
+                OrchestratorAgent(),
+            ):
                 result = agent.execute(store)
                 agentResults.append({
                     "agent_name": agent.agent_name,
@@ -828,12 +839,33 @@ class KurlyMarketSmokeRunner:
         blackboard = store.load()
         productEvidenceState = blackboard.get("product_evidence_state") or {}
         observedFacts = productEvidenceState.get("observed_facts") or {}
+        productUnderstanding = blackboard.get("product_understanding") or {}
+        if not isinstance(productUnderstanding, Mapping):
+            productUnderstanding = {}
+        routingContext = blackboard.get("routing_context") or {}
+        if not isinstance(routingContext, Mapping):
+            routingContext = {}
         candidateCodeSet = (blackboard.get("candidate_code_sets") or [None])[-1]
         if not isinstance(candidateCodeSet, Mapping):
             candidateCodeSet = {}
+        documentPackages = blackboard.get("document_packages") or []
+        if not isinstance(documentPackages, list):
+            documentPackages = []
+        documentPackage = documentPackages[-1] if documentPackages else {}
+        if not isinstance(documentPackage, Mapping):
+            documentPackage = {}
+        orchestratorDecisions = blackboard.get("orchestrator_decisions") or []
+        if not isinstance(orchestratorDecisions, list):
+            orchestratorDecisions = []
+        orchestratorDecision = orchestratorDecisions[-1] if orchestratorDecisions else {}
+        if not isinstance(orchestratorDecision, Mapping):
+            orchestratorDecision = {}
         trace = candidateCodeSet.get("classification_trace") or {}
         if not isinstance(trace, Mapping):
             trace = {}
+        routeTrace = trace.get("routing_context") or {}
+        if not isinstance(routeTrace, Mapping):
+            routeTrace = {}
         candidates = self._BuildClassificationCandidateSmokeRows(candidateCodeSet)
         zeroScoreCodes = [
             candidate["cn8"]
@@ -849,17 +881,22 @@ class KurlyMarketSmokeRunner:
             "source": productUrl,
             "dash_equivalence": {
                 "scope": (
-                    "Dash pipeline up to Classification_Agent; "
-                    "Document_Agent and Orchestrator_Agent are intentionally skipped."
+                    "Integrated smoke path after merge: reconstruction facts feed "
+                    "ProductUnderstanding, DomainRouter, Beam Classification, "
+                    "Document recommendation, and Orchestrator."
                 ),
                 "path": [
                     "KurlyProductPipeline.Run",
                     "build_kurly_url_facts_from_pipeline_result",
                     "build_raw_input_from_ui",
                     "EvidenceIntakeAgent",
+                    "ProductUnderstandingAgent",
+                    "DomainRouterAgent",
                     "ClassificationAgent",
+                    "DocumentAgent",
+                    "OrchestratorAgent",
                 ],
-                "document_recommendation_executed": False,
+                "document_recommendation_executed": bool(documentPackage),
                 "raw_input_matches_evidence_intake": (
                     self._DoesRawInputMatchObservedFacts(rawInput, observedFacts)
                 ),
@@ -903,6 +940,13 @@ class KurlyMarketSmokeRunner:
                 "candidate_count": len(candidates),
                 "zero_score_candidate_codes": zeroScoreCodes,
             },
+            "product_understanding": self._BuildProductUnderstandingSmoke(
+                productUnderstanding,
+            ),
+            "domain_routing": self._BuildRoutingSmoke(
+                routingContext,
+                routeTrace,
+            ),
             "candidates": candidates,
             "candidate_code_set": {
                 "candidate_set_id": candidateCodeSet.get("candidate_set_id"),
@@ -920,8 +964,112 @@ class KurlyMarketSmokeRunner:
                 "backtracking_reason": trace.get("backtracking_reason"),
             },
             "traversal_history": list(trace.get("traversal_history") or []),
+            "document_recommendation": self._BuildDocumentSmoke(
+                documentPackage,
+                documentPackages,
+            ),
+            "orchestrator": {
+                "decision_id": orchestratorDecision.get("decision_id"),
+                "status": orchestratorDecision.get("status"),
+                "next_action": orchestratorDecision.get("next_action"),
+            },
             "agent_results": agentResults,
             "agent_runs": list(store.iter_agent_runs()),
+        }
+
+    @staticmethod
+    def _BuildProductUnderstandingSmoke(
+        productUnderstanding: Mapping[str, object],
+    ) -> Dict[str, object]:
+        identity = productUnderstanding.get("identity_lane") or {}
+        if not isinstance(identity, Mapping):
+            identity = {}
+        coiEvidence = productUnderstanding.get("coi_evidence") or {}
+        if not isinstance(coiEvidence, Mapping):
+            coiEvidence = {}
+        encyclopediaEvidence = productUnderstanding.get("encyclopedia_evidence") or {}
+        if not isinstance(encyclopediaEvidence, Mapping):
+            encyclopediaEvidence = {}
+        routingTerms = productUnderstanding.get("routing_terms") or []
+        if not isinstance(routingTerms, list):
+            routingTerms = []
+        return {
+            "understanding_id": productUnderstanding.get("understanding_id"),
+            "product_id": productUnderstanding.get("product_id"),
+            "product_name": productUnderstanding.get("product_name"),
+            "fact_count": len(
+                productUnderstanding.get("classification_input_product_facts")
+                or [],
+            ),
+            "fact_text_count": len(
+                productUnderstanding.get("classification_input_fact_texts")
+                or [],
+            ),
+            "identity": {
+                "commercial_identity": identity.get("commercial_identity"),
+                "ingredient_class": identity.get("ingredient_class"),
+                "food_form": identity.get("food_form"),
+                "processing_state": identity.get("processing_state"),
+                "confidence": identity.get("confidence"),
+            },
+            "coi": {
+                "matched_documents": coiEvidence.get("matched_documents") or [],
+                "error": coiEvidence.get("error") or "",
+            },
+            "encyclopedia": {
+                "configured": encyclopediaEvidence.get("configured"),
+                "quality_status": encyclopediaEvidence.get("quality_status"),
+                "entry_count": len(encyclopediaEvidence.get("entries") or []),
+                "error": encyclopediaEvidence.get("error") or "",
+            },
+            "routing_terms_preview": routingTerms[:12],
+            "unknowns": productUnderstanding.get("unknowns") or [],
+        }
+
+    @staticmethod
+    def _BuildRoutingSmoke(
+        routingContext: Mapping[str, object],
+        routeTrace: Mapping[str, object],
+    ) -> Dict[str, object]:
+        return {
+            "routing_context_id": routingContext.get("routing_context_id"),
+            "candidate_hs2": routingContext.get("candidate_hs2") or [],
+            "blocked_hs2": routingContext.get("blocked_hs2") or [],
+            "strict_route": routingContext.get("strict_route"),
+            "fallback_allowed": routingContext.get("fallback_allowed"),
+            "domain_scopes": routingContext.get("domain_scopes") or [],
+            "pre_gate_domains": routingContext.get("pre_gate_domains") or [],
+            "routing_basis": routingContext.get("routing_basis") or {},
+            "missing_facts": routingContext.get("missing_facts") or [],
+            "classification_boundary": {
+                "boundary_applied": routeTrace.get("boundary_applied"),
+                "fallback_used": routeTrace.get("fallback_used"),
+            },
+        }
+
+    @staticmethod
+    def _BuildDocumentSmoke(
+        documentPackage: Mapping[str, object],
+        documentPackages: Sequence[object],
+    ) -> Dict[str, object]:
+        summary = documentPackage.get("summary") or {}
+        if not isinstance(summary, Mapping):
+            summary = {}
+        return {
+            "package_count": len(documentPackages),
+            "latest_document_package_id": documentPackage.get("document_package_id"),
+            "candidate_id": documentPackage.get("candidate_id"),
+            "cn8": documentPackage.get("cn8"),
+            "taric10": documentPackage.get("taric10"),
+            "customs_check_count": len(documentPackage.get("customs_check_items") or []),
+            "required_document_count": len(documentPackage.get("required_documents") or []),
+            "product_regulation_count": len(documentPackage.get("product_regulations") or []),
+            "missing_facts": documentPackage.get("missing_facts") or [],
+            "summary": {
+                "duty": summary.get("duty"),
+                "domains": summary.get("domains") or [],
+                "main_requirements": summary.get("main_requirements") or [],
+            },
         }
 
     @staticmethod
@@ -1651,8 +1799,52 @@ class KurlyMarketSmokeRunner:
             return
         classificationLogger = self._Logger("_LogClassificationSmoke")
         status = classificationData.get("status") or {}
+        productUnderstanding = classificationData.get("product_understanding") or {}
+        domainRouting = classificationData.get("domain_routing") or {}
         decision = classificationData.get("decision") or {}
         traversal = classificationData.get("traversal") or {}
+        documentRecommendation = classificationData.get("document_recommendation") or {}
+        classificationLogger.info("===== INTEGRATED PIPELINE MERGE CHECK =====")
+        for agentResult in classificationData.get("agent_results") or []:
+            classificationLogger.info(
+                "agent name={} success={} error={} outputs={}",
+                agentResult.get("agent_name"),
+                agentResult.get("success"),
+                agentResult.get("error"),
+                agentResult.get("outputs_written"),
+            )
+        classificationLogger.info(
+            (
+                "product_understanding id={} product={} facts={} fact_texts={} "
+                "identity={}/{}/{} coi_docs={} encyclopedia={}"
+            ),
+            productUnderstanding.get("understanding_id"),
+            productUnderstanding.get("product_name"),
+            productUnderstanding.get("fact_count"),
+            productUnderstanding.get("fact_text_count"),
+            (productUnderstanding.get("identity") or {}).get("ingredient_class"),
+            (productUnderstanding.get("identity") or {}).get("food_form"),
+            (productUnderstanding.get("identity") or {}).get("processing_state"),
+            len((productUnderstanding.get("coi") or {}).get("matched_documents") or []),
+            (productUnderstanding.get("encyclopedia") or {}).get("quality_status"),
+        )
+        classificationLogger.info(
+            (
+                "domain_router routing_context_id={} candidate_hs2={} "
+                "blocked_hs2={} strict_route={} fallback_allowed={} "
+                "boundary_applied={} fallback_used={} missing_facts={}"
+            ),
+            domainRouting.get("routing_context_id"),
+            domainRouting.get("candidate_hs2"),
+            domainRouting.get("blocked_hs2"),
+            domainRouting.get("strict_route"),
+            domainRouting.get("fallback_allowed"),
+            (domainRouting.get("classification_boundary") or {}).get(
+                "boundary_applied",
+            ),
+            (domainRouting.get("classification_boundary") or {}).get("fallback_used"),
+            domainRouting.get("missing_facts"),
+        )
         classificationLogger.info(
             (
                 "classification_smoke error={} candidates={} zero_score={} "
@@ -1684,6 +1876,21 @@ class KurlyMarketSmokeRunner:
                 len(candidate.get("classification_evidence_refs") or []),
                 len(candidate.get("similar_ebti_cases") or []),
             )
+        classificationLogger.info(
+            (
+                "document_recommendation packages={} latest={} cn8={} taric10={} "
+                "customs={} required_docs={} product_rules={} missing_facts={}"
+            ),
+            documentRecommendation.get("package_count"),
+            documentRecommendation.get("latest_document_package_id"),
+            documentRecommendation.get("cn8"),
+            documentRecommendation.get("taric10"),
+            documentRecommendation.get("customs_check_count"),
+            documentRecommendation.get("required_document_count"),
+            documentRecommendation.get("product_regulation_count"),
+            documentRecommendation.get("missing_facts"),
+        )
+        classificationLogger.info("===== END INTEGRATED PIPELINE MERGE CHECK =====")
 
     def _LogSummary(self, results: List[Dict[str, Any]]) -> None:
         summaryLogger = self._Logger("_LogSummary")

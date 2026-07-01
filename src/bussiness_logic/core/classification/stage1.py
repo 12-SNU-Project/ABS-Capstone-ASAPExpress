@@ -1725,10 +1725,12 @@ class CnCandidateRetriever:
         self,
         productInput: ProductClassificationInput,
         topK: int = DEFAULT_CN_CANDIDATE_TOP_K,
+        boundary: Optional[HierarchySearchBoundary] = None,
     ) -> List[CnCandidate]:
         return self._FindHierarchicalCandidates(
             productInput=productInput,
             topK=topK,
+            boundary=boundary,
         )
 
     def _FindHierarchicalCandidates(
@@ -1861,6 +1863,7 @@ class CnCandidateRetriever:
         semanticIndex: Optional[CnSemanticCandidateIndex] = None,
         semanticTopK: int = DEFAULT_SEMANTIC_CANDIDATE_TOP_K,
         minSemanticScore: float = 0.0,
+        searchBoundary: Optional[HierarchySearchBoundary] = None,
     ) -> List[CnCandidate]:
         semanticHints = None
         if semanticIndex is not None:
@@ -1874,6 +1877,8 @@ class CnCandidateRetriever:
             currentCandidates,
             targetLevel,
         )
+        if searchBoundary is not None:
+            boundary = self._MergeSearchBoundaries(searchBoundary, boundary)
         return self._FindHierarchicalCandidates(
             productInput=productInput,
             topK=topK,
@@ -1890,6 +1895,7 @@ class CnCandidateRetriever:
         semanticTopK: int = DEFAULT_SEMANTIC_CANDIDATE_TOP_K,
         finalCandidateLimit: Optional[int] = None,
         minSemanticScore: float = 0.0,
+        boundary: Optional[HierarchySearchBoundary] = None,
     ) -> List[CnCandidate]:
         semanticHints = semanticIndex.SearchHierarchyHints(
             queryText=productInput.BuildSemanticSearchText(),
@@ -1906,6 +1912,7 @@ class CnCandidateRetriever:
             productInput=productInput,
             topK=candidateLimit,
             semanticHints=semanticHints,
+            boundary=boundary,
         )
 
     def _FindCandidatesWithSemanticHits(
@@ -2300,6 +2307,36 @@ class CnCandidateRetriever:
                 for level, codes in allowedCodesByLevel.items()
                 if codes
             },
+            excludedCodesByLevel={
+                level: codes
+                for level, codes in excludedCodesByLevel.items()
+                if codes
+            },
+        )
+
+    @staticmethod
+    def _MergeSearchBoundaries(
+        *boundaries: Optional[HierarchySearchBoundary],
+    ) -> HierarchySearchBoundary:
+        allowedCodesByLevel: Dict[str, frozenset[str]] = {}
+        excludedCodesByLevel: Dict[str, frozenset[str]] = {}
+        for boundary in boundaries:
+            if boundary is None:
+                continue
+            for level, codes in boundary.allowedCodesByLevel.items():
+                existingCodes = allowedCodesByLevel.get(level)
+                allowedCodesByLevel[level] = (
+                    frozenset(codes)
+                    if existingCodes is None
+                    else existingCodes.intersection(codes)
+                )
+            for level, codes in boundary.excludedCodesByLevel.items():
+                excludedCodesByLevel[level] = excludedCodesByLevel.get(
+                    level,
+                    frozenset(),
+                ).union(codes)
+        return HierarchySearchBoundary(
+            allowedCodesByLevel=allowedCodesByLevel,
             excludedCodesByLevel={
                 level: codes
                 for level, codes in excludedCodesByLevel.items()

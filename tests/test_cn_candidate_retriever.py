@@ -1,7 +1,9 @@
 from pathlib import Path
 
 from bussiness_logic.core.classification.hierarchical_beam import (
+    HIERARCHY_LEVEL_HS2,
     HierarchyBeamConfig,
+    HierarchySearchBoundary,
 )
 from bussiness_logic.core.classification.stage1 import (
     CnCandidateRetriever,
@@ -161,6 +163,23 @@ def test_preferred_heading_keeps_parent_hs2_in_beam() -> None:
     candidates = retriever.FindCandidates(_Product("산채나물 비빔밥"), topK=1)
 
     assert candidates[0].hs8 == "21069098"
+
+
+def test_hs2_boundary_limits_static_beam_candidates() -> None:
+    pastaCandidate = _Row("19", "1902", "190219", "19021910", "pasta noodles")
+    sauceCandidate = _Row("21", "2103", "210390", "21039090", "sauce noodles")
+    retriever = _Retriever([pastaCandidate, sauceCandidate])
+
+    candidates = retriever.FindCandidates(
+        _Product("sauce noodles pasta"),
+        topK=5,
+        boundary=HierarchySearchBoundary(
+            allowedCodesByLevel={HIERARCHY_LEVEL_HS2: frozenset({"19"})},
+        ),
+    )
+
+    assert candidates
+    assert {candidate.hs2Code for candidate in candidates} == {"19"}
 
 
 def test_quantitative_hard_condition_remains_unknown_without_structured_proof() -> None:

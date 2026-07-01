@@ -18,6 +18,9 @@ from bussiness_logic.core.decision_flow.decision_policy import (
 from bussiness_logic.core.context_retrieval.semantic_retrieval import (
     CnSemanticCandidateIndex,
 )
+from bussiness_logic.core.classification.hierarchical_beam import (
+    HierarchySearchBoundary,
+)
 
 
 DEFAULT_STAGE1_TRAVERSAL_MAX_RETRY_COUNT = 1
@@ -161,6 +164,7 @@ class Stage1TraversalController:
         semanticIndex: Optional[CnSemanticCandidateIndex] = None,
         semanticTopK: int = DEFAULT_CN_CANDIDATE_TOP_K,
         minSemanticScore: float = 0.0,
+        searchBoundary: Optional[HierarchySearchBoundary] = None,
     ) -> List[CnCandidate]:
         if completedRetryCount >= maxRetryCount:
             return []
@@ -183,6 +187,7 @@ class Stage1TraversalController:
             semanticIndex=semanticIndex,
             semanticTopK=semanticTopK,
             minSemanticScore=minSemanticScore,
+            searchBoundary=searchBoundary,
         )
 
     def _BuildUniqueCandidateCodes(

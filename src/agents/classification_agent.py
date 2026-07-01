@@ -63,6 +63,13 @@ class ClassificationAgent(BaseAgent):
         if not pes:
             raise RuntimeError("No ProductEvidenceState on the Blackboard.")
         self.read_input(pes["product_id"])
+        routingContext = bb.get("routing_context")
+        if isinstance(routingContext, dict):
+            routingContextId = str(routingContext.get("routing_context_id") or "")
+            if routingContextId:
+                self.read_input(routingContextId)
+        else:
+            routingContext = None
 
         # Step 0 — handle pending challenges first. If another agent has
         # raised an open challenge against one of our candidates, write a
@@ -72,7 +79,10 @@ class ClassificationAgent(BaseAgent):
             self._respond_to_challenges(store, open_challenges)
             return
 
-        result: ExternalClassificationResult = run_external_classifier(pes)
+        result: ExternalClassificationResult = run_external_classifier(
+            pes,
+            routing_context=routingContext,
+        )
 
         # Cite candidates from the retriever (every shortlisted CN8).
         for c in result.citations:
@@ -385,7 +395,13 @@ class ClassificationAgent(BaseAgent):
             for entry in getattr(result, "traversal_history", []) or []
             if isinstance(entry, dict)
         ]
-        if traversalReport is None and decisionReport is None and not history:
+        routeTrace = dict(result.routing_context_trace or {})
+        if (
+            traversalReport is None
+            and decisionReport is None
+            and not history
+            and not routeTrace
+        ):
             return {}
         backtrackingOccurred = any(
             str(entry.get("phase") or "").startswith("backtracking")
@@ -437,11 +453,12 @@ class ClassificationAgent(BaseAgent):
             ),
             "retry_count": max(0, len(history) - 1),
             "traversal_history": history,
+            "routing_context": routeTrace,
         }
         return {
             key: value
             for key, value in trace.items()
-            if value is not None and value != "" and value != []
+            if value is not None and value != "" and value != [] and value != {}
         }
 
     def _build_trace_history_entry(self, entry: dict[str, Any]) -> dict[str, Any]:

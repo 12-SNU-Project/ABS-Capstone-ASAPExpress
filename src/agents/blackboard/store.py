@@ -47,6 +47,8 @@ DEFAULT_SCHEMA = APP_CONFIG.paths.ResolvePath(
 
 OBJECT_KEY: dict[str, str] = {
     "ProductEvidenceState": "product_evidence_state",
+    "ProductUnderstandingFacts": "product_understanding",
+    "RoutingContext": "routing_context",
     "CandidateCodeSet": "candidate_code_sets",
     # Legacy draft object names retained for old run inspection only. Current
     # agents should fold this context into CandidateCodeSet / DocumentPackage.
@@ -63,6 +65,8 @@ OBJECT_KEY: dict[str, str] = {
 
 AGENT_WRITE_KEYS: dict[str, set[str]] = {
     "Evidence_Intake_Agent": {"product_evidence_state", "user_questions"},
+    "Product_Understanding_Agent": {"product_understanding", "user_questions"},
+    "Domain_Router_Agent": {"routing_context", "user_questions"},
     "Classification_Agent": {"candidate_code_sets", "challenge_responses", "user_questions"},
     "Document_Agent": {"document_packages", "challenges", "user_questions"},
     "Orchestrator_Agent": {"orchestrator_decisions", "user_questions"},
@@ -151,6 +155,8 @@ class BlackboardStore:
                 "runtime_mode": runtime_mode,
             },
             "candidate_code_sets": [],
+            "product_understanding": None,
+            "routing_context": None,
             "taric_measure_contexts": [],
             "document_packages": [],
             "regulatory_routes": [],

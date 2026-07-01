@@ -1,0 +1,230 @@
+"""Build ProductUnderstandingFacts from reconstructed product input."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+
+from agents.agent_base import BaseAgent
+from agents.blackboard import BlackboardStore, now_iso
+from agents.coi_loader import LoadCoiEvidence
+from agents.pipeline_dto import (
+    CoiEvidenceSet,
+    DistilledIdentityFacts,
+    EncyclopediaEvidenceSet,
+    JsonValue,
+    ProductUnderstandingFacts,
+)
+from agents.tools.encyclopedia_lookup import LookupEncyclopediaEvidence
+from agents.tools.identity_distiller import IdentityDistillerTool
+
+
+class ProductUnderstandingAgent(BaseAgent):
+    agent_name = "Product_Understanding_Agent"
+    stage = "Product_Understanding"
+    llm_model = None
+
+    def run(self, store: BlackboardStore) -> None:
+        bb = store.load()
+        pes = bb.get("product_evidence_state") or {}
+        if not isinstance(pes, dict):
+            raise RuntimeError("No ProductEvidenceState on the Blackboard.")
+        productId = str(pes.get("product_id") or "")
+        self.read_input(productId)
+
+        observedFacts = pes.get("observed_facts") or {}
+        if not isinstance(observedFacts, dict):
+            observedFacts = {}
+        productName = str(observedFacts.get("product_name") or "")
+        shortDescription = str(observedFacts.get("description") or "")
+        factTexts = self._ReadTextTuple(
+            observedFacts.get("classification_input_fact_texts")
+            or observedFacts.get("composition")
+            or [],
+        )
+        productFacts = self._ReadFactTuple(
+            observedFacts.get("classification_input_product_facts") or [],
+        )
+        classificationText = "\n".join(
+            text
+            for text in (
+                productName,
+                shortDescription,
+                *factTexts,
+                *self._FactTexts(productFacts),
+            )
+            if text.strip()
+        )
+
+        coiEvidence = self._BuildCoiEvidenceSet(
+            store,
+            productId=productId,
+            productName=productName,
+        )
+        encyclopediaEvidence = LookupEncyclopediaEvidence(
+            encyclopediaEvidenceId=store.next_id("ency"),
+            productId=productId,
+            query=productName,
+        )
+        identity = IdentityDistillerTool().Distill(
+            distilledIdentityId=store.next_id("dist"),
+            productId=productId,
+            productName=productName,
+            shortDescription=shortDescription,
+            classificationText="\n".join([classificationText, *coiEvidence.matchedTexts]),
+            encyclopediaEvidence=encyclopediaEvidence,
+        )
+        understandingId = store.next_id("under")
+        productUnderstanding = ProductUnderstandingFacts(
+            understandingId=understandingId,
+            productId=productId,
+            sourceProductId=productId,
+            productName=productName,
+            shortDescription=shortDescription,
+            classificationText=classificationText,
+            classificationInputFactTexts=factTexts,
+            classificationInputProductFacts=productFacts,
+            identity=identity,
+            coiEvidence=coiEvidence,
+            encyclopediaEvidence=encyclopediaEvidence,
+            routingTerms=self._RoutingTerms(
+                productName=productName,
+                factTexts=factTexts,
+                identity=identity,
+            ),
+            unknowns=(
+                ("classification_input_product_facts",)
+                if not productFacts
+                else ()
+            ),
+        )
+        store.put(
+            "product_understanding",
+            productUnderstanding.ToBlackboard(
+                createdBy=self.agent_name,
+                createdAt=now_iso(),
+            ),
+        )
+        self.wrote(understandingId)
+        self.reason(
+            "ProductUnderstandingFacts 생성: "
+            f"facts={len(productFacts)}, fact_texts={len(factTexts)}, "
+            f"encyclopedia={encyclopediaEvidence.qualityStatus}."
+        )
+
+    def _BuildCoiEvidenceSet(
+        self,
+        store: BlackboardStore,
+        *,
+        productId: str,
+        productName: str,
+    ) -> CoiEvidenceSet:
+        coiEvidenceId = store.next_id("coi")
+        try:
+            evidence = LoadCoiEvidence(
+                caseIndex=None,
+                productName=productName,
+            )
+        except RuntimeError as exc:
+            return CoiEvidenceSet(
+                coiEvidenceId=coiEvidenceId,
+                productId=productId,
+                error=str(exc),
+            )
+        if evidence is None:
+            return CoiEvidenceSet(
+                coiEvidenceId=coiEvidenceId,
+                productId=productId,
+            )
+        return CoiEvidenceSet(
+            coiEvidenceId=coiEvidenceId,
+            productId=productId,
+            matchedDocuments=(str(evidence.path),),
+            matchedTexts=(evidence.text,),
+            matchScores=(evidence.matchedScore,),
+        )
+
+    @staticmethod
+    def _ReadTextTuple(value: object) -> tuple[str, ...]:
+        if isinstance(value, str):
+            return (value.strip(),) if value.strip() else ()
+        if not isinstance(value, list):
+            return ()
+        return tuple(str(item).strip() for item in value if str(item).strip())
+
+    @staticmethod
+    def _ReadFactTuple(value: object) -> tuple[dict[str, JsonValue], ...]:
+        if not isinstance(value, list):
+            return ()
+        return tuple(
+            ProductUnderstandingAgent._JsonDict(item)
+            for item in value
+            if isinstance(item, dict)
+        )
+
+    @staticmethod
+    def _JsonDict(value: Mapping[object, object]) -> dict[str, JsonValue]:
+        out: dict[str, JsonValue] = {}
+        for key, item in value.items():
+            if isinstance(key, str):
+                out[key] = ProductUnderstandingAgent._JsonValue(item)
+        return out
+
+    @staticmethod
+    def _JsonValue(value: object) -> JsonValue:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, list):
+            return [
+                ProductUnderstandingAgent._JsonValue(item)
+                for item in value
+            ]
+        if isinstance(value, dict):
+            return ProductUnderstandingAgent._JsonDict(value)
+        return str(value)
+
+    @staticmethod
+    def _FactTexts(productFacts: tuple[dict[str, JsonValue], ...]) -> tuple[str, ...]:
+        texts: list[str] = []
+        for fact in productFacts:
+            field = str(
+                fact.get("field_name")
+                or fact.get("field")
+                or fact.get("name")
+                or ""
+            ).strip()
+            value = str(
+                fact.get("normalized_value")
+                or fact.get("value")
+                or fact.get("raw_value")
+                or fact.get("text")
+                or ""
+            ).strip()
+            if field and value:
+                texts.append(f"{field}: {value}")
+            elif value:
+                texts.append(value)
+        return tuple(texts)
+
+    @staticmethod
+    def _RoutingTerms(
+        *,
+        productName: str,
+        factTexts: tuple[str, ...],
+        identity: DistilledIdentityFacts,
+    ) -> tuple[str, ...]:
+        terms: list[str] = []
+        for value in (
+            productName,
+            identity.commercialIdentity,
+            identity.ingredientClass,
+            identity.foodForm,
+            identity.processingState,
+            *identity.identityTerms,
+            *identity.compositionTerms,
+            *identity.processingTerms,
+            *factTexts,
+        ):
+            text = str(value).strip()
+            if text and text not in terms:
+                terms.append(text)
+        return tuple(terms[:80])

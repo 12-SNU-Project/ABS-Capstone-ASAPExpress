@@ -23,9 +23,11 @@ for _path in (PROJECT_ROOT, SRC_ROOT):
         sys.path.insert(0, str(_path))
 
 from agents.classification_agent import ClassificationAgent
+from agents.domain_router_agent import DomainRouterAgent
 from agents.document_agent import DocumentAgent
 from agents.evidence_intake_agent import EvidenceIntakeAgent
 from agents.orchestrator_agent import OrchestratorAgent
+from agents.product_understanding_agent import ProductUnderstandingAgent
 from agents.blackboard import BlackboardStore
 from bussiness_logic.artifact_paths import (
     BuildSafeArtifactPathSegment,
@@ -727,6 +729,8 @@ def run_document_pipeline(
 
     agents = [
         EvidenceIntakeAgent(raw_input),
+        ProductUnderstandingAgent(),
+        DomainRouterAgent(),
         ClassificationAgent(),
         DocumentAgent(include_celex_excerpt=include_celex_excerpt),
         OrchestratorAgent(),
