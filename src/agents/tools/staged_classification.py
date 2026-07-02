@@ -6,7 +6,7 @@ at the previous level, so the right node cannot be drowned out by unrelated
 chapters.
 
 Baseline building blocks (no dependency on the removed ``llm_classifier``):
-  - cn_table children  : direct prefix query via ``document_package._connect_db``
+  - cn_table children  : managed session-based query via ``DbSessionManager``
   - LLM stage-select   : ``_external_classifier.build_runtime_adapter`` +
                          ``bussiness_logic.bridge.schema.LlmRequest`` (RuntimeAdapter.Generate)
 
@@ -20,6 +20,9 @@ import json
 import os
 import re
 from typing import Any
+from sqlalchemy import bindparam, text
+
+from agents.tools.db_session_manager import DbSessionManager
 
 # AXIS_MAP — decision axis -> baseline ProductUnderstandingFacts field paths.
 # Reads the embedded 2-lane: identity_lane (DistilledIdentityFacts.ToTrace) +
@@ -270,36 +273,70 @@ class StagedClassificationTool:
 
     # ---- cn_table children (deterministic, baseline DB) -------------------
     def _load_children(self, parent_codes: list[str], prefix_len: int) -> list[dict[str, Any]]:
-        from agents.document_package import _connect_db, _release_db
-
         parent_len = len(parent_codes[0]) if parent_codes else 0
         desc_col = {4: "heading_description", 6: "subheading_description", 8: "cn8_description"}[prefix_len]
-        conn = None
         rows: list[dict[str, Any]] = []
+        if not parent_codes:
+            return rows
+
         try:
-            conn = _connect_db()
-            cur = conn.cursor()
-            cur.execute(
-                f"""
-                SELECT DISTINCT ON (left(cn8, %s))
-                       left(cn8, %s) AS code,
-                       coalesce({desc_col}, combined_description, cn8_description, '') AS descr,
-                       coalesce(include_rule_keywords, '') AS incl,
-                       coalesce(exclude_rule_keywords, '') AS excl
-                FROM cn_table
-                WHERE left(cn8, %s) = ANY(%s)
-                ORDER BY left(cn8, %s), cn8
-                """,
-                (prefix_len, prefix_len, parent_len, parent_codes, prefix_len),
-            )
-            for code, descr, incl, excl in cur.fetchall():
-                rows.append({"code": code, "descr": descr, "incl": incl, "excl": excl})
-            cur.close()
+            manager = DbSessionManager.GetInstance()
+            for row in manager.FetchRows(
+                text(
+                    f"""
+                    SELECT DISTINCT ON (left(cn8, :prefixLen))
+                           left(cn8, :prefixLen) AS code,
+                           coalesce({desc_col}, combined_description, cn8_description, '') AS descr,
+                           coalesce(include_rule_keywords, '') AS incl,
+                           coalesce(exclude_rule_keywords, '') AS excl
+                    FROM cn_table
+                    WHERE left(cn8, :parentLen) IN :parentCodes
+                    ORDER BY left(cn8, :prefixLen), cn8
+                    """
+                ).bindparams(bindparam("parentCodes", expanding=True)),
+                {
+                    "prefixLen": prefix_len,
+                    "parentLen": parent_len,
+                    "parentCodes": tuple(parent_codes),
+                },
+            ):
+                rows.append(
+                    {
+                        "code": row.get("code"),
+                        "descr": row.get("descr"),
+                        "incl": row.get("incl"),
+                        "excl": row.get("excl"),
+                    }
+                )
         except Exception:  # noqa: BLE001 — narrowing must not break the pipeline
             return []
-        finally:
-            _release_db(conn)
         return rows
+
+    # ---- final cn8 + trace ------------------------------------------------
+    def _final_candidates(self, cn8_prefixes: list[str], *, top_k: int) -> list[dict[str, Any]]:
+        if not cn8_prefixes:
+            return []
+        out: list[dict[str, Any]] = []
+        try:
+            manager = DbSessionManager.GetInstance()
+            for row in manager.FetchRows(
+                text(
+                    """
+                    SELECT cn8, coalesce(cn8_description, combined_description, '') d
+                    FROM cn_table WHERE cn8 IN :cn8Prefixes ORDER BY cn8 LIMIT :topK
+                    """
+                ).bindparams(bindparam("cn8Prefixes", expanding=True)),
+                {
+                    "cn8Prefixes": tuple(code for code in cn8_prefixes if _digits(code, limit=8)),
+                    "topK": top_k,
+                },
+            ):
+                code = _digits(row.get("cn8"), limit=8)
+                if len(code) == 8:
+                    out.append({"cn8": code, "hs6": code[:6], "hs4": code[:4], "description": row.get("d")})
+        except Exception:  # noqa: BLE001
+            return []
+        return out
 
     # ---- weighted lexical rank + quantitative gate ------------------------
     def _lexical_rank(
@@ -375,33 +412,6 @@ class StagedClassificationTool:
         valid = {r["code"] for r in ranked}
         picked = [str(c) for c in (parsed.get("selected") or []) if str(c) in valid]
         return picked[: self.keep_per_level]
-
-    # ---- final cn8 + trace ------------------------------------------------
-    def _final_candidates(self, cn8_prefixes: list[str], *, top_k: int) -> list[dict[str, Any]]:
-        from agents.document_package import _connect_db, _release_db
-
-        out: list[dict[str, Any]] = []
-        conn = None
-        try:
-            conn = _connect_db()
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT cn8, coalesce(cn8_description, combined_description, '') d
-                FROM cn_table WHERE cn8 = ANY(%s) ORDER BY cn8 LIMIT %s
-                """,
-                (cn8_prefixes, top_k),
-            )
-            for cn8, d in cur.fetchall():
-                code = _digits(cn8, limit=8)
-                if len(code) == 8:
-                    out.append({"cn8": code, "hs6": code[:6], "hs4": code[:4], "description": d})
-            cur.close()
-        except Exception:  # noqa: BLE001
-            return []
-        finally:
-            _release_db(conn)
-        return out
 
     def _trace(self, level: str, ranked: list[dict[str, Any]], selected: list[str], facts: dict[str, list[str]], status: str) -> dict[str, Any]:
         return {

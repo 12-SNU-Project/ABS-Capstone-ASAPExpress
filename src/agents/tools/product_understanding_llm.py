@@ -1,76 +1,75 @@
-"""LLM combiner for ProductUnderstanding identity lane (baseline-styled, additive).
+"""LLM combiner for ProductUnderstanding identity lane.
 
-Restores the pre-baseline LLM combination step that the partial merge dropped:
-multi-source Korean evidence (product name / OCR-reconstructed facts / Naver
-encyclopedia) is combined by a bounded LLM into the *current* 2-lane
-``DistilledIdentityFacts`` fields — it never emits HS/CN codes or routing
-decisions, so hallucination stays contained to typed identity fields.
+Baseline-styled, additive path:
+  - multi-source Korean evidence (product name / OCR-reconstructed facts / Wikipedia evidence)
+  - constrained JSON-completion by Chapter-boundary vocabulary
 
-Design constraints:
-  - Adapter goes through the bridge ``build_runtime_adapter`` (same path as
-    StagedClassificationTool), so the runtime model is env-selected (gemini).
-  - ``ingredient_class`` / ``food_form`` stay inside the existing closed
-    vocabularies so the downstream StagedClassificationTool AXIS_MAP keeps
-    matching; richer open-vocab signal lives in ``product_form_terms`` /
-    ``identity_terms`` and the English ``normalized_tariff_description``.
-  - Chapter-routing context is read from Supabase ``cn_chapter_index`` (no local
-    data files). Degrades gracefully (never raises) to the regex distiller.
+The combiner never emits HS/CN codes or direct routing decisions; it only enriches
+current ``DistilledIdentityFacts`` fields and routing hint terms.
 """
+
 from __future__ import annotations
 
 import json
 import os
 import re
-from typing import Any
 
 from agents.pipeline_dto import EncyclopediaEvidenceSet
 
 
-# Closed vocabularies must mirror IdentityDistillerTool so both paths feed the
-# same StagedClassificationTool axis map.
 INGREDIENT_CLASS_VOCAB = ("mollusc", "cereal", "cosmetic", "other")
 FOOD_FORM_VOCAB = ("noodle", "bread_pastry", "soup", "sauce", "cosmetic", "other")
 PROCESSING_STATE_VOCAB = ("processed_or_prepared", "raw_or_fresh", "unknown")
-DOMAIN_HINT_VOCAB = ("food", "cosmetics", "pharmaceutical", "hazardous", "animal_origin", "other")
+DOMAIN_HINT_VOCAB = (
+    "food",
+    "cosmetics",
+    "pharmaceutical",
+    "hazardous",
+    "animal_origin",
+    "other",
+)
 
 _IDENTITY_SYSTEM_PROMPT = f"""
 Return only one JSON object. No markdown, no code fence.
 You are ProductUnderstandingTool. Combine the given product evidence into
-chapter-routing identity facts. Do NOT output HS/CN/TARIC codes or documents.
+chapter-routing identity facts and bounded lexical hints. Do NOT output HS/CN/TARIC
+codes or documents.
 
 Rules:
 - Use only the supplied evidence. Do not invent ingredients or forms.
-- Allergen / cross-contact / manufacturer / country / expiry / package text is
-  admin label evidence, not product form.
-- Translate the Korean product into an English commercial/tariff identity and a
-  concise HS/CN tariff-nomenclature description (physical form, processing state,
-  the ingredient giving essential character).
+- If the product description contains translated/common-English wording, keep it short
+  and stable.
+- Translate the product into tariff-style English wording where possible.
 - ingredient_class MUST be one of: {", ".join(INGREDIENT_CLASS_VOCAB)}.
 - food_form MUST be one of: {", ".join(FOOD_FORM_VOCAB)}.
 - processing_state MUST be one of: {", ".join(PROCESSING_STATE_VOCAB)}.
-- domain_hints values MUST be from: {", ".join(DOMAIN_HINT_VOCAB)}.
-- product_form_terms are open English tariff-form phrases (e.g. "prepared rice
-  meal", "cereal preparation", "stir-fried"), used to enrich routing.
+- domain_hints values MUST be subset of: {", ".join(DOMAIN_HINT_VOCAB)}.
+
+Use the provided chapter-boundary context (cn_chapter_index titles/keywords) to
+propose up to 8 chapter_hint_terms. Each term should be a short English or
+Korean keyword phrase that appears in those contexts.
 
 JSON keys (all required):
 translated_product_name, commercial_identity, normalized_tariff_description,
-ingredient_class, food_form, processing_state, identity_terms, composition_terms,
-processing_terms, product_form_terms, domain_hints, confidence, needs_review.
+ingredient_class, food_form, processing_state, identity_terms,
+composition_terms, processing_terms, product_form_terms, domain_hints,
+chapter_hint_terms, chapter_hint_source_terms, chapter_hint_basis,
+chapter_hint_status, confidence, needs_review.
 """.strip()
 
 _TRANSLATION_SYSTEM_PROMPT = (
-    "You are a customs tariff classification assistant. Convert a Korean "
-    "food/cosmetic product into ONE concise English sentence phrased in HS/CN "
-    "tariff nomenclature vocabulary (physical form, processing/preparation "
-    "state, and the single ingredient giving the essential character). Output "
-    "only that English description. No HS/CN codes, no commentary, no Korean."
+    "You are a customs tariff classification assistant. Convert a Korean product "
+    "into ONE concise English tariff-style sentence phrased with physical form, "
+    "processing/preparation state, and the ingredient giving essential character. "
+    "Output only that English description. No HS/CN codes, no commentary, no Korean."
 )
 
-_adapter_cache: list[Any] = []
+
+_adapter_cache: list[object] = []
 _chapter_context_cache: list[str] = []
 
 
-def _get_adapter() -> Any:
+def _get_adapter() -> object:
     if not _adapter_cache:
         from agents._external_classifier import build_runtime_adapter
 
@@ -78,23 +77,26 @@ def _get_adapter() -> Any:
     return _adapter_cache[0]
 
 
-def _extract_json(text: str) -> dict[str, Any]:
+def _extract_json(text: str) -> dict[str, object]:
     raw = str(text or "").strip()
     if "```" in raw:
         raw = re.sub(r"^```[a-zA-Z]*", "", raw).strip().rstrip("`").strip()
     start, end = raw.find("{"), raw.rfind("}")
     if start >= 0 and end > start:
         try:
-            return json.loads(raw[start : end + 1])
+            value = json.loads(raw[start : end + 1])
+            if isinstance(value, dict):
+                return value
         except Exception:  # noqa: BLE001
             return {}
     return {}
 
 
 def _chapter_context() -> str:
-    """Compact chapter-routing context from Supabase cn_chapter_index (no files)."""
+    """Compact chapter-index context used only for hint grounding."""
     if _chapter_context_cache:
         return _chapter_context_cache[0]
+
     lines: list[str] = []
     try:
         from agents.tools.chapter_index_repository import LoadPreClassificationChapterRows
@@ -105,12 +107,15 @@ def _chapter_context() -> str:
                 row.get("title")
                 or row.get("description")
                 or row.get("heading_scope")
-                or ""
+                or "",
             ).strip()
-            if chapter and title:
-                lines.append(f"{chapter}: {title[:90]}")
-    except Exception:  # noqa: BLE001 — context is best-effort
+            keywords = str(row.get("chapter_keywords") or "").strip()
+            if chapter and (title or keywords):
+                scope = " | ".join(part for part in (title, keywords) if part)
+                lines.append(f"{chapter}: {scope}".rstrip())
+    except Exception:  # noqa: BLE001 — best-effort context build
         lines = []
+
     context = "cn_chapter_index (chapter: scope):\n" + "\n".join(lines[:97]) if lines else ""
     _chapter_context_cache.append(context)
     return context
@@ -125,7 +130,7 @@ def _compact_evidence(
 ) -> str:
     facts = "\n".join(f"- {t[:350]}" for t in factTexts[:10] if str(t).strip())
     encyc = "\n".join(
-        f"- {entry.title}: {entry.description[:200]}"
+        f"- {entry.title}: {entry.description[:220]}"
         for entry in encyclopediaEvidence.entries[:3]
     )
     return (
@@ -136,19 +141,57 @@ def _compact_evidence(
     )
 
 
-def _coerce_enum(value: Any, vocab: tuple[str, ...], default: str) -> str:
+def _coerce_enum(value: object, vocab: tuple[str, ...], default: str) -> str:
     text = str(value or "").strip().lower()
     return text if text in vocab else default
 
 
-def _string_tuple(value: Any, *, limit: int) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        return ()
+def _dedup_strings(
+    values: object,
+    *,
+    limit: int,
+    allow_single_char: bool = False,
+) -> tuple[str, ...]:
+    if isinstance(values, tuple):
+        rawValues = values
+    elif isinstance(values, list):
+        rawValues = tuple(values)
+    else:
+        rawValues = (str(values).strip(),) if str(values).strip() else ()
+
     out: list[str] = []
-    for item in value:
+    for item in rawValues:
         text = str(item or "").strip()
-        if text and text not in out:
+        if not text:
+            continue
+        if not allow_single_char and len(text) < 2:
+            continue
+        if text not in out:
             out.append(text)
+        if len(out) >= limit:
+            break
+    return tuple(out)
+
+
+def _filter_chapter_terms(
+    values: tuple[str, ...],
+    context: str,
+    *,
+    limit: int,
+) -> tuple[str, ...]:
+    if not context:
+        return values[:limit]
+
+    normalizedContext = context.lower()
+    out: list[str] = []
+    for value in values:
+        normalized = re.sub(r"\s+", " ", value.strip().lower())
+        if not normalized:
+            continue
+        if normalized not in normalizedContext:
+            continue
+        if normalized not in out:
+            out.append(normalized)
         if len(out) >= limit:
             break
     return tuple(out)
@@ -161,13 +204,12 @@ def BuildIdentityFactsFromLlm(
     factTexts: list[str],
     encyclopediaEvidence: EncyclopediaEvidenceSet,
     max_tokens: int | None = None,
-) -> dict[str, Any]:
-    """Combine evidence into current-schema identity fields via one LLM call.
+) -> dict[str, object]:
+    """Combine evidence into identity fields via one LLM call.
 
-    Returns a dict with the DistilledIdentityFacts-shaped keys plus
-    ``understanding_mode``/``needs_review``/``llm_error``. On any failure the
-    dict is empty except ``llm_error`` so the caller falls back to the regex
-    distiller. Never raises.
+    Returns a dict keyed by ``DistilledIdentityFacts`` fields plus
+    understanding mode + error fields. On failure returns a best-effort failure
+    payload; caller overlays regex identity.
     """
     from bussiness_logic.bridge.schema import LlmGenerationOptions, LlmRequest
 
@@ -189,32 +231,70 @@ def BuildIdentityFactsFromLlm(
                 user_prompt=user_prompt,
                 system_prompt=_IDENTITY_SYSTEM_PROMPT,
                 generation_options=LlmGenerationOptions(temperature=0, max_tokens=tokens),
-            )
+            ),
         )
-        parsed = _extract_json(getattr(response, "generatedText", "") or "")
-    except Exception as exc:  # noqa: BLE001 — degrade to regex distiller
-        return {"understanding_mode": "regex_fallback", "llm_error": f"{type(exc).__name__}: {exc}"}
+        parsed = _extract_json(str(getattr(response, "generatedText", "")))
+    except Exception as error:  # noqa: BLE001 — fallback to regex only
+        return {
+            "understanding_mode": "llm_fallback",
+            "llm_error": f"{type(error).__name__}: {error}",
+        }
+
     if not parsed:
-        return {"understanding_mode": "regex_fallback", "llm_error": "empty_or_invalid_json"}
+        return {
+            "understanding_mode": "llm_fallback",
+            "llm_error": "empty_or_invalid_json",
+        }
+
+    chapterHintTerms = _dedup_strings(
+        parsed.get("chapter_hint_terms"),
+        limit=10,
+    )
+    chapterHintTerms = _filter_chapter_terms(chapterHintTerms, chapter_context, limit=8)
+    chapterHintSourceTerms = _dedup_strings(
+        parsed.get("chapter_hint_source_terms"),
+        limit=8,
+    )
 
     try:
-        confidence = float(parsed.get("confidence"))
+        confidence = float(parsed.get("confidence", 0.5))
     except (TypeError, ValueError):
         confidence = 0.5
+
     return {
         "translated_product_name": str(parsed.get("translated_product_name") or "").strip(),
         "commercial_identity": str(parsed.get("commercial_identity") or productName).strip(),
         "normalized_tariff_description": str(parsed.get("normalized_tariff_description") or "").strip(),
-        "ingredient_class": _coerce_enum(parsed.get("ingredient_class"), INGREDIENT_CLASS_VOCAB, "other"),
-        "food_form": _coerce_enum(parsed.get("food_form"), FOOD_FORM_VOCAB, "other"),
-        "processing_state": _coerce_enum(parsed.get("processing_state"), PROCESSING_STATE_VOCAB, "unknown"),
-        "identity_terms": _string_tuple(parsed.get("identity_terms"), limit=16),
-        "composition_terms": _string_tuple(parsed.get("composition_terms"), limit=20),
-        "processing_terms": _string_tuple(parsed.get("processing_terms"), limit=12),
-        "product_form_terms": _string_tuple(parsed.get("product_form_terms"), limit=20),
-        "domain_hints": tuple(
-            h for h in _string_tuple(parsed.get("domain_hints"), limit=6) if h in DOMAIN_HINT_VOCAB
+        "ingredient_class": _coerce_enum(
+            parsed.get("ingredient_class"),
+            INGREDIENT_CLASS_VOCAB,
+            "other",
         ),
+        "food_form": _coerce_enum(
+            parsed.get("food_form"),
+            FOOD_FORM_VOCAB,
+            "other",
+        ),
+        "processing_state": _coerce_enum(
+            parsed.get("processing_state"),
+            PROCESSING_STATE_VOCAB,
+            "unknown",
+        ),
+        "identity_terms": _dedup_strings(parsed.get("identity_terms"), limit=16),
+        "composition_terms": _dedup_strings(parsed.get("composition_terms"), limit=20),
+        "processing_terms": _dedup_strings(parsed.get("processing_terms"), limit=12),
+        "product_form_terms": _dedup_strings(parsed.get("product_form_terms"), limit=20),
+        "domain_hints": tuple(
+            term
+            for term in _dedup_strings(parsed.get("domain_hints"), limit=6)
+            if term in DOMAIN_HINT_VOCAB
+        )[:6],
+        "chapter_hint_terms": chapterHintTerms,
+        "chapter_hint_source_terms": chapterHintSourceTerms,
+        "chapter_hint_basis": str(parsed.get("chapter_hint_basis") or "").strip()
+        or ("from_chapter_context" if chapterHintTerms else "context_fallback"),
+        "chapter_hint_status": str(parsed.get("chapter_hint_status") or "").strip()
+        or ("enabled" if chapterHintTerms else "not_enabled"),
         "confidence": confidence,
         "needs_review": bool(parsed.get("needs_review")),
         "understanding_mode": "llm_json",
@@ -223,8 +303,8 @@ def BuildIdentityFactsFromLlm(
 
 
 def TranslateToTariffEnglish(productName: str, factTexts: list[str]) -> str:
-    """Korean product facts -> one tariff-nomenclature English sentence ("" on failure)."""
-    facts = "; ".join(t for t in factTexts[:20] if str(t).strip())
+    """Korean product facts -> one tariff-nomenclature English sentence."""
+    facts = "; ".join(text for text in factTexts[:20] if str(text).strip())
     if not (productName.strip() or facts.strip()):
         return ""
     from bussiness_logic.bridge.schema import LlmGenerationOptions, LlmRequest
@@ -239,8 +319,8 @@ def TranslateToTariffEnglish(productName: str, factTexts: list[str]) -> str:
                 ),
                 system_prompt=_TRANSLATION_SYSTEM_PROMPT,
                 generation_options=LlmGenerationOptions(temperature=0, max_tokens=200),
-            )
+            ),
         )
-        return (getattr(response, "generatedText", "") or "").strip()
+        return str(getattr(response, "generatedText", "") or "").strip()
     except Exception:  # noqa: BLE001 — translation is best-effort
         return ""

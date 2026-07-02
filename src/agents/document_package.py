@@ -18,15 +18,21 @@ import os
 import re
 import sys
 import threading
+from contextlib import contextmanager
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Iterator, Optional
 
 try:
     import psycopg2
     from psycopg2 import pool as psycopg2_pool
 except ImportError:
     sys.exit("[fatal] psycopg2 missing. pip install psycopg2-binary")
+
+try:
+    from agents.tools.db_session_manager import DbSessionManager
+except Exception:
+    DbSessionManager = None
 
 
 DEFAULT_DB_NAME = "postgres"
@@ -96,8 +102,19 @@ def _get_db_pool():
         return _DB_POOL
 
 
-def _connect_db():
-    return _get_db_pool().getconn()
+@contextmanager
+def _connect_db() -> Iterator[Any]:
+    if DbSessionManager is not None:
+        manager = DbSessionManager.GetInstance()
+        with manager.OpenRawConnection() as connection:
+            yield connection
+            return
+
+    connection = _get_db_pool().getconn()
+    try:
+        yield connection
+    finally:
+        _release_db(connection)
 
 
 def _release_db(conn) -> None:
@@ -866,6 +883,11 @@ def _ancestor_goods_codes(goods_code_10: str) -> list[str]:
 
 
 def _table_exists(cur, table_name: str) -> bool:
+    if DbSessionManager is not None:
+        try:
+            return DbSessionManager.GetInstance().TableExists(table_name)
+        except Exception:
+            pass
     cached = _TABLE_EXISTS_CACHE.get(table_name)
     if cached is not None:
         return cached
@@ -877,6 +899,22 @@ def _table_exists(cur, table_name: str) -> bool:
 
 
 def _column_exists(cur, table_name: str, column_name: str) -> bool:
+    if DbSessionManager is not None:
+        try:
+            value = DbSessionManager.GetInstance().FetchOne(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = :table_name
+                  AND column_name = :column_name
+                LIMIT 1
+                """,
+                {"table_name": table_name, "column_name": column_name},
+            )
+            return bool(value)
+        except Exception:
+            pass
     cur.execute(
         """
         SELECT 1
@@ -1542,245 +1580,247 @@ def get_document_package(
             f"measures shown apply to the 10-digit parent/ancestor where applicable."
         )
 
-    conn = _connect_db()
-    cur = conn.cursor()
-
-    # 1. measure rows: exact + ancestor measures.
-    # A2M inherits measures attached to broader TARIC/CN nodes, e.g. R1227/25
-    # attached to 2100000000 appears when querying 2103901000.
-    candidate_codes = _candidate_goods_codes(cur, code, notes)
-    cur.execute(
-        """
-        SELECT
-            master_id, goods_code_10, cn8, line_id,
-            measure_type_code, measure_type_description,
-            duty_text, condition_summary,
-            certificate_codes, certificate_descriptions,
-            footnote_codes, footnote_descriptions,
-            origin_code, origin_description_en, applies_to_korea,
-            legal_base, official_journal, publication_date,
-            needs_review
-        FROM taric_master_table
-        WHERE goods_code_10 = ANY(%s)
-          AND row_kind = 'measure_line'
-          AND is_current = 'true'
-        ORDER BY
-            CASE WHEN goods_code_10 = %s THEN 0 ELSE 1 END,
-            length(regexp_replace(goods_code_10, '0+$', '')) DESC,
-            CASE WHEN applies_to_korea = 'true' THEN 0 ELSE 1 END,
-            measure_type_code, legal_base, origin_description_en
-        """,
-        (candidate_codes, code),
-    )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-
-    inherited_codes = sorted({r["goods_code_10"] for r in rows if r.get("goods_code_10") != code})
-    if inherited_codes:
-        notes.append(
-            "Included broader TARIC/CN ancestor measures, A2M-style inheritance: "
-            + ", ".join(inherited_codes)
-        )
-
-    if not rows:
-        notes.append("No current measure rows found for this TARIC10.")
-
-    # 2. (measure_type, legal_base) 그룹핑
-    grouped = defaultdict(list)
-    for r in rows:
-        key = (
-            r["measure_type_description"] or "Unknown measure",
-            r["legal_base"] or "",
-            r.get("goods_code_10") or "",
-        )
-        grouped[key].append(r)
-
-    # 3. legal_base → CELEX 조회
-    legal_bases = sorted({r["legal_base"] for r in rows if r["legal_base"]})
-    celex_map: dict[str, dict] = {}
-    if legal_bases:
-        cur.execute(
-            """SELECT legal_base, celex_id, full_description, celex_match_status
-               FROM taric_celex_table WHERE legal_base = ANY(%s)""",
-            (legal_bases,),
-        )
-        for lb, cid, fd, ms in cur.fetchall():
-            celex_map[lb] = {"celex_id": cid, "title": fd, "status": ms}
-
-    # 4. (선택) CELEX 본문 발췌
-    celex_excerpts: dict[str, str] = {}
-    if include_celex_excerpt and _table_exists(cur, "taric_celex_source_chunks"):
-        celex_ids = [c["celex_id"] for c in celex_map.values() if c.get("celex_id")]
-        if celex_ids:
+    with _connect_db() as conn:
+        with conn.cursor() as cur:
+            # 1. measure rows: exact + ancestor measures.
+            # A2M inherits measures attached to broader TARIC/CN nodes, e.g. R1227/25
+            # attached to 2100000000 appears when querying 2103901000.
+            candidate_codes = _candidate_goods_codes(cur, code, notes)
             cur.execute(
-                """SELECT celex_id, string_agg(chunk_text, ' ' ORDER BY chunk_index) AS body
-                   FROM taric_celex_source_chunks
-                   WHERE celex_id = ANY(%s)
-                   GROUP BY celex_id""",
-                (celex_ids,),
+                """
+                SELECT
+                    master_id, goods_code_10, cn8, line_id,
+                    measure_type_code, measure_type_description,
+                    duty_text, condition_summary,
+                    certificate_codes, certificate_descriptions,
+                    footnote_codes, footnote_descriptions,
+                    origin_code, origin_description_en, applies_to_korea,
+                    legal_base, official_journal, publication_date,
+                    needs_review
+                FROM taric_master_table
+                WHERE goods_code_10 = ANY(%s)
+                  AND row_kind = 'measure_line'
+                  AND is_current = 'true'
+                ORDER BY
+                    CASE WHEN goods_code_10 = %s THEN 0 ELSE 1 END,
+                    length(regexp_replace(goods_code_10, '0+$', '')) DESC,
+                    CASE WHEN applies_to_korea = 'true' THEN 0 ELSE 1 END,
+                    measure_type_code, legal_base, origin_description_en
+                """,
+                (candidate_codes, code),
             )
-            for cid, body in cur.fetchall():
-                if body:
-                    celex_excerpts[cid] = (body or "")[:celex_excerpt_chars]
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
 
-    all_certificate_codes = sorted({
-        c.strip().upper()
-        for r in rows
-        for c in (r["certificate_codes"] or "").split(";")
-        if c.strip()
-    })
-    certificate_guidance = _fetch_certificate_guidance(cur, all_certificate_codes)
+            inherited_codes = sorted({r['goods_code_10'] for r in rows if r.get('goods_code_10') != code})
+            if inherited_codes:
+                notes.append(
+                    "Included broader TARIC/CN ancestor measures, A2M-style inheritance: "
+                    + ", ".join(inherited_codes)
+                )
 
-    # 5. Requirement 객체 구성
-    requirements: list[Requirement] = []
-    for (mt_desc, lb, source_code), group_rows in grouped.items():
-        cert_set: dict[str, str] = {}  # code → description
-        for r in group_rows:
-            codes = (r["certificate_codes"] or "").split(";")
-            descs = (r["certificate_descriptions"] or "").split(";")
-            for i, c in enumerate(codes):
-                c = c.strip()
-                if not c:
-                    continue
-                d = descs[i].strip() if i < len(descs) else ""
-                if c not in cert_set or len(d) > len(cert_set.get(c, "")):
-                    cert_set[c] = d
+            if not rows:
+                notes.append("No current measure rows found for this TARIC10.")
 
-        certs = [
-            Certificate(code=c, description=d, category=cert_category(c), guidance=certificate_guidance.get(c, {}))
-            for c, d in sorted(cert_set.items())
-        ]
+            # 2. (measure_type, legal_base) 그룹핑
+            grouped = defaultdict(list)
+            for r in rows:
+                key = (
+                    r['measure_type_description'] or 'Unknown measure',
+                    r['legal_base'] or '',
+                    r.get('goods_code_10') or '',
+                )
+                grouped[key].append(r)
 
-        footnote_codes = sorted({
-            f.strip() for r in group_rows
-            for f in (r["footnote_codes"] or "").split(";") if f.strip()
-        })
+            # 3. legal_base → CELEX 조회
+            legal_bases = sorted({r['legal_base'] for r in rows if r['legal_base']})
+            celex_map: dict[str, dict] = {}
+            if legal_bases:
+                cur.execute(
+                    """SELECT legal_base, celex_id, full_description, celex_match_status
+                    FROM taric_celex_table WHERE legal_base = ANY(%s)""",
+                    (legal_bases,),
+                )
+                for lb, cid, fd, ms in cur.fetchall():
+                    celex_map[lb] = {"celex_id": cid, "title": fd, "status": ms}
 
-        kr_applicable = any(_truthy(r["applies_to_korea"]) for r in group_rows)
-        origins = sorted({r["origin_description_en"] for r in group_rows if r["origin_description_en"]})
-        source_goods_codes = sorted({r["goods_code_10"] for r in group_rows if r.get("goods_code_10")})
+            # 4. (선택) CELEX 본문 발췌
+            celex_excerpts: dict[str, str] = {}
+            if include_celex_excerpt and _table_exists(cur, "taric_celex_source_chunks"):
+                celex_ids = [c["celex_id"] for c in celex_map.values() if c.get("celex_id")]
+                if celex_ids:
+                    cur.execute(
+                        """SELECT celex_id, string_agg(chunk_text, ' ' ORDER BY chunk_index) AS body
+                        FROM taric_celex_source_chunks
+                        WHERE celex_id = ANY(%s)
+                        GROUP BY celex_id""",
+                        (celex_ids,),
+                    )
+                    for cid, body in cur.fetchall():
+                        if body:
+                            celex_excerpts[cid] = (body or "")[:celex_excerpt_chars]
 
-        # 첫 measure 의 duty_text 를 대표로 (같은 measure_type+legal_base 그룹은 보통 같은 duty)
-        duty_raw = next((r["duty_text"] for r in group_rows if r["duty_text"]), "")
-        duty_parsed = parse_duty_text(duty_raw)
+            all_certificate_codes = sorted({
+                c.strip().upper()
+                for r in rows
+                for c in (r['certificate_codes'] or '').split(';')
+                if c.strip()
+            })
+            certificate_guidance = _fetch_certificate_guidance(cur, all_certificate_codes)
 
-        celex_info = celex_map.get(lb)
-        celex_ref = None
-        if celex_info and celex_info.get("celex_id"):
-            celex_ref = CelexRef(
-                celex_id=celex_info["celex_id"],
-                title=(celex_info.get("title") or "")[:300],
-                match_status=celex_info.get("status"),
-                excerpt=celex_excerpts.get(celex_info["celex_id"]),
+            # 5. Requirement 객체 구성
+            requirements: list[Requirement] = []
+            for (mt_desc, lb, source_code), group_rows in grouped.items():
+                cert_set: dict[str, str] = {}  # code → description
+                for r in group_rows:
+                    codes = (r['certificate_codes'] or '').split(';')
+                    descs = (r['certificate_descriptions'] or '').split(';')
+                    for i, c in enumerate(codes):
+                        c = c.strip()
+                        if not c:
+                            continue
+                        d = descs[i].strip() if i < len(descs) else ''
+                        if c not in cert_set or len(d) > len(cert_set.get(c, '')):
+                            cert_set[c] = d
+
+                certs = [
+                    Certificate(code=c, description=d, category=cert_category(c), guidance=certificate_guidance.get(c, {}))
+                    for c, d in sorted(cert_set.items())
+                ]
+
+                footnote_codes = sorted({
+                    f.strip() for r in group_rows
+                    for f in (r['footnote_codes'] or '').split(';') if f.strip()
+                })
+
+                kr_applicable = any(_truthy(r['applies_to_korea']) for r in group_rows)
+                origins = sorted({r['origin_description_en'] for r in group_rows if r['origin_description_en']})
+                source_goods_codes = sorted({r['goods_code_10'] for r in group_rows if r.get('goods_code_10')})
+
+                # 첫 measure 의 duty_text 를 대표로 (같은 measure_type+legal_base 그룹은 보통 같은 duty)
+                duty_raw = next((r['duty_text'] for r in group_rows if r['duty_text']), '')
+                duty_parsed = parse_duty_text(duty_raw)
+
+                celex_info = celex_map.get(lb)
+                celex_ref = None
+                if celex_info and celex_info.get('celex_id'):
+                    celex_ref = CelexRef(
+                        celex_id=celex_info['celex_id'],
+                        title=(celex_info.get('title') or '')[:300],
+                        match_status=celex_info.get('status'),
+                        excerpt=celex_excerpts.get(celex_info['celex_id']),
+                    )
+
+                detailed_requirements = _fetch_detailed_requirements(
+                    cur,
+                    group_rows,
+                    celex_map,
+                    product_facts,
+                )
+
+                requirements.append(Requirement(
+                    measure_type=mt_desc,
+                    applies_to_korea=kr_applicable,
+                    origins=origins[:8],
+                    source_goods_codes=source_goods_codes,
+                    duty=duty_parsed,
+                    certificates=certs,
+                    conditions_count=len(group_rows),
+                    footnotes=footnote_codes[:10],
+                    legal_base=lb or None,
+                    celex=celex_ref,
+                    needs_review=any(_truthy(r.get('needs_review')) for r in group_rows),
+                    detailed_requirements=detailed_requirements,
+                ))
+
+            baseline_details = _fetch_baseline_documents(cur, code, product_facts)
+            if baseline_details:
+                requirements.append(Requirement(
+                    measure_type='Baseline document requirements',
+                    applies_to_korea=True,
+                    origins=['All third countries'],
+                    source_goods_codes=[f"CN chapter {code[:2]}"],
+                    duty={"raw": '', "rate": None, "conditions": []},
+                    certificates=[],
+                    conditions_count=len(baseline_details),
+                    footnotes=[],
+                    legal_base=None,
+                    celex=None,
+                    needs_review=any(d.needs_review for d in baseline_details),
+                    detailed_requirements=baseline_details,
+                ))
+                notes.append(
+                    "Included baseline document requirements from baseline_document_master: "
+                    + str(len(baseline_details))
+                    + " documents"
+                )
+
+            pre_taric_details = _fetch_pre_taric_requirements(cur, code, product_facts)
+            if pre_taric_details:
+                pre_domains = sorted({
+                    d.domain_route or d.domain for d in pre_taric_details
+                    if d.domain_route or d.domain
+                })
+                requirements.append(Requirement(
+                    measure_type='Pre-TARIC screening requirements',
+                    applies_to_korea=True,
+                    origins=['All third countries'],
+                    source_goods_codes=[f"CN chapter {code[:2]}"],
+                    duty={"raw": '', "rate": None, "conditions": []},
+                    certificates=[],
+                    conditions_count=len(pre_taric_details),
+                    footnotes=[],
+                    legal_base=None,
+                    celex=None,
+                    needs_review=any(d.needs_review for d in pre_taric_details),
+                    detailed_requirements=pre_taric_details,
+                ))
+                notes.append(
+                    "Included pre-TARIC screening requirements from pre_taric_requirement_master: "
+                    + ", ".join(pre_domains)
+                )
+
+            product_domain_details = _fetch_product_domain_requirements(cur, code, product_facts)
+            if product_domain_details:
+                domain_names = sorted({
+                    d.domain_route or d.domain for d in product_domain_details
+                    if d.domain_route or d.domain
+                })
+                requirements.append(Requirement(
+                    measure_type='Product regulatory requirements',
+                    applies_to_korea=True,
+                    origins=['All third countries'],
+                    source_goods_codes=[f"CN chapter {code[:2]}"],
+                    duty={"raw": '', "rate": None, "conditions": []},
+                    certificates=[],
+                    conditions_count=len(product_domain_details),
+                    footnotes=[],
+                    legal_base=None,
+                    celex=None,
+                    needs_review=any(d.needs_review for d in product_domain_details),
+                    detailed_requirements=product_domain_details,
+                ))
+                notes.append(
+                    "Included product-domain requirements from post_taric_requirement_master: "
+                    + ", ".join(domain_names)
+                )
+
+            # KR 적용 measure 먼저 정렬
+            requirements.sort(key=lambda r: (not r.applies_to_korea, r.measure_type))
+            checklist_summary = _checklist_summary(requirements)
+            binding_cards = _fetch_document_binding_cards(cur, requirements, product_facts)
+            if binding_cards:
+                checklist_summary['document_binding_cards'] = binding_cards
+                checklist_summary['document_binding_count'] = len(binding_cards)
+
+            return DocumentPackage(
+                taric10=code, cn8=cn8, total_measure_rows=len(rows),
+                has_data=bool(rows or requirements), requirements=requirements,
+                verification_urls=_verification_urls(code), data_source=DB_SOURCE_NAME,
+                notes=notes, product_facts=product_facts,
+                checklist_summary=checklist_summary,
             )
 
-        detailed_requirements = _fetch_detailed_requirements(cur, group_rows, celex_map, product_facts)
-
-        requirements.append(Requirement(
-            measure_type=mt_desc,
-            applies_to_korea=kr_applicable,
-            origins=origins[:8],
-            source_goods_codes=source_goods_codes,
-            duty=duty_parsed,
-            certificates=certs,
-            conditions_count=len(group_rows),
-            footnotes=footnote_codes[:10],
-            legal_base=lb or None,
-            celex=celex_ref,
-            needs_review=any(_truthy(r.get("needs_review")) for r in group_rows),
-            detailed_requirements=detailed_requirements,
-        ))
-
-    baseline_details = _fetch_baseline_documents(cur, code, product_facts)
-    if baseline_details:
-        requirements.append(Requirement(
-            measure_type="Baseline document requirements",
-            applies_to_korea=True,
-            origins=["All third countries"],
-            source_goods_codes=[f"CN chapter {code[:2]}"],
-            duty={"raw": "", "rate": None, "conditions": []},
-            certificates=[],
-            conditions_count=len(baseline_details),
-            footnotes=[],
-            legal_base=None,
-            celex=None,
-            needs_review=any(d.needs_review for d in baseline_details),
-            detailed_requirements=baseline_details,
-        ))
-        notes.append(
-            "Included baseline document requirements from baseline_document_master: "
-            + str(len(baseline_details))
-            + " documents"
-        )
-
-    pre_taric_details = _fetch_pre_taric_requirements(cur, code, product_facts)
-    if pre_taric_details:
-        pre_domains = sorted({
-            d.domain_route or d.domain for d in pre_taric_details
-            if d.domain_route or d.domain
-        })
-        requirements.append(Requirement(
-            measure_type="Pre-TARIC screening requirements",
-            applies_to_korea=True,
-            origins=["All third countries"],
-            source_goods_codes=[f"CN chapter {code[:2]}"],
-            duty={"raw": "", "rate": None, "conditions": []},
-            certificates=[],
-            conditions_count=len(pre_taric_details),
-            footnotes=[],
-            legal_base=None,
-            celex=None,
-            needs_review=any(d.needs_review for d in pre_taric_details),
-            detailed_requirements=pre_taric_details,
-        ))
-        notes.append(
-            "Included pre-TARIC screening requirements from pre_taric_requirement_master: "
-            + ", ".join(pre_domains)
-        )
-
-    product_domain_details = _fetch_product_domain_requirements(cur, code, product_facts)
-    if product_domain_details:
-        domain_names = sorted({
-            d.domain_route or d.domain for d in product_domain_details
-            if d.domain_route or d.domain
-        })
-        requirements.append(Requirement(
-            measure_type="Product regulatory requirements",
-            applies_to_korea=True,
-            origins=["All third countries"],
-            source_goods_codes=[f"CN chapter {code[:2]}"],
-            duty={"raw": "", "rate": None, "conditions": []},
-            certificates=[],
-            conditions_count=len(product_domain_details),
-            footnotes=[],
-            legal_base=None,
-            celex=None,
-            needs_review=any(d.needs_review for d in product_domain_details),
-            detailed_requirements=product_domain_details,
-        ))
-        notes.append(
-            "Included product-domain requirements from post_taric_requirement_master: "
-            + ", ".join(domain_names)
-        )
-
-    # KR 적용 measure 먼저 정렬
-    requirements.sort(key=lambda r: (not r.applies_to_korea, r.measure_type))
-    checklist_summary = _checklist_summary(requirements)
-    binding_cards = _fetch_document_binding_cards(cur, requirements, product_facts)
-    if binding_cards:
-        checklist_summary["document_binding_cards"] = binding_cards
-        checklist_summary["document_binding_count"] = len(binding_cards)
-
-    cur.close()
-    _release_db(conn)
-
-    return DocumentPackage(
-        taric10=code, cn8=cn8, total_measure_rows=len(rows),
-        has_data=bool(rows or requirements), requirements=requirements,
-        verification_urls=_verification_urls(code), data_source=DB_SOURCE_NAME,
-        notes=notes, product_facts=product_facts,
-        checklist_summary=checklist_summary,
-    )
 
 
 def _verification_urls(taric10: str) -> dict:

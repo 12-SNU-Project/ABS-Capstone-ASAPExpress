@@ -1225,6 +1225,21 @@ class KurlyMarketSmokeRunner:
                 "ingredient_class": identity.get("ingredient_class"),
                 "food_form": identity.get("food_form"),
                 "processing_state": identity.get("processing_state"),
+                "translated_product_name": identity.get("translated_product_name"),
+                "normalized_tariff_description": identity.get(
+                    "normalized_tariff_description",
+                ),
+                "product_form_terms": identity.get("product_form_terms") or [],
+                "domain_hints": identity.get("domain_hints") or [],
+                "chapter_hint_terms": identity.get("chapter_hint_terms") or [],
+                "chapter_hint_source_terms": identity.get(
+                    "chapter_hint_source_terms",
+                )
+                or [],
+                "chapter_hint_basis": identity.get("chapter_hint_basis"),
+                "chapter_hint_status": identity.get("chapter_hint_status"),
+                "understanding_mode": identity.get("understanding_mode"),
+                "needs_review": identity.get("needs_review"),
                 "confidence": identity.get("confidence"),
             },
             "coi": {

@@ -90,6 +90,10 @@ class DistilledIdentityFacts:
     translatedProductName: str = ""
     productFormTerms: tuple[str, ...] = ()
     domainHints: tuple[str, ...] = ()
+    chapterHintTerms: tuple[str, ...] = ()
+    chapterHintSourceTerms: tuple[str, ...] = ()
+    chapterHintBasis: str = ""
+    chapterHintStatus: str = ""
     understandingMode: str = "regex"
     needsReview: bool = False
     llmError: str = ""
@@ -111,6 +115,10 @@ class DistilledIdentityFacts:
             "translated_product_name": self.translatedProductName,
             "product_form_terms": list(self.productFormTerms),
             "domain_hints": list(self.domainHints),
+            "chapter_hint_terms": list(self.chapterHintTerms),
+            "chapter_hint_source_terms": list(self.chapterHintSourceTerms),
+            "chapter_hint_basis": self.chapterHintBasis,
+            "chapter_hint_status": self.chapterHintStatus,
             "understanding_mode": self.understandingMode,
             "needs_review": self.needsReview,
             "llm_error": self.llmError,

@@ -1,11 +1,10 @@
-"""Naver encyclopedia evidence lookup."""
+"""Wikipedia encyclopedia evidence lookup."""
 
 from __future__ import annotations
 
 import hashlib
 import html
 import json
-import os
 import re
 import urllib.parse
 import urllib.request
@@ -14,23 +13,22 @@ from dataclasses import dataclass
 from agents.pipeline_dto import EncyclopediaEntryDto, EncyclopediaEvidenceSet
 
 
-NAVER_ENCYC_ENDPOINT = "https://openapi.naver.com/v1/search/encyc.json"
+WIKIPEDIA_SEARCH_ENDPOINT = "https://en.wikipedia.org/w/rest.php/v1/search/title"
+WIKIPEDIA_SUMMARY_ENDPOINT = "https://en.wikipedia.org/api/rest_v1/page/summary/{title}"
+WIKI_REQUEST_HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "ASAPExpress/1.0 (+https://github.com/)",
+}
 TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"\s+")
 
 
 @dataclass(frozen=True, slots=True)
-class NaverCredentials:
-    clientId: str
-    clientSecret: str
-
-
-def ReadNaverCredentials() -> NaverCredentials | None:
-    clientId = (os.environ.get("NAVER_CLIENT_ID") or "").strip()
-    clientSecret = (os.environ.get("NAVER_CLIENT_SECRET") or "").strip()
-    if not clientId or not clientSecret:
-        return None
-    return NaverCredentials(clientId=clientId, clientSecret=clientSecret)
+class WikipediaSearchResult:
+    title: str
+    description: str
+    snippet: str
+    link: str
 
 
 def LookupEncyclopediaEvidence(
@@ -42,41 +40,24 @@ def LookupEncyclopediaEvidence(
     timeoutSeconds: float = 10.0,
 ) -> EncyclopediaEvidenceSet:
     normalizedQuery = query.strip()
-    credentials = ReadNaverCredentials()
     if not normalizedQuery:
         return EncyclopediaEvidenceSet(
             encyclopediaEvidenceId=encyclopediaEvidenceId,
             productId=productId,
             query=normalizedQuery,
-            configured=credentials is not None,
+            configured=True,
             qualityStatus="no_query",
             qualityReasons=("empty_query",),
         )
-    if credentials is None:
-        return EncyclopediaEvidenceSet(
-            encyclopediaEvidenceId=encyclopediaEvidenceId,
-            productId=productId,
-            query=normalizedQuery,
-            configured=False,
-            qualityStatus="unconfigured",
-            qualityReasons=("naver_credentials_missing",),
-            error="NAVER_CLIENT_ID/NAVER_CLIENT_SECRET not set",
-        )
 
-    url = NAVER_ENCYC_ENDPOINT + "?" + urllib.parse.urlencode(
-        {"query": normalizedQuery, "display": max(1, min(display, 10))},
-    )
-    request = urllib.request.Request(
-        url,
-        headers={
-            "X-Naver-Client-Id": credentials.clientId,
-            "X-Naver-Client-Secret": credentials.clientSecret,
-        },
-    )
+    rows: list[WikipediaSearchResult] = []
+    searchError = ""
     try:
-        with urllib.request.urlopen(request, timeout=timeoutSeconds) as response:
-            decoded = json.loads(response.read().decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001
+        rows = list(_search_wikipedia(normalizedQuery, limit=display, timeoutSeconds=timeoutSeconds))
+    except Exception as exc:  # noqa: BLE001 — keep lookup tolerant
+        searchError = f"{type(exc).__name__}: {exc}"
+
+    if not rows and searchError:
         return EncyclopediaEvidenceSet(
             encyclopediaEvidenceId=encyclopediaEvidenceId,
             productId=productId,
@@ -84,37 +65,118 @@ def LookupEncyclopediaEvidence(
             configured=True,
             qualityStatus="error",
             qualityReasons=("lookup_error",),
-            error=f"{type(exc).__name__}: {exc}",
+            error=searchError,
         )
 
-    items = decoded.get("items") if isinstance(decoded, dict) else []
-    entries: list[EncyclopediaEntryDto] = []
-    if isinstance(items, list):
-        for item in items[:display]:
-            if not isinstance(item, dict):
-                continue
-            title = _StripMarkup(str(item.get("title") or ""))
-            description = _StripMarkup(str(item.get("description") or ""))
-            link = str(item.get("link") or "")
-            if not title and not description:
-                continue
-            entries.append(
-                EncyclopediaEntryDto(
-                    title=title,
-                    description=description,
-                    link=link,
-                    contentHash=_HashEntry(title, description, link),
-                ),
-            )
+    if not rows:
+        return EncyclopediaEvidenceSet(
+            encyclopediaEvidenceId=encyclopediaEvidenceId,
+            productId=productId,
+            query=normalizedQuery,
+            configured=True,
+            qualityStatus="no_result",
+            qualityReasons=("no_items",),
+        )
 
     return EncyclopediaEvidenceSet(
         encyclopediaEvidenceId=encyclopediaEvidenceId,
         productId=productId,
         query=normalizedQuery,
         configured=True,
-        entries=tuple(entries),
-        qualityStatus="raw_entries" if entries else "no_result",
-        qualityReasons=("raw_not_routing_input",) if entries else ("no_items",),
+        entries=tuple(
+            EncyclopediaEntryDto(
+                title=row.title,
+                description=row.snippet,
+                link=row.link,
+                contentHash=_HashEntry(row.title, row.description, row.snippet, row.link),
+            )
+            for row in rows
+        ),
+        qualityStatus="raw_entries",
+        qualityReasons=("raw_not_routing_input",),
+    )
+
+
+def _search_wikipedia(
+    query: str,
+    *,
+    limit: int,
+    timeoutSeconds: float,
+) -> list[WikipediaSearchResult]:
+    request = urllib.request.Request(
+        _BuildSearchUrl(query, limit=limit),
+        headers=WIKI_REQUEST_HEADERS,
+    )
+    rows: list[WikipediaSearchResult] = []
+    with urllib.request.urlopen(request, timeout=timeoutSeconds) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    for rawItem in _ReadSearchItems(payload):
+        if not isinstance(rawItem, dict):
+            continue
+        title = _StripMarkup(str(rawItem.get("title") or "")).strip()
+        if not title:
+            continue
+        description = _StripMarkup(str(rawItem.get("description") or "")).strip()
+        snippet = _StripMarkup(str(rawItem.get("excerpt") or description or "")).strip()
+        summary = _fetch_summary_snippet(title, timeoutSeconds=timeoutSeconds)
+        if summary:
+            snippet = summary
+        link = f"https://en.wikipedia.org/wiki/{urllib.parse.quote(title.replace(' ', '_'))}"
+        rows.append(
+            WikipediaSearchResult(
+                title=title,
+                description=description,
+                snippet=snippet,
+                link=link,
+            ),
+        )
+    return rows
+
+
+def _fetch_summary_snippet(title: str, *, timeoutSeconds: float) -> str:
+    request = urllib.request.Request(
+        WIKIPEDIA_SUMMARY_ENDPOINT.format(title=urllib.parse.quote(title)),
+        headers=WIKI_REQUEST_HEADERS,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeoutSeconds) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(payload, dict):
+            return ""
+        extract = str(payload.get("extract") or "").strip()
+        if extract:
+            return _StripMarkup(extract)
+    except Exception:
+        return ""
+    return ""
+
+
+def _ReadSearchItems(payload: object) -> list[dict[str, object]]:
+    if not isinstance(payload, dict):
+        return []
+    rawItems = payload.get("pages")
+    if isinstance(rawItems, dict):
+        # Some clients return {pages: {"results": [...]}}
+        candidates = rawItems.get("results")
+        if isinstance(candidates, list):
+            return [
+                item
+                for item in candidates
+                if isinstance(item, dict)
+            ]
+    if isinstance(rawItems, list):
+        return [item for item in rawItems if isinstance(item, dict)]
+    fallback = payload.get("results")
+    return [item for item in (fallback if isinstance(fallback, list) else []) if isinstance(item, dict)]
+
+
+def _BuildSearchUrl(query: str, *, limit: int) -> str:
+    return WIKIPEDIA_SEARCH_ENDPOINT + "?" + urllib.parse.urlencode(
+        {
+            "q": query,
+            "limit": max(1, min(limit, 10)),
+            "format": "json",
+        },
     )
 
 
@@ -122,6 +184,6 @@ def _StripMarkup(markup: str) -> str:
     return WS_RE.sub(" ", html.unescape(TAG_RE.sub("", markup))).strip()
 
 
-def _HashEntry(title: str, description: str, link: str) -> str:
-    raw = "\n".join([title, description, link])
+def _HashEntry(title: str, description: str, snippet: str, link: str) -> str:
+    raw = "\n".join([title, description, snippet, link])
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]

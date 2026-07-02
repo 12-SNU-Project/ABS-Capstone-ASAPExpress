@@ -32,12 +32,21 @@ class DomainRouterAgent(BaseAgent):
         routingTerms = self._StringTuple(
             productUnderstanding.get("routing_terms") or [],
         )
+        identityLane = productUnderstanding.get("identity_lane") or {}
+        if not isinstance(identityLane, dict):
+            identityLane = {}
+        chapterHints = self._StringTuple(
+            identityLane.get("chapter_hint_terms") or [],
+        )
+        chapterHintSources = self._StringTuple(
+            identityLane.get("chapter_hint_source_terms") or [],
+        )
         productFacts = productUnderstanding.get("classification_input_product_facts")
         structuredFacts = self._FactDictList(productFacts)
         routeInput = BuildPreClassificationRouteInput(
             productName=str(productUnderstanding.get("product_name") or ""),
             shortDescription=str(productUnderstanding.get("short_description") or ""),
-            factTexts=(*factTexts, *routingTerms),
+            factTexts=(*factTexts, *routingTerms, *chapterHints, *chapterHintSources),
             structuredProductFacts=structuredFacts,
         )
         routeHint = PreClassificationDomainRouter(
