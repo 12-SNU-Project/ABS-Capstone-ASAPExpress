@@ -86,6 +86,13 @@ class DistilledIdentityFacts:
     processingTerms: tuple[str, ...] = ()
     confidence: float = 0.0
     conflictReason: str = ""
+    # LLM-combiner fields (additive; empty when the deterministic regex path runs).
+    translatedProductName: str = ""
+    productFormTerms: tuple[str, ...] = ()
+    domainHints: tuple[str, ...] = ()
+    understandingMode: str = "regex"
+    needsReview: bool = False
+    llmError: str = ""
 
     def ToTrace(self) -> dict[str, JsonValue]:
         return {
@@ -101,6 +108,12 @@ class DistilledIdentityFacts:
             "processing_terms": list(self.processingTerms),
             "confidence": self.confidence,
             "conflict_reason": self.conflictReason,
+            "translated_product_name": self.translatedProductName,
+            "product_form_terms": list(self.productFormTerms),
+            "domain_hints": list(self.domainHints),
+            "understanding_mode": self.understandingMode,
+            "needs_review": self.needsReview,
+            "llm_error": self.llmError,
         }
 
 

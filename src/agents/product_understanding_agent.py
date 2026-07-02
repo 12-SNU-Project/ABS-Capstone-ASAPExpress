@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+import os
 import re
 from collections.abc import Mapping
 
@@ -84,6 +86,13 @@ class ProductUnderstandingAgent(BaseAgent):
             productName=productName,
             shortDescription=shortDescription,
             classificationText="\n".join([classificationText, *coiEvidence.matchedTexts]),
+            encyclopediaEvidence=encyclopediaEvidence,
+        )
+        identity = self._MaybeEnrichIdentityWithLlm(
+            identity,
+            productName=productName,
+            shortDescription=shortDescription,
+            factTexts=factTexts,
             encyclopediaEvidence=encyclopediaEvidence,
         )
         composition = self._BuildCompositionLane(
@@ -224,6 +233,64 @@ class ProductUnderstandingAgent(BaseAgent):
             elif value:
                 texts.append(value)
         return tuple(texts)
+
+    @staticmethod
+    def _MaybeEnrichIdentityWithLlm(
+        identity: DistilledIdentityFacts,
+        *,
+        productName: str,
+        shortDescription: str,
+        factTexts: tuple[str, ...],
+        encyclopediaEvidence: EncyclopediaEvidenceSet,
+    ) -> DistilledIdentityFacts:
+        """Overlay bounded LLM identity fields when the opt-in flag is set.
+
+        Off by default (``ASAP_USE_LLM_UNDERSTANDING``): the deterministic regex
+        identity is returned unchanged. On LLM failure the regex identity is
+        returned with the error recorded for the admin trace. LLM output is
+        already vocab-validated, so the overlay cannot introduce codes.
+        """
+        flag = (os.environ.get("ASAP_USE_LLM_UNDERSTANDING", "0") or "").strip().lower()
+        if flag not in ("1", "true", "yes", "on"):
+            return identity
+        from agents.tools.product_understanding_llm import BuildIdentityFactsFromLlm
+
+        result = BuildIdentityFactsFromLlm(
+            productName=productName,
+            shortDescription=shortDescription,
+            factTexts=list(factTexts),
+            encyclopediaEvidence=encyclopediaEvidence,
+        )
+        if result.get("understanding_mode") != "llm_json":
+            return dataclasses.replace(
+                identity,
+                understandingMode=str(result.get("understanding_mode") or "regex_fallback"),
+                llmError=str(result.get("llm_error") or ""),
+            )
+        overlay: dict[str, object] = {
+            "ingredientClass": result["ingredient_class"],
+            "foodForm": result["food_form"],
+            "processingState": result["processing_state"],
+            "productFormTerms": result["product_form_terms"],
+            "domainHints": result["domain_hints"],
+            "translatedProductName": result["translated_product_name"],
+            "confidence": result["confidence"],
+            "needsReview": result["needs_review"],
+            "understandingMode": "llm_json",
+            "llmError": "",
+        }
+        # Prefer non-empty LLM text/lists; keep the regex value otherwise.
+        if result["commercial_identity"]:
+            overlay["commercialIdentity"] = result["commercial_identity"]
+        if result["normalized_tariff_description"]:
+            overlay["normalizedTariffDescription"] = result["normalized_tariff_description"]
+        if result["identity_terms"]:
+            overlay["identityTerms"] = result["identity_terms"]
+        if result["composition_terms"]:
+            overlay["compositionTerms"] = result["composition_terms"]
+        if result["processing_terms"]:
+            overlay["processingTerms"] = result["processing_terms"]
+        return dataclasses.replace(identity, **overlay)
 
     @staticmethod
     def _BuildCompositionLane(

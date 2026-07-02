@@ -236,3 +236,7 @@ data/processed/*
 !data/processed/*.empty
 
 tmp
+
+# personal working files (Claude Code, 개인용 — not for commit)
+/CLAUDE.md
+/code-engineering/
