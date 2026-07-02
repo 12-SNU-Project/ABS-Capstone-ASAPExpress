@@ -85,7 +85,7 @@ class ProductUnderstandingAgent(BaseAgent):
             productId=productId,
             productName=productName,
             shortDescription=shortDescription,
-            classificationText="\n".join([classificationText, *coiEvidence.matchedTexts]),
+            classificationText=classificationText,
             encyclopediaEvidence=encyclopediaEvidence,
         )
         identity = self._MaybeEnrichIdentityWithLlm(
@@ -99,6 +99,7 @@ class ProductUnderstandingAgent(BaseAgent):
             factTexts=factTexts,
             productFacts=productFacts,
             identity=identity,
+            coiEvidence=coiEvidence,
         )
         understandingId = store.next_id("under")
         productUnderstanding = ProductUnderstandingFacts(
@@ -298,8 +299,12 @@ class ProductUnderstandingAgent(BaseAgent):
         factTexts: tuple[str, ...],
         productFacts: tuple[dict[str, JsonValue], ...],
         identity: DistilledIdentityFacts,
+        coiEvidence: CoiEvidenceSet,
     ) -> CompositionLaneFacts:
-        text = "\n".join([*factTexts, *ProductUnderstandingAgent._FactTexts(productFacts)])
+        # COI (식품원재료풀이) is composition evidence — it belongs to this lane,
+        # not the identity lane. Feed its matched texts into %-parsing and terms.
+        coiTexts = tuple(coiEvidence.matchedTexts)
+        text = "\n".join([*factTexts, *ProductUnderstandingAgent._FactTexts(productFacts), *coiTexts])
         percentages: list[dict[str, JsonValue]] = []
         seenPercentages: set[tuple[str, str]] = set()
         for match in PERCENT_RE.finditer(text):
@@ -328,6 +333,7 @@ class ProductUnderstandingAgent(BaseAgent):
                 *identity.compositionTerms,
                 *ProductUnderstandingAgent._FactTexts(productFacts),
                 *factTexts,
+                *coiTexts,
             ],
             limit=80,
         )
@@ -344,7 +350,7 @@ class ProductUnderstandingAgent(BaseAgent):
             ingredientPercentages=tuple(percentages[:20]),
             compositionTerms=compositionTerms,
             processingTerms=identity.processingTerms,
-            compositionBasis="label" if percentages else "label_text_no_percent",
+            compositionBasis="label" if percentages else ("coi_text" if coiTexts else "label_text_no_percent"),
             containsWrapperOrDough=bool(WRAPPER_RE.search(text)),
             containsSauceOrBroth=bool(SAUCE_BROTH_RE.search(text)),
             allergenTermsExcluded=tuple(allergenTexts[:20]),
