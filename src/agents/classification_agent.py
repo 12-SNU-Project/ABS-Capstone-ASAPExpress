@@ -305,7 +305,12 @@ class ClassificationAgent(BaseAgent):
     ) -> bool:
         import os
 
-        if not _truthy_env(os.environ.get("ASAP_USE_STAGED_CLASSIFIER")):
+        # Staged narrowing is the DEFAULT classification path (designer
+        # decision, 2026-07-03); the legacy external classifier is the explicit
+        # exception. Set ASAP_USE_STAGED_CLASSIFIER=0 to force the legacy path.
+        gate = (os.environ.get("ASAP_USE_STAGED_CLASSIFIER", "1") or "").strip().lower()
+        if gate in ("0", "false", "no", "off"):
+            self.reason("Staged classifier disabled by env; using legacy external classifier (explicit).")
             return False
         try:
             product_facts = bb.get("product_understanding") or {}

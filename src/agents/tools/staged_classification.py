@@ -79,8 +79,54 @@ def _digits(value: Any, *, limit: int = 8) -> str:
     return re.sub(r"\D", "", str(value or ""))[:limit]
 
 
+def _stem(token: str) -> str:
+    """Naive singular/plural normalisation — CN wording is mostly plural
+    (molluscs, cockles) while product facts are often singular; without this
+    the species-deciding words never match."""
+    if len(token) > 4 and token.endswith("ies"):
+        return token[:-3] + "y"
+    if len(token) > 3 and token.endswith("es") and not token.endswith(("ses", "oes")):
+        return token[:-2] if token.endswith(("ches", "shes", "xes")) else token[:-1]
+    if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
+    return token
+
+
+# Operator grammar of CN quantitative clauses ("containing more than 20 % by
+# weight of ..."). These words describe the THRESHOLD, not the product; the
+# quantitative gate (_quantitative_verdict) owns that clause, so counting them
+# as lexical evidence would double-score a condition without checking it.
+# Derived from the _PCT_BEFORE/_PCT_AFTER grammar — not a product-word list.
+_QUANT_OPERATOR_TOKENS = frozenset({
+    "containing", "content", "exceeding", "more", "less", "than", "least",
+    "most", "weight", "percent", "cent", "minimum", "maximum",
+})
+
+_WHETHER_OR_NOT_RE = re.compile(r"whether\s+or\s+not", re.I)
+_NEGATION_RE = re.compile(r"\b(?:not|excluding|without|other\s+than)\s+([a-z]+(?:\s+[a-z]+)?)", re.I)
+
+
+def _negated_tokens(label: str) -> set[str]:
+    """Tokens a node label explicitly negates ("not stuffed" -> {stuffed}).
+
+    "whether or not X" means *irrespective of X* — stripped first so it is not
+    treated as a negation.
+    """
+    cleaned = _WHETHER_OR_NOT_RE.sub(" ", str(label or "").lower())
+    out: set[str] = set()
+    for match in _NEGATION_RE.finditer(cleaned):
+        out |= _tokens(match.group(1))
+    return out
+
+
 def _tokens(text: str) -> set[str]:
-    return set(_TOKEN.findall(str(text or "").lower()))
+    # len>=3 drops function words (or/of/in/by) that would otherwise pass the
+    # sibling-IDF filter and score as fake "discriminative" matches.
+    return {
+        _stem(token)
+        for token in _TOKEN.findall(str(text or "").lower())
+        if len(token) >= 3
+    }
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -227,19 +273,39 @@ class StagedClassificationTool:
             return {"ok": False, "error": "no_route_chapters", "candidates": [], "stages": []}
         chapter_scores = self._chapter_scores(routing_context)
 
+        use_branch_index = (os.environ.get("ASAP_USE_BRANCH_INDEX", "1") or "").strip().lower() not in (
+            "0", "false", "no", "off",
+        )
+        # Parent confidence carried level to level: chapters start with the
+        # router's scores; afterwards each selected code carries its own score.
+        parent_scores: dict[str, float] = dict(chapter_scores)
+
         stages: list[dict[str, Any]] = []
         for level, prefix_len in LEVELS:
-            children = self._load_children(parents, prefix_len)
-            if not children:
-                stages.append(self._trace(level, [], [], facts, "no_children"))
-                return {"ok": False, "error": f"no_children_at_{level}",
-                        "candidates": [], "stages": stages}
-            ranked = self._lexical_rank(children, facts, level, percentages)
-            if level == "hs4" and chapter_scores:
-                # Respect the router's chapter ranking (restored backup
-                # candidate_chapters contract): both scores are keyword-match
-                # counts on the same scale, so add the chapter score to its
-                # headings instead of flattening all route chapters as equals.
+            branch_rows = self._load_branch_rows(level, parents) if use_branch_index else ()
+            if branch_rows:
+                if len(branch_rows) == 1:  # pass-through branch: no decision to make
+                    only = _digits(branch_rows[0].get("code"), limit=prefix_len)
+                    stages.append(self._trace(level, [], [only], facts, "pass_through", engine="branch_index"))
+                    parent_scores = {only: max(parent_scores.values(), default=0.0)}
+                    parents = [only]
+                    continue
+                ranked = self._branch_rank(
+                    branch_rows, product_facts, facts, percentages, prefix_len,
+                    parent_order=list(parents),
+                    parent_scores=parent_scores,
+                )
+            else:
+                children = self._load_children(parents, prefix_len)
+                if not children:
+                    stages.append(self._trace(level, [], [], facts, "no_children"))
+                    return {"ok": False, "error": f"no_children_at_{level}",
+                            "candidates": [], "stages": stages}
+                ranked = self._lexical_rank(children, facts, level, percentages)
+            if level == "hs4" and chapter_scores and not branch_rows:
+                # Lexical fallback path only: add the router chapter score.
+                # The branch path encodes parent ranking hierarchically inside
+                # _branch_rank (round-robin merge), so no raw-score bonus there.
                 for row in ranked:
                     row["score"] = round(
                         row["score"] + chapter_scores.get(str(row["code"])[:2], 0.0), 2,
@@ -249,7 +315,12 @@ class StagedClassificationTool:
             selected = self._llm_select(ranked, facts, level)
             if not selected:  # deterministic fallback = top lexical
                 selected = [ranked[0]["code"]]
-            stages.append(self._trace(level, ranked, selected, facts, "ok"))
+            stages.append(self._trace(
+                level, ranked, selected, facts, "ok",
+                engine="branch_index" if branch_rows else "cn_table",
+            ))
+            ranked_scores = {r["code"]: float(r["score"]) for r in ranked}
+            parent_scores = {code: ranked_scores.get(code, 0.0) for code in selected}
             parents = selected
 
         candidates = self._final_candidates(parents, top_k=top_k)
@@ -261,12 +332,25 @@ class StagedClassificationTool:
         }
 
     # ---- facts / route ----------------------------------------------------
+    # Internal categorical labels must not become search tokens: composite
+    # labels split into misleading words ("bread_pastry" -> bread+pastry pushed
+    # 만두 to ch19 bakery) and "other" matches every residual "Other" node.
+    _INTERNAL_LABELS = frozenset({
+        "other", "unknown", "bread_pastry", "processed_or_prepared",
+        "raw_or_fresh", "not_food_processing", "label", "label_text_no_percent",
+        "coi_text",
+    })
+
     def _read_facts(self, product_facts: dict[str, Any]) -> dict[str, list[str]]:
         out: dict[str, list[str]] = {}
         for axis, paths in CLASSIFICATION_AXIS_MAP.items():
             vals: list[str] = []
             for path in paths:
-                vals.extend(_string_values(_dig(product_facts, path)))
+                vals.extend(
+                    value
+                    for value in _string_values(_dig(product_facts, path))
+                    if value.strip().lower() not in self._INTERNAL_LABELS
+                )
             out[axis] = vals[:16]
         return out
 
@@ -367,7 +451,183 @@ class StagedClassificationTool:
                     out.append({"cn8": code, "hs6": code[:6], "hs4": code[:4], "description": row.get("d")})
         except Exception:  # noqa: BLE001
             return []
+        # Preserve the staged score order (cn8_prefixes is already ranked by the
+        # cn8 stage); the SQL's ORDER BY cn8 would otherwise destroy the ranking
+        # and demote a top-1 answer to a code-sorted position.
+        rank = {_digits(code, limit=8): index for index, code in enumerate(cn8_prefixes)}
+        out.sort(key=lambda item: rank.get(item["cn8"], len(rank)))
         return out
+
+    # ---- branch-index driven rank (P2: node-local criteria from Supabase) --
+    @staticmethod
+    def _load_branch_rows(level: str, parents: list[str]) -> tuple[dict[str, Any], ...]:
+        try:
+            from agents.tools.branch_index_repository import LoadBranchRows
+        except Exception:  # noqa: BLE001
+            return ()
+        return tuple(dict(row) for row in LoadBranchRows(level, tuple(parents)))
+
+    def _branch_rank(
+        self,
+        branch_rows: tuple[dict[str, Any], ...],
+        product_facts: dict[str, Any],
+        facts: dict[str, list[str]],
+        percentages: list[Any],
+        prefix_len: int,
+        parent_order: list[str],
+        parent_scores: dict[str, float] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Hierarchical branch ranking: children compete ONLY with their own
+        siblings; families are merged by PARENT CONFIDENCE first.
+
+        A branch is a parent-local question, so pooling children of different
+        parents is an unfair fight (a single-leaf child inherits its parent's
+        whole wording; leaf-level siblings only carry their distinguisher).
+        Merge order: (parent score desc, rank within own family, child score
+        desc) — a router/previous-stage confidence of 86 vs 20 must not be
+        flattened into one-slot-per-family; only near-tied parents let child
+        evidence decide.
+        """
+        fallback_tokens: set[str] = set()
+        for values in facts.values():
+            for value in values:
+                fallback_tokens |= _tokens(value)
+
+        # Group children under their own parent (the actual branching point).
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for row in branch_rows:
+            code = _digits(row.get("code"), limit=prefix_len)
+            if len(code) != prefix_len:
+                continue
+            parent = _digits(row.get("parent_code"), limit=prefix_len) or code[:-2]
+            groups.setdefault(parent, []).append({"row": row, "code": code})
+
+        parent_rank = {p: i for i, p in enumerate(parent_order)}
+        scores_by_parent = parent_scores or {}
+        merged: list[dict[str, Any]] = []
+        for parent, items in groups.items():
+            ranked_group = self._rank_sibling_group(
+                items, product_facts, fallback_tokens, percentages,
+            )
+            for round_index, entry in enumerate(ranked_group):
+                entry["_parent_score"] = float(scores_by_parent.get(parent, 0.0))
+                entry["_round"] = round_index
+                entry["_parent_rank"] = parent_rank.get(parent, len(parent_rank))
+                merged.append(entry)
+
+        merged.sort(key=lambda r: (
+            -r["_parent_score"], r["_round"], -r["score"], r["_parent_rank"], r["code"],
+        ))
+        for entry in merged:
+            entry.pop("_parent_score", None)
+            entry.pop("_round", None)
+            entry.pop("_parent_rank", None)
+        return merged
+
+    def _rank_sibling_group(
+        self,
+        items: list[dict[str, Any]],
+        product_facts: dict[str, Any],
+        fallback_tokens: set[str],
+        percentages: list[Any],
+    ) -> list[dict[str, Any]]:
+        """Rank ONE family of siblings by their own decision criteria.
+
+        H2: tokens the label negates ("NOT stuffed") move to negative.
+        Quant-operator grammar (containing/exceeding/weight/…) is excluded from
+        lexical evidence — that clause belongs to the quantitative gate.
+        H1: sibling-IDF within the family (skipped for a single child — there
+        is nothing to discriminate). Residuals never win by wording.
+        """
+        prepared: list[dict[str, Any]] = []
+        for item in items:
+            row = item["row"]
+            negated = _negated_tokens(str(row.get("option_label_en") or ""))
+            positive = (
+                _tokens(str(row.get("positive_terms") or "").replace(";", " "))
+                - negated - _QUANT_OPERATOR_TOKENS
+            )
+            negative = _tokens(str(row.get("negative_terms") or "").replace(";", " ")) | negated
+            prepared.append({**item, "positive": positive, "negative": negative})
+
+        sibling_count = len(prepared)
+        doc_freq: dict[str, int] = {}
+        for entry in prepared:
+            for tok in entry["positive"]:
+                doc_freq[tok] = doc_freq.get(tok, 0) + 1
+
+        scored: list[dict[str, Any]] = []
+        for entry in prepared:
+            row = entry["row"]
+            code = entry["code"]
+            # Tokens from the DTO fields THIS branch says it needs; fall back
+            # to the full fact-token pool when the paths yield nothing.
+            fact_tokens: set[str] = set()
+            for path in str(row.get("required_dto_fields") or "").split(";"):
+                path = path.strip()
+                if path:
+                    for value in _string_values(_dig(product_facts, path)):
+                        if value.strip().lower() not in self._INTERNAL_LABELS:
+                            fact_tokens |= _tokens(value)
+            if not fact_tokens:
+                fact_tokens = fallback_tokens
+
+            if sibling_count > 1:
+                positive = {
+                    tok for tok in entry["positive"]
+                    if doc_freq.get(tok, 0) * 2 <= sibling_count
+                }
+            else:
+                positive = entry["positive"]
+            negative = entry["negative"]
+            residual = str(row.get("residual_other_flag") or "").strip().lower() == "true"
+            score = float(len(positive & fact_tokens)) - float(len(negative & fact_tokens))
+
+            # Give the verdict the node's full wording (label + terms), not just
+            # the thresholds — it needs the ingredient words to know WHICH
+            # ingredient the % condition is about.
+            quant_conditions = " ; ".join(
+                part for part in (
+                    str(row.get("quantitative_conditions") or ""),
+                    str(row.get("hard_conditions") or ""),
+                ) if part.strip()
+            )
+            quant_text = " ; ".join(
+                part for part in (
+                    str(row.get("option_label_en") or ""),
+                    str(row.get("positive_terms") or "").replace(";", " "),
+                    quant_conditions,
+                ) if part.strip()
+            )
+            verdict = _quantitative_verdict(quant_text, percentages) if quant_conditions else {
+                "verdict": "neutral", "reason": "no_threshold_in_node",
+            }
+            if verdict["verdict"] == "satisfies":
+                score += QUANT_BOOST
+            elif verdict["verdict"] == "violates":
+                score -= QUANT_PENALTY  # legal condition contradicted -> effectively out
+            if residual:
+                score = min(score, 0.0)  # residuals never win on wording
+
+            scored.append({
+                "code": code,
+                "descr": str(row.get("option_label_en") or ""),
+                "incl": str(row.get("positive_terms") or ""),
+                "excl": str(row.get("negative_terms") or ""),
+                "residual": residual,
+                "score": round(score, 2),
+                "quantitative_verdict": verdict,
+            })
+
+        # Elimination order: positive-scoring specific nodes first; residual
+        # ("Other") nodes surface only when no specific sibling scored > 0.
+        specific = [r for r in scored if not r["residual"]]
+        residuals = [r for r in scored if r["residual"]]
+        specific.sort(key=lambda r: r["score"], reverse=True)
+        residuals.sort(key=lambda r: r["score"], reverse=True)
+        if specific and specific[0]["score"] > 0:
+            return specific + residuals
+        return residuals + specific if residuals else specific
 
     # ---- weighted lexical rank + quantitative gate ------------------------
     def _lexical_rank(
@@ -378,23 +638,46 @@ class StagedClassificationTool:
         percentages: list[Any],
     ) -> list[dict[str, Any]]:
         weights = LEVEL_AXIS_WEIGHTS[level]
-        axis_tokens: dict[str, set[str]] = {}
+        # Per-token best weight: a token that appears in several axes must not
+        # be scored once per axis — generic words ("prepared", "preserved")
+        # otherwise pile up and outrank species-specific headings.
+        token_weight: dict[str, float] = {}
         for axis in LEVEL_AXES[level]:
-            toks: set[str] = set()
+            axis_w = weights.get(axis, 1.0)
             for v in facts.get(axis, []):
-                toks |= _tokens(v)
-            axis_tokens[axis] = toks
-        all_terms: set[str] = set()
-        for toks in axis_tokens.values():
-            all_terms |= toks
+                for tok in _tokens(v):
+                    if axis_w > token_weight.get(tok, 0.0):
+                        token_weight[tok] = axis_w
+        all_terms = set(token_weight)
+
+        # Sibling-IDF: a token carried by more than half of the siblings being
+        # ranked cannot tell them apart ("prepared", "preserved", "frozen" …)
+        # and must score zero — otherwise generic-word piles outrank the one
+        # species-deciding word (octopus, cockles). Runtime counterpart of the
+        # branch_index positive_terms idea; no hardcoded word list.
+        node_term_sets = [
+            (row, _tokens(row["descr"]) | _tokens(row["incl"]))
+            for row in children
+        ]
+        doc_freq: dict[str, int] = {}
+        for _, terms in node_term_sets:
+            for tok in terms & all_terms:
+                doc_freq[tok] = doc_freq.get(tok, 0) + 1
+        sibling_count = len(children)
+        discriminative_weight = {
+            tok: weight
+            for tok, weight in token_weight.items()
+            if doc_freq.get(tok, 0) * 2 <= sibling_count
+        }
 
         scored = []
-        for row in children:
-            node_terms = _tokens(row["descr"]) | _tokens(row["incl"])
+        for row, node_terms in node_term_sets:
             excl_terms = _tokens(row["excl"])
-            score = 0.0
-            for axis, toks in axis_tokens.items():
-                score += weights.get(axis, 1.0) * len(toks & node_terms)
+            score = sum(
+                discriminative_weight[tok]
+                for tok in node_terms
+                if tok in discriminative_weight
+            )
             score -= 0.5 * len(all_terms & excl_terms)
             verdict = _quantitative_verdict(row["descr"], percentages)
             if verdict["verdict"] == "satisfies":
@@ -450,10 +733,11 @@ class StagedClassificationTool:
         picked = [str(c) for c in (parsed.get("selected") or []) if str(c) in valid]
         return picked[: self.keep_per_level]
 
-    def _trace(self, level: str, ranked: list[dict[str, Any]], selected: list[str], facts: dict[str, list[str]], status: str) -> dict[str, Any]:
+    def _trace(self, level: str, ranked: list[dict[str, Any]], selected: list[str], facts: dict[str, list[str]], status: str, engine: str = "cn_table") -> dict[str, Any]:
         return {
             "stage": level,
             "status": status,
+            "engine": engine,
             "decision_axes": [{"axis": a, "values": facts.get(a, [])[:8]} for a in LEVEL_AXES[level]],
             "candidates_considered": [
                 {

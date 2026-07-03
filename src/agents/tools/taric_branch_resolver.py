@@ -77,7 +77,12 @@ class TaricBranch:
 
 @functools.lru_cache(maxsize=1)
 def _load_by_cn8(csv_path: str) -> dict[str, list[dict]]:
-    """{cn8 -> list of master_table row dicts}. Cached for process lifetime."""
+    """{cn8 -> list of master_table row dicts}. Cached for process lifetime.
+
+    Legacy CSV path — kept ONLY for an explicitly passed master_csv (tests).
+    The default runtime path is ``_load_rows_from_db`` (Supabase
+    taric_master_table) so classification and documents read the SAME table.
+    """
     if not Path(csv_path).exists():
         raise FileNotFoundError(f"taric_master_table.csv not found: {csv_path}")
     out: dict[str, list[dict]] = {}
@@ -87,6 +92,29 @@ def _load_by_cn8(csv_path: str) -> dict[str, list[dict]]:
             if cn8:
                 out.setdefault(cn8, []).append(r)
     return out
+
+
+@functools.lru_cache(maxsize=512)
+def _load_rows_from_db(cn8: str) -> tuple[dict, ...]:
+    """taric_master_table rows for one CN8 from the DB (runtime-env based).
+
+    Same table document_package already queries — removes the CSV/DB dual
+    source that could desync classification from document requirements.
+    Degrades to () on failure (resolver then returns no branches).
+    """
+    try:
+        from sqlalchemy import text
+
+        from agents.tools.db_session_manager import DbSessionManager
+
+        manager = DbSessionManager.GetInstance()
+        rows = manager.FetchRows(
+            text("SELECT * FROM taric_master_table WHERE cn8 = :cn8"),
+            {"cn8": cn8},
+        )
+        return tuple(dict(r) for r in rows)
+    except Exception:  # noqa: BLE001 — resolver must not break the pipeline
+        return ()
 
 
 class TaricBranchResolverTool:
@@ -102,7 +130,9 @@ class TaricBranchResolverTool:
         self,
         master_csv: Optional[Path] = None,
     ) -> None:
-        self._master_csv = Path(master_csv) if master_csv else DEFAULT_MASTER_CSV
+        # DB is the default source; an explicitly passed master_csv (tests /
+        # offline runs) keeps the legacy CSV path.
+        self._master_csv = Path(master_csv) if master_csv else None
 
     def resolve(
         self,
@@ -115,7 +145,10 @@ class TaricBranchResolverTool:
         cn8 = (cn8 or "").strip()
         if not cn8 or len(cn8) < 8:
             return []
-        rows = _load_by_cn8(str(self._master_csv)).get(cn8, [])
+        if self._master_csv is not None:
+            rows = _load_by_cn8(str(self._master_csv)).get(cn8, [])
+        else:
+            rows = list(_load_rows_from_db(cn8))
         if not rows:
             return []
 

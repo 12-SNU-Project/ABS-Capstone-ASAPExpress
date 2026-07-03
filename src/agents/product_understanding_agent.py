@@ -31,6 +31,13 @@ ALLERGEN_RE = re.compile(
     r"알레르|알러지|알레르겐|같은\s*제조시설|동일\s*제조시설|교차|allergen|may contain|cross[- ]?contact",
     re.I,
 )
+# Acquisition-level noise filters (allowed hardcoding — collection, not judgement):
+# origin marks ("중국산 100%") are not ingredient percentages, and admin label
+# lines (packaging/expiry/shipping) are not composition terms.
+ORIGIN_TERM_RE = re.compile(r"원산지|^[가-힣]{1,4}산$")
+ADMIN_LABEL_LINE_RE = re.compile(
+    r"^(?:포장타입|중량/?용량|판매단위|소비기한|유통기한|보관\s*방법|배송|교환|반품|고객|원산지)",
+)
 
 
 class ProductUnderstandingAgent(BaseAgent):
@@ -286,8 +293,11 @@ class ProductUnderstandingAgent(BaseAgent):
         returned with the error recorded for the admin trace. LLM output is
         already vocab-validated, so the overlay cannot introduce codes.
         """
-        flag = (os.environ.get("ASAP_USE_LLM_UNDERSTANDING", "0") or "").strip().lower()
-        if flag not in ("1", "true", "yes", "on"):
+        # LLM combination is the DEFAULT understanding path (designer decision,
+        # 2026-07-03); the regex distiller stays only as the failure parachute.
+        # Set ASAP_USE_LLM_UNDERSTANDING=0 to force the regex-only path.
+        flag = (os.environ.get("ASAP_USE_LLM_UNDERSTANDING", "1") or "").strip().lower()
+        if flag in ("0", "false", "no", "off"):
             return identity
         from agents.tools.product_understanding_llm import BuildIdentityFactsFromLlm
 
@@ -354,7 +364,7 @@ class ProductUnderstandingAgent(BaseAgent):
             except ValueError:
                 percent = percentRaw
             key = (term.lower(), str(percent))
-            if term and key not in seenPercentages:
+            if term and key not in seenPercentages and not ORIGIN_TERM_RE.search(term):
                 percentages.append({"term": term, "percent": percent})
                 seenPercentages.add(key)
 
@@ -369,10 +379,15 @@ class ProductUnderstandingAgent(BaseAgent):
 
         compositionTerms = ProductUnderstandingAgent._DedupStrings(
             [
-                *identity.compositionTerms,
-                *ProductUnderstandingAgent._FactTexts(productFacts),
-                *factTexts,
-                *coiTexts,
+                term
+                for term in (
+                    *identity.compositionTerms,
+                    *ProductUnderstandingAgent._FactTexts(productFacts),
+                    *factTexts,
+                    *coiTexts,
+                )
+                # Allergen notices and admin label lines are not composition.
+                if not ALLERGEN_RE.search(term) and not ADMIN_LABEL_LINE_RE.search(term)
             ],
             limit=80,
         )

@@ -131,12 +131,97 @@ def _QueryCandidates(cleanedQuery: str, *, limit: int = 4) -> tuple[str, ...]:
     return tuple(candidates)
 
 
+_KOREAN_RE = re.compile(r"[가-힣]")
+KO_WIKIPEDIA_SEARCH_ENDPOINT = "https://ko.wikipedia.org/w/rest.php/v1/search/title"
+KO_WIKIPEDIA_ACTION_ENDPOINT = "https://ko.wikipedia.org/w/api.php"
+
+
+def _fetch_en_langlink(koTitle: str, *, timeoutSeconds: float) -> str:
+    """ko.wikipedia article title -> its English article title ("" if none)."""
+    url = KO_WIKIPEDIA_ACTION_ENDPOINT + "?" + urllib.parse.urlencode({
+        "action": "query", "titles": koTitle, "prop": "langlinks",
+        "lllang": "en", "format": "json", "redirects": 1,
+    })
+    request = urllib.request.Request(url, headers=WIKI_REQUEST_HEADERS)
+    try:
+        with urllib.request.urlopen(request, timeout=timeoutSeconds) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        pages = payload.get("query", {}).get("pages", {}) if isinstance(payload, dict) else {}
+        for page in pages.values():
+            langlinks = page.get("langlinks") if isinstance(page, dict) else None
+            if isinstance(langlinks, list) and langlinks:
+                return str(langlinks[0].get("*") or "").strip()
+    except Exception:  # noqa: BLE001 — langlink is best-effort
+        return ""
+    return ""
+
+
+def _search_korean_via_langlink(
+    query: str,
+    *,
+    limit: int,
+    timeoutSeconds: float,
+) -> list[WikipediaSearchResult]:
+    """Korean query -> ko.wikipedia title search -> EN langlink -> EN summary.
+
+    en.wikipedia title search cannot resolve Korean text (always no_result),
+    so the deterministic KO->EN anchor goes through the Korean article's
+    inter-language link (떡볶이 -> Tteokbokki), verified against live data.
+    """
+    url = KO_WIKIPEDIA_SEARCH_ENDPOINT + "?" + urllib.parse.urlencode({
+        "q": query, "limit": max(1, min(limit, 5)),
+    })
+    request = urllib.request.Request(url, headers=WIKI_REQUEST_HEADERS)
+    try:
+        with urllib.request.urlopen(request, timeout=timeoutSeconds) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+
+    queryTokens = [token for token in query.split() if len(token) >= 2] or [query]
+    rows: list[WikipediaSearchResult] = []
+    for rawItem in _ReadSearchItems(payload):
+        koTitle = _StripMarkup(str(rawItem.get("title") or "")).strip()
+        if not koTitle:
+            continue
+        # Relevance guard: ko title search prefix-matches unrelated articles
+        # ("군만두" -> "군발두통"). Bidirectional containment keeps redirects
+        # to the base dish ("군만두" -> "만두") while dropping strangers.
+        compactTitle = re.sub(r"\s+|\([^)]*\)", "", koTitle)
+        if not any(
+            token in compactTitle or (len(compactTitle) >= 2 and compactTitle in token)
+            for token in queryTokens
+        ):
+            continue
+        enTitle = _fetch_en_langlink(koTitle, timeoutSeconds=timeoutSeconds)
+        if not enTitle:
+            continue
+        summary = _fetch_summary_snippet(enTitle, timeoutSeconds=timeoutSeconds)
+        rows.append(
+            WikipediaSearchResult(
+                title=enTitle,
+                description=f"ko:{koTitle}",
+                snippet=summary or enTitle,
+                link=f"https://en.wikipedia.org/wiki/{urllib.parse.quote(enTitle.replace(' ', '_'))}",
+            ),
+        )
+        if len(rows) >= limit:
+            break
+    return rows
+
+
 def _search_wikipedia(
     query: str,
     *,
     limit: int,
     timeoutSeconds: float,
 ) -> list[WikipediaSearchResult]:
+    # Korean queries never match en.wikipedia title search; route them through
+    # the ko-article -> EN langlink bridge first.
+    if _KOREAN_RE.search(query):
+        rows = _search_korean_via_langlink(query, limit=limit, timeoutSeconds=timeoutSeconds)
+        if rows:
+            return rows
     request = urllib.request.Request(
         _BuildSearchUrl(query, limit=limit),
         headers=WIKI_REQUEST_HEADERS,

@@ -37,9 +37,22 @@ codes or documents.
 
 Rules:
 - Use only the supplied evidence. Do not invent ingredients or forms.
+- Allergen / cross-contact / same-facility notices ("함유", "같은 제조시설",
+  "may contain") are NOT composition evidence: never list those substances in
+  composition_terms or the tariff description unless they also appear as real
+  ingredients. Country-of-origin and packaging/expiry text is admin label
+  evidence, not product form or composition.
 - If the product description contains translated/common-English wording, keep it short
   and stable.
 - Translate the product into tariff-style English wording where possible.
+- Use the EU nomenclature's own wording and plural forms (e.g. "molluscs",
+  "cockles", "crustaceans"), not colloquial food names.
+- Vocabulary bridge (restored designer rules): for 만두/dumpling use
+  "stuffed pasta" and "cereal preparation", never "bakery". For pastry/약과/
+  cake/noodle/pasta/rice dishes include "cereal preparation" or "bakery product"
+  as fits the evidence. For 무침/반찬/side dishes use "miscellaneous edible
+  preparation" and "side dish". Use "rice meal" only when evidence contains
+  밥/솥밥/rice.
 - ingredient_class MUST be one of: {", ".join(INGREDIENT_CLASS_VOCAB)}.
 - food_form MUST be one of: {", ".join(FOOD_FORM_VOCAB)}.
 - processing_state MUST be one of: {", ".join(PROCESSING_STATE_VOCAB)}.

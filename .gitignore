@@ -240,3 +240,13 @@ tmp
 # personal working files (Claude Code, 개인용 — not for commit)
 /CLAUDE.md
 /code-engineering/
+
+# test data / artifacts (정답지·스모크출력·grouping index → Supabase行, git 불필요; 테스트코드 tests/test_*.py는 유지)
+tests/*.zip
+tests/kurly-market-smoke/
+tests/cn_hierarchy_analysis_grouping_20260702/
+tests/EU_HS_test.csv
+tests/.DS_Store
+tests/__pycache__/
+smoke_out.txt
+artifacts/

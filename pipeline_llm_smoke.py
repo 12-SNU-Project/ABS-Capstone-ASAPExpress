@@ -36,7 +36,7 @@ DEFAULT_CSV_PATH = PROJECT_ROOT_PATH / "tests" / "EU_HS_test.csv"
 DEFAULT_ARTIFACT_ROOT = PROJECT_ROOT_PATH / "artifacts" / "pipeline_llm_smoke"
 URL_COLUMN = "상품 상세"
 ANSWER_COLUMN = "EU HS CODE"
-RECALL_LEVELS = (("hs4", 4), ("hs6", 6), ("cn8", 8))
+RECALL_LEVELS = (("hs2", 2), ("hs4", 4), ("hs6", 6), ("cn8", 8))
 
 
 def ParseArguments(arguments: list[str] | None = None) -> argparse.Namespace:
@@ -59,10 +59,14 @@ def _digits(value: Any) -> str:
 def LoadRows(csvPath: Path, *, offset: int, limit: int) -> list[dict[str, str]]:
     with open(csvPath, newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
-        rows = [
-            {"url": (row.get(URL_COLUMN) or "").strip(), "answer": _digits(row.get(ANSWER_COLUMN))}
-            for row in reader
-        ]
+        rows = []
+        for row in reader:
+            answer = _digits(row.get(ANSWER_COLUMN))
+            # EU codes have even length (8/10); an odd length means the CSV
+            # dropped a leading zero (0710805920 -> "710805920").
+            if len(answer) % 2 == 1:
+                answer = "0" + answer
+            rows.append({"url": (row.get(URL_COLUMN) or "").strip(), "answer": answer})
     rows = [r for r in rows if r["url"].startswith("http") and r["answer"]]
     rows = rows[offset:]
     return rows[:limit] if limit else rows
@@ -107,6 +111,12 @@ def _run_chain(rawInput: dict[str, Any], *, productId: str, use_llm: bool,
 
         bb = store.load()
         identity = (bb.get("product_understanding") or {}).get("identity_lane") or {}
+        routing = bb.get("routing_context") or {}
+        routerChapters = [
+            f"{d.get('chapter')}({d.get('score')})"
+            for d in (routing.get("candidate_chapter_details") or [])
+            if isinstance(d, dict)
+        ] or [str(c) for c in (routing.get("candidate_hs2") or [])]
         codeSets = bb.get("candidate_code_sets") or []
         latest = codeSets[-1] if isinstance(codeSets, list) and codeSets else {}
         candidates = latest.get("candidates") if isinstance(latest, dict) else []
@@ -118,6 +128,7 @@ def _run_chain(rawInput: dict[str, Any], *, productId: str, use_llm: bool,
             "translated_product_name": identity.get("translated_product_name"),
             "normalized_tariff_description": identity.get("normalized_tariff_description"),
             "llm_error": identity.get("llm_error"),
+            "router_chapters": routerChapters,
             "cn8_candidates": cn8s,
             "errors": errors,
         }
@@ -163,8 +174,10 @@ def main(arguments: list[str] | None = None) -> int:
         for name, _ in RECALL_LEVELS:
             agg["off"][name] += int(rOff[name])
             agg["on"][name] += int(rOn[name])
-        print(f"    OFF food_form={off['food_form']!r:>16} recall={_fmt(rOff)} cn8={off['cn8_candidates'][:4]}")
-        print(f"    ON  food_form={on['food_form']!r:>16} recall={_fmt(rOn)} cn8={on['cn8_candidates'][:4]}"
+        print(f"    OFF hs2={','.join(off['router_chapters'][:4])}")
+        print(f"        food_form={off['food_form']!r:>16} recall={_fmt(rOff)} cn8={off['cn8_candidates'][:4]}")
+        print(f"    ON  hs2={','.join(on['router_chapters'][:4])}")
+        print(f"        food_form={on['food_form']!r:>16} recall={_fmt(rOn)} cn8={on['cn8_candidates'][:4]}"
               f"{'  llm_err=' + str(on['llm_error']) if on.get('llm_error') else ''}")
         if on.get("normalized_tariff_description"):
             print(f"        EN: {on['normalized_tariff_description']}")
