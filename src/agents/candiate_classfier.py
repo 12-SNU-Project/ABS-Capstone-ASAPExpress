@@ -1,5 +1,5 @@
 """
-agents/_external_classifier — adapter for the vendored Stage 1 classifier.
+agents.candiate_classfier — adapter for the vendored Stage 1 classifier.
 
 The classifier runtime code lives in ``src/bussiness_logic``. It reads our core
 data from ``docs/ASAP_Ontology_v1`` and orchestrates
@@ -14,7 +14,7 @@ its 7-step Stage 1 pipeline:
   7. Stage1ResponseValidator + Stage1DecisionPolicy + Stage1TraversalController
      + Stage1RecommendationReportBuilder
 
-Outputs collected into ExternalClassificationResult so ClassificationAgent
+Outputs collected into ExternalClassificationResult so ClassificationComponent
 can stamp citations / reasoning / candidates onto the Blackboard.
 """
 from __future__ import annotations
@@ -23,7 +23,6 @@ from collections.abc import Mapping
 import json
 import os
 import re
-import sys
 from dataclasses import dataclass, field, is_dataclass, replace
 from pathlib import Path
 from typing import Sequence
@@ -552,10 +551,6 @@ LLM_MAX_TOKENS = 2048
 STAGE1_REVIEW_MODE_FULL = "full"
 
 ASAP_PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
-ASAP_SRC_ROOT = ASAP_PROJECT_ROOT / "src"
-for _path in (ASAP_PROJECT_ROOT, ASAP_SRC_ROOT):
-    if _path.exists() and str(_path) not in sys.path:
-        sys.path.insert(0, str(_path))
 
 from bussiness_logic.app_config import LoadAppConfig
 from bussiness_logic.bridge.embedding import (

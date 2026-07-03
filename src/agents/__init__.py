@@ -19,10 +19,12 @@ Architecture (codex 2026-06-08):
 Components are exposed at the package level; tools at agents.tools.
 """
 from agents.component_base import BasePipelineComponent, ComponentResult
-from agents.evidence_intake_component import EvidenceIntakeComponent
-from agents.product_understanding_component import ProductUnderstandingComponent
-from agents.hs2_routing_component import Hs2RoutingComponent
-from agents.classification_component import ClassificationAgent
+from agents.pipeline_components import (
+    ClassificationComponent,
+    EvidenceIntakeComponent,
+    Hs2RoutingComponent,
+    ProductUnderstandingComponent,
+)
 from bussiness_logic.document.document_component import DocumentComponent
 
 __all__ = [
@@ -31,6 +33,6 @@ __all__ = [
     "EvidenceIntakeComponent",
     "ProductUnderstandingComponent",
     "Hs2RoutingComponent",
-    "ClassificationAgent",
+    "ClassificationComponent",
     "DocumentComponent",
 ]

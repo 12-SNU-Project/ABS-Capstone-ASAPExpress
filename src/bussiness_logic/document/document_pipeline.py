@@ -10,7 +10,6 @@ from functools import lru_cache
 import hashlib
 import json
 import os
-import sys
 from collections.abc import Callable
 from threading import Lock
 import uuid
@@ -18,16 +17,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
-SRC_ROOT = PROJECT_ROOT / "src"
-for _path in (PROJECT_ROOT, SRC_ROOT):
-    if _path.exists() and str(_path) not in sys.path:
-        sys.path.insert(0, str(_path))
 
-from agents.classification_component import ClassificationAgent
-from agents.hs2_routing_component import Hs2RoutingComponent
+from agents.pipeline_components import (
+    ClassificationComponent,
+    Hs2RoutingComponent,
+    EvidenceIntakeComponent,
+    ProductUnderstandingComponent,
+)
 from bussiness_logic.document.document_component import DocumentComponent
-from agents.evidence_intake_component import EvidenceIntakeComponent
-from agents.product_understanding_component import ProductUnderstandingComponent
 from agents.blackboard import BlackboardStore
 from bussiness_logic.artifact_paths import (
     BuildSafeArtifactPathSegment,
@@ -748,7 +745,7 @@ def run_document_pipeline(
         EvidenceIntakeComponent(raw_input),
         ProductUnderstandingComponent(),
         Hs2RoutingComponent(),
-        ClassificationAgent(),
+        ClassificationComponent(),
         DocumentComponent(include_celex_excerpt=include_celex_excerpt),
     ]
 

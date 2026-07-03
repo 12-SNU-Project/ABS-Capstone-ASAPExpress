@@ -19,7 +19,7 @@ from agents.pipeline_dto import (
     ProductUnderstandingPackage,
 )
 from agents.tools.encyclopedia_lookup import LookupEncyclopediaEvidence
-from agents.tools.identity_distiller import IdentityDistillerAgent
+from agents.tools.identity_distiller import IdentityDistillerService
 
 
 PERCENT_RE = re.compile(
@@ -80,7 +80,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             productId=productId,
             query=productName,
         )
-        identity = IdentityDistillerAgent().BuildHints(
+        identity = IdentityDistillerService().BuildHints(
             identityHintId=store.next_id("hint"),
             productId=productId,
             productName=productName,
