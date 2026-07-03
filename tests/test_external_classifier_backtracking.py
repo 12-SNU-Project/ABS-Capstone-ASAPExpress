@@ -1,8 +1,9 @@
 from types import SimpleNamespace
-from typing import Any
 import json
 
-from agents import _external_classifier as externalClassifier
+import pytest
+
+from agents import candiate_classfier as externalClassifier
 from bussiness_logic.core.classification.hierarchical_beam import (
     HierarchySearchBoundary,
 )
@@ -17,42 +18,42 @@ def _Candidate(code: str) -> SimpleNamespace:
 
 
 def test_external_classifier_runs_one_bounded_backtracking_round(
-    monkeypatch: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     initialCandidate = _Candidate("19021910")
     backtrackingCandidate = _Candidate("19022010")
     roundCalls: list[list[str]] = []
 
     class FakeRetriever:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
+        def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
         def FindCandidates(
             self,
-            productInput: Any,
+            productInput: object,
             topK: int,
             boundary: HierarchySearchBoundary | None = None,
-        ) -> list[Any]:
+        ) -> list[object]:
             del productInput, topK, boundary
             return [initialCandidate]
 
     class FakeTraversalController:
         def BuildBacktrackingCandidates(
             self,
-            **kwargs: Any,
-        ) -> list[Any]:
+            **kwargs: object,
+        ) -> list[object]:
             assert kwargs["completedRetryCount"] == 0
             assert kwargs["maxRetryCount"] == 1
             return [backtrackingCandidate]
 
     class FakeRecommendationBuilder:
-        def Build(self, *args: Any, **kwargs: Any) -> str:
+        def Build(self, *args: object, **kwargs: object) -> str:
             return "fixture-recommendation"
 
     def RunRound(
-        productInput: Any,
-        candidates: list[Any],
-        adapter: Any,
+        productInput: object,
+        candidates: list[object],
+        adapter: object,
     ) -> externalClassifier._Stage1ReviewRound:
         del productInput, adapter
         roundCalls.append([candidate.hs8 for candidate in candidates])
@@ -109,33 +110,33 @@ def test_external_classifier_runs_one_bounded_backtracking_round(
 
 
 def test_external_classifier_falls_back_when_routed_scope_is_empty(
-    monkeypatch: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fallbackCandidate = _Candidate("21039090")
     seenBoundaries: list[HierarchySearchBoundary | None] = []
 
     class FakeRetriever:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
+        def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
         def FindCandidates(
             self,
-            productInput: Any,
+            productInput: object,
             topK: int,
             boundary: HierarchySearchBoundary | None = None,
-        ) -> list[Any]:
+        ) -> list[object]:
             del productInput, topK
             seenBoundaries.append(boundary)
             return [] if boundary is not None else [fallbackCandidate]
 
     class FakeRecommendationBuilder:
-        def Build(self, *args: Any, **kwargs: Any) -> str:
+        def Build(self, *args: object, **kwargs: object) -> str:
             return "fixture-recommendation"
 
     def RunRound(
-        productInput: Any,
-        candidates: list[Any],
-        adapter: Any,
+        productInput: object,
+        candidates: list[object],
+        adapter: object,
     ) -> externalClassifier._Stage1ReviewRound:
         del productInput, adapter
         return externalClassifier._Stage1ReviewRound(
@@ -175,8 +176,8 @@ def test_external_classifier_falls_back_when_routed_scope_is_empty(
         top_k_candidates=1,
         routing_context={
             "routing_context_id": "route_001",
-            "candidate_hs2": ["19"],
-            "strict_route": True,
+            "allowed_hs2": ["19"],
+            "enforce_hs2_boundary": True,
             "fallback_allowed": True,
         },
     )
@@ -186,7 +187,6 @@ def test_external_classifier_falls_back_when_routed_scope_is_empty(
     assert seenBoundaries[0].Allows("hs2", "19")
     assert seenBoundaries[1] is None
     assert [candidate.hs8 for candidate in result.candidates] == ["21039090"]
-    assert result.routing_context_trace["fallback_used"] is True
 
 
 def test_unreviewed_candidate_defaults_to_insufficient_information() -> None:

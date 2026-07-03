@@ -7,14 +7,16 @@ import os
 import re
 from collections.abc import Mapping
 
-from agents.component_base import BasePipelineComponent
 from agents.blackboard import BlackboardStore, now_iso
+from agents.component_base import BasePipelineComponent
 from agents.coi_loader import LoadCoiEvidence
+from agents.llm_agents import IdentityHintAgent
 from agents.pipeline_dto import (
     CompositionFactSet,
     CoiEvidenceSet,
-    IdentityHintSet,
+    DistilledIdentityFacts,
     EncyclopediaEvidenceSet,
+    IdentityHintSet,
     JsonValue,
     ProductUnderstandingPackage,
 )
@@ -80,25 +82,25 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             productId=productId,
             query=productName,
         )
-        identity = IdentityDistillerService().BuildHints(
+        distilledIdentity = IdentityDistillerService().BuildFacts(
+            distilledIdentityId=store.next_id("distid"),
+            productId=productId,
+            encyclopediaEvidence=encyclopediaEvidence,
+        )
+        identity = self._BuildIdentitySeed(
             identityHintId=store.next_id("hint"),
             productId=productId,
-            productName=productName,
-            shortDescription=shortDescription,
-            classificationText=classificationText,
-            encyclopediaEvidence=encyclopediaEvidence,
+            distilledIdentity=distilledIdentity,
         )
         identity = self._MaybeEnrichIdentityWithLlm(
             identity,
             productName=productName,
-            shortDescription=shortDescription,
-            factTexts=factTexts,
+            distilledIdentity=distilledIdentity,
             encyclopediaEvidence=encyclopediaEvidence,
         )
         composition = self._BuildCompositionLane(
             factTexts=factTexts,
             productFacts=productFacts,
-            identity=identity,
             coiEvidence=coiEvidence,
         )
         understandingId = store.next_id("under")
@@ -111,13 +113,14 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             classificationText=classificationText,
             reconstructedFactTexts=factTexts,
             reconstructedProductFacts=productFacts,
+            distilledIdentity=distilledIdentity,
             identityHints=identity,
             compositionFacts=composition,
             coiEvidence=coiEvidence,
             encyclopediaEvidence=encyclopediaEvidence,
             routingTerms=self._RoutingTerms(
                 productName=productName,
-                factTexts=factTexts,
+                distilledIdentity=distilledIdentity,
                 identity=identity,
             ),
             unknowns=(
@@ -235,30 +238,44 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         return tuple(texts)
 
     @staticmethod
+    def _BuildIdentitySeed(
+        *,
+        identityHintId: str,
+        productId: str,
+        distilledIdentity: DistilledIdentityFacts,
+    ) -> IdentityHintSet:
+        return IdentityHintSet(
+            identityHintId=identityHintId,
+            productId=productId,
+            commercialIdentity=distilledIdentity.commercialIdentity,
+            normalizedTariffDescription=distilledIdentity.normalizedDescription,
+            identityTerms=distilledIdentity.identityTerms,
+            productFormTerms=distilledIdentity.productFormSignalTerms,
+            confidence=0.4 if distilledIdentity.identityTerms else 0.0,
+            understandingMode="wikipedia_distilled",
+        )
+
+    @staticmethod
     def _MaybeEnrichIdentityWithLlm(
         identity: IdentityHintSet,
         *,
         productName: str,
-        shortDescription: str,
-        factTexts: tuple[str, ...],
+        distilledIdentity: DistilledIdentityFacts,
         encyclopediaEvidence: EncyclopediaEvidenceSet,
     ) -> IdentityHintSet:
-        """Overlay bounded LLM identity fields when the opt-in flag is set.
+        """Overlay bounded LLM identity fields unless explicitly disabled.
 
-        Off by default (``ASAP_USE_LLM_UNDERSTANDING``): the deterministic regex
-        identity is returned unchanged. On LLM failure the regex identity is
+        On by default (``ASAP_USE_LLM_UNDERSTANDING``). On LLM failure the regex identity is
         returned with the error recorded in the identity hint reasons. LLM output is
         already vocab-validated, so the overlay cannot introduce codes.
         """
-        flag = (os.environ.get("ASAP_USE_LLM_UNDERSTANDING", "0") or "").strip().lower()
+        flag = (os.environ.get("ASAP_USE_LLM_UNDERSTANDING", "1") or "").strip().lower()
         if flag not in ("1", "true", "yes", "on"):
             return identity
-        from agents.tools.product_understanding_llm import BuildIdentityFactsFromLlm
 
-        result = BuildIdentityFactsFromLlm(
+        result = IdentityHintAgent().BuildIdentityFacts(
             productName=productName,
-            shortDescription=shortDescription,
-            factTexts=list(factTexts),
+            distilledIdentity=distilledIdentity,
             encyclopediaEvidence=encyclopediaEvidence,
         )
         if result.get("understanding_mode") != "llm_json":
@@ -268,9 +285,6 @@ class ProductUnderstandingComponent(BasePipelineComponent):
                 llmError=str(result.get("llm_error") or ""),
             )
         overlay: dict[str, object] = {
-            "ingredientClass": result["ingredient_class"],
-            "foodForm": result["food_form"],
-            "processingState": result["processing_state"],
             "productFormTerms": result["product_form_terms"],
             "domainHints": result["domain_hints"],
             "chapterHintTerms": result["chapter_hint_terms"],
@@ -290,10 +304,6 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             overlay["normalizedTariffDescription"] = result["normalized_tariff_description"]
         if result["identity_terms"]:
             overlay["identityTerms"] = result["identity_terms"]
-        if result["composition_terms"]:
-            overlay["compositionTerms"] = result["composition_terms"]
-        if result["processing_terms"]:
-            overlay["processingTerms"] = result["processing_terms"]
         return dataclasses.replace(identity, **overlay)
 
     @staticmethod
@@ -301,7 +311,6 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         *,
         factTexts: tuple[str, ...],
         productFacts: tuple[dict[str, JsonValue], ...],
-        identity: IdentityHintSet,
         coiEvidence: CoiEvidenceSet,
     ) -> CompositionFactSet:
         # COI (식품원재료풀이) is composition evidence — it belongs to this lane,
@@ -331,9 +340,13 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         if not percentages:
             missing.append("ingredient_percentages")
 
+        processingTerms = tuple(
+            term
+            for term in ("볶음", "구이", "조리", "가공", "양념", "fried", "cooked", "prepared", "seasoned")
+            if term.lower() in text.lower()
+        )
         compositionTerms = ProductUnderstandingComponent._DedupStrings(
             [
-                *identity.compositionTerms,
                 *ProductUnderstandingComponent._FactTexts(productFacts),
                 *factTexts,
                 *coiTexts,
@@ -341,18 +354,16 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             limit=80,
         )
         return CompositionFactSet(
-            processingState=identity.processingState,
+            processingState="processed_or_prepared" if processingTerms else "unknown",
             principalIngredient=(
                 str(percentages[0].get("term") or "")
                 if percentages
-                else identity.compositionTerms[0]
-                if identity.compositionTerms
                 else ""
             ),
-            ingredientClasses=(identity.ingredientClass,) if identity.ingredientClass else (),
+            ingredientClasses=(),
             ingredientPercentages=tuple(percentages[:20]),
             compositionTerms=compositionTerms,
-            processingTerms=identity.processingTerms,
+            processingTerms=processingTerms,
             compositionBasis="label" if percentages else ("coi_text" if coiTexts else "label_text_no_percent"),
             containsWrapperOrDough=bool(WRAPPER_RE.search(text)),
             containsSauceOrBroth=bool(SAUCE_BROTH_RE.search(text)),
@@ -381,7 +392,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
     def _RoutingTerms(
         *,
         productName: str,
-        factTexts: tuple[str, ...],
+        distilledIdentity: DistilledIdentityFacts,
         identity: IdentityHintSet,
     ) -> tuple[str, ...]:
         terms: list[str] = []
@@ -394,13 +405,9 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             *identity.domainHints,
             *identity.chapterHintTerms,
             *identity.chapterHintSourceTerms,
-            identity.ingredientClass,
-            identity.foodForm,
-            identity.processingState,
+            *distilledIdentity.productFormSignalTerms,
+            *distilledIdentity.processingSignalTerms,
             *identity.identityTerms,
-            *identity.compositionTerms,
-            *identity.processingTerms,
-            *factTexts,
         ):
             text = str(value).strip()
             if text and text not in terms:

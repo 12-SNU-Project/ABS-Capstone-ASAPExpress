@@ -1,5 +1,7 @@
 """KurlyMarket 상품 페이지 parser/OCR fallback runtime smoke."""
 
+from __future__ import annotations
+
 import argparse
 import csv
 import json
@@ -13,16 +15,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Dict, List
 from urllib.parse import urlsplit, urlunsplit
 
 PROJECT_ROOT_PATH = Path(__file__).resolve().parent
-SOURCE_ROOT_PATH = PROJECT_ROOT_PATH / "src"
-if str(SOURCE_ROOT_PATH) not in sys.path:
-    sys.path.insert(0, str(SOURCE_ROOT_PATH))
 
 from bussiness_logic.app_config import LoadAppConfig  # noqa: E402
 from bussiness_logic.artifact_paths import ExtractProductIdFromUrl  # noqa: E402
+from bussiness_logic.utils.json_types import JsonMapping, JsonObject  # noqa: E402
 from bussiness_logic.bridge.factory import (  # noqa: E402
     BuildRuntimeAdapter,
     RuntimeAdapterBuildError,
@@ -103,16 +102,16 @@ class _BoundLogger:
         self._logger = logger
         self._prefix = f"{className}::{functionName}: "
 
-    def info(self, message: str, *args: Any) -> None:
+    def info(self, message: str, *args: object) -> None:
         self._log(logging.INFO, message, *args)
 
-    def warning(self, message: str, *args: Any) -> None:
+    def warning(self, message: str, *args: object) -> None:
         self._log(logging.WARNING, message, *args)
 
-    def error(self, message: str, *args: Any) -> None:
+    def error(self, message: str, *args: object) -> None:
         self._log(logging.ERROR, message, *args)
 
-    def _log(self, level: int, message: str, *args: Any) -> None:
+    def _log(self, level: int, message: str, *args: object) -> None:
         try:
             renderedMessage = message.format(*args)
         except Exception:
@@ -169,25 +168,25 @@ def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
     return parsedArguments
 
 
-def _ShortText(value: Any, limit: int = 700) -> str:
+def _ShortText(value: object, limit: int = 700) -> str:
     text = str(value or "").strip()
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
-def _CompactText(value: Any) -> str:
+def _CompactText(value: object) -> str:
     return str(value or "").replace(" ", "").lower()
 
 
-def _ContainsMarker(value: Any, markers: Sequence[str]) -> bool:
+def _ContainsMarker(value: object, markers: Sequence[str]) -> bool:
     text = _CompactText(value)
     return any(marker.replace(" ", "").lower() in text for marker in markers)
 
 
-def _EvidenceId(row: Mapping[str, Any]) -> str:
+def _EvidenceId(row: JsonMapping) -> str:
     return str(row.get("evidence_id") or row.get("id") or "").strip()
 
 
-def _SourceRefsForTable(table: Mapping[str, Any]) -> list[str]:
+def _SourceRefsForTable(table: JsonMapping) -> list[str]:
     refs = [
         str(ref).strip()
         for ref in table.get("source_refs") or []
@@ -204,13 +203,12 @@ def _SourceRefsForTable(table: Mapping[str, Any]) -> list[str]:
     return list(dict.fromkeys(refs))
 
 
-def _RowText(table: Mapping[str, Any], row: Mapping[str, Any]) -> str:
+def _RowText(table: JsonMapping, row: JsonMapping) -> str:
     return " ".join(
         str(value or "")
         for value in (
             table.get("table_name"),
             row.get("field_name"),
-            row.get("raw_value"),
             row.get("normalized_value"),
             row.get("unit"),
             row.get("daily_value_percent"),
@@ -219,8 +217,8 @@ def _RowText(table: Mapping[str, Any], row: Mapping[str, Any]) -> str:
 
 
 def _ProductContextForTable(
-    table: Mapping[str, Any],
-    evidenceRows: list[Any],
+    table: JsonMapping,
+    evidenceRows: list[object],
 ) -> str:
     evidenceById = {
         evidenceId: row
@@ -254,10 +252,10 @@ def _ProductContextForTable(
 
 
 def _CompactReconstructedTables(
-    tables: list[Any],
-    evidenceRows: list[Any],
-) -> list[dict[str, Any]]:
-    compactTables: list[dict[str, Any]] = []
+    tables: list[object],
+    evidenceRows: list[object],
+) -> list[JsonObject]:
+    compactTables: list[JsonObject] = []
     for table in tables:
         if not isinstance(table, Mapping):
             continue
@@ -267,10 +265,7 @@ def _CompactReconstructedTables(
                 continue
             rows.append({
                 "field_name": str(row.get("field_name") or ""),
-                "raw_value": _ShortText(row.get("raw_value")),
-                "normalized_value": _ShortText(
-                    row.get("normalized_value") or row.get("raw_value"),
-                ),
+                "normalized_value": _ShortText(row.get("normalized_value")),
                 "unit": str(row.get("unit") or ""),
                 "daily_value_percent": str(row.get("daily_value_percent") or ""),
                 "source_refs": [
@@ -293,17 +288,14 @@ def _CompactReconstructedTables(
     return compactTables
 
 
-def _CompactFacts(facts: list[Any]) -> list[dict[str, Any]]:
-    compactFacts: list[dict[str, Any]] = []
+def _CompactFacts(facts: list[object]) -> list[JsonObject]:
+    compactFacts: list[JsonObject] = []
     for fact in facts:
         if not isinstance(fact, Mapping):
             continue
         compactFacts.append({
             "field_name": str(fact.get("field_name") or ""),
-            "raw_value": _ShortText(fact.get("raw_value")),
-            "normalized_value": _ShortText(
-                fact.get("normalized_value") or fact.get("raw_value"),
-            ),
+            "normalized_value": _ShortText(fact.get("normalized_value")),
             "source_refs": [
                 str(ref)
                 for ref in (fact.get("source_refs") or [])
@@ -315,7 +307,7 @@ def _CompactFacts(facts: list[Any]) -> list[dict[str, Any]]:
     return compactFacts
 
 
-def _IngredientFacts(facts: list[Any]) -> list[dict[str, Any]]:
+def _IngredientFacts(facts: list[object]) -> list[JsonObject]:
     return [
         dict(fact)
         for fact in facts
@@ -327,14 +319,14 @@ def _IngredientFacts(facts: list[Any]) -> list[dict[str, Any]]:
 
 
 def _BuildCurrentReconstructionDrawerBinding(
-    inputProcessingView: Mapping[str, Any],
-) -> dict[str, Any]:
+    inputProcessingView: JsonMapping,
+) -> JsonObject:
     reconstructedTables = inputProcessingView.get("reconstructed_detail_tables") or []
     evidenceRows = inputProcessingView.get("detail_evidence_rows") or []
-    productFacts = inputProcessingView.get("classification_input_facts") or []
-    factTexts = inputProcessingView.get("classification_input_text_lines") or []
-    unresolvedFacts = inputProcessingView.get("unresolved_input_facts") or []
-    conflicts = inputProcessingView.get("input_fact_conflicts") or []
+    productFacts = inputProcessingView.get("reconstructed_product_facts") or []
+    factTexts = inputProcessingView.get("reconstructed_fact_texts") or []
+    unresolvedFacts = inputProcessingView.get("unresolved_product_facts") or []
+    conflicts = inputProcessingView.get("product_fact_conflicts") or []
     return {
         "render_mode": "reconstructed_tables",
         "status_table": inputProcessingView.get("reconstruction_status") or {},
@@ -342,25 +334,25 @@ def _BuildCurrentReconstructionDrawerBinding(
             reconstructedTables if isinstance(reconstructedTables, list) else [],
             evidenceRows if isinstance(evidenceRows, list) else [],
         ),
-        "classification_input_facts": _CompactFacts(
+        "reconstructed_product_facts": _CompactFacts(
             productFacts if isinstance(productFacts, list) else [],
         ),
-        "classification_input_text_lines": [
+        "reconstructed_fact_texts": [
             _ShortText(text) for text in factTexts
         ] if isinstance(factTexts, list) else [],
-        "unresolved_input_facts": _CompactFacts(
+        "unresolved_product_facts": _CompactFacts(
             unresolvedFacts if isinstance(unresolvedFacts, list) else [],
         ),
-        "input_fact_conflicts": [
+        "product_fact_conflicts": [
             _ShortText(conflict) for conflict in conflicts
         ] if isinstance(conflicts, list) else [],
     }
 
 
 def _BuildPipelineChecks(
-    facts: Mapping[str, Any],
-    inputProcessingView: Mapping[str, Any],
-) -> dict[str, Any]:
+    facts: JsonMapping,
+    inputProcessingView: JsonMapping,
+) -> JsonObject:
     urlIntake = facts.get("url_intake") or {}
     if not isinstance(urlIntake, Mapping):
         urlIntake = {}
@@ -380,8 +372,8 @@ def _BuildPipelineChecks(
     ]
     binding = _BuildCurrentReconstructionDrawerBinding(inputProcessingView)
     hasBoundFacts = bool(
-        binding.get("classification_input_facts")
-        or binding.get("unresolved_input_facts")
+        binding.get("reconstructed_product_facts")
+        or binding.get("unresolved_product_facts")
     )
     return {
         "url_collection": bool(urlIntake),
@@ -399,12 +391,12 @@ def _BuildPipelineChecks(
 
 
 def _BuildUiBindingDiagnostics(
-    inputProcessingView: Mapping[str, Any],
-) -> dict[str, Any]:
+    inputProcessingView: JsonMapping,
+) -> JsonObject:
     reconstructedTables = inputProcessingView.get("reconstructed_detail_tables") or []
     evidenceRows = inputProcessingView.get("detail_evidence_rows") or []
-    productFacts = inputProcessingView.get("classification_input_facts") or []
-    unresolvedFacts = inputProcessingView.get("unresolved_input_facts") or []
+    productFacts = inputProcessingView.get("reconstructed_product_facts") or []
+    unresolvedFacts = inputProcessingView.get("unresolved_product_facts") or []
     if not isinstance(reconstructedTables, list):
         reconstructedTables = []
     if not isinstance(evidenceRows, list):
@@ -420,7 +412,6 @@ def _BuildUiBindingDiagnostics(
         if isinstance(record, Mapping)
     )
     blankNormalizedRows = []
-    blankRawRows = []
     skeletonRows = []
     nutritionTables = []
     ingredientTables = []
@@ -445,12 +436,9 @@ def _BuildUiBindingDiagnostics(
             rowSummary = {
                 "table_name": table.get("table_name") or "",
                 "field_name": row.get("field_name") or "",
-                "raw_value": _ShortText(row.get("raw_value"), limit=220),
                 "normalized_value": _ShortText(row.get("normalized_value"), limit=220),
                 "validation_status": row.get("validation_status") or "",
             }
-            if not str(row.get("raw_value") or "").strip():
-                blankRawRows.append(rowSummary)
             if not str(row.get("normalized_value") or "").strip():
                 blankNormalizedRows.append(rowSummary)
             if row.get("validation_status") == "vlm_skeleton":
@@ -506,7 +494,6 @@ def _BuildUiBindingDiagnostics(
         "nutrition_tables": nutritionTables,
         "ingredient_tables": ingredientTables,
         "ingredient_facts": _CompactFacts(ingredientFacts)[:8],
-        "blank_raw_rows": blankRawRows,
         "blank_normalized_rows": blankNormalizedRows,
         "vlm_skeleton_rows": skeletonRows,
         "issues": issues,
@@ -514,10 +501,10 @@ def _BuildUiBindingDiagnostics(
 
 
 def BuildUiBindingSmoke(
-    facts: Mapping[str, Any],
+    facts: JsonMapping,
     *,
     sourceLabel: str,
-) -> dict[str, Any]:
+) -> JsonObject:
     inputProcessingView = InputProcessingViewProjector().BuildInputProcessingViewFromFacts(
         facts,
     )
@@ -583,9 +570,6 @@ class KurlyMarketSmokeRunner:
         )
         self._useInputReconstruction = smokeConfig.use_input_reconstruction
         self._useLlmInputReconstruction = smokeConfig.use_llm_input_reconstruction
-        self._writeLlmInputReconstructionDebugArtifacts = (
-            smokeConfig.write_llm_input_reconstruction_debug_artifacts
-        )
         self._llmInputReconstructionMaxTokens = (
             smokeConfig.llm_input_reconstruction_max_tokens
         )
@@ -619,8 +603,8 @@ class KurlyMarketSmokeRunner:
         self._maxLoggedOcrCandidateUrls = smokeConfig.max_logged_ocr_candidate_urls
         self._fieldValuePreviewCharacters = smokeConfig.field_value_preview_characters
         self._ocrTextPreviewCharacters = smokeConfig.ocr_text_preview_characters
-        self._pipelineOcrEngine: Any = None
-        self._pipelineRawOcrEngine: Any = None
+        self._pipelineOcrEngine: object = None
+        self._pipelineRawOcrEngine: object = None
 
     @staticmethod
     def _LoadAnswerRecords(
@@ -722,7 +706,7 @@ class KurlyMarketSmokeRunner:
             "STEP 2/4 KurlyMarket 상품 페이지를 수집합니다 url_count={}",
             len(self._productUrls),
         )
-        results: List[Dict[str, Any]] = []
+        results: List[Dict[str]] = []
         for productIndex, productUrl in enumerate(self._productUrls, start=1):
             runLogger.info(
                 "STEP 2/4 상품 페이지 수집 index={}/{} url={}",
@@ -806,21 +790,13 @@ class KurlyMarketSmokeRunner:
             runtimeAdapter=runtimeAdapter,
             fuzzyMinRatio=self._inputDictionaryFuzzyMinRatio,
             llmMaxTokens=self._llmInputReconstructionMaxTokens,
-            llmDebugArtifactRootPath=(
-                self._artifactRootPath
-                if (
-                    runtimeAdapter is not None
-                    and self._writeLlmInputReconstructionDebugArtifacts
-                )
-                else None
-            ),
         )
 
     def _RunOne(
         self,
         productSourcePipeline: KurlyProductPipeline,
         productUrl: str,
-    ) -> Dict[str, Any]:
+    ) -> Dict[str]:
         try:
             pipelineResult = productSourcePipeline.Run(
                 KurlyPipelineInput(
@@ -869,9 +845,9 @@ class KurlyMarketSmokeRunner:
     def _BuildDashFactsFromPipelineResult(
         self,
         productUrl: str,
-        pipelineResult: Any,
-    ) -> Dict[str, Any]:
-        from agents.document_pipeline import build_kurly_url_facts_from_pipeline_result
+        pipelineResult: object,
+    ) -> Dict[str]:
+        from bussiness_logic.document.document_pipeline import build_kurly_url_facts_from_pipeline_result
 
         return build_kurly_url_facts_from_pipeline_result(
             productUrl,
@@ -882,14 +858,16 @@ class KurlyMarketSmokeRunner:
     def _RunClassificationSmoke(
         self,
         productUrl: str,
-        uiFacts: Mapping[str, Any],
-    ) -> Dict[str, Any]:
+        uiFacts: JsonMapping,
+    ) -> Dict[str]:
         from agents.blackboard import BlackboardStore
-        from agents.classification_agent import ClassificationAgent
-        from agents.document_pipeline import build_raw_input_from_ui
-        from agents.domain_router_agent import DomainRouterAgent
-        from agents.evidence_intake_agent import EvidenceIntakeAgent
-        from agents.product_understanding_agent import ProductUnderstandingAgent
+        from agents.pipeline_components import (
+            ClassificationComponent,
+            EvidenceIntakeComponent,
+            Hs2RoutingComponent,
+            ProductUnderstandingComponent,
+        )
+        from bussiness_logic.document.document_pipeline import build_raw_input_from_ui
 
         rawInput = build_raw_input_from_ui(
             query=str(uiFacts.get("product_name") or productUrl),
@@ -908,19 +886,19 @@ class KurlyMarketSmokeRunner:
             run_dir=runDirectory,
             validate_on_write=False,
         )
-        agentResults = []
+        componentResults = []
         previousReviewMode = os.environ.get("ASAP_STAGE1_REVIEW_MODE")
         os.environ["ASAP_STAGE1_REVIEW_MODE"] = self._stage1ReviewMode
         try:
-            for agent in (
-                EvidenceIntakeAgent(rawInput),
-                ProductUnderstandingAgent(),
-                DomainRouterAgent(),
-                ClassificationAgent(),
+            for component in (
+                EvidenceIntakeComponent(rawInput),
+                ProductUnderstandingComponent(),
+                Hs2RoutingComponent(),
+                ClassificationComponent(),
             ):
-                result = agent.execute(store)
-                agentResults.append({
-                    "agent_name": agent.agent_name,
+                result = component.Execute(store)
+                componentResults.append({
+                    "component_name": component.component_name,
                     "success": result.success,
                     "error": result.error,
                     "outputs_written": result.outputs_written,
@@ -948,18 +926,15 @@ class KurlyMarketSmokeRunner:
         trace = candidateCodeSet.get("classification_trace") or {}
         if not isinstance(trace, Mapping):
             trace = {}
-        routeTrace = trace.get("routing_context") or {}
-        if not isinstance(routeTrace, Mapping):
-            routeTrace = {}
         candidates = self._BuildClassificationCandidateSmokeRows(candidateCodeSet)
         zeroScoreCodes = [
             candidate["cn8"]
             for candidate in candidates
             if float(candidate.get("score") or 0) <= 0
         ]
-        classificationAgentResult = self._FindAgentResult(
-            agentResults,
-            "Classification_Agent",
+        classificationComponentResult = self._FindComponentResult(
+            componentResults,
+            "Classification_Component",
         )
         answerRecord = self._FindAnswerRecord(productUrl, productId)
         answerRecall = self._BuildAnswerRecallSmoke(answerRecord, candidates)
@@ -977,10 +952,10 @@ class KurlyMarketSmokeRunner:
                     "KurlyProductPipeline.Run",
                     "build_kurly_url_facts_from_pipeline_result",
                     "build_raw_input_from_ui",
-                    "EvidenceIntakeAgent",
-                    "ProductUnderstandingAgent",
-                    "DomainRouterAgent",
-                    "ClassificationAgent",
+                    "EvidenceIntakeComponent",
+                    "ProductUnderstandingComponent",
+                    "Hs2RoutingComponent",
+                    "ClassificationComponent",
                 ],
                 "raw_input_matches_evidence_intake": (
                     self._DoesRawInputMatchObservedFacts(rawInput, observedFacts)
@@ -991,17 +966,17 @@ class KurlyMarketSmokeRunner:
             "input": {
                 "product_name": observedFacts.get("product_name") or "",
                 "classification_fact_count": (
-                    len(observedFacts.get("classification_input_product_facts") or [])
+                    len(observedFacts.get("reconstructed_product_facts") or [])
                     if isinstance(
-                        observedFacts.get("classification_input_product_facts"),
+                        observedFacts.get("reconstructed_product_facts"),
                         list,
                     )
                     else 0
                 ),
                 "classification_text_line_count": (
-                    len(observedFacts.get("classification_input_fact_texts") or [])
+                    len(observedFacts.get("reconstructed_fact_texts") or [])
                     if isinstance(
-                        observedFacts.get("classification_input_fact_texts"),
+                        observedFacts.get("reconstructed_fact_texts"),
                         list,
                     )
                     else 0
@@ -1011,16 +986,16 @@ class KurlyMarketSmokeRunner:
                     if isinstance(observedFacts.get("unresolved_product_facts"), list)
                     else 0
                 ),
-                "classification_input_text_lines": list(
-                    observedFacts.get("classification_input_fact_texts") or [],
+                "reconstructed_fact_texts": list(
+                    observedFacts.get("reconstructed_fact_texts") or [],
                 )
-                if isinstance(observedFacts.get("classification_input_fact_texts"), list)
+                if isinstance(observedFacts.get("reconstructed_fact_texts"), list)
                 else [],
             },
             "status": {
-                "error": classificationAgentResult.get("error"),
-                "agent_success": bool(classificationAgentResult.get("success")),
-                "llm_model": self._FindAgentRunModel(store, "Classification_Agent"),
+                "error": classificationComponentResult.get("error"),
+                "component_success": bool(classificationComponentResult.get("success")),
+                "llm_model": self._FindComponentRunModel(store, "Classification_Component"),
                 "stage1_review_mode": self._stage1ReviewMode,
                 "candidate_count": len(candidates),
                 "zero_score_candidate_codes": zeroScoreCodes,
@@ -1031,7 +1006,6 @@ class KurlyMarketSmokeRunner:
             ),
             "domain_routing": self._BuildRoutingSmoke(
                 routingContext,
-                routeTrace,
             ),
             "candidates": candidates,
             "candidate_code_set": {
@@ -1039,9 +1013,10 @@ class KurlyMarketSmokeRunner:
                 "product_id": candidateCodeSet.get("product_id"),
             },
             "decision": {
+                "classification_status": candidateCodeSet.get("classification_status"),
+                "failure_reason": candidateCodeSet.get("failure_reason"),
                 "decision_status": trace.get("decision_status"),
                 "backtracking_recommended": trace.get("backtracking_recommended"),
-                "backtracking_occurred": trace.get("backtracking_occurred"),
             },
             "traversal": {
                 "traversal_status": trace.get("traversal_status"),
@@ -1052,28 +1027,28 @@ class KurlyMarketSmokeRunner:
             "traversal_history": list(trace.get("traversal_history") or []),
             "llm_validation_recommendation": llmValidationRecommendation,
             "answer_recall": answerRecall,
-            "agent_results": agentResults,
-            "agent_runs": list(store.iter_agent_runs()),
+            "component_results": componentResults,
+            "component_runs": list(store.iter_component_runs()),
         }
 
     @staticmethod
-    def _FindAgentResult(
-        agentResults: Sequence[Mapping[str, object]],
-        agentName: str,
-    ) -> Mapping[str, object]:
-        for agentResult in agentResults:
-            if agentResult.get("agent_name") == agentName:
-                return agentResult
+    def _FindComponentResult(
+        componentResults: Sequence[JsonMapping],
+        componentName: str,
+    ) -> JsonMapping:
+        for componentResult in componentResults:
+            if componentResult.get("component_name") == componentName:
+                return componentResult
         return {
             "success": False,
-            "error": f"{agentName}_not_executed",
+            "error": f"{componentName}_not_executed",
         }
 
     @staticmethod
     def _BuildAnswerRecallSmoke(
         answerRecord: AnswerRecord | None,
-        candidates: Sequence[Mapping[str, object]],
-    ) -> Dict[str, object]:
+        candidates: Sequence[JsonMapping],
+    ) -> Dict[str]:
         if answerRecord is None:
             return {
                 "answer_found": False,
@@ -1102,7 +1077,7 @@ class KurlyMarketSmokeRunner:
             ]
             for level, codeLength in RECALL_LEVELS
         }
-        levels: dict[str, dict[str, object]] = {}
+        levels: dict[str, JsonObject] = {}
         for level, codeLength in RECALL_LEVELS:
             expectedCode = expectedByLevel[level]
             top5Codes = candidateCodesByLevel[level]
@@ -1139,7 +1114,7 @@ class KurlyMarketSmokeRunner:
 
     @staticmethod
     def _CandidateCodeAtLevel(
-        candidate: Mapping[str, object],
+        candidate: JsonMapping,
         codeLength: int,
     ) -> str:
         cn8 = re.sub(r"\D", "", str(candidate.get("cn8") or ""))
@@ -1152,8 +1127,8 @@ class KurlyMarketSmokeRunner:
 
     @staticmethod
     def _BuildLlmValidationRecommendationSmoke(
-        candidates: Sequence[Mapping[str, object]],
-    ) -> Dict[str, object]:
+        candidates: Sequence[JsonMapping],
+    ) -> Dict[str]:
         recommendedCandidate = next(
             (candidate for candidate in candidates if candidate.get("llm_recommended")),
             None,
@@ -1194,11 +1169,14 @@ class KurlyMarketSmokeRunner:
 
     @staticmethod
     def _BuildProductUnderstandingSmoke(
-        productUnderstanding: Mapping[str, object],
-    ) -> Dict[str, object]:
-        identity = productUnderstanding.get("identity_lane") or {}
+        productUnderstanding: JsonMapping,
+    ) -> Dict[str]:
+        identity = productUnderstanding.get("identity_hints") or {}
         if not isinstance(identity, Mapping):
             identity = {}
+        distilledIdentity = productUnderstanding.get("distilled_identity") or {}
+        if not isinstance(distilledIdentity, Mapping):
+            distilledIdentity = {}
         coiEvidence = productUnderstanding.get("coi_evidence") or {}
         if not isinstance(coiEvidence, Mapping):
             coiEvidence = {}
@@ -1213,18 +1191,15 @@ class KurlyMarketSmokeRunner:
             "product_id": productUnderstanding.get("product_id"),
             "product_name": productUnderstanding.get("product_name"),
             "fact_count": len(
-                productUnderstanding.get("classification_input_product_facts")
+                productUnderstanding.get("reconstructed_product_facts")
                 or [],
             ),
             "fact_text_count": len(
-                productUnderstanding.get("classification_input_fact_texts")
+                productUnderstanding.get("reconstructed_fact_texts")
                 or [],
             ),
             "identity": {
                 "commercial_identity": identity.get("commercial_identity"),
-                "ingredient_class": identity.get("ingredient_class"),
-                "food_form": identity.get("food_form"),
-                "processing_state": identity.get("processing_state"),
                 "translated_product_name": identity.get("translated_product_name"),
                 "normalized_tariff_description": identity.get(
                     "normalized_tariff_description",
@@ -1242,6 +1217,22 @@ class KurlyMarketSmokeRunner:
                 "needs_review": identity.get("needs_review"),
                 "confidence": identity.get("confidence"),
             },
+            "distilled_identity": {
+                "commercial_identity": distilledIdentity.get("commercial_identity"),
+                "normalized_description": distilledIdentity.get("normalized_description"),
+                "identity_terms": distilledIdentity.get("identity_terms") or [],
+                "product_form_signal_terms": distilledIdentity.get(
+                    "product_form_signal_terms",
+                )
+                or [],
+                "processing_signal_terms": distilledIdentity.get(
+                    "processing_signal_terms",
+                )
+                or [],
+                "source_titles": distilledIdentity.get("source_titles") or [],
+                "source_links": distilledIdentity.get("source_links") or [],
+                "quality_status": distilledIdentity.get("quality_status"),
+            },
             "coi": {
                 "matched_documents": coiEvidence.get("matched_documents") or [],
                 "error": coiEvidence.get("error") or "",
@@ -1258,30 +1249,25 @@ class KurlyMarketSmokeRunner:
 
     @staticmethod
     def _BuildRoutingSmoke(
-        routingContext: Mapping[str, object],
-        routeTrace: Mapping[str, object],
-    ) -> Dict[str, object]:
+        routingContext: JsonMapping,
+    ) -> Dict[str]:
         return {
-            "routing_context_id": routingContext.get("routing_context_id"),
-            "candidate_hs2": routingContext.get("candidate_hs2") or [],
+            "routing_decision_id": routingContext.get("routing_decision_id"),
+            "allowed_hs2": routingContext.get("allowed_hs2") or [],
             "blocked_hs2": routingContext.get("blocked_hs2") or [],
-            "strict_route": routingContext.get("strict_route"),
+            "enforce_hs2_boundary": routingContext.get("enforce_hs2_boundary"),
             "fallback_allowed": routingContext.get("fallback_allowed"),
             "domain_scopes": routingContext.get("domain_scopes") or [],
             "pre_gate_domains": routingContext.get("pre_gate_domains") or [],
             "routing_basis": routingContext.get("routing_basis") or {},
             "missing_facts": routingContext.get("missing_facts") or [],
-            "classification_boundary": {
-                "boundary_applied": routeTrace.get("boundary_applied"),
-                "fallback_used": routeTrace.get("fallback_used"),
-            },
         }
 
     @staticmethod
     def _BuildClassificationCandidateSmokeRows(
-        candidateCodeSet: Mapping[str, Any],
-    ) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
+        candidateCodeSet: JsonMapping,
+    ) -> List[Dict[str]]:
+        out: List[Dict[str]] = []
         candidates = candidateCodeSet.get("candidates") or []
         if not isinstance(candidates, list):
             return out
@@ -1320,7 +1306,7 @@ class KurlyMarketSmokeRunner:
 
     @staticmethod
     def _BuildCandidateHierarchySmoke(
-        candidate: Mapping[str, object],
+        candidate: JsonMapping,
     ) -> Dict[str, str]:
         cn8 = re.sub(r"\D", "", str(candidate.get("cn8") or ""))
         hs6 = re.sub(r"\D", "", str(candidate.get("hs6") or ""))
@@ -1333,14 +1319,14 @@ class KurlyMarketSmokeRunner:
 
     @staticmethod
     def _DoesRawInputMatchObservedFacts(
-        rawInput: Mapping[str, Any],
-        observedFacts: Mapping[str, Any],
+        rawInput: JsonMapping,
+        observedFacts: JsonMapping,
     ) -> bool:
         keys = (
             "product_name",
             "description",
-            "classification_input_product_facts",
-            "classification_input_fact_texts",
+            "reconstructed_product_facts",
+            "reconstructed_fact_texts",
             "unresolved_product_facts",
             "product_fact_conflicts",
             "ocr_text",
@@ -1353,17 +1339,17 @@ class KurlyMarketSmokeRunner:
         return all(rawInput.get(key) == observedFacts.get(key) for key in keys)
 
     @staticmethod
-    def _FindAgentRunModel(store: Any, agentName: str) -> str | None:
-        for agentRun in store.iter_agent_runs():
-            if agentRun.get("agent_name") == agentName:
-                return agentRun.get("llm_model")
+    def _FindComponentRunModel(store: object, componentName: str) -> str | None:
+        for componentRun in store.iter_component_runs():
+            if componentRun.get("component_name") == componentName:
+                return componentRun.get("llm_model")
         return None
 
     def _BuildResult(
         self,
         productUrl: str,
-        pipelineResultData: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        pipelineResultData: Dict[str],
+    ) -> Dict[str]:
         collectionResult = pipelineResultData.get("collection_result")
         if not isinstance(collectionResult, dict):
             collectionResult = pipelineResultData.get("collection_summary", {})
@@ -1493,7 +1479,7 @@ class KurlyMarketSmokeRunner:
         productUrl: str,
         imageUrls: List[str],
         pipelineOcrImageResults: List[ProductOcrImageResult],
-    ) -> Dict[str, Any]:
+    ) -> Dict[str]:
         selectedImageUrls = (
             imageUrls
             if self._compareMaxImages == 0
@@ -1504,7 +1490,7 @@ class KurlyMarketSmokeRunner:
             for result in pipelineOcrImageResults
             if result.error is None
         }
-        engines: Dict[str, Any] = {}
+        engines: Dict[str] = {}
         if selectedImageUrls:
             from paddleocr import PPStructureV3
 
@@ -1550,7 +1536,7 @@ class KurlyMarketSmokeRunner:
                 ),
             }
         downloader = ProductOcrImageDownloader()
-        imageResults: List[Dict[str, Any]] = []
+        imageResults: List[Dict[str]] = []
         for imageIndex, imageUrl in enumerate(selectedImageUrls, start=1):
             try:
                 imageBytes = downloader.Download(
@@ -1602,7 +1588,7 @@ class KurlyMarketSmokeRunner:
             / ExtractProductIdFromUrl(productUrl)
             / "ocr-comparison.json"
         )
-        engineTotals: Dict[str, Dict[str, Any]] = {}
+        engineTotals: Dict[str, Dict[str]] = {}
         for imageResult in imageResults:
             for engineName, engineResult in (
                 imageResult.get("engines", {}) or {}
@@ -1664,7 +1650,7 @@ class KurlyMarketSmokeRunner:
     def _BuildProductionHybridComparison(
         self,
         imageResult: ProductOcrImageResult,
-    ) -> Dict[str, Any]:
+    ) -> Dict[str]:
         structuredResult = imageResult.structuredOcr
         text = structuredResult.text
         tableTexts = [table.plainText for table in structuredResult.tables]
@@ -1699,7 +1685,7 @@ class KurlyMarketSmokeRunner:
         }
 
     @staticmethod
-    def _BuildSkippedOcrComparison(reason: str) -> Dict[str, Any]:
+    def _BuildSkippedOcrComparison(reason: str) -> Dict[str]:
         return {
             "status": "skipped",
             "elapsed_seconds": 0.0,
@@ -1716,14 +1702,14 @@ class KurlyMarketSmokeRunner:
     def _CompareOcrEngine(
         self,
         engineName: str,
-        engine: Any,
+        engine: object,
         imageBytes: bytes,
-    ) -> Dict[str, Any]:
+    ) -> Dict[str]:
         startedAt = perf_counter()
         text = ""
         tableTexts: List[str] = []
         warnings: List[str] = []
-        extra: Dict[str, Any] = {}
+        extra: Dict[str] = {}
         try:
             if engineName == "only_raw_ocr":
                 text = engine.ExtractTextFromImage(imageBytes)
@@ -1794,7 +1780,7 @@ class KurlyMarketSmokeRunner:
         return comparisonResult
 
     @staticmethod
-    def _ReadPaddleResultPayload(result: Any) -> Dict[str, Any]:
+    def _ReadPaddleResultPayload(result: object) -> Dict[str]:
         jsonPayload = getattr(result, "json", None)
         payload = jsonPayload if isinstance(jsonPayload, dict) else result
         if not isinstance(payload, dict):
@@ -1803,7 +1789,7 @@ class KurlyMarketSmokeRunner:
         return nestedPayload if isinstance(nestedPayload, dict) else payload
 
     @staticmethod
-    def _ReadPaddleMarkdownText(result: Any) -> str:
+    def _ReadPaddleMarkdownText(result: object) -> str:
         markdown = getattr(result, "markdown", None)
         if not isinstance(markdown, dict):
             return ""
@@ -1812,8 +1798,8 @@ class KurlyMarketSmokeRunner:
 
     @staticmethod
     def _IsParseOk(
-        collectionResult: Dict[str, Any],
-        parsedProductPage: Dict[str, Any],
+        collectionResult: Dict[str],
+        parsedProductPage: Dict[str],
         productNoticeFieldCount: int,
     ) -> bool:
         return (
@@ -1822,7 +1808,7 @@ class KurlyMarketSmokeRunner:
             and productNoticeFieldCount > 0
         )
 
-    def _LogOne(self, resultData: Dict[str, Any]) -> None:
+    def _LogOne(self, resultData: Dict[str]) -> None:
         smokeLogger = self._Logger("_LogOne")
         statusData = resultData["status"]
         if "runtime_error" in statusData:
@@ -1868,7 +1854,7 @@ class KurlyMarketSmokeRunner:
         self._LogWarningsAndErrors(resultData)
         self._LogClassificationSmoke(resultData)
 
-    def _LogPipelineSteps(self, resultData: Dict[str, Any]) -> None:
+    def _LogPipelineSteps(self, resultData: Dict[str]) -> None:
         stepLogger = self._Logger("_LogPipelineSteps")
         for pipelineStep in resultData["pipeline_steps"]:
             stepLogger.info(
@@ -1878,7 +1864,7 @@ class KurlyMarketSmokeRunner:
                 pipelineStep["message"],
             )
 
-    def _LogNoticeOptions(self, resultData: Dict[str, Any]) -> None:
+    def _LogNoticeOptions(self, resultData: Dict[str]) -> None:
         noticeLogger = self._Logger("_LogNoticeOptions")
         noticeData = resultData["raw_collection"]["notice"]
         optionNames = noticeData["option_names"]
@@ -1904,7 +1890,7 @@ class KurlyMarketSmokeRunner:
                     fieldRecord["requires_ocr_fallback"],
                 )
 
-    def _LogInputReconstruction(self, resultData: Dict[str, Any]) -> None:
+    def _LogInputReconstruction(self, resultData: Dict[str]) -> None:
         reconstructionLogger = self._Logger("_LogInputReconstruction")
         inputReconstruction = resultData.get("llm_reconstruction", {})
         if not isinstance(inputReconstruction, dict) or not inputReconstruction:
@@ -1938,7 +1924,7 @@ class KurlyMarketSmokeRunner:
                 tableRecord.get("source_refs", []),
             )
 
-    def _LogOcrSummary(self, resultData: Dict[str, Any]) -> None:
+    def _LogOcrSummary(self, resultData: Dict[str]) -> None:
         ocrLogger = self._Logger("_LogOcrSummary")
         ocrData = resultData["raw_collection"]["ocr_evidence"]
         ocrLogger.info(
@@ -2000,7 +1986,7 @@ class KurlyMarketSmokeRunner:
                 ),
             )
 
-    def _LogWarningsAndErrors(self, resultData: Dict[str, Any]) -> None:
+    def _LogWarningsAndErrors(self, resultData: Dict[str]) -> None:
         eventLogger = self._Logger("_LogWarningsAndErrors")
         for warning in resultData["warnings"]:
             eventLogger.warning("warning={}", warning)
@@ -2018,7 +2004,7 @@ class KurlyMarketSmokeRunner:
                 diagnostics.get("issues", []),
             )
 
-    def _LogClassificationSmoke(self, resultData: Dict[str, Any]) -> None:
+    def _LogClassificationSmoke(self, resultData: Dict[str]) -> None:
         classificationData = resultData.get("classification_smoke")
         if not isinstance(classificationData, dict):
             return
@@ -2033,39 +2019,39 @@ class KurlyMarketSmokeRunner:
         )
         answerRecall = classificationData.get("answer_recall") or {}
         classificationLogger.info("===== INTEGRATED PIPELINE MERGE CHECK =====")
-        for agentResult in classificationData.get("agent_results") or []:
+        for componentResult in classificationData.get("component_results") or []:
             classificationLogger.info(
-                "agent name={} success={} error={} outputs={}",
-                agentResult.get("agent_name"),
-                agentResult.get("success"),
-                agentResult.get("error"),
-                agentResult.get("outputs_written"),
+                "component name={} success={} error={} outputs={}",
+                componentResult.get("component_name"),
+                componentResult.get("success"),
+                componentResult.get("error"),
+                componentResult.get("outputs_written"),
             )
         classificationLogger.info(
             (
                 "product_understanding id={} product={} facts={} fact_texts={} "
-                "identity={}/{}/{} coi_docs={} encyclopedia={}"
+                "identity_mode={} form_terms={} chapter_hints={} coi_docs={} encyclopedia={}"
             ),
             productUnderstanding.get("understanding_id"),
             productUnderstanding.get("product_name"),
             productUnderstanding.get("fact_count"),
             productUnderstanding.get("fact_text_count"),
-            (productUnderstanding.get("identity") or {}).get("ingredient_class"),
-            (productUnderstanding.get("identity") or {}).get("food_form"),
-            (productUnderstanding.get("identity") or {}).get("processing_state"),
+            (productUnderstanding.get("identity") or {}).get("understanding_mode"),
+            (productUnderstanding.get("identity") or {}).get("product_form_terms"),
+            (productUnderstanding.get("identity") or {}).get("chapter_hint_terms"),
             len((productUnderstanding.get("coi") or {}).get("matched_documents") or []),
             (productUnderstanding.get("encyclopedia") or {}).get("quality_status"),
         )
         classificationLogger.info(
             (
-                "domain_router routing_context_id={} candidate_hs2={} "
-                "blocked_hs2={} strict_route={} fallback_allowed={} "
+                "domain_router routing_context_id={} allowed_hs2={} "
+                "blocked_hs2={} enforce_hs2_boundary={} fallback_allowed={} "
                 "boundary_applied={} fallback_used={} missing_facts={}"
             ),
             domainRouting.get("routing_context_id"),
-            domainRouting.get("candidate_hs2"),
+            domainRouting.get("allowed_hs2"),
             domainRouting.get("blocked_hs2"),
-            domainRouting.get("strict_route"),
+            domainRouting.get("enforce_hs2_boundary"),
             domainRouting.get("fallback_allowed"),
             (domainRouting.get("classification_boundary") or {}).get(
                 "boundary_applied",
@@ -2125,7 +2111,7 @@ class KurlyMarketSmokeRunner:
     def _LogAnswerRecall(
         self,
         logger: _BoundLogger,
-        answerRecall: Mapping[str, object],
+        answerRecall: JsonMapping,
     ) -> None:
         if not answerRecall.get("answer_found"):
             logger.info("answer_recall skipped reason={}", answerRecall.get("reason"))
@@ -2160,7 +2146,7 @@ class KurlyMarketSmokeRunner:
                 levelData.get("top5_codes"),
             )
 
-    def _LogSummary(self, results: List[Dict[str, Any]]) -> None:
+    def _LogSummary(self, results: List[Dict[str]]) -> None:
         summaryLogger = self._Logger("_LogSummary")
         parseOkCount = sum(
             1 for result in results if result["status"].get("is_parse_ok")
@@ -2209,8 +2195,8 @@ class KurlyMarketSmokeRunner:
 
     @staticmethod
     def _BuildAnswerRecallSummary(
-        results: Sequence[Mapping[str, object]],
-    ) -> Dict[str, object]:
+        results: Sequence[JsonMapping],
+    ) -> Dict[str]:
         levelTotals = {
             levelName: {
                 "evaluated_count": 0,
@@ -2244,7 +2230,7 @@ class KurlyMarketSmokeRunner:
                 if levelData.get("llm_recommended_match"):
                     levelTotals[levelName]["llm_recommended_match_count"] += 1
 
-        levelsOut: dict[str, dict[str, object]] = {}
+        levelsOut: dict[str, JsonObject] = {}
         evaluatedCounts: list[int] = []
         for levelName, totals in levelTotals.items():
             evaluatedCount = totals["evaluated_count"]
@@ -2275,7 +2261,7 @@ class KurlyMarketSmokeRunner:
             "levels": levelsOut,
         }
 
-    def _WriteSummaryArtifact(self, results: List[Dict[str, Any]]) -> None:
+    def _WriteSummaryArtifact(self, results: List[Dict[str]]) -> None:
         self._summaryArtifactPath.parent.mkdir(parents=True, exist_ok=True)
         self._summaryArtifactPath.write_text(
             json.dumps(results, ensure_ascii=False, indent=2),
@@ -2288,8 +2274,8 @@ class KurlyMarketSmokeRunner:
 
     def _BuildInputReconstructionView(
         self,
-        inputReconstruction: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        inputReconstruction: Dict[str],
+    ) -> Dict[str]:
         facts = [
             self._BuildReconstructedFactView(factRecord)
             for factRecord in inputReconstruction.get("product_facts", []) or []
@@ -2328,18 +2314,15 @@ class KurlyMarketSmokeRunner:
             )
             or [],
             "warnings": inputReconstruction.get("warnings", []) or [],
-            "debug_artifacts": inputReconstruction.get("debug_artifacts", {}) or {},
         }
 
     @staticmethod
     def _BuildReconstructedFactView(
-        factRecord: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        rawValue = factRecord.get("raw_value") or ""
-        reconstructedValue = factRecord.get("normalized_value") or rawValue
+        factRecord: Dict[str],
+    ) -> Dict[str]:
+        reconstructedValue = factRecord.get("normalized_value") or ""
         return {
             "field_name": factRecord.get("field_name"),
-            "raw_evidence_value": rawValue,
             "reconstructed_value": reconstructedValue,
             "source_refs": factRecord.get("source_refs", []) or [],
             "reconstruction_type": factRecord.get("correction_type"),
@@ -2347,7 +2330,7 @@ class KurlyMarketSmokeRunner:
         }
 
     @staticmethod
-    def _BuildTextPreview(text: Any, maxCharacters: int) -> Any:
+    def _BuildTextPreview(text: object, maxCharacters: int) -> object:
         if not isinstance(text, str):
             return text
         if len(text) <= maxCharacters:
@@ -2356,9 +2339,9 @@ class KurlyMarketSmokeRunner:
 
     def _BuildOptionPreview(
         self,
-        noticeOptions: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        optionPreview: List[Dict[str, Any]] = []
+        noticeOptions: List[Dict[str]],
+    ) -> List[Dict[str]]:
+        optionPreview: List[Dict[str]] = []
         for optionIndex, noticeOption in enumerate(
             noticeOptions[:self._maxLoggedNoticeOptions],
             start=1,
@@ -2380,7 +2363,7 @@ class KurlyMarketSmokeRunner:
 
     @staticmethod
     def _CountNoticeOptionFields(
-        noticeOptions: List[Dict[str, Any]],
+        noticeOptions: List[Dict[str]],
     ) -> int:
         seenFieldKeys = set()
         for noticeOption in noticeOptions:
@@ -2400,8 +2383,8 @@ class KurlyMarketSmokeRunner:
 
     def _BuildFieldRecordPreview(
         self,
-        fieldRecord: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        fieldRecord: Dict[str],
+    ) -> Dict[str]:
         return {
             "field_name": fieldRecord["field_name"],
             "field_value": self._BuildTextPreview(

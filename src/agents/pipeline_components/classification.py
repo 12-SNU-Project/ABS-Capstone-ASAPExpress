@@ -257,6 +257,7 @@ class ClassificationComponent(BasePipelineComponent):
             "created_at": now_iso(),
             "candidate_set_id": ccs_id,
             "product_id": pes["product_id"],
+            "classification_trace": self._build_classification_trace(result),
             "candidates": ccs_candidates,
         })
         self.WriteBlackBoard(ccs_id)
@@ -366,6 +367,63 @@ class ClassificationComponent(BasePipelineComponent):
             ).strip(),
             "status": status,
             "evidence": self._read_text_list(evidenceValue, limit=8),
+        }
+
+    def _build_classification_trace(
+        self,
+        result: ExternalClassificationResult,
+    ) -> JsonObject:
+        traversalReport = result.traversal_report
+        decisionReport = result.decision_report
+        return {
+            "decision_status": str(
+                _read_field(
+                    decisionReport,
+                    "decisionStatus",
+                    "decision_status",
+                    default="unknown",
+                )
+                or "unknown"
+            ),
+            "traversal_status": str(
+                _read_field(
+                    traversalReport,
+                    "traversalStatus",
+                    "traversal_status",
+                    default="unknown",
+                )
+                or "unknown"
+            ),
+            "next_action": str(
+                _read_field(
+                    traversalReport,
+                    "nextAction",
+                    "next_action",
+                    default="",
+                )
+                or ""
+            ),
+            "backtracking_recommended": bool(
+                _read_field(
+                    traversalReport,
+                    "backtrackingRecommended",
+                    "backtracking_recommended",
+                    default=False,
+                )
+            ),
+            "backtracking_target_level": _read_field(
+                traversalReport,
+                "backtrackingTargetLevel",
+                "backtracking_target_level",
+                default=None,
+            ),
+            "backtracking_reason": _read_field(
+                traversalReport,
+                "backtrackingReason",
+                "backtracking_reason",
+                default=None,
+            ),
+            "traversal_history": list(result.traversal_history),
         }
 
     @staticmethod

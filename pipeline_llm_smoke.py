@@ -2,7 +2,7 @@
 
 Reuses the classification-smoke wiring from ``kurly_market_smoke.py`` (commit
 668cf10) — ``build_raw_input_from_ui`` (which scrapes the Kurly URL) + the
-current agent chain (EvidenceIntake -> ProductUnderstanding -> DomainRouter ->
+current component chain (EvidenceIntake -> ProductUnderstanding -> DomainRouter ->
 Classification). For every URL in ``tests/EU_HS_test.csv`` it runs the chain
 twice (``ASAP_USE_LLM_UNDERSTANDING`` off vs on) against the *same* scraped raw
 input, then scores hs4/hs6/cn8 recall vs the ``EU HS CODE`` answer — so you can
@@ -22,21 +22,18 @@ import csv
 import json
 import os
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 PROJECT_ROOT_PATH = Path(__file__).resolve().parent
-SOURCE_ROOT_PATH = PROJECT_ROOT_PATH / "src"
-if str(SOURCE_ROOT_PATH) not in sys.path:
-    sys.path.insert(0, str(SOURCE_ROOT_PATH))
+
+from bussiness_logic.utils.json_types import JsonObject  # noqa: E402
 
 DEFAULT_CSV_PATH = PROJECT_ROOT_PATH / "tests" / "EU_HS_test.csv"
 DEFAULT_ARTIFACT_ROOT = PROJECT_ROOT_PATH / "artifacts" / "pipeline_llm_smoke"
 URL_COLUMN = "상품 상세"
 ANSWER_COLUMN = "EU HS CODE"
-RECALL_LEVELS = (("hs4", 4), ("hs6", 6), ("cn8", 8))
+RECALL_LEVELS = (("hs2", 2), ("hs4", 4), ("hs6", 6), ("cn8", 8))
 
 
 def ParseArguments(arguments: list[str] | None = None) -> argparse.Namespace:
@@ -52,7 +49,7 @@ def ParseArguments(arguments: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def _digits(value: Any) -> str:
+def _digits(value: object) -> str:
     return re.sub(r"\D", "", str(value or ""))
 
 
@@ -68,22 +65,20 @@ def LoadRows(csvPath: Path, *, offset: int, limit: int) -> list[dict[str, str]]:
     return rows[:limit] if limit else rows
 
 
-def _run_chain(rawInput: dict[str, Any], *, productId: str, use_llm: bool,
-               artifact_root: Path) -> dict[str, Any]:
+def _run_chain(rawInput: JsonObject, *, productId: str, use_llm: bool,
+               artifact_root: Path) -> JsonObject:
     from agents.blackboard import BlackboardStore
-    from agents.classification_agent import ClassificationAgent
-    from agents.domain_router_agent import DomainRouterAgent
-    from agents.evidence_intake_agent import EvidenceIntakeAgent
-    from agents.product_understanding_agent import ProductUnderstandingAgent
+    from agents.pipeline_components import (
+        ClassificationComponent,
+        Hs2RoutingComponent,
+        EvidenceIntakeComponent,
+        ProductUnderstandingComponent,
+    )
 
-    # Staged narrowing is the current cn8 candidate source (CLAUDE.md); without
-    # it the default retriever returns no_candidates_from_retriever.
     saved = {
         "ASAP_USE_LLM_UNDERSTANDING": os.environ.get("ASAP_USE_LLM_UNDERSTANDING"),
-        "ASAP_USE_STAGED_CLASSIFIER": os.environ.get("ASAP_USE_STAGED_CLASSIFIER"),
     }
     os.environ["ASAP_USE_LLM_UNDERSTANDING"] = "1" if use_llm else "0"
-    os.environ["ASAP_USE_STAGED_CLASSIFIER"] = "1"
     try:
         runDirectory = (
             artifact_root / productId / ("llm_on" if use_llm else "llm_off")
@@ -94,27 +89,52 @@ def _run_chain(rawInput: dict[str, Any], *, productId: str, use_llm: bool,
             run_dir=runDirectory, validate_on_write=False,
         )
         errors: list[str] = []
-        for agent in (
-            EvidenceIntakeAgent(rawInput),
-            ProductUnderstandingAgent(),
-            DomainRouterAgent(),
-            ClassificationAgent(),
+        for component in (
+            EvidenceIntakeComponent(rawInput),
+            ProductUnderstandingComponent(),
+            Hs2RoutingComponent(),
+            ClassificationComponent(),
         ):
-            result = agent.execute(store)
+            result = component.Execute(store)
             if not result.success:
-                errors.append(f"{agent.agent_name}: {result.error}")
+                errors.append(f"{component.component_name}: {result.error}")
                 break
 
         bb = store.load()
-        identity = (bb.get("product_understanding") or {}).get("identity_lane") or {}
+        productUnderstanding = bb.get("product_understanding") or {}
+        if not isinstance(productUnderstanding, dict):
+            productUnderstanding = {}
+        identity = productUnderstanding.get("identity_hints") or {}
+        if not isinstance(identity, dict):
+            identity = {}
+        distilledIdentity = productUnderstanding.get("distilled_identity") or {}
+        if not isinstance(distilledIdentity, dict):
+            distilledIdentity = {}
         codeSets = bb.get("candidate_code_sets") or []
         latest = codeSets[-1] if isinstance(codeSets, list) and codeSets else {}
+        classificationTrace = latest.get("classification_trace") if isinstance(latest, dict) else {}
+        if not isinstance(classificationTrace, dict):
+            classificationTrace = {}
         candidates = latest.get("candidates") if isinstance(latest, dict) else []
         cn8s = [_digits(c.get("cn8"))[:8] for c in (candidates or []) if isinstance(c, dict)]
         cn8s = [c for c in cn8s if len(c) == 8]
         return {
+            "run_dir": str(runDirectory),
+            "blackboard_path": str(store.bb_path),
             "understanding_mode": identity.get("understanding_mode"),
-            "food_form": identity.get("food_form"),
+            "product_form_terms": identity.get("product_form_terms") or [],
+            "chapter_hint_terms": identity.get("chapter_hint_terms") or [],
+            "distilled_identity": {
+                "commercial_identity": distilledIdentity.get("commercial_identity"),
+                "product_form_signal_terms": distilledIdentity.get("product_form_signal_terms") or [],
+                "processing_signal_terms": distilledIdentity.get("processing_signal_terms") or [],
+            },
+            "classification_trace": {
+                "decision_status": classificationTrace.get("decision_status"),
+                "traversal_status": classificationTrace.get("traversal_status"),
+                "next_action": classificationTrace.get("next_action"),
+                "backtracking_recommended": classificationTrace.get("backtracking_recommended"),
+            },
             "translated_product_name": identity.get("translated_product_name"),
             "normalized_tariff_description": identity.get("normalized_tariff_description"),
             "llm_error": identity.get("llm_error"),
@@ -138,7 +158,7 @@ def _recall(answer: str, cn8_candidates: list[str]) -> dict[str, bool]:
 
 
 def main(arguments: list[str] | None = None) -> int:
-    from agents.document_pipeline import build_raw_input_from_ui
+    from bussiness_logic.document.document_pipeline import build_raw_input_from_ui
 
     args = ParseArguments(arguments)
     rows = LoadRows(args.csv_path, offset=args.offset, limit=args.limit)
@@ -147,7 +167,7 @@ def main(arguments: list[str] | None = None) -> int:
         return 1
 
     agg = {"off": {n: 0 for n, _ in RECALL_LEVELS}, "on": {n: 0 for n, _ in RECALL_LEVELS}}
-    results: list[dict[str, Any]] = []
+    results: list[JsonObject] = []
     for index, row in enumerate(rows):
         url, answer = row["url"], row["answer"]
         productId = f"row{args.offset + index}"
@@ -163,8 +183,8 @@ def main(arguments: list[str] | None = None) -> int:
         for name, _ in RECALL_LEVELS:
             agg["off"][name] += int(rOff[name])
             agg["on"][name] += int(rOn[name])
-        print(f"    OFF food_form={off['food_form']!r:>16} recall={_fmt(rOff)} cn8={off['cn8_candidates'][:4]}")
-        print(f"    ON  food_form={on['food_form']!r:>16} recall={_fmt(rOn)} cn8={on['cn8_candidates'][:4]}"
+        print(f"    OFF form_terms={off['product_form_terms'][:4]} recall={_fmt(rOff)} cn8={off['cn8_candidates'][:4]}")
+        print(f"    ON  form_terms={on['product_form_terms'][:4]} recall={_fmt(rOn)} cn8={on['cn8_candidates'][:4]}"
               f"{'  llm_err=' + str(on['llm_error']) if on.get('llm_error') else ''}")
         if on.get("normalized_tariff_description"):
             print(f"        EN: {on['normalized_tariff_description']}")

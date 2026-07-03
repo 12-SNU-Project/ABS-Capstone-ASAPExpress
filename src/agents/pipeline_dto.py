@@ -77,6 +77,38 @@ class EncyclopediaEvidenceSet:
 
 
 @dataclass(frozen=True, slots=True)
+class DistilledIdentityFacts:
+    distilledIdentityId: str = field(metadata=_desc("Wikipedia 기반 identity seed ID"))
+    productId: str = field(metadata=_desc("대상 상품 ID"))
+    sourceEncyclopediaEvidenceId: str = field(metadata=_desc("원천 백과사전 근거 묶음 ID"))
+    commercialIdentity: str = field(default="", metadata=_desc("백과사전 기반 상품 정체성"))
+    normalizedDescription: str = field(default="", metadata=_desc("백과사전 기반 정규 설명"))
+    identityTerms: tuple[str, ...] = field(default=(), metadata=_desc("백과사전 기반 정체성 토큰"))
+    productFormSignalTerms: tuple[str, ...] = field(default=(), metadata=_desc("백과사전 원문 상품 형태 신호"))
+    processingSignalTerms: tuple[str, ...] = field(default=(), metadata=_desc("백과사전 원문 가공 상태 신호"))
+    sourceTitles: tuple[str, ...] = field(default=(), metadata=_desc("사용한 백과사전 제목"))
+    sourceDescriptions: tuple[str, ...] = field(default=(), metadata=_desc("사용한 백과사전 설명"))
+    sourceLinks: tuple[str, ...] = field(default=(), metadata=_desc("사용한 백과사전 링크"))
+    qualityStatus: str = field(default="", metadata=_desc("백과사전 조회 품질 상태"))
+
+    def ToTrace(self) -> dict[str, JsonValue]:
+        return {
+            "distilled_identity_id": self.distilledIdentityId,
+            "product_id": self.productId,
+            "source_encyclopedia_evidence_id": self.sourceEncyclopediaEvidenceId,
+            "commercial_identity": self.commercialIdentity,
+            "normalized_description": self.normalizedDescription,
+            "identity_terms": list(self.identityTerms),
+            "product_form_signal_terms": list(self.productFormSignalTerms),
+            "processing_signal_terms": list(self.processingSignalTerms),
+            "source_titles": list(self.sourceTitles),
+            "source_descriptions": list(self.sourceDescriptions),
+            "source_links": list(self.sourceLinks),
+            "quality_status": self.qualityStatus,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class IdentityHintSet:
     identityHintId: str = field(metadata=_desc("Identity 힌트 묶음 ID"))
     productId: str = field(metadata=_desc("대상 상품 ID"))
@@ -168,6 +200,7 @@ class ProductUnderstandingPackage:
     classificationText: str = field(metadata=_desc("분류 입력용 통합 텍스트"))
     reconstructedFactTexts: tuple[str, ...] = field(metadata=_desc("LLM Reconstruction 정규화 텍스트"))
     reconstructedProductFacts: tuple[dict[str, JsonValue], ...] = field(metadata=_desc("LLM Reconstruction 구조화 fact"))
+    distilledIdentity: DistilledIdentityFacts = field(metadata=_desc("Wikipedia 기반 identity seed"))
     identityHints: IdentityHintSet = field(metadata=_desc("HS2-HS4용 identity 힌트"))
     compositionFacts: CompositionFactSet = field(metadata=_desc("HS6-CN8용 성분/함량 fact"))
     coiEvidence: CoiEvidenceSet = field(metadata=_desc("COI 보조 근거"))
@@ -190,6 +223,7 @@ class ProductUnderstandingPackage:
             "classification_text": self.classificationText,
             "reconstructed_fact_texts": list(self.reconstructedFactTexts),
             "reconstructed_product_facts": list(self.reconstructedProductFacts),
+            "distilled_identity": self.distilledIdentity.ToTrace(),
             "identity_hints": self.identityHints.ToTrace(),
             "composition_facts": self.compositionFacts.ToTrace(),
             "coi_evidence": self.coiEvidence.ToBlackboard(

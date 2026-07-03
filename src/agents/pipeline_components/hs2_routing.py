@@ -26,28 +26,43 @@ class Hs2RoutingComponent(BasePipelineComponent):
         productId = str(productUnderstanding.get("product_id") or "")
         self.ReadBlackBoard(understandingId)
 
-        factTexts = self._StringTuple(
-            productUnderstanding.get("reconstructed_fact_texts") or [],
-        )
-        routingTerms = self._StringTuple(
-            productUnderstanding.get("routing_terms") or [],
-        )
         identityLane = productUnderstanding.get("identity_hints") or {}
         if not isinstance(identityLane, dict):
             identityLane = {}
+        distilledIdentity = productUnderstanding.get("distilled_identity") or {}
+        if not isinstance(distilledIdentity, dict):
+            distilledIdentity = {}
+        identityTerms = self._StringTuple(identityLane.get("identity_terms") or [])
+        productFormTerms = self._StringTuple(identityLane.get("product_form_terms") or [])
+        distilledFormTerms = self._StringTuple(
+            distilledIdentity.get("product_form_signal_terms") or [],
+        )
+        distilledProcessingTerms = self._StringTuple(
+            distilledIdentity.get("processing_signal_terms") or [],
+        )
+        domainHints = self._StringTuple(identityLane.get("domain_hints") or [])
         chapterHints = self._StringTuple(
             identityLane.get("chapter_hint_terms") or [],
         )
         chapterHintSources = self._StringTuple(
             identityLane.get("chapter_hint_source_terms") or [],
         )
-        productFacts = productUnderstanding.get("reconstructed_product_facts")
-        structuredFacts = self._FactDictList(productFacts)
         routeInput = BuildPreClassificationRouteInput(
             productName=str(productUnderstanding.get("product_name") or ""),
-            shortDescription=str(productUnderstanding.get("short_description") or ""),
-            factTexts=(*factTexts, *routingTerms, *chapterHints, *chapterHintSources),
-            structuredProductFacts=structuredFacts,
+            shortDescription="",
+            factTexts=(
+                str(identityLane.get("commercial_identity") or ""),
+                str(identityLane.get("translated_product_name") or ""),
+                str(identityLane.get("normalized_tariff_description") or ""),
+                *identityTerms,
+                *productFormTerms,
+                *distilledFormTerms,
+                *distilledProcessingTerms,
+                *domainHints,
+                *chapterHints,
+                *chapterHintSources,
+            ),
+            structuredProductFacts=[],
         )
         routeHint = PreClassificationDomainRouter(
             chapterRowsProvider=LoadPreClassificationChapterRows,
@@ -87,21 +102,6 @@ class Hs2RoutingComponent(BasePipelineComponent):
         if not isinstance(value, list):
             return ()
         return tuple(str(item).strip() for item in value if str(item).strip())
-
-    @staticmethod
-    def _FactDictList(value: object) -> list[dict[str, object]]:
-        if not isinstance(value, list):
-            return []
-        facts: list[dict[str, object]] = []
-        for item in value:
-            if not isinstance(item, dict):
-                continue
-            facts.append({
-                str(key): factValue
-                for key, factValue in item.items()
-                if isinstance(key, str)
-            })
-        return facts
 
     @staticmethod
     def _TraceDict(value: dict[str, JsonValue]) -> dict[str, JsonValue]:
