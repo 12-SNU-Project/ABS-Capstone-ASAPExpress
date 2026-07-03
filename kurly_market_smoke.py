@@ -27,6 +27,7 @@ from bussiness_logic.bridge.factory import (  # noqa: E402
     RuntimeAdapterBuildError,
 )
 from bussiness_logic.bridge.selector import BuildLlmRuntimeConfigFromEnv  # noqa: E402
+from bussiness_logic.bridge.schema import LlmGenerationOptions, LlmRequest  # noqa: E402
 from bussiness_logic.input_process.reconstruction import (  # noqa: E402
     ProductInputReconstructionService,
 )
@@ -51,6 +52,7 @@ from bussiness_logic.product.web_parser.kurly_page_adapter import (  # noqa: E40
     KurlyPageAdapter,
 )
 from backend.pipeline_projection import InputProcessingViewProjector  # noqa: E402
+from db.db_session_manager import DbSessionManager  # noqa: E402
 
 
 VLM_SOURCE_TYPES = {"vlm_table", "pp_table"}
@@ -154,6 +156,18 @@ def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--answer-csv",
+        type=Path,
+        default=None,
+        help="계층별 recall 정답 TARIC10 CSV 경로입니다.",
+    )
+    parser.add_argument(
+        "--write-summary-artifact",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="smoke summary JSON artifact 저장 여부를 강제합니다.",
+    )
+    parser.add_argument(
         "--stage1-review-mode",
         choices=("compact", "full"),
         default="compact",
@@ -180,6 +194,30 @@ def _CompactText(value: object) -> str:
 def _ContainsMarker(value: object, markers: Sequence[str]) -> bool:
     text = _CompactText(value)
     return any(marker.replace(" ", "").lower() in text for marker in markers)
+
+
+def _LoadDotEnvDefaults(envFilePath: Path) -> None:
+    if not envFilePath.exists():
+        return
+    for line in envFilePath.read_text(encoding="utf-8").splitlines():
+        strippedLine = line.strip()
+        if strippedLine == "" or strippedLine.startswith("#"):
+            continue
+        if strippedLine.startswith("export "):
+            strippedLine = strippedLine[len("export ") :].strip()
+        if "=" not in strippedLine:
+            continue
+        envName, rawValue = strippedLine.split("=", 1)
+        normalizedName = envName.strip()
+        normalizedValue = rawValue.strip()
+        if (
+            len(normalizedValue) >= 2
+            and normalizedValue[0] == normalizedValue[-1]
+            and normalizedValue[0] in {"'", '"'}
+        ):
+            normalizedValue = normalizedValue[1:-1].strip()
+        if normalizedName and normalizedValue:
+            os.environ.setdefault(normalizedName, normalizedValue)
 
 
 def _EvidenceId(row: JsonMapping) -> str:
@@ -533,7 +571,10 @@ class KurlyMarketSmokeRunner:
         checkUiBinding: bool = False,
         classifyReconstruction: bool = False,
         stage1ReviewMode: str = "compact",
+        answerCsvPath: Path | None = None,
+        writeSummaryArtifact: bool | None = None,
     ) -> None:
+        _LoadDotEnvDefaults(PROJECT_ROOT_PATH / ".env")
         appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
         pathConfig = appConfig.paths
         smokeConfig = appConfig.kurly_smoke
@@ -581,7 +622,11 @@ class KurlyMarketSmokeRunner:
         self._inputDictionaryFuzzyMinRatio = (
             smokeConfig.input_dictionary_fuzzy_min_ratio
         )
-        self._writeSummaryArtifact = smokeConfig.write_summary_artifact
+        self._writeSummaryArtifact = (
+            smokeConfig.write_summary_artifact
+            if writeSummaryArtifact is None
+            else writeSummaryArtifact
+        )
         self._logFullResult = smokeConfig.log_full_result
         self._artifactRootPath = pathConfig.ResolvePath(
             PROJECT_ROOT_PATH,
@@ -593,7 +638,7 @@ class KurlyMarketSmokeRunner:
         )
         self._answerCsvPath = pathConfig.ResolvePath(
             PROJECT_ROOT_PATH,
-            appConfig.ontology_smoke.answer_csv_path,
+            answerCsvPath or appConfig.ontology_smoke.answer_csv_path,
         )
         self._answerByUrl, self._answerByProductId = self._LoadAnswerRecords(
             self._answerCsvPath,
@@ -699,6 +744,9 @@ class KurlyMarketSmokeRunner:
                 self._WriteSummaryArtifact([])
             return
 
+        if self._classifyReconstruction:
+            self._RunClassificationPreflight(runLogger)
+
         runLogger.info("STEP 1/4 상품 페이지 수집/OCR 파이프라인을 준비합니다")
         productSourcePipeline = self._BuildProductSourcePipeline()
 
@@ -725,6 +773,75 @@ class KurlyMarketSmokeRunner:
             self._WriteSummaryArtifact(results)
         else:
             runLogger.info("STEP 4/4 상품 수집 결과 JSON artifact 저장을 건너뜁니다")
+
+    def _RunClassificationPreflight(self, runLogger: _BoundLogger) -> None:
+        runLogger.info("PREFLIGHT classification DB/LLM 연결을 확인합니다")
+        try:
+            chapterRowCount = self._RequireTableRows("cn_chapter_index")
+            cnTableName, cnTableRowCount = self._RequireFirstAvailableTableRows(
+                ("cn_table_index", "cn_table"),
+            )
+            llmRuntimeLabel = self._RequireLlmRuntime()
+        except Exception as exc:
+            runLogger.error("PREFLIGHT failed: {}", exc)
+            raise SystemExit(2) from exc
+
+        runLogger.info(
+            (
+                "PREFLIGHT ok cn_chapter_index_rows={} {}_rows={} "
+                "llm_runtime={}"
+            ),
+            chapterRowCount,
+            cnTableName,
+            cnTableRowCount,
+            llmRuntimeLabel,
+        )
+
+    @staticmethod
+    def _RequireTableRows(tableName: str) -> int:
+        manager = DbSessionManager.GetInstance()
+        if not manager.TableExists(tableName):
+            raise RuntimeError(f"required DB table not found: {tableName}")
+        rowCount = manager.FetchOne(f"SELECT count(*) FROM {tableName}")
+        if not isinstance(rowCount, int):
+            raise RuntimeError(f"DB table row count query failed: {tableName}")
+        if rowCount <= 0:
+            raise RuntimeError(f"required DB table is empty: {tableName}")
+        return rowCount
+
+    @classmethod
+    def _RequireFirstAvailableTableRows(
+        cls,
+        tableNames: Sequence[str],
+    ) -> tuple[str, int]:
+        errors: list[str] = []
+        for tableName in tableNames:
+            try:
+                return tableName, cls._RequireTableRows(tableName)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{tableName}: {exc}")
+        raise RuntimeError("required CN table lookup failed; " + "; ".join(errors))
+
+    @staticmethod
+    def _RequireLlmRuntime() -> str:
+        runtimeConfig = BuildLlmRuntimeConfigFromEnv(projectRootPath=PROJECT_ROOT_PATH)
+        runtimeAdapter = BuildRuntimeAdapter(runtimeConfig, requireAvailable=True)
+        response = runtimeAdapter.Generate(
+            LlmRequest(
+                system_prompt="You are a connection health check.",
+                user_prompt="Reply with exactly: ok",
+                generation_options=LlmGenerationOptions(
+                    temperature=0.0,
+                    max_tokens=8,
+                ),
+            ),
+        )
+        if not response.generatedText.strip():
+            raise RuntimeError("LLM runtime returned an empty response")
+        return "{0}:{1}".format(
+            runtimeConfig.runtimeKind.value,
+            runtimeConfig.modelName or "default",
+        )
 
     def _BuildProductSourcePipeline(self) -> KurlyProductPipeline:
         pageAdapter = KurlyPageAdapter(
@@ -2416,4 +2533,6 @@ if __name__ == "__main__":
         checkUiBinding=cliArguments.check_ui_binding,
         classifyReconstruction=cliArguments.classify_reconstruction,
         stage1ReviewMode=cliArguments.stage1_review_mode,
+        answerCsvPath=cliArguments.answer_csv,
+        writeSummaryArtifact=cliArguments.write_summary_artifact,
     ).Run()

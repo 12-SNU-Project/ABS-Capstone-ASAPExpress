@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import List, Mapping, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence
 
 from pydantic import (
     AliasChoices,
@@ -1949,4 +1949,3 @@ class ProductInputReconstructionService:
         if sourceRef == "combined_ocr_text":
             return "통합 OCR 텍스트"
         return sourceRef
-
