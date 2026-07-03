@@ -56,6 +56,10 @@ class ProductUnderstandingAgent(BaseAgent):
             or observedFacts.get("composition")
             or [],
         )
+        # §13(b): OCR composition lines, selectively. Full raw-OCR re-injection is
+        # forbidden (designer rule); only ingredient/percentage lines, capped, so
+        # detail-page composition tables still reach the understanding stage.
+        factTexts = (*factTexts, *self._OcrCompositionLines(observedFacts, factTexts))
         productFacts = self._ReadFactTuple(
             observedFacts.get("classification_input_product_facts") or [],
         )
@@ -172,6 +176,37 @@ class ProductUnderstandingAgent(BaseAgent):
             matchedTexts=(evidence.text,),
             matchScores=(evidence.matchedScore,),
         )
+
+    _OCR_COMPOSITION_LINE_RE = re.compile(
+        r"원재료|원료|성분|함량|배합|재료명|\d+(?:[.,]\d+)?\s*%",
+    )
+
+    @classmethod
+    def _OcrCompositionLines(
+        cls,
+        observedFacts: dict[str, JsonValue],
+        existingFactTexts: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        """Composition-looking lines from observed ocr_text (capped, dedup)."""
+        raw = observedFacts.get("ocr_text")
+        if isinstance(raw, list):
+            text = "\n".join(str(item) for item in raw)
+        else:
+            text = str(raw or "")
+        if not text.strip():
+            return ()
+        existing = {line.strip() for line in existingFactTexts}
+        out: list[str] = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or len(line) < 4 or line in existing:
+                continue
+            if not cls._OCR_COMPOSITION_LINE_RE.search(line):
+                continue
+            out.append(line[:200])
+            if len(out) >= 8:
+                break
+        return tuple(out)
 
     @staticmethod
     def _ReadTextTuple(value: object) -> tuple[str, ...]:

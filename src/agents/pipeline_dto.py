@@ -214,6 +214,10 @@ class RoutingContext:
     preGateDomains: tuple[str, ...]
     routingBasis: dict[str, JsonValue]
     missingFacts: tuple[str, ...] = ()
+    # Restored backup Route_dto ``candidate_chapters`` contract: per-chapter
+    # score + matched-term evidence in candidateHs2 order, so the classifier
+    # can respect the router's ranking instead of flattening all chapters.
+    candidateChapterDetails: tuple[dict[str, JsonValue], ...] = ()
 
     def ToBlackboard(self, *, createdBy: str, createdAt: str) -> dict[str, JsonValue]:
         return {
@@ -231,4 +235,5 @@ class RoutingContext:
             "pre_gate_domains": list(self.preGateDomains),
             "routing_basis": dict(self.routingBasis),
             "missing_facts": list(self.missingFacts),
+            "candidate_chapter_details": list(self.candidateChapterDetails),
         }

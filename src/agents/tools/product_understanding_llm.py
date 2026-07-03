@@ -49,6 +49,13 @@ Use the provided chapter-boundary context (cn_chapter_index titles/keywords) to
 propose up to 8 chapter_hint_terms. Each term should be a short English or
 Korean keyword phrase that appears in those contexts.
 
+Pipeline role (ontology summary):
+- ProductUnderstandingFacts feeds DomainRouter, not final classification.
+- DomainRouter matches chapter_hint_terms/product_form_terms/processing_state
+  against cn_chapter_index include/exclude/guardrail columns.
+- Prepared foods must not route only by raw ingredient/allergen mentions.
+- Never output HS/CN/TARIC codes; code selection happens downstream.
+
 JSON keys (all required):
 translated_product_name, commercial_identity, normalized_tariff_description,
 ingredient_class, food_form, processing_state, identity_terms,
@@ -144,6 +151,60 @@ def _compact_evidence(
 def _coerce_enum(value: object, vocab: tuple[str, ...], default: str) -> str:
     text = str(value or "").strip().lower()
     return text if text in vocab else default
+
+
+# ---- evidence-grounding guard (restored from pre-merge backup) --------------
+# The prompt asks the model to use only supplied evidence; these functions
+# ENFORCE it: any form the evidence does not mention is stripped, and leaked
+# HS/CN code digits are removed ("LLM never returns codes; if it does, ignore").
+_HS_CODE_LEAK_RE = re.compile(
+    r"\b(?:chapter|heading|subheading)\s+\d+\b|\b\d{1,2}\s*[-/]\s*\d{1,2}\b|\b\d{4}(?:[.]\d+)?\b|\b\d{6,10}\b",
+    re.I,
+)
+_UNSUPPORTED_FORM_RULES: tuple[tuple[re.Pattern[str], re.Pattern[str]], ...] = (
+    # (evidence pattern that must exist, output pattern to strip when absent)
+    (
+        re.compile(r"쌀|밥|솥밥|비빔밥|볶음밥|죽|누룽지|떡|\brice\b", re.I),
+        re.compile(r"\brice\s*(?:meal|dish|porridge|noodle|cake)s?\b|\brice\b", re.I),
+    ),
+    (
+        re.compile(r"빵|케이크|과자|비스킷|쿠키|약과|pastry|bakery|bread|cake|biscuit|cookie", re.I),
+        re.compile(r"\bbakery products?\b|\bpastry(?:\s*products?)?\b", re.I),
+    ),
+    (
+        re.compile(r"녹두|mung\s*bean", re.I),
+        re.compile(r"\bmung bean(?:\s*paste)?\b", re.I),
+    ),
+    (
+        re.compile(r"해바라기|sunflower", re.I),
+        re.compile(r"\bsunflower(?:\s*seed)?(?:\s*oil)?\b", re.I),
+    ),
+    (
+        re.compile(r"전분|starch", re.I),
+        re.compile(r"\bstarch\b", re.I),
+    ),
+)
+
+
+def _text_without_unsupported_forms(text: str, evidenceText: str) -> str:
+    cleaned = str(text or "")
+    for evidencePattern, outputPattern in _UNSUPPORTED_FORM_RULES:
+        if not evidencePattern.search(evidenceText):
+            cleaned = outputPattern.sub("", cleaned)
+    cleaned = _HS_CODE_LEAK_RE.sub("", cleaned)
+    return re.sub(r"\s{2,}", " ", cleaned).strip(" ,;")
+
+
+def _list_without_unsupported_forms(
+    values: tuple[str, ...],
+    evidenceText: str,
+) -> tuple[str, ...]:
+    out: list[str] = []
+    for value in values:
+        cleaned = _text_without_unsupported_forms(value, evidenceText)
+        if cleaned and cleaned not in out:
+            out.append(cleaned)
+    return tuple(out)
 
 
 def _dedup_strings(
@@ -261,10 +322,25 @@ def BuildIdentityFactsFromLlm(
     except (TypeError, ValueError):
         confidence = 0.5
 
+    # Evidence text the model was given — the grounding reference for the guard.
+    evidenceText = "\n".join(
+        [
+            productName,
+            shortDescription,
+            *[str(text) for text in factTexts],
+            *[f"{entry.title} {entry.description}" for entry in encyclopediaEvidence.entries],
+        ],
+    )
     return {
         "translated_product_name": str(parsed.get("translated_product_name") or "").strip(),
-        "commercial_identity": str(parsed.get("commercial_identity") or productName).strip(),
-        "normalized_tariff_description": str(parsed.get("normalized_tariff_description") or "").strip(),
+        "commercial_identity": _text_without_unsupported_forms(
+            str(parsed.get("commercial_identity") or productName),
+            evidenceText,
+        ),
+        "normalized_tariff_description": _text_without_unsupported_forms(
+            str(parsed.get("normalized_tariff_description") or ""),
+            evidenceText,
+        ),
         "ingredient_class": _coerce_enum(
             parsed.get("ingredient_class"),
             INGREDIENT_CLASS_VOCAB,
@@ -280,10 +356,16 @@ def BuildIdentityFactsFromLlm(
             PROCESSING_STATE_VOCAB,
             "unknown",
         ),
-        "identity_terms": _dedup_strings(parsed.get("identity_terms"), limit=16),
-        "composition_terms": _dedup_strings(parsed.get("composition_terms"), limit=20),
+        "identity_terms": _list_without_unsupported_forms(
+            _dedup_strings(parsed.get("identity_terms"), limit=16), evidenceText,
+        ),
+        "composition_terms": _list_without_unsupported_forms(
+            _dedup_strings(parsed.get("composition_terms"), limit=20), evidenceText,
+        ),
         "processing_terms": _dedup_strings(parsed.get("processing_terms"), limit=12),
-        "product_form_terms": _dedup_strings(parsed.get("product_form_terms"), limit=20),
+        "product_form_terms": _list_without_unsupported_forms(
+            _dedup_strings(parsed.get("product_form_terms"), limit=20), evidenceText,
+        ),
         "domain_hints": tuple(
             term
             for term in _dedup_strings(parsed.get("domain_hints"), limit=6)

@@ -116,17 +116,17 @@ def _build_url_from_pg_env() -> str:
     except ValueError as exc:
         raise ValueError(f"PGPORT는 정수여야 합니다: {port_value}") from exc
 
-    return str(
-        URL.create(
-            "postgresql+psycopg2",
-            username=username or None,
-            password=password or None,
-            host=host,
-            port=port,
-            database=database_name,
-            query={"sslmode": ssl_mode} if ssl_mode else None,
-        )
-    )
+    # NOTE: str(URL) obscures the password as "***" in SQLAlchemy 2.x, which then
+    # gets sent to the server verbatim and fails auth. render_as_string keeps it.
+    return URL.create(
+        "postgresql+psycopg2",
+        username=username or None,
+        password=password or None,
+        host=host,
+        port=port,
+        database=database_name,
+        query={"sslmode": ssl_mode} if ssl_mode else None,
+    ).render_as_string(hide_password=False)
 
 
 def _validate_table_name(table_name: str) -> str:

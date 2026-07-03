@@ -60,6 +60,10 @@ class PreClassificationRouteHint:
         method="no_route_hint",
     )
     missingFacts: tuple[str, ...] = ()
+    # Per-chapter score + matched-term evidence, in candidateHs2 order. Restores
+    # the backup Route_dto ``candidate_chapters`` contract so the downstream
+    # classifier can respect the router's ranking instead of flattening it.
+    candidateChapterDetails: tuple[dict[str, JsonValue], ...] = ()
 
     def ToTrace(self) -> dict[str, JsonValue]:
         return {
@@ -69,6 +73,7 @@ class PreClassificationRouteHint:
             "pre_gate_domains": list(self.preGateDomains),
             "routing_basis": self.routingBasis.ToTrace(),
             "missing_facts": list(self.missingFacts),
+            "candidate_chapter_details": list(self.candidateChapterDetails),
         }
 
 
@@ -251,6 +256,7 @@ class PreClassificationDomainRouter:
         domainScopes: list[str] = []
         preGateDomains: list[str] = []
         matchedTerms: list[str] = []
+        matchedByChapter: dict[str, list[str]] = {}
 
         for rule in ROUTE_RULES:
             match = rule.pattern.search(searchText)
@@ -261,6 +267,7 @@ class PreClassificationDomainRouter:
             for domain in rule.preGateDomains:
                 self._AppendUnique(preGateDomains, domain)
             self._AppendUnique(matchedTerms, match.group(0))
+            matchedByChapter.setdefault(rule.hs2, []).append(match.group(0))
 
         blockedHs2: list[str] = []
         blockedReason = ""
@@ -294,6 +301,14 @@ class PreClassificationDomainRouter:
                 rowCount=rowCount,
             ),
             missingFacts=missingFacts,
+            candidateChapterDetails=tuple(
+                {
+                    "chapter": chapter,
+                    "score": float(len(matchedByChapter.get(chapter, []))),
+                    "matched_terms": matchedByChapter.get(chapter, [])[:8],
+                }
+                for chapter in candidateHs2
+            ),
         )
 
     def _RouteWithChapterIndex(
@@ -393,6 +408,14 @@ class PreClassificationDomainRouter:
             for term in matchedByChapter.get(chapter, []):
                 self._AppendUnique(matchedTerms, term)
 
+        candidateChapterDetails = tuple(
+            {
+                "chapter": chapter,
+                "score": round(scores.get(chapter, 0.0), 2),
+                "matched_terms": list(dict.fromkeys(matchedByChapter.get(chapter, [])))[:8],
+            }
+            for chapter in candidateHs2
+        )
         return PreClassificationRouteHint(
             candidateHs2=candidateHs2,
             blockedHs2=tuple(blockedHs2),
@@ -405,6 +428,7 @@ class PreClassificationDomainRouter:
                 sourceTable="cn_chapter_index",
                 rowCount=len(chapterRows),
             ),
+            candidateChapterDetails=candidateChapterDetails,
             missingFacts=(
                 ("primary_ingredient_ratio",)
                 if "animal_origin" in preGateDomains and "%" not in searchText

@@ -225,6 +225,7 @@ class StagedClassificationTool:
         parents = self._start_chapters(routing_context)
         if not parents:
             return {"ok": False, "error": "no_route_chapters", "candidates": [], "stages": []}
+        chapter_scores = self._chapter_scores(routing_context)
 
         stages: list[dict[str, Any]] = []
         for level, prefix_len in LEVELS:
@@ -233,7 +234,18 @@ class StagedClassificationTool:
                 stages.append(self._trace(level, [], [], facts, "no_children"))
                 return {"ok": False, "error": f"no_children_at_{level}",
                         "candidates": [], "stages": stages}
-            ranked = self._lexical_rank(children, facts, level, percentages)[: self.rank_top_k]
+            ranked = self._lexical_rank(children, facts, level, percentages)
+            if level == "hs4" and chapter_scores:
+                # Respect the router's chapter ranking (restored backup
+                # candidate_chapters contract): both scores are keyword-match
+                # counts on the same scale, so add the chapter score to its
+                # headings instead of flattening all route chapters as equals.
+                for row in ranked:
+                    row["score"] = round(
+                        row["score"] + chapter_scores.get(str(row["code"])[:2], 0.0), 2,
+                    )
+                ranked.sort(key=lambda r: r["score"], reverse=True)
+            ranked = ranked[: self.rank_top_k]
             selected = self._llm_select(ranked, facts, level)
             if not selected:  # deterministic fallback = top lexical
                 selected = [ranked[0]["code"]]
@@ -257,6 +269,25 @@ class StagedClassificationTool:
                 vals.extend(_string_values(_dig(product_facts, path)))
             out[axis] = vals[:16]
         return out
+
+    @staticmethod
+    def _chapter_scores(routing_context: dict[str, Any]) -> dict[str, float]:
+        """Router chapter scores from candidate_chapter_details ({} if absent)."""
+        details = routing_context.get("candidate_chapter_details")
+        if not isinstance(details, list):
+            return {}
+        scores: dict[str, float] = {}
+        for item in details:
+            if not isinstance(item, dict):
+                continue
+            chapter = _digits(item.get("chapter"), limit=2)
+            try:
+                score = float(item.get("score") or 0.0)
+            except (TypeError, ValueError):
+                score = 0.0
+            if len(chapter) == 2 and score > 0:
+                scores[chapter] = score
+        return scores
 
     def _start_chapters(self, routing_context: dict[str, Any]) -> list[str]:
         chapters: list[str] = []
@@ -384,6 +415,12 @@ class StagedClassificationTool:
     def _llm_select(self, ranked: list[dict[str, Any]], facts: dict[str, list[str]], level: str) -> list[str]:
         if not ranked:
             return []
+        # code_driven by default (designer decision): the deterministic lexical
+        # top-k is the stage answer; the LLM re-selector is opt-in only.
+        if (os.environ.get("ASAP_STAGED_USE_LLM_SELECT", "0") or "").strip().lower() not in (
+            "1", "true", "yes", "on",
+        ):
+            return [r["code"] for r in ranked[: self.keep_per_level]]
         from bussiness_logic.bridge.schema import LlmRequest, LlmGenerationOptions
 
         facts_view = {axis: facts.get(axis, [])[:8] for axis in LEVEL_AXES[level]}

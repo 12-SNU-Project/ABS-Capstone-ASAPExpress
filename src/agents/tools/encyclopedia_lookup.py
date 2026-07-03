@@ -39,12 +39,12 @@ def LookupEncyclopediaEvidence(
     display: int = 3,
     timeoutSeconds: float = 10.0,
 ) -> EncyclopediaEvidenceSet:
-    normalizedQuery = query.strip()
+    normalizedQuery = CleanEncyclopediaQuery(query)
     if not normalizedQuery:
         return EncyclopediaEvidenceSet(
             encyclopediaEvidenceId=encyclopediaEvidenceId,
             productId=productId,
-            query=normalizedQuery,
+            query=query.strip(),
             configured=True,
             qualityStatus="no_query",
             qualityReasons=("empty_query",),
@@ -52,10 +52,18 @@ def LookupEncyclopediaEvidence(
 
     rows: list[WikipediaSearchResult] = []
     searchError = ""
-    try:
-        rows = list(_search_wikipedia(normalizedQuery, limit=display, timeoutSeconds=timeoutSeconds))
-    except Exception as exc:  # noqa: BLE001 — keep lookup tolerant
-        searchError = f"{type(exc).__name__}: {exc}"
+    # Restored backup candidate fallback: brand/quantity-stripped full query
+    # first, then trailing dish-name suffixes ("압구정낙지 낙지 볶음" -> "낙지 볶음").
+    for candidate in _QueryCandidates(normalizedQuery):
+        try:
+            rows = list(_search_wikipedia(candidate, limit=display, timeoutSeconds=timeoutSeconds))
+        except Exception as exc:  # noqa: BLE001 — keep lookup tolerant
+            searchError = f"{type(exc).__name__}: {exc}"
+            continue
+        if rows:
+            normalizedQuery = candidate
+            searchError = ""
+            break
 
     if not rows and searchError:
         return EncyclopediaEvidenceSet(
@@ -95,6 +103,32 @@ def LookupEncyclopediaEvidence(
         qualityStatus="raw_entries",
         qualityReasons=("raw_not_routing_input",),
     )
+
+
+def CleanEncyclopediaQuery(value: str) -> str:
+    """Strip brand/quantity/marketing noise from a product name before lookup.
+
+    Restored from the pre-merge backup (_clean_encyclopedia_query): raw product
+    names hijack encyclopedia search ("전주 베테랑 칼국수" -> Jeonju the city).
+    """
+    text = re.sub(r"\[[^\]]+\]", " ", str(value or ""))
+    text = re.sub(r"\([^)]*\)", " ", text)
+    text = re.sub(r"\b\d+(?:\.\d+)?\s*(?:g|kg|ml|l|개입|팩|종|인분)\b", " ", text, flags=re.I)
+    text = re.sub(r"\b(?:택\s*1|택1|냉동|냉장|상온|간편|프리미엄)\b", " ", text, flags=re.I)
+    return re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip(" -_/|")
+
+
+def _QueryCandidates(cleanedQuery: str, *, limit: int = 4) -> tuple[str, ...]:
+    """Cleaned query first, then trailing-token suffixes (dish name is usually last)."""
+    tokens = [token for token in cleanedQuery.split() if len(token) >= 2]
+    candidates: list[str] = [cleanedQuery]
+    for start in range(1, len(tokens)):
+        suffix = " ".join(tokens[start:])
+        if suffix and suffix not in candidates:
+            candidates.append(suffix)
+        if len(candidates) >= limit:
+            break
+    return tuple(candidates)
 
 
 def _search_wikipedia(
