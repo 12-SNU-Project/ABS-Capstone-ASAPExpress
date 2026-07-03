@@ -40,7 +40,7 @@ from bussiness_logic.utils.json_types import JsonObject
 DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS = 4096
 
 PRODUCT_FACT_RECONSTRUCTION_SYSTEM_PROMPT = """
-You reconstruct structured product input facts from Korean product notice, structured table OCR (PaddleOCR-VL/PP-Structure), and raw OCR text.
+You reconstruct structured product input facts from Korean product summary, Korean product notice, structured table OCR (PaddleOCR-VL/PP-Structure), and raw OCR text.
 Return strict JSON only.
 Return exactly one JSON object. Do not append markdown, commentary, or extra braces after the root object.
 Return only these top-level keys: reconstructed_tables, product_facts, unresolved_facts, conflicts, warnings.
@@ -56,6 +56,7 @@ conflicts and warnings must be arrays of strings.
 Do not return JSON null. Use an empty string, empty array, or omit the uncertain fact.
 Do not infer HS, CN, TARIC, customs, legal, or regulatory conclusions.
 Do not create product facts that are absent from the provided evidence.
+Use product_summary evidence only for product identity, commercial description, physical form, processing/preparation hints, and brand. Do not derive ingredient or composition facts from product_summary unless an exact ingredient/composition list appears there.
 Correct OCR typos only when the surrounding evidence strongly supports the correction.
 Put the corrected/canonical classification value in normalized_value.
 Do not expose pre-correction OCR text in any output field.
@@ -65,6 +66,7 @@ The application will generate normalized_fact_texts after validation.
 Preserve table rows in reconstructed_tables even when they are not selected as product_facts.
 Prefer concise product_facts for classification: product name, food/cosmetic type, physical form, processing state, preparation/use, storage state, ingredients, composition ratios, net content, and origin/manufacture country when explicit.
 For food products, product_facts must include explicit ingredient/composition rows when they appear in evidence, including component-specific ingredients for multi-component products such as dumpling plus sauce.
+For raw OCR text, treat section headings strictly. Ingredients/composition facts must come from Ingredient/재료/원재료 sections, not from Process/생산 유통 과정, Recommendation/활용법, or Brand/브랜드 sections.
 Do not put nutrient measurements such as sodium, carbohydrates, fat, protein, kcal, or daily value percentages in product_facts; keep nutrition rows only in reconstructed_tables.
 Do not include allergen warnings, same-facility/cross-contamination warnings, seller/vendor/manufacturer business-party names, expiry, package material, or marketing copy as product_facts unless they directly change customs classification.
 Return atomic field_name/normalized_value pairs. Do not put a whole OCR block under a generic field.
@@ -107,6 +109,31 @@ NUTRITION_FIELD_MARKERS = (
     "단백질",
     "kcal",
     "dailyvalue",
+)
+INGREDIENT_SECTION_START_MARKERS = (
+    "재료와성분",
+    "원재료명",
+    "원재료",
+    "원료명",
+    "전성분",
+    "성분",
+    "ingredients",
+    "composition",
+)
+INGREDIENT_SECTION_STOP_MARKERS = (
+    "생산유통과정",
+    "활용법",
+    "브랜드와생산자",
+    "보관방법",
+    "유통기한",
+    "소비기한",
+    "품목보고번호",
+    "포장재질",
+    "주의사항",
+    "알레르기정보",
+    "process",
+    "recommendation",
+    "brand",
 )
 
 
@@ -451,8 +478,59 @@ def _IsTokenCoveredByEvidenceParts(token: str, evidenceTokens: set[str]) -> bool
     )
 
 
+def _IsTokenTextuallyCovered(token: str, evidenceTokens: set[str]) -> bool:
+    if _IsTokenCoveredByEvidenceParts(token, evidenceTokens):
+        return True
+    return any(token in evidenceToken for evidenceToken in evidenceTokens)
+
+
 def _CompactEvidenceText(text: str) -> str:
     return re.sub(r"[^0-9A-Za-z가-힣]+", "", text or "").lower()
+
+
+def _ExtractIngredientSectionText(text: str) -> str:
+    sectionLines: List[str] = []
+    inIngredientSection = False
+    for line in NormalizeWhitespaceLines(text).splitlines():
+        normalizedLine = NormalizeWhiteSpace(line)
+        if normalizedLine == "":
+            continue
+        compactLine = _CompactEvidenceText(normalizedLine)
+        if not inIngredientSection and any(
+            marker in compactLine
+            for marker in INGREDIENT_SECTION_START_MARKERS
+        ):
+            inIngredientSection = True
+            sectionLines.append(normalizedLine)
+            continue
+        if inIngredientSection and any(
+            marker in compactLine
+            for marker in INGREDIENT_SECTION_STOP_MARKERS
+        ):
+            break
+        if inIngredientSection:
+            sectionLines.append(normalizedLine)
+    return NormalizeWhitespaceLines("\n".join(sectionLines))
+
+
+def _HasIngredientMarketingSectionBoundary(text: str) -> bool:
+    compactText = _CompactEvidenceText(text)
+    hasIngredientHeading = any(
+        marker in compactText
+        for marker in ("재료와성분", "ingredients")
+    )
+    hasMarketingStopHeading = any(
+        marker in compactText
+        for marker in (
+            "생산유통과정",
+            "활용법",
+            "브랜드와생산자",
+            "process",
+            "recommendation",
+            "brand",
+        )
+    )
+    return hasIngredientHeading and hasMarketingStopHeading
 
 
 def _NormalizeLlmScalarText(value: object, *, defaultValue: str = "") -> str:
@@ -650,6 +728,18 @@ class _BoundNoticeOption(_BoundModel):
 
 
 class _BoundParsedProductPage(_BoundModel):
+    productName: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("productName", "product_name"),
+    )
+    shortDescription: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("shortDescription", "short_description"),
+    )
+    brandName: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("brandName", "brand_name"),
+    )
     productNoticeFields: List[_BoundNoticeField] = Field(
         default_factory=list,
         validation_alias=AliasChoices("productNoticeFields", "product_notice_fields"),
@@ -730,6 +820,10 @@ class ProductInputEvidenceBuilder:
             _BoundOcrImageResult.model_validate(ocrImageResult)
             for ocrImageResult in ocrImageResults
         ]
+        self._AppendProductSummaryEvidence(
+            records,
+            boundCollectionResult.parsedProductPage,
+        )
         self._AppendNoticeEvidence(records, boundCollectionResult.parsedProductPage)
         self._AppendOcrEvidence(
             records,
@@ -747,6 +841,26 @@ class ProductInputEvidenceBuilder:
             productPageUrl=boundCollectionResult.productPageUrl,
             records=records,
         )
+
+    def _AppendProductSummaryEvidence(
+        self,
+        records: List[InputEvidenceRecord],
+        parsedProductPage: _BoundParsedProductPage,
+    ) -> None:
+        summaryFields = [
+            ("product_name", parsedProductPage.productName),
+            ("short_description", parsedProductPage.shortDescription),
+            ("brand_name", parsedProductPage.brandName),
+        ]
+        for fieldName, fieldValue in summaryFields:
+            if fieldValue is None:
+                continue
+            self._AppendRecord(
+                records,
+                sourceType="product_summary",
+                text="{0}: {1}".format(fieldName, fieldValue),
+                sourceRef=fieldName,
+            )
 
     def _AppendNoticeEvidence(
         self,
@@ -1004,6 +1118,7 @@ class ProductFactReconstructionValidator:
                 evidenceById,
             )
             validationIssue = validationIssue or self._ValidateTextEvidence(
+                cleanedFactRecord.fieldName,
                 cleanedFactRecord.normalizedValue,
                 cleanedFactRecord.sourceRefs,
                 evidenceById,
@@ -1084,6 +1199,7 @@ class ProductFactReconstructionValidator:
                     evidenceById,
                 )
                 validationIssue = validationIssue or self._ValidateTextEvidence(
+                    factRecord.fieldName,
                     factRecord.normalizedValue,
                     factRecord.sourceRefs,
                     evidenceById,
@@ -1184,6 +1300,7 @@ class ProductFactReconstructionValidator:
                     evidenceById,
                 )
                 validationIssue = validationIssue or self._ValidateTextEvidence(
+                    fieldName,
                     normalizedValue,
                     rawValidationRefs or rowSourceRefs or tableSourceRefs,
                     evidenceById,
@@ -1474,6 +1591,7 @@ class ProductFactReconstructionValidator:
 
     def _ValidateTextEvidence(
         self,
+        fieldName: str,
         value: str,
         sourceRefs: Sequence[str],
         evidenceById: Mapping[str, InputEvidenceRecord],
@@ -1483,6 +1601,20 @@ class ProductFactReconstructionValidator:
         compactValue = _CompactEvidenceText(value)
         if len(compactValue) < 3:
             return None
+        if self._IsIngredientClassificationField(fieldName):
+            summaryOnlyIssue = self._ValidateIngredientSourceTypes(
+                sourceRefs,
+                evidenceById,
+            )
+            if summaryOnlyIssue is not None:
+                return summaryOnlyIssue
+            sectionIssue = self._ValidateIngredientSectionEvidence(
+                value,
+                sourceRefs,
+                evidenceById,
+            )
+            if sectionIssue is not None:
+                return sectionIssue
         if any(
             compactValue
             in _CompactEvidenceText(evidenceById[sourceRef].text)
@@ -1508,6 +1640,66 @@ class ProductFactReconstructionValidator:
         if self._HasSufficientCorrectedTextCoverage(valueTokens, evidenceTokens):
             return None
         return "normalized_value_not_found_in_source"
+
+    def _ValidateIngredientSourceTypes(
+        self,
+        sourceRefs: Sequence[str],
+        evidenceById: Mapping[str, InputEvidenceRecord],
+    ) -> Optional[str]:
+        matchedSourceTypes = [
+            evidenceById[sourceRef].sourceType
+            for sourceRef in sourceRefs
+            if sourceRef in evidenceById
+        ]
+        if matchedSourceTypes and all(
+            sourceType == "product_summary"
+            for sourceType in matchedSourceTypes
+        ):
+            return "ingredient_fact_requires_label_or_ocr_evidence"
+        return None
+
+    def _ValidateIngredientSectionEvidence(
+        self,
+        value: str,
+        sourceRefs: Sequence[str],
+        evidenceById: Mapping[str, InputEvidenceRecord],
+    ) -> Optional[str]:
+        sectionTexts = [
+            sectionText
+            for sourceRef in sourceRefs
+            if sourceRef in evidenceById
+            and evidenceById[sourceRef].sourceType == "raw_ocr_tile"
+            and _HasIngredientMarketingSectionBoundary(evidenceById[sourceRef].text)
+            for sectionText in [_ExtractIngredientSectionText(evidenceById[sourceRef].text)]
+            if sectionText
+        ]
+        if not sectionTexts:
+            return None
+        valueTokens = _ExtractMeaningfulEvidenceTokens(value)
+        sectionTokens = _ExtractMeaningfulEvidenceTokens(
+            "\n".join(sectionTexts),
+            minLength=1,
+        )
+        fullTokens = {
+            token
+            for sourceRef in sourceRefs
+            if sourceRef in evidenceById
+            for token in _ExtractMeaningfulEvidenceTokens(
+                evidenceById[sourceRef].text,
+                minLength=1,
+            )
+        }
+        outsideTokens = sorted(
+            token
+            for token in valueTokens
+            if not _IsTokenTextuallyCovered(token, sectionTokens)
+            and _IsTokenTextuallyCovered(token, fullTokens)
+        )
+        if outsideTokens:
+            return "ingredient_value_outside_ingredient_section:{0}".format(
+                ",".join(outsideTokens)
+            )
+        return None
 
     def _HasSufficientCorrectedTextCoverage(
         self,
@@ -1579,7 +1771,7 @@ class DeterministicProductFactReconstructor:
     ) -> List[ClassificationFact]:
         factRecords: List[ClassificationFact] = []
         for record in evidencePackage.records:
-            if record.sourceType == "notice_field":
+            if record.sourceType in {"notice_field", "product_summary"}:
                 factRecord = self._BuildFactRecordFromText(record, dictionaryMatches)
                 if factRecord is not None:
                     factRecords.append(factRecord)
@@ -1801,6 +1993,8 @@ class ProductFactReconstructionAgent:
                     "출력 key는 reconstructed_tables, product_facts, unresolved_facts, conflicts, warnings만 사용하라.",
                     "reconstructed_tables에는 structured table/raw OCR에서 복원 가능한 표 행을 가능한 한 보존하라.",
                     "product_facts에는 분류 후보 생성에 필요한 핵심 상품 fact만 넣어라.",
+                    "product_summary는 제품 정체성/형태/설명 힌트로만 사용하고 원재료/함량은 OCR 또는 표 증거에서만 만들라.",
+                    "raw OCR에서 원재료 섹션과 생산/활용/브랜드 섹션이 나뉘면 원재료 fact는 원재료 섹션 안의 텍스트만 사용하라.",
                     "JSON null을 절대 출력하지 말고, 모르는 값은 빈 문자열/빈 배열 또는 항목 생략으로 표현하라.",
                     "오탈자 교정, 단위 정규화, 표준 필드명/값은 normalized_value에만 넣어라.",
                     "교정 전 OCR 원문값을 별도 필드로 출력하지 마라.",
@@ -2082,6 +2276,8 @@ class ProductInputReconstructionService:
             return "상품고시 옵션 {0}".format(sourceParts[2])
         if sourceRef.startswith("notice-field-"):
             return "상품고시 항목 {0}".format(sourceParts[2])
+        if record.sourceType == "product_summary":
+            return "상품 요약 {0}".format(sourceRef)
         if (
             len(sourceParts) >= 4
             and sourceParts[0] == "image"

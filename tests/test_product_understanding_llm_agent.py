@@ -1,11 +1,35 @@
 from pytest import MonkeyPatch
 
+from agents.llm_agents import identity_hint_agent
 from agents.pipeline_components import product_understanding
 from agents.pipeline_dto import (
     DistilledIdentityFacts,
     EncyclopediaEvidenceSet,
     IdentityHintSet,
 )
+
+
+class FakeLlmResponse:
+    generatedText: str = """{
+      "translated_product_name": "stir-fried octopus",
+      "commercial_identity": "Nakji-bokkeum",
+      "normalized_tariff_description": "prepared stir-fried octopus",
+      "identity_terms": ["octopus"],
+      "product_form_terms": ["prepared seafood"],
+      "domain_hints": ["food", "animal_origin"],
+      "chapter_hint_terms": ["prepared seafood"],
+      "chapter_hint_source_terms": ["octopus"],
+      "chapter_hint_basis": "from_chapter_context",
+      "chapter_hint_status": "enabled",
+      "confidence": 0.9,
+      "needs_review": false
+    }"""
+
+
+class FakeRuntimeAdapter:
+    def Generate(self, request: object) -> FakeLlmResponse:
+        del request
+        return FakeLlmResponse()
 
 
 class FakeIdentityHintAgent:
@@ -85,6 +109,28 @@ def test_identity_hint_agent_runs_by_default(monkeypatch: MonkeyPatch) -> None:
     assert identity.translatedProductName == "prepared seafood sauce"
     assert identity.compositionTerms == ()
     assert identity.processingTerms == ()
+
+
+def test_identity_hint_agent_does_not_reference_missing_short_description(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(identity_hint_agent, "_adapter_cache", [FakeRuntimeAdapter()])
+    monkeypatch.setattr(identity_hint_agent, "_chapter_context", lambda: "")
+
+    result = identity_hint_agent.IdentityHintAgent().BuildIdentityFacts(
+        productName="낙지볶음",
+        distilledIdentity=_BuildDistilledIdentity(),
+        encyclopediaEvidence=EncyclopediaEvidenceSet(
+            encyclopediaEvidenceId="ency_001",
+            productId="prod_001",
+            query="낙지볶음",
+            configured=True,
+        ),
+    )
+
+    assert result["understanding_mode"] == "llm_json"
+    assert result["translated_product_name"] == "stir-fried octopus"
+    assert result["chapter_hint_terms"] == ("prepared seafood",)
 
 
 def test_identity_hint_agent_can_be_disabled(monkeypatch: MonkeyPatch) -> None:

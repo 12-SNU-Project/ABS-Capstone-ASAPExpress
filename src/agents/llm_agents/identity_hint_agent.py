@@ -243,15 +243,6 @@ def _BuildIdentityFacts(
     except (TypeError, ValueError):
         confidence = 0.5
 
-    # Evidence text the model was given — the grounding reference for the guard.
-    evidenceText = "\n".join(
-        [
-            productName,
-            shortDescription,
-            *[str(text) for text in factTexts],
-            *[f"{entry.title} {entry.description}" for entry in encyclopediaEvidence.entries],
-        ],
-    )
     return {
         "translated_product_name": str(parsed.get("translated_product_name") or "").strip(),
         "commercial_identity": str(

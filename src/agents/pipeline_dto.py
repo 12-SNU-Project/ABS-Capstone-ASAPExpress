@@ -250,6 +250,10 @@ class Hs2RoutingDecision:
     domainScopes: tuple[str, ...] = field(metadata=_desc("도메인 scope 힌트"))
     preGateDomains: tuple[str, ...] = field(metadata=_desc("사전 게이트 도메인"))
     routingBasis: dict[str, JsonValue] = field(metadata=_desc("라우팅 판단 근거"))
+    candidateChapterDetails: tuple[dict[str, JsonValue], ...] = field(
+        default=(),
+        metadata=_desc("HS2 후보별 점수와 매칭 근거"),
+    )
     missingFacts: tuple[str, ...] = field(default=(), metadata=_desc("라우팅에 부족한 fact"))
 
     def ToBlackboard(self, *, createdBy: str, createdAt: str) -> dict[str, JsonValue]:
@@ -267,5 +271,6 @@ class Hs2RoutingDecision:
             "domain_scopes": list(self.domainScopes),
             "pre_gate_domains": list(self.preGateDomains),
             "routing_basis": dict(self.routingBasis),
+            "candidate_chapter_details": list(self.candidateChapterDetails),
             "missing_facts": list(self.missingFacts),
         }

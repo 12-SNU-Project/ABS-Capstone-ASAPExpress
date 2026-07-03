@@ -90,6 +90,11 @@ ANSWER_TARIC10_COLUMNS = (
     "미국 HS Code",
 )
 RECALL_LEVELS = (("hs2", 2), ("hs4", 4), ("hs6", 6), ("cn8", 8))
+SMOKE_LOG_CONTEXT_PATTERN = re.compile(
+    r"\s*(?:pipeline_step|component)=([^\s]+)"
+)
+SMOKE_LOG_STEP_PATTERN = re.compile(r"(?:^|\s)pipeline_step=([^\s]+)")
+SMOKE_LOG_COMPONENT_PATTERN = re.compile(r"(?:^|\s)component=([^\s]+)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +105,8 @@ class AnswerRecord:
 
 
 class _BoundLogger:
+    _currentSectionKey: tuple[str, str, str] | None = None
+
     def __init__(self, logger: logging.Logger, className: str, functionName: str) -> None:
         self._logger = logger
         self._className = className
@@ -119,7 +126,40 @@ class _BoundLogger:
             renderedMessage = message.format(*args)
         except Exception:
             renderedMessage = " ".join([message, *[str(arg) for arg in args]])
+        self._emitSectionHeaderIfNeeded(level, renderedMessage)
+        renderedMessage = self._StripStepComponentContext(renderedMessage)
+        if not renderedMessage:
+            return
         self._logger.log(level, "%s", renderedMessage)
+
+    def _emitSectionHeaderIfNeeded(self, level: int, message: str) -> None:
+        stepMatch = SMOKE_LOG_STEP_PATTERN.search(message)
+        if stepMatch is None:
+            return
+        componentMatch = SMOKE_LOG_COMPONENT_PATTERN.search(message)
+        stepName = stepMatch.group(1)
+        componentName = (
+            componentMatch.group(1)
+            if componentMatch is not None
+            else self._functionName.strip("_") or self._className
+        )
+        sectionKey = (stepName, self._className, componentName)
+        if sectionKey == _BoundLogger._currentSectionKey:
+            return
+        _BoundLogger._currentSectionKey = sectionKey
+        self._logger.log(
+            level,
+            "%s",
+            (
+                "==========[STEP: {0} Pipeline: {1} Component: {2}]=========="
+            ).format(stepName, self._className, componentName),
+        )
+
+    @staticmethod
+    def _StripStepComponentContext(message: str) -> str:
+        cleanedMessage = SMOKE_LOG_CONTEXT_PATTERN.sub("", message)
+        cleanedMessage = re.sub(r"\s{2,}", " ", cleanedMessage)
+        return cleanedMessage.strip()
 
 
 def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
@@ -761,7 +801,7 @@ class KurlyMarketSmokeRunner:
         results: List[Dict[str]] = []
         for productIndex, productUrl in enumerate(self._productUrls, start=1):
             runLogger.info(
-                "========== pipeline_step=collection_ocr product_index={}/{} ==========",
+                "product_index={}/{}",
                 productIndex,
                 len(self._productUrls),
             )
@@ -1410,6 +1450,9 @@ class KurlyMarketSmokeRunner:
             "domain_scopes": routingContext.get("domain_scopes") or [],
             "pre_gate_domains": routingContext.get("pre_gate_domains") or [],
             "routing_basis": routingContext.get("routing_basis") or {},
+            "candidate_chapter_details": (
+                routingContext.get("candidate_chapter_details") or []
+            ),
             "missing_facts": routingContext.get("missing_facts") or [],
         }
 
@@ -2050,7 +2093,6 @@ class KurlyMarketSmokeRunner:
             resultData,
             inputReconstruction,
         )
-        reconstructionLogger.info("========== pipeline_step=llm_reconstruction ==========")
         reconstructionLogger.info(
             (
                 "pipeline_step=llm_reconstruction component=ProductInputReconstructionService "
@@ -2211,7 +2253,6 @@ class KurlyMarketSmokeRunner:
         if not isinstance(classificationData, dict):
             return
         classificationLogger = self._Logger("_LogClassificationSmoke")
-        classificationLogger.info("========== pipeline_step=classification_merge_check ==========")
         status = classificationData.get("status") or {}
         productUnderstanding = classificationData.get("product_understanding") or {}
         domainRouting = classificationData.get("domain_routing") or {}
@@ -2251,13 +2292,15 @@ class KurlyMarketSmokeRunner:
                 "pipeline_step=domain_routing component=Hs2RoutingComponent "
                 "output_dto=Hs2RoutingDecision routing_context_id={} allowed_hs2={} "
                 "blocked_hs2={} enforce_hs2_boundary={} fallback_allowed={} "
-                "boundary_applied={} fallback_used={} missing_facts={}"
+                "candidate_chapter_details={} boundary_applied={} fallback_used={} "
+                "missing_facts={}"
             ),
             domainRouting.get("routing_context_id"),
             domainRouting.get("allowed_hs2"),
             domainRouting.get("blocked_hs2"),
             domainRouting.get("enforce_hs2_boundary"),
             domainRouting.get("fallback_allowed"),
+            domainRouting.get("candidate_chapter_details"),
             (domainRouting.get("classification_boundary") or {}).get(
                 "boundary_applied",
             ),

@@ -9,6 +9,36 @@ from bussiness_logic.product.web_parser.kurly_market_schema import (
     ProductSummaryEvidence,
     RenderedPageEvidence,
 )
+from bussiness_logic.utils import NormalizeWhiteSpace
+
+
+CLASSIFICATION_NOTICE_FIELD_MARKERS = (
+    "제품명",
+    "품명",
+    "식품유형",
+    "식품의유형",
+    "원재료",
+    "원료",
+    "전성분",
+    "성분",
+    "함량",
+    "주성분",
+    "구성품",
+    "구성",
+)
+CLASSIFICATION_NOTICE_EXCLUDED_FIELD_MARKERS = (
+    "알레르기",
+    "주의",
+    "소비기한",
+    "유통기한",
+    "품질유지기한",
+    "포장",
+    "판매단위",
+    "중량",
+    "용량",
+    "내용량",
+    "원산지",
+)
 
 
 class KurlyProductPageParserProtocol(Protocol):
@@ -178,6 +208,10 @@ class KurlyPageCollector:
         parsedProductPage = self._ApplyProductSummaryEvidence(
             parsedProductPage,
             renderedPageEvidence.productSummaryEvidence,
+        )
+        parsedProductPage = self._ApplyClassificationOcrNeed(
+            parsedProductPage,
+            renderedPageEvidence.productDetailImageUrls,
         )
         ocrCandidateImageUrls = self._BuildOcrCandidateImageUrls(
             parsedProductPage,
@@ -383,6 +417,53 @@ class KurlyPageCollector:
         if not updates:
             return parsedProductPage
         return parsedProductPage.model_copy(update=updates)
+
+    @staticmethod
+    def _ApplyClassificationOcrNeed(
+        parsedProductPage: KurlyProductPage,
+        productDetailImageUrls: List[str],
+    ) -> KurlyProductPage:
+        if parsedProductPage.requiresOcrFallback or not productDetailImageUrls:
+            return parsedProductPage
+        if KurlyPageCollector._HasClassificationNoticeEvidence(parsedProductPage):
+            return parsedProductPage
+        return parsedProductPage.model_copy(
+            update={
+                "requiresOcrFallback": True,
+                "warnings": [
+                    *parsedProductPage.warnings,
+                    "ocr_fallback_enabled_for_classification_evidence",
+                ],
+            }
+        )
+
+    @staticmethod
+    def _HasClassificationNoticeEvidence(parsedProductPage: KurlyProductPage) -> bool:
+        fields = [
+            *parsedProductPage.productNoticeFields,
+            *[
+                field
+                for option in parsedProductPage.productNoticeOptions
+                for field in option.fields
+            ],
+        ]
+        for field in fields:
+            fieldName = NormalizeWhiteSpace(field.fieldName).replace(" ", "")
+            if any(
+                marker in fieldName
+                for marker in CLASSIFICATION_NOTICE_EXCLUDED_FIELD_MARKERS
+            ):
+                continue
+            fieldText = "{0}{1}".format(
+                fieldName,
+                NormalizeWhiteSpace(field.fieldValue or "").replace(" ", ""),
+            )
+            if any(
+                marker in fieldText
+                for marker in CLASSIFICATION_NOTICE_FIELD_MARKERS
+            ):
+                return True
+        return False
 
     def _ReadProductNoticeText(self, page: object) -> str:
         readProductNoticeText = getattr(self._parser, "ReadProductNoticeText", None)
