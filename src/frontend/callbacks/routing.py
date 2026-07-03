@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import requests
 from dash import Dash, Input, Output, html
 
 from frontend.callbacks.navigation import SplitPath
 from frontend.pipeline_api_client import PipelineApiClient
-from frontend.ui import admin_dash, classification_dash, document_package_view
+from frontend.ui import classification_dash, document_package_view
 
 
 def RegisterRoutingCallbacks(
@@ -27,12 +25,12 @@ def RegisterRoutingCallbacks(
     )
     def render_page(
         pathname: str | None,
-        result_data: dict[str, Any] | None,
+        result_data: dict[str, object] | None,
         document_panel: str | None,
         input_detail_drawer_mode: str | bool | None,
         candidate_tree_drawer_open: bool | None,
-        classification_result_drawer_open: bool | str | dict[str, Any] | None,
-    ) -> Any:
+        classification_result_drawer_open: bool | str | dict[str, object] | None,
+    ) -> object:
         parts = SplitPath(pathname)
         if not parts:
             return classification_dash.render_page(
@@ -58,23 +56,6 @@ def RegisterRoutingCallbacks(
                 taric10,
                 document_panel or "overview",
                 documentPackage=documentPackagePayload.get("document_package"),
-            )
-
-        if page == "admin":
-            runId = parts[1] if len(parts) > 1 else None
-            try:
-                debugResult = pipelineApiClient.ReadAdminRunDebug(runId or "")
-            except (requests.RequestException, ValueError) as exc:
-                return _RenderBackendError(exc)
-            live = (
-                result_data
-                if result_data and (not runId or result_data.get("run_id") == runId)
-                else None
-            )
-            return admin_dash.render_page(
-                run_id=runId,
-                debug_result=debugResult,
-                live_result=live,
             )
 
         return classification_dash.render_page(

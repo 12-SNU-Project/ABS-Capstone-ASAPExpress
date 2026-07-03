@@ -1,9 +1,9 @@
 """
-ASAP multi-agent Blackboard storage.
+ASAP pipeline Blackboard storage.
 
 One pipeline run = one directory under ``data/runs/run_<NNN>/``:
   - ``blackboard.json``  — full mutable Blackboard root document.
-  - ``agent_runs.jsonl`` — append-only log of AgentRun records.
+  - ``component_runs.jsonl`` — append-only log of ComponentRun records.
 
 The schema is defined in
 ``docs/ASAP_Ontology_v1/linkml/asap_runtime.yaml``

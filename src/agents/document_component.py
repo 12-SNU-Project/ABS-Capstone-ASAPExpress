@@ -1,5 +1,5 @@
 """
-Document_Agent — candidate TARIC10 branch(es) → 5-section document package,
+Document_Component — candidate TARIC10 branch(es) → 5-section document package,
 regulatory domain, and backtracking signals.
 
 Owned tools:
@@ -29,12 +29,12 @@ LLM 호출 없음 — current MVP. CELEX 본문 해석/카드 생성 LLM 통합�
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any
 
-from agents.agent_base import BaseAgent
+from agents.component_base import BasePipelineComponent
 from agents.document_package import get_document_package
-from agents.tools.domain_router import DomainRouterTool
+from agents.tools.domain_router import DomainRouteResult, DomainRouterTool
 from agents.blackboard import BlackboardStore, now_iso
+from bussiness_logic.utils.json_types import JsonObject
 
 
 # ---------------------------------------------------------------------------
@@ -90,15 +90,15 @@ def _cert_kind(code: str) -> str:
     return "other"
 
 
-def _compact_text(value: Any) -> str:
+def _compact_text(value: object) -> str:
     return str(value or "").strip()
 
 
 # ---------------------------------------------------------------------------
-# Document_Agent
+# Document_Component
 # ---------------------------------------------------------------------------
-class DocumentAgent(BaseAgent):
-    agent_name = "Document_Agent"
+class DocumentComponent(BasePipelineComponent):
+    component_name = "Document_Component"
     stage = "Document_Recommendation"
     llm_model = None  # MVP: deterministic. CELEX 해석 LLM 후속.
 
@@ -112,9 +112,9 @@ class DocumentAgent(BaseAgent):
         pes = bb.get("product_evidence_state") or {}
         ccs_list = bb.get("candidate_code_sets") or []
         if not pes:
-            raise RuntimeError("Document_Agent requires a ProductEvidenceState.")
+            raise RuntimeError("Document_Component requires a ProductEvidenceState.")
         if not ccs_list:
-            self.reason("No CandidateCodeSet present; nothing to package.")
+            self.reason("No ClassificationCandidateSet present; nothing to package.")
             return
         latest = ccs_list[-1]
         self.read_input(latest["candidate_set_id"])
@@ -188,7 +188,7 @@ class DocumentAgent(BaseAgent):
                 dp = {
                     **self._public_raw_package_fields(raw),
                     "object_type": "DocumentPackage",
-                    "created_by": self.agent_name,
+                    "created_by": self.component_name,
                     "created_at": now_iso(),
                     "document_package_id": dp_id,
                     "candidate_id": cand["candidate_id"],
@@ -236,9 +236,9 @@ class DocumentAgent(BaseAgent):
                 )
 
     # ------------------------------------------------------------------ helpers
-    def _taric_targets_for_candidate(self, cand: dict) -> list[dict[str, Any]]:
+    def _taric_targets_for_candidate(self, cand: JsonObject) -> list[JsonObject]:
         branches = cand.get("taric10_branch_candidates") or []
-        targets: list[dict[str, Any]] = []
+        targets: list[JsonObject] = []
         seen: set[str] = set()
         if branches:
             for branch in branches:
@@ -267,14 +267,17 @@ class DocumentAgent(BaseAgent):
         return targets
 
     @staticmethod
-    def _public_raw_package_fields(raw: dict[str, Any]) -> dict[str, Any]:
+    def _public_raw_package_fields(raw: JsonObject) -> JsonObject:
         return {
             key: value
             for key, value in raw.items()
             if key not in {"object_type", "created_by", "created_at", "document_package_id", "candidate_id"}
         }
 
-    def _bucket_requirements(self, raw_requirements: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
+    def _bucket_requirements(
+        self,
+        raw_requirements: list[JsonObject],
+    ) -> tuple[list[JsonObject], list[JsonObject], list[JsonObject]]:
         customs, duties, preferential = [], [], []
         for req in raw_requirements:
             mt = req.get("measure_type") or ""
@@ -299,8 +302,8 @@ class DocumentAgent(BaseAgent):
                 customs.append(item)
         return customs, duties, preferential
 
-    def _extract_required_documents(self, raw_requirements: list[dict]) -> list[dict]:
-        seen: dict[str, dict] = {}
+    def _extract_required_documents(self, raw_requirements: list[JsonObject]) -> list[JsonObject]:
+        seen: dict[str, JsonObject] = {}
         for req in raw_requirements:
             for c in req.get("certificates") or []:
                 code = (c.get("code") or "").strip()
@@ -321,8 +324,8 @@ class DocumentAgent(BaseAgent):
                 }
         return list(seen.values())
 
-    def _build_product_regulations(self, dom) -> list[dict]:
-        out: list[dict] = []
+    def _build_product_regulations(self, dom: DomainRouteResult) -> list[JsonObject]:
+        out: list[JsonObject] = []
         # Map each domain to its rule family + scope (rough MVP — real CELEX
         # binding 후속 step 에서).
         family_map = {
@@ -348,8 +351,8 @@ class DocumentAgent(BaseAgent):
             })
         return out
 
-    def _collect_celex(self, raw_requirements: list[dict]) -> list[dict]:
-        seen: dict[str, dict] = {}
+    def _collect_celex(self, raw_requirements: list[JsonObject]) -> list[JsonObject]:
+        seen: dict[str, JsonObject] = {}
         for req in raw_requirements:
             celex = req.get("celex") or {}
             if not isinstance(celex, dict):
@@ -364,8 +367,8 @@ class DocumentAgent(BaseAgent):
                 }
         return list(seen.values())
 
-    def _suggest_external(self, dom) -> list[dict]:
-        out: list[dict] = []
+    def _suggest_external(self, dom: DomainRouteResult) -> list[JsonObject]:
+        out: list[JsonObject] = []
         if "food" in dom.domains:
             out.append({"name": "EU TRACES system", "url": "https://traces.ec.europa.eu/"})
         if "animal_origin" in dom.domains:
@@ -379,7 +382,7 @@ class DocumentAgent(BaseAgent):
                         "url": "https://speciesplus.net/"})
         return out
 
-    def _pick_basic_duty(self, duties: list[dict], raw: dict) -> dict:
+    def _pick_basic_duty(self, duties: list[JsonObject], raw: JsonObject) -> JsonObject:
         # Prefer 'Third country duty' as the canonical basic_duty.
         for d in duties:
             if "Third country duty" in (d.get("measure_type") or ""):
@@ -399,8 +402,13 @@ class DocumentAgent(BaseAgent):
             }
         return {}
 
-    def _backtracking_signals(self, cand: dict, raw: dict, dom) -> list[dict]:
-        signals: list[dict] = []
+    def _backtracking_signals(
+        self,
+        cand: JsonObject,
+        raw: JsonObject,
+        dom: DomainRouteResult,
+    ) -> list[JsonObject]:
+        signals: list[JsonObject] = []
         # 1. No measure rows → 분류 잘못 가능
         if not raw.get("has_data"):
             signals.append({
@@ -427,7 +435,7 @@ class DocumentAgent(BaseAgent):
     def _emit_unresolved_package(
         self,
         store: BlackboardStore,
-        cand: dict,
+        cand: JsonObject,
         *,
         reason: str = "candidate_unresolved",
     ) -> None:
@@ -436,7 +444,7 @@ class DocumentAgent(BaseAgent):
         dp_id = store.next_id("dp")
         store.append("document_packages", {
             "object_type": "DocumentPackage",
-            "created_by": self.agent_name,
+            "created_by": self.component_name,
             "created_at": now_iso(),
             "document_package_id": dp_id,
             "candidate_id": cand["candidate_id"],

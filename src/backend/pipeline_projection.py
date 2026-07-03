@@ -3,32 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.api_contract import CandidateCodeSetView, RunSnapshotResponse
-
-
-def _BuildOpenUserQuestions(
-    blackboard: Mapping[str, Any],
-    decision: Any,
-) -> list[dict[str, Any]]:
-    userQuestionIds = (
-        set(decision.get("user_questions") or [])
-        if isinstance(decision, Mapping)
-        else set()
-    )
-    return [
-        dict(question)
-        for question in blackboard.get("user_questions", [])
-        if isinstance(question, Mapping)
-        and question.get("status") == "open"
-        and (
-            not userQuestionIds
-            or question.get("question_id") in userQuestionIds
-        )
-    ]
+from backend.api_contract import ClassificationCandidateSetView, RunSnapshotResponse
+from bussiness_logic.utils.json_types import JsonMapping, JsonObject
 
 
 class PipelineRunResult(BaseModel):
@@ -38,33 +18,28 @@ class PipelineRunResult(BaseModel):
 
     runId: str = Field(alias="run_id")
     runDir: str = Field(default="", alias="run_dir")
-    auditRef: dict[str, Any] = Field(default_factory=dict, alias="audit_ref")
-    candidateCodeSet: Optional[CandidateCodeSetView] = Field(
+    auditRef: JsonObject = Field(default_factory=dict, alias="audit_ref")
+    candidateCodeSet: Optional[ClassificationCandidateSetView] = Field(
         default=None,
         alias="candidate_code_set",
     )
-    documentPackage: Optional[dict[str, Any]] = Field(
+    documentPackage: Optional[JsonObject] = Field(
         default=None,
         alias="document_package",
     )
-    decision: Optional[dict[str, Any]] = None
-    agentResults: list[dict[str, Any]] = Field(
+    decision: Optional[JsonObject] = None
+    componentResults: list[JsonObject] = Field(
         default_factory=list,
-        alias="agent_results",
-    )
-    userQuestions: list[dict[str, Any]] = Field(
-        default_factory=list,
-        alias="user_questions",
+        alias="component_results",
     )
 
     @classmethod
     def FromPipelineOutput(
         cls,
-        pipelineOutput: Mapping[str, Any],
+        pipelineOutput: JsonMapping,
     ) -> "PipelineRunResult":
         runId = str(pipelineOutput.get("run_id") or "")
         runDir = str(pipelineOutput.get("run_dir") or "")
-        blackboard = pipelineOutput.get("blackboard") or {}
         decision = pipelineOutput.get("decision")
         documentPackage = pipelineOutput.get("document_package")
         return cls(
@@ -74,7 +49,7 @@ class PipelineRunResult(BaseModel):
                 "run_id": runId,
                 "run_dir": runDir,
                 "blackboard_available": bool(pipelineOutput.get("blackboard")),
-                "agent_run_count": len(pipelineOutput.get("agent_runs") or []),
+                "component_run_count": len(pipelineOutput.get("component_runs") or []),
             },
             candidate_code_set=pipelineOutput.get("candidate_code_set"),
             document_package=(
@@ -83,17 +58,16 @@ class PipelineRunResult(BaseModel):
                 else documentPackage
             ),
             decision=decision,
-            agent_results=list(pipelineOutput.get("agent_results") or []),
-            user_questions=_BuildOpenUserQuestions(blackboard, decision),
+            component_results=list(pipelineOutput.get("component_results") or []),
         )
 
-    def ToUiDict(self) -> dict[str, Any]:
+    def ToUiDict(self) -> JsonObject:
         return self.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
 class DocumentPackageProjector:
     @staticmethod
-    def PublicDocumentPackage(documentPackage: Mapping[str, Any]) -> dict[str, Any]:
+    def PublicDocumentPackage(documentPackage: JsonMapping) -> JsonObject:
         return {
             key: value
             for key, value in documentPackage.items()
@@ -102,8 +76,8 @@ class DocumentPackageProjector:
 
     def PublicDocumentPackagesFromBlackboard(
         self,
-        blackboard: Mapping[str, Any],
-    ) -> list[dict[str, Any]]:
+        blackboard: JsonMapping,
+    ) -> list[JsonObject]:
         packages = blackboard.get("document_packages") or []
         if not isinstance(packages, list):
             return []
@@ -115,8 +89,8 @@ class DocumentPackageProjector:
 
     def ExtractDocumentPackages(
         self,
-        resultData: Mapping[str, Any],
-    ) -> list[dict[str, Any]]:
+        resultData: JsonMapping,
+    ) -> list[JsonObject]:
         packages = resultData.get("document_packages")
         if isinstance(packages, list):
             return [
@@ -131,7 +105,7 @@ class DocumentPackageProjector:
 
 
 class InputProcessingViewProjector:
-    def CompactInputFacts(self, rawInput: Mapping[str, Any]) -> dict[str, Any]:
+    def CompactInputFacts(self, rawInput: JsonMapping) -> JsonObject:
         compact = {
             key: value
             for key, value in rawInput.items()
@@ -139,8 +113,8 @@ class InputProcessingViewProjector:
             not in {
                 "ocr_text",
                 "ingredient_list",
-                "classification_input_fact_texts",
-                "classification_input_product_facts",
+                "reconstructed_fact_texts",
+                "reconstructed_product_facts",
                 "unresolved_product_facts",
                 "product_fact_conflicts",
                 "input_reconstruction",
@@ -149,7 +123,7 @@ class InputProcessingViewProjector:
         for textListKey in (
             "ocr_text",
             "ingredient_list",
-            "classification_input_fact_texts",
+            "reconstructed_fact_texts",
         ):
             if textListKey not in rawInput:
                 continue
@@ -159,13 +133,13 @@ class InputProcessingViewProjector:
                 compact[f"{textListKey}_char_count"] = sum(
                     len(str(item)) for item in textList
                 )
-                if textListKey == "classification_input_fact_texts":
+                if textListKey == "reconstructed_fact_texts":
                     compact[textListKey] = [
                         str(item)[:500] for item in textList[:24]
                     ]
 
         for recordListKey in (
-            "classification_input_product_facts",
+            "reconstructed_product_facts",
             "unresolved_product_facts",
             "product_fact_conflicts",
         ):
@@ -188,14 +162,14 @@ class InputProcessingViewProjector:
             )
             compact["reconstructed_fact_count"] = (
                 inputReconstruction.get("fact_count")
-                or len(inputReconstruction.get("classification_input_product_facts") or [])
+                or len(inputReconstruction.get("reconstructed_product_facts") or [])
             )
         return compact
 
     def BuildSnapshotInputProcessingView(
         self,
-        resultData: Mapping[str, Any],
-    ) -> dict[str, Any]:
+        resultData: JsonMapping,
+    ) -> JsonObject:
         existingView = resultData.get("input_processing_view")
         if isinstance(existingView, Mapping):
             return self._CompactInputProcessingView(existingView)
@@ -203,8 +177,8 @@ class InputProcessingViewProjector:
 
     def BuildInputProcessingViewFromBlackboard(
         self,
-        blackboard: Mapping[str, Any],
-    ) -> dict[str, Any]:
+        blackboard: JsonMapping,
+    ) -> JsonObject:
         productEvidenceState = blackboard.get("product_evidence_state") or {}
         if not isinstance(productEvidenceState, Mapping):
             return {}
@@ -215,8 +189,8 @@ class InputProcessingViewProjector:
 
     def BuildInputProcessingViewFromFacts(
         self,
-        facts: Mapping[str, Any],
-    ) -> dict[str, Any]:
+        facts: JsonMapping,
+    ) -> JsonObject:
         if not isinstance(facts, Mapping):
             return {}
 
@@ -242,15 +216,15 @@ class InputProcessingViewProjector:
             for key in (
                 "source_evidence_preview",
                 "reconstructed_tables",
-                "classification_input_product_facts",
-                "classification_input_fact_texts",
+                "reconstructed_product_facts",
+                "reconstructed_fact_texts",
             )
         )
         hasStructuredFacts = any(
             facts.get(key)
             for key in (
-                "classification_input_product_facts",
-                "classification_input_fact_texts",
+                "reconstructed_product_facts",
+                "reconstructed_fact_texts",
             )
         )
         if not (hasBasicInfo or hasReconstruction or hasStructuredFacts):
@@ -271,22 +245,22 @@ class InputProcessingViewProjector:
                 "reconstructed_tables",
                 [],
             ),
-            "classification_input_facts": (
-                inputReconstruction.get("classification_input_product_facts")
-                or facts.get("classification_input_product_facts")
+            "reconstructed_product_facts": (
+                inputReconstruction.get("reconstructed_product_facts")
+                or facts.get("reconstructed_product_facts")
                 or []
             ),
-            "classification_input_text_lines": (
-                inputReconstruction.get("classification_input_fact_texts")
-                or facts.get("classification_input_fact_texts")
+            "reconstructed_fact_texts": (
+                inputReconstruction.get("reconstructed_fact_texts")
+                or facts.get("reconstructed_fact_texts")
                 or []
             ),
-            "unresolved_input_facts": (
+            "unresolved_product_facts": (
                 inputReconstruction.get("unresolved_product_facts")
                 or facts.get("unresolved_product_facts")
                 or []
             ),
-            "input_fact_conflicts": (
+            "product_fact_conflicts": (
                 inputReconstruction.get("product_fact_conflicts")
                 or facts.get("product_fact_conflicts")
                 or []
@@ -305,11 +279,11 @@ class InputProcessingViewProjector:
                 ),
                 "classification_fact_count": (
                     inputReconstruction.get("fact_count")
-                    or len(inputReconstruction.get("classification_input_product_facts") or [])
+                    or len(inputReconstruction.get("reconstructed_product_facts") or [])
                 ),
                 "classification_text_line_count": (
                     inputReconstruction.get("fact_text_count")
-                    or len(inputReconstruction.get("classification_input_fact_texts") or [])
+                    or len(inputReconstruction.get("reconstructed_fact_texts") or [])
                 ),
             },
         }
@@ -317,8 +291,8 @@ class InputProcessingViewProjector:
 
     def BuildInputProcessingSummary(
         self,
-        blackboard: Mapping[str, Any],
-    ) -> dict[str, Any]:
+        blackboard: JsonMapping,
+    ) -> JsonObject:
         productEvidenceState = blackboard.get("product_evidence_state") or {}
         if not isinstance(productEvidenceState, Mapping):
             return {}
@@ -348,14 +322,14 @@ class InputProcessingViewProjector:
             )
             summary["reconstructed_fact_count"] = (
                 inputReconstruction.get("fact_count")
-                or len(inputReconstruction.get("classification_input_product_facts") or [])
+                or len(inputReconstruction.get("reconstructed_product_facts") or [])
             )
         return summary
 
     def _CompactInputProcessingView(
         self,
-        inputProcessingView: Mapping[str, Any],
-    ) -> dict[str, Any]:
+        inputProcessingView: JsonMapping,
+    ) -> JsonObject:
         basicInfo = inputProcessingView.get("page_product_facts") or {}
         if not isinstance(basicInfo, Mapping):
             basicInfo = {}
@@ -382,23 +356,23 @@ class InputProcessingViewProjector:
             "reconstructed_detail_tables": self._CompactReconstructedTables(
                 inputProcessingView.get("reconstructed_detail_tables"),
             ),
-            "classification_input_facts": self._CompactMappingList(
-                inputProcessingView.get("classification_input_facts"),
+            "reconstructed_product_facts": self._CompactMappingList(
+                inputProcessingView.get("reconstructed_product_facts"),
                 limit=80,
                 textLimit=700,
             ),
-            "classification_input_text_lines": self._CompactTextList(
-                inputProcessingView.get("classification_input_text_lines"),
+            "reconstructed_fact_texts": self._CompactTextList(
+                inputProcessingView.get("reconstructed_fact_texts"),
                 limit=80,
                 textLimit=700,
             ),
-            "unresolved_input_facts": self._CompactMappingList(
-                inputProcessingView.get("unresolved_input_facts"),
+            "unresolved_product_facts": self._CompactMappingList(
+                inputProcessingView.get("unresolved_product_facts"),
                 limit=40,
                 textLimit=700,
             ),
-            "input_fact_conflicts": self._CompactTextList(
-                inputProcessingView.get("input_fact_conflicts"),
+            "product_fact_conflicts": self._CompactTextList(
+                inputProcessingView.get("product_fact_conflicts"),
                 limit=20,
                 textLimit=700,
             ),
@@ -411,7 +385,7 @@ class InputProcessingViewProjector:
 
     def _CompactTextList(
         self,
-        records: Any,
+        records: object,
         *,
         limit: int,
         textLimit: int,
@@ -428,7 +402,7 @@ class InputProcessingViewProjector:
 
     def _CompactTextMapping(
         self,
-        records: Any,
+        records: object,
         *,
         textLimit: int,
     ) -> dict[str, str]:
@@ -441,11 +415,11 @@ class InputProcessingViewProjector:
 
     def _CompactMappingList(
         self,
-        records: Any,
+        records: object,
         *,
         limit: int,
         textLimit: int,
-    ) -> list[dict[str, Any]]:
+    ) -> list[JsonObject]:
         if not isinstance(records, list):
             return []
         return [
@@ -459,10 +433,10 @@ class InputProcessingViewProjector:
             if isinstance(record, Mapping)
         ]
 
-    def _CompactReconstructedTables(self, tables: Any) -> list[dict[str, Any]]:
+    def _CompactReconstructedTables(self, tables: object) -> list[JsonObject]:
         if not isinstance(tables, list):
             return []
-        compactTables: list[dict[str, Any]] = []
+        compactTables: list[JsonObject] = []
         for table in tables[:8]:
             if not isinstance(table, Mapping):
                 continue
@@ -492,13 +466,13 @@ class PipelineOutputProjector:
 
     def BuildPipelineResultProjection(
         self,
-        pipelineOutput: Mapping[str, Any],
-    ) -> dict[str, Any]:
+        pipelineOutput: JsonMapping,
+    ) -> JsonObject:
         result = PipelineRunResult.FromPipelineOutput(pipelineOutput).ToUiDict()
         result.update(self.CompactPipelineResult(pipelineOutput))
         return result
 
-    def CompactPipelineResult(self, pipelineResult: Mapping[str, Any]) -> dict[str, Any]:
+    def CompactPipelineResult(self, pipelineResult: JsonMapping) -> JsonObject:
         blackboard = pipelineResult.get("blackboard")
         compact = {
             key: value
@@ -506,7 +480,7 @@ class PipelineOutputProjector:
             if key
             not in {
                 "blackboard",
-                "agent_runs",
+                "component_runs",
                 "raw_document_package",
                 "events",
                 "facts",
@@ -525,12 +499,6 @@ class PipelineOutputProjector:
             )
             if inputProcessingView:
                 compact["input_processing_view"] = inputProcessingView
-            userQuestions = _BuildOpenUserQuestions(
-                blackboard,
-                compact.get("decision"),
-            )
-            if userQuestions:
-                compact["user_questions"] = userQuestions
         documentPackage = compact.get("document_package")
         if isinstance(documentPackage, Mapping):
             compact["document_package"] = (
@@ -555,9 +523,9 @@ class PipelineSnapshotProjector:
 
     def BuildUiResult(
         self,
-        snapshot: Mapping[str, Any],
+        snapshot: JsonMapping,
         runId: str,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         baseResult = snapshot.get("result") or snapshot.get("partial_result") or {}
         resultData = self._CompactSnapshotResult(baseResult)
         documentPackages = resultData.get("document_packages")
@@ -587,7 +555,7 @@ class PipelineSnapshotProjector:
             resultData["error"] = str(snapshot.get("error") or "")
         return RunSnapshotResponse.model_validate(resultData).ToDict()
 
-    def _CompactSnapshotResult(self, result: Any) -> dict[str, Any]:
+    def _CompactSnapshotResult(self, result: object) -> JsonObject:
         if not isinstance(result, Mapping):
             return {}
         allowedKeys = {
@@ -598,8 +566,7 @@ class PipelineSnapshotProjector:
             "document_package",
             "document_packages",
             "decision",
-            "agent_results",
-            "user_questions",
+            "component_results",
             "input_processing_summary",
             "input_processing_view",
         }
@@ -609,7 +576,7 @@ class PipelineSnapshotProjector:
             if key in allowedKeys
         }
 
-    def _BuildRequestView(self, snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    def _BuildRequestView(self, snapshot: JsonMapping) -> JsonObject:
         facts = snapshot.get("facts")
         return {
             "query": str(snapshot.get("query") or ""),
@@ -626,7 +593,7 @@ class PipelineEventProjector:
         self._inputProcessingProjector = inputProcessingProjector
         self._outputProjector = outputProjector
 
-    def CompactEvent(self, event: Mapping[str, Any]) -> dict[str, Any]:
+    def CompactEvent(self, event: JsonMapping) -> JsonObject:
         eventData = dict(event)
         rawInput = eventData.pop("raw_input", None)
         inputProcessingView = (
@@ -673,28 +640,28 @@ class PipelineResultProjector:
 
     def BuildUiResult(
         self,
-        snapshot: Mapping[str, Any],
+        snapshot: JsonMapping,
         runId: str,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         return self._snapshotProjector.BuildUiResult(snapshot, runId)
 
     def BuildPipelineResultProjection(
         self,
-        pipelineOutput: Mapping[str, Any],
-    ) -> dict[str, Any]:
+        pipelineOutput: JsonMapping,
+    ) -> JsonObject:
         return self._outputProjector.BuildPipelineResultProjection(pipelineOutput)
 
-    def CompactEvent(self, event: Mapping[str, Any]) -> dict[str, Any]:
+    def CompactEvent(self, event: JsonMapping) -> JsonObject:
         return self._eventProjector.CompactEvent(event)
 
-    def CompactInputFacts(self, rawInput: Mapping[str, Any]) -> dict[str, Any]:
+    def CompactInputFacts(self, rawInput: JsonMapping) -> JsonObject:
         return self._inputProcessingProjector.CompactInputFacts(rawInput)
 
-    def PublicDocumentPackage(self, documentPackage: Mapping[str, Any]) -> dict[str, Any]:
+    def PublicDocumentPackage(self, documentPackage: JsonMapping) -> JsonObject:
         return self._documentPackageProjector.PublicDocumentPackage(documentPackage)
 
     def ExtractDocumentPackages(
         self,
-        resultData: Mapping[str, Any],
-    ) -> list[dict[str, Any]]:
+        resultData: JsonMapping,
+    ) -> list[JsonObject]:
         return self._documentPackageProjector.ExtractDocumentPackages(resultData)

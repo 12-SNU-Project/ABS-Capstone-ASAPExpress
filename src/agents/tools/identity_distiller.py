@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import re
 
-from agents.pipeline_dto import (
-    DistilledIdentityFacts,
-    EncyclopediaEvidenceSet,
-)
+from agents.pipeline_dto import EncyclopediaEvidenceSet, IdentityHintSet
 
 
 TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣]+")
@@ -20,17 +17,17 @@ COSMETIC_PATTERN = re.compile(r"화장품|크림|로션|샴푸|cosmetic|cream|lo
 PROCESSED_PATTERN = re.compile(r"볶음|구이|조리|가공|양념|fried|cooked|prepared|seasoned", re.I)
 
 
-class IdentityDistillerTool:
-    def Distill(
+class IdentityHintService:
+    def BuildHints(
         self,
         *,
-        distilledIdentityId: str,
+        identityHintId: str,
         productId: str,
         productName: str,
         shortDescription: str,
         classificationText: str,
         encyclopediaEvidence: EncyclopediaEvidenceSet,
-    ) -> DistilledIdentityFacts:
+    ) -> IdentityHintSet:
         text = "\n".join(
             [
                 productName,
@@ -57,8 +54,8 @@ class IdentityDistillerTool:
             for term in (ingredientClass, foodForm, processingState)
             if term and term != "unknown"
         )
-        return DistilledIdentityFacts(
-            distilledIdentityId=distilledIdentityId,
+        return IdentityHintSet(
+            identityHintId=identityHintId,
             productId=productId,
             commercialIdentity=productName or shortDescription,
             ingredientClass=ingredientClass,

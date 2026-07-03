@@ -15,7 +15,7 @@ from bussiness_logic.product.ocr.ocr_fallback import (
     ProductOcrImageResult,
 )
 from bussiness_logic.product.ocr.ocr_normalization import ProductOcrFactNormalizationResult
-from bussiness_logic.input_process.reconstruction import ProductFactReconstructionResult
+from bussiness_logic.input_process.reconstruction import ProductReconstructionResult
 
 
 class KurlyPipelineInput(BaseModel):
@@ -63,8 +63,8 @@ class KurlyPipelineResult(BaseModel):
         default_factory=ProductOcrFactNormalizationResult,
         alias="ocr_normalization",
     )
-    inputReconstructionResult: ProductFactReconstructionResult = Field(
-        default_factory=ProductFactReconstructionResult,
+    inputReconstructionResult: ProductReconstructionResult = Field(
+        default_factory=ProductReconstructionResult,
         alias="input_reconstruction",
     )
     steps: List[PipelineStep] = Field(default_factory=list)
@@ -164,13 +164,13 @@ class KurlyPipelineResult(BaseModel):
                 "unresolved_count": len(unresolvedFacts),
                 "conflict_count": len(reconstructionData.get("conflicts", [])),
                 "fact_text_count": len(classificationFactTexts),
-                "classification_input_product_facts": productFacts,
+                "reconstructed_product_facts": productFacts,
                 "reconstructed_tables": reconstructedTables,
                 "unresolved_product_facts": unresolvedFacts,
                 "product_fact_conflicts": list(
                     reconstructionData.get("conflicts", [])
                 ),
-                "classification_input_fact_texts": classificationFactTexts,
+                "reconstructed_fact_texts": classificationFactTexts,
                 "source_ref_labels": dict(
                     reconstructionData.get("source_ref_labels", {})
                 ),
@@ -178,9 +178,6 @@ class KurlyPipelineResult(BaseModel):
                     reconstructionData.get("source_evidence_preview", [])
                 ),
                 "warnings": list(reconstructionData.get("warnings", [])),
-                "debug_artifact_count": len(
-                    self.inputReconstructionResult.debugArtifacts
-                ),
             },
             "pipeline_steps": [
                 step.model_dump(mode="json", by_alias=True)

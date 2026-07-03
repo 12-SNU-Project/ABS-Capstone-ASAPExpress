@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from agents.agent_base import BaseAgent
+from agents.component_base import BasePipelineComponent
 from agents.blackboard import BlackboardStore, now_iso
-from agents.pipeline_dto import JsonValue, RoutingContext
+from agents.pipeline_dto import JsonValue, Hs2RoutingDecision
 from agents.tools.chapter_index_repository import LoadPreClassificationChapterRows
 from agents.tools.pre_classification_router import (
     BuildPreClassificationRouteInput,
@@ -12,8 +12,8 @@ from agents.tools.pre_classification_router import (
 )
 
 
-class DomainRouterAgent(BaseAgent):
-    agent_name = "Domain_Router_Agent"
+class Hs2RoutingComponent(BasePipelineComponent):
+    component_name = "HS2_Routing_Component"
     stage = "Regulatory_Domain_Routing"
     llm_model = None
 
@@ -21,18 +21,18 @@ class DomainRouterAgent(BaseAgent):
         bb = store.load()
         productUnderstanding = bb.get("product_understanding") or {}
         if not isinstance(productUnderstanding, dict):
-            raise RuntimeError("No ProductUnderstandingFacts on the Blackboard.")
+            raise RuntimeError("No ProductUnderstandingPackage on the Blackboard.")
         understandingId = str(productUnderstanding.get("understanding_id") or "")
         productId = str(productUnderstanding.get("product_id") or "")
         self.read_input(understandingId)
 
         factTexts = self._StringTuple(
-            productUnderstanding.get("classification_input_fact_texts") or [],
+            productUnderstanding.get("reconstructed_fact_texts") or [],
         )
         routingTerms = self._StringTuple(
             productUnderstanding.get("routing_terms") or [],
         )
-        identityLane = productUnderstanding.get("identity_lane") or {}
+        identityLane = productUnderstanding.get("identity_hints") or {}
         if not isinstance(identityLane, dict):
             identityLane = {}
         chapterHints = self._StringTuple(
@@ -41,7 +41,7 @@ class DomainRouterAgent(BaseAgent):
         chapterHintSources = self._StringTuple(
             identityLane.get("chapter_hint_source_terms") or [],
         )
-        productFacts = productUnderstanding.get("classification_input_product_facts")
+        productFacts = productUnderstanding.get("reconstructed_product_facts")
         structuredFacts = self._FactDictList(productFacts)
         routeInput = BuildPreClassificationRouteInput(
             productName=str(productUnderstanding.get("product_name") or ""),
@@ -52,14 +52,14 @@ class DomainRouterAgent(BaseAgent):
         routeHint = PreClassificationDomainRouter(
             chapterRowsProvider=LoadPreClassificationChapterRows,
         ).Route(routeInput)
-        routingContextId = store.next_id("route")
-        routingContext = RoutingContext(
-            routingContextId=routingContextId,
+        routingDecisionId = store.next_id("route")
+        routingContext = Hs2RoutingDecision(
+            routingDecisionId=routingDecisionId,
             productId=productId,
             sourceUnderstandingId=understandingId,
-            candidateHs2=routeHint.candidateHs2,
+            allowedHs2=routeHint.candidateHs2,
             blockedHs2=routeHint.blockedHs2,
-            strictRoute=bool(routeHint.candidateHs2),
+            enforceHs2Boundary=bool(routeHint.candidateHs2),
             fallbackAllowed=True,
             domainScopes=routeHint.domainScopes,
             preGateDomains=routeHint.preGateDomains,
@@ -69,14 +69,14 @@ class DomainRouterAgent(BaseAgent):
         store.put(
             "routing_context",
             routingContext.ToBlackboard(
-                createdBy=self.agent_name,
+                createdBy=self.component_name,
                 createdAt=now_iso(),
             ),
         )
-        self.wrote(routingContextId)
+        self.wrote(routingDecisionId)
         self.reason(
-            "RoutingContext 생성: "
-            f"candidate_hs2={list(routeHint.candidateHs2)}, "
+            "Hs2RoutingDecision 생성: "
+            f"allowed_hs2={list(routeHint.candidateHs2)}, "
             f"fallback_allowed={routingContext.fallbackAllowed}."
         )
 

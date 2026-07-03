@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
-
 from dash import dcc, html
 
+from bussiness_logic.utils.json_types import JsonObject
 from frontend.ui.document_package_renderer import (
     CleanCode,
     RenderDocumentPackageResult,
@@ -11,9 +10,9 @@ from frontend.ui.document_package_renderer import (
 
 
 def _contract_package_for_detail(
-    documentPackage: dict[str, Any] | None,
+    documentPackage: JsonObject | None,
     taric10: str,
-) -> dict[str, Any]:
+) -> JsonObject:
     if not isinstance(documentPackage, dict):
         return {}
     requestedCode = CleanCode(taric10)
@@ -50,7 +49,7 @@ def render_detail_page(
     taric10: str,
     panel: str = "overview",
     *,
-    documentPackage: dict[str, Any] | None = None,
+    documentPackage: JsonObject | None = None,
 ) -> html.Div:
     package = _contract_package_for_detail(documentPackage, taric10)
     if not package:

@@ -1,6 +1,6 @@
 """KurlyMarket product page collection via Playwright."""
 
-from typing import Any, List, Optional, Protocol
+from typing import List, Optional, Protocol
 from urllib.parse import urljoin, urlparse
 
 from bussiness_logic.product.web_parser.kurly_market_schema import (
@@ -206,13 +206,13 @@ class KurlyPageCollector:
         return KurlyPageAdapter()
 
 
-    def _BlockUnnecessaryResource(self, route: Any) -> None:
+    def _BlockUnnecessaryResource(self, route: object) -> None:
         if route.request.resource_type in ("media", "font"):
             route.abort()
             return
         route.continue_()
 
-    def _ScrollUntilProductNoticeLoaded(self, page: Any) -> None:
+    def _ScrollUntilProductNoticeLoaded(self, page: object) -> None:
         prepareRenderedPage = getattr(self._parser, "PrepareRenderedPage", None)
         if callable(prepareRenderedPage):
             if prepareRenderedPage(
@@ -241,7 +241,7 @@ class KurlyPageCollector:
             if self._scrollWaitMilliseconds > 0:
                 page.wait_for_timeout(self._scrollWaitMilliseconds)
 
-    def _ReadVisibleText(self, page: Any) -> str:
+    def _ReadVisibleText(self, page: object) -> str:
         try:
             value = page.locator("body").inner_text(
                 timeout=self._timeoutMilliseconds,
@@ -253,7 +253,7 @@ class KurlyPageCollector:
             return ""
         return value
 
-    def _ReadProductSummaryEvidence(self, page: Any) -> ProductSummaryEvidence:
+    def _ReadProductSummaryEvidence(self, page: object) -> ProductSummaryEvidence:
         readProductSummaryEvidence = getattr(
             self._parser,
             "ReadProductSummaryEvidence",
@@ -384,7 +384,7 @@ class KurlyPageCollector:
             return parsedProductPage
         return parsedProductPage.model_copy(update=updates)
 
-    def _ReadProductNoticeText(self, page: Any) -> str:
+    def _ReadProductNoticeText(self, page: object) -> str:
         readProductNoticeText = getattr(self._parser, "ReadProductNoticeText", None)
         if callable(readProductNoticeText):
             value = readProductNoticeText(page)
@@ -503,7 +503,7 @@ class KurlyPageCollector:
             return ""
         return value
 
-    def _ReadProductDetailImageUrls(self, page: Any) -> List[str]:
+    def _ReadProductDetailImageUrls(self, page: object) -> List[str]:
         values = page.evaluate(
             """
             () => {

@@ -1,11 +1,11 @@
 """외부 dict payload 검증에 사용하는 작은 helper 함수."""
 
-from typing import Any, Dict, List, Set, Annotated
+from typing import Dict, List, Set, Annotated
 
 
 
 def ReadRequiredString(
-    data: Dict[str, Any],
+    data: Dict[str, object],
     fieldName: str,
     errors: List[str],
 ) -> str:
@@ -17,7 +17,7 @@ def ReadRequiredString(
     return value.strip()
 
 def ReadRequiredBool(
-    data: Dict[str, Any],
+    data: Dict[str, object],
     fieldName: str,
     errors: List[str],
 ) -> bool:
@@ -30,7 +30,7 @@ def ReadRequiredBool(
 
 
 def ReadStringList(
-    data: Dict[str, Any],
+    data: Dict[str, object],
     fieldName: str,
     errors: List[str],
 ) -> List[str]:
@@ -53,7 +53,7 @@ def ReadStringList(
 
 
 def ReadOptionalStringList(
-    data: Dict[str, Any],
+    data: Dict[str, object],
     fieldName: str,
     errors: List[str],
 ) -> List[str]:
@@ -64,7 +64,7 @@ def ReadOptionalStringList(
 
 
 def ReadNumberInRange(
-    data: Dict[str, Any],
+    data: Dict[str, object],
     fieldName: str,
     minValue: float,
     maxValue: float,

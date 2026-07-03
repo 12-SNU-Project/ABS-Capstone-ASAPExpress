@@ -5,7 +5,7 @@ Baseline-styled, additive path:
   - constrained JSON-completion by Chapter-boundary vocabulary
 
 The combiner never emits HS/CN codes or direct routing decisions; it only enriches
-current ``DistilledIdentityFacts`` fields and routing hint terms.
+current ``IdentityHintSet`` fields and routing hint terms.
 """
 
 from __future__ import annotations
@@ -207,7 +207,7 @@ def BuildIdentityFactsFromLlm(
 ) -> dict[str, object]:
     """Combine evidence into identity fields via one LLM call.
 
-    Returns a dict keyed by ``DistilledIdentityFacts`` fields plus
+    Returns a dict keyed by ``IdentityHintSet`` fields plus
     understanding mode + error fields. On failure returns a best-effort failure
     payload; caller overlays regex identity.
     """

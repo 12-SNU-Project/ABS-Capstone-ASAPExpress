@@ -1,7 +1,7 @@
 """OCR 입력 이미지의 고해상도 타일 분할 helper."""
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -26,7 +26,7 @@ class ProductOcrImageTilePlan:
     tiles: List[ProductOcrImageTile] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
-    def AsTuples(self) -> List[Tuple[Optional[int], Any]]:
+    def AsTuples(self) -> List[Tuple[Optional[int], object]]:
         return [(tile.tileIndex, tile.image) for tile in self.tiles]
 
 
@@ -53,10 +53,10 @@ class ProductOcrImageTilePlanner:
         self._tileOverlapPixels = min(max(0, tileOverlapPixels), maximumOverlapPixels)
         self._allowHardCutFallback = allowHardCutFallback
 
-    def BuildTiles(self, image: Any) -> List[Tuple[Optional[int], Any]]:
+    def BuildTiles(self, image: object) -> List[Tuple[Optional[int], object]]:
         return self.BuildTilePlan(image).AsTuples()
 
-    def BuildTilePlan(self, image: Any) -> ProductOcrImageTilePlan:
+    def BuildTilePlan(self, image: object) -> ProductOcrImageTilePlan:
         if not self._useImageTiling:
             return ProductOcrImageTilePlan(
                 tiles=[ProductOcrImageTile(tileIndex=None, image=image)],
@@ -406,15 +406,15 @@ class ProductOcrImageTilePlanner:
         tileStart = max(0, tileEnd - maxTileSize)
         return tileStart, tileEnd
 
-    def _FindHorizontalLowActivityBands(self, image: Any) -> List[Tuple[int, int]]:
+    def _FindHorizontalLowActivityBands(self, image: object) -> List[Tuple[int, int]]:
         return self._FindLowActivityBands(image=image, axis=1)
 
-    def _FindVerticalLowActivityBands(self, image: Any) -> List[Tuple[int, int]]:
+    def _FindVerticalLowActivityBands(self, image: object) -> List[Tuple[int, int]]:
         return self._FindLowActivityBands(image=image, axis=0)
 
     def _FindLowActivityBands(
         self,
-        image: Any,
+        image: object,
         axis: int,
     ) -> List[Tuple[int, int]]:
         densityProfiles = self._BuildDensityProfiles(image=image, axis=axis)
@@ -445,9 +445,9 @@ class ProductOcrImageTilePlanner:
 
     def _BuildDensityProfiles(
         self,
-        image: Any,
+        image: object,
         axis: int,
-    ) -> Optional[Tuple[Any, Any]]:
+    ) -> Optional[Tuple[object, object]]:
         try:
             import cv2
             import numpy as np
@@ -562,11 +562,11 @@ class ProductOcrImageTilePlanner:
     ) -> int:
         return min(max(targetCut, bandStart), bandEnd)
 
-    def _SliceImage(self, image: Any, axisName: str, start: int, end: int) -> Any:
+    def _SliceImage(self, image: object, axisName: str, start: int, end: int) -> object:
         if axisName == "height":
             return image[start:end, :]
         return image[:, start:end]
 
-    def _ReadImageSize(self, image: Any) -> Tuple[int, int]:
+    def _ReadImageSize(self, image: object) -> Tuple[int, int]:
         imageShape = getattr(image, "shape", [0, 0])
         return int(imageShape[0] or 0), int(imageShape[1] or 0)

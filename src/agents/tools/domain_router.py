@@ -1,7 +1,7 @@
 """
 DomainRouterTool — 제품 → regulatory domain.
 
-Owned by Document_Agent. Hybrid design:
+Owned by Document_Component. Hybrid design:
 
   1) Deterministic fast-path  ← THIS STEP
      - chapter → 1-2 도메인 매핑 테이블
@@ -10,7 +10,7 @@ Owned by Document_Agent. Hybrid design:
 
   2) LLM fallback (낙지볶음 같은 ambiguous case)
      - 추후 step 에서 wire (bridge.RuntimeAdapter 재사용)
-     - 현재는 ambiguous 표시만 반환 → Document_Agent 가 backtracking_signal 발행
+     - 현재는 ambiguous 표시만 반환 → Document_Component 가 backtracking_signal 발행
 
 도메인 vocabulary (asap_evidence.yaml 의 RegulatoryDomain enum 과 일치):
   food / cosmetics / animal_origin / cites / hazardous /

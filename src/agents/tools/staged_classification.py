@@ -10,48 +10,57 @@ Baseline building blocks (no dependency on the removed ``llm_classifier``):
   - LLM stage-select   : ``_external_classifier.build_runtime_adapter`` +
                          ``bussiness_logic.bridge.schema.LlmRequest`` (RuntimeAdapter.Generate)
 
-Reads baseline ProductUnderstandingFacts / RoutingContext shaped blackboard dicts. Returns compact
-per-stage payloads so ``classification_stage_results`` on the blackboard can
-explain why HS4/HS6/CN8 were chosen. Degrades gracefully (never raises).
+Reads ProductUnderstandingPackage / Hs2RoutingDecision blackboard dicts.
+Degrades gracefully (never raises).
 """
 from __future__ import annotations
 
 import json
 import os
 import re
-from typing import Any
+from typing import Protocol
 from sqlalchemy import bindparam, text
 
 from agents.tools.db_session_manager import DbSessionManager
+from bussiness_logic.utils.json_types import JsonObject
 
-# AXIS_MAP — decision axis -> baseline ProductUnderstandingFacts field paths.
-# Reads the embedded 2-lane: identity_lane (DistilledIdentityFacts.ToTrace) +
-# composition_lane (CompositionLaneFacts.ToTrace). No separate composition_facts object under B.
+
+class _LlmResponse(Protocol):
+    generatedText: str
+
+
+class _RuntimeAdapter(Protocol):
+    def Generate(self, request: object) -> _LlmResponse:
+        """Generate a model response for a bridge request."""
+
+# AXIS_MAP — decision axis -> baseline ProductUnderstandingPackage field paths.
+# Reads the embedded 2-lane: identity_hints (IdentityHintSet.ToTrace) +
+# composition_facts (CompositionFactSet.ToTrace). No separate composition_facts object under B.
 CLASSIFICATION_AXIS_MAP: dict[str, list[str]] = {
     "ingredient_taxonomy": [
-        "identity_lane.ingredient_class",
-        "identity_lane.normalized_tariff_description",
-        "identity_lane.identity_terms",
-        "composition_lane.principal_ingredient",
-        "composition_lane.ingredient_classes",
+        "identity_hints.ingredient_class",
+        "identity_hints.normalized_tariff_description",
+        "identity_hints.identity_terms",
+        "composition_facts.principal_ingredient",
+        "composition_facts.ingredient_classes",
     ],
     "product_form": [
-        "identity_lane.food_form",
-        "identity_lane.commercial_identity",
-        "identity_lane.identity_terms",
+        "identity_hints.food_form",
+        "identity_hints.commercial_identity",
+        "identity_hints.identity_terms",
     ],
     "processing_state": [
-        "identity_lane.processing_state",
-        "identity_lane.processing_terms",
-        "composition_lane.processing_state",
-        "composition_lane.processing_terms",
-        "composition_lane.contains_wrapper_or_dough",
-        "composition_lane.contains_sauce_or_broth",
+        "identity_hints.processing_state",
+        "identity_hints.processing_terms",
+        "composition_facts.processing_state",
+        "composition_facts.processing_terms",
+        "composition_facts.contains_wrapper_or_dough",
+        "composition_facts.contains_sauce_or_broth",
     ],
     "composition_percentage": [
-        "identity_lane.composition_terms",
-        "composition_lane.composition_terms",
-        "composition_lane.ingredient_percentages",
+        "identity_hints.composition_terms",
+        "composition_facts.composition_terms",
+        "composition_facts.ingredient_percentages",
     ],
 }
 # Which axes matter at each level (identity high, composition low).
@@ -75,15 +84,15 @@ LEVELS = (("hs4", 4), ("hs6", 6), ("cn8", 8))
 _TOKEN = re.compile(r"[a-z0-9]+")
 
 
-def _digits(value: Any, *, limit: int = 8) -> str:
+def _digits(value: object, *, limit: int = 8) -> str:
     return re.sub(r"\D", "", str(value or ""))[:limit]
 
 
-def _tokens(text: str) -> set[str]:
+def _tokens(text: object) -> set[str]:
     return set(_TOKEN.findall(str(text or "").lower()))
 
 
-def _extract_json(text: str) -> dict[str, Any]:
+def _extract_json(text: str) -> JsonObject:
     raw = str(text or "").strip()
     if "```" in raw:  # strip ```json ... ``` fences
         raw = re.sub(r"^```[a-zA-Z]*", "", raw).strip().rstrip("`").strip()
@@ -96,7 +105,7 @@ def _extract_json(text: str) -> dict[str, Any]:
     return {}
 
 
-def _dig(obj: Any, path: str) -> Any:
+def _dig(obj: object, path: str) -> object | None:
     cur = obj
     for key in path.split("."):
         if isinstance(cur, dict):
@@ -106,7 +115,7 @@ def _dig(obj: Any, path: str) -> Any:
     return cur
 
 
-def _string_values(value: Any) -> list[str]:
+def _string_values(value: object) -> list[str]:
     if value is None:
         return []
     if isinstance(value, bool):
@@ -132,7 +141,7 @@ def _string_values(value: Any) -> list[str]:
 # ---- quantitative %-gate (deterministic; never guesses percentages) ----------
 # EU CN uses stable threshold phrasings, e.g. "content exceeding 20 % by weight",
 # "not exceeding 30 %", "20 % or more by weight of". We parse the node text and
-# compare against the product's composition_lane.ingredient_percentages.
+# compare against the product's composition_facts.ingredient_percentages.
 _PCT_BEFORE = re.compile(
     r"(?P<op>not exceeding|exceeding|more than|less than|at least)\s*(?P<val>\d+(?:\.\d+)?)\s*%",
     re.I,
@@ -144,7 +153,7 @@ _LE_STRICT = {"less than"}
 _LE_EQ = {"not exceeding", "or less"}
 
 
-def _to_float(value: Any) -> float | None:
+def _to_float(value: object) -> float | None:
     try:
         return float(str(value).replace(",", ".").strip())
     except (TypeError, ValueError):
@@ -173,7 +182,7 @@ def _threshold_holds(op: str, pct: float, val: float) -> bool | None:
     return None
 
 
-def _quantitative_verdict(descr: str, percentages: list[Any]) -> dict[str, Any]:
+def _quantitative_verdict(descr: str, percentages: list[object]) -> JsonObject:
     if not percentages:
         return {"verdict": "neutral", "reason": "no_percentages"}
     thresholds = _parse_thresholds(descr)
@@ -207,7 +216,7 @@ class StagedClassificationTool:
     tool_name = "StagedClassificationTool"
 
     def __init__(self, *, keep_per_level: int = 3, rank_top_k: int = 8) -> None:
-        self._adapter = None
+        self._adapter: _RuntimeAdapter | None = None
         self.keep_per_level = keep_per_level
         self.rank_top_k = rank_top_k
 
@@ -215,18 +224,18 @@ class StagedClassificationTool:
     def classify(
         self,
         *,
-        product_facts: dict[str, Any],
-        routing_context: dict[str, Any],
+        product_facts: JsonObject,
+        routing_context: JsonObject,
         top_k: int = 8,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         facts = self._read_facts(product_facts)
-        percentages = _dig(product_facts, "composition_lane.ingredient_percentages")
+        percentages = _dig(product_facts, "composition_facts.ingredient_percentages")
         percentages = percentages if isinstance(percentages, list) else []
         parents = self._start_chapters(routing_context)
         if not parents:
             return {"ok": False, "error": "no_route_chapters", "candidates": [], "stages": []}
 
-        stages: list[dict[str, Any]] = []
+        stages: list[JsonObject] = []
         for level, prefix_len in LEVELS:
             children = self._load_children(parents, prefix_len)
             if not children:
@@ -249,7 +258,7 @@ class StagedClassificationTool:
         }
 
     # ---- facts / route ----------------------------------------------------
-    def _read_facts(self, product_facts: dict[str, Any]) -> dict[str, list[str]]:
+    def _read_facts(self, product_facts: JsonObject) -> dict[str, list[str]]:
         out: dict[str, list[str]] = {}
         for axis, paths in CLASSIFICATION_AXIS_MAP.items():
             vals: list[str] = []
@@ -258,13 +267,9 @@ class StagedClassificationTool:
             out[axis] = vals[:16]
         return out
 
-    def _start_chapters(self, routing_context: dict[str, Any]) -> list[str]:
+    def _start_chapters(self, routing_context: JsonObject) -> list[str]:
         chapters: list[str] = []
-        route_values = (
-            routing_context.get("candidate_hs2")
-            or routing_context.get("candidate_chapters")
-            or []
-        )
+        route_values = routing_context.get("allowed_hs2") or []
         for c in route_values[:5]:
             ch = _digits(c.get("chapter") if isinstance(c, dict) else c, limit=2)
             if len(ch) == 2 and ch not in chapters:
@@ -272,10 +277,10 @@ class StagedClassificationTool:
         return chapters
 
     # ---- cn_table children (deterministic, baseline DB) -------------------
-    def _load_children(self, parent_codes: list[str], prefix_len: int) -> list[dict[str, Any]]:
+    def _load_children(self, parent_codes: list[str], prefix_len: int) -> list[JsonObject]:
         parent_len = len(parent_codes[0]) if parent_codes else 0
         desc_col = {4: "heading_description", 6: "subheading_description", 8: "cn8_description"}[prefix_len]
-        rows: list[dict[str, Any]] = []
+        rows: list[JsonObject] = []
         if not parent_codes:
             return rows
 
@@ -313,10 +318,10 @@ class StagedClassificationTool:
         return rows
 
     # ---- final cn8 + trace ------------------------------------------------
-    def _final_candidates(self, cn8_prefixes: list[str], *, top_k: int) -> list[dict[str, Any]]:
+    def _final_candidates(self, cn8_prefixes: list[str], *, top_k: int) -> list[JsonObject]:
         if not cn8_prefixes:
             return []
-        out: list[dict[str, Any]] = []
+        out: list[JsonObject] = []
         try:
             manager = DbSessionManager.GetInstance()
             for row in manager.FetchRows(
@@ -341,11 +346,11 @@ class StagedClassificationTool:
     # ---- weighted lexical rank + quantitative gate ------------------------
     def _lexical_rank(
         self,
-        children: list[dict[str, Any]],
+        children: list[JsonObject],
         facts: dict[str, list[str]],
         level: str,
-        percentages: list[Any],
-    ) -> list[dict[str, Any]]:
+        percentages: list[object],
+    ) -> list[JsonObject]:
         weights = LEVEL_AXIS_WEIGHTS[level]
         axis_tokens: dict[str, set[str]] = {}
         for axis in LEVEL_AXES[level]:
@@ -375,13 +380,13 @@ class StagedClassificationTool:
         return scored
 
     # ---- LLM select (bridge) ---------------------------------------------
-    def _get_adapter(self):
+    def _get_adapter(self) -> _RuntimeAdapter:
         if self._adapter is None:
             from agents._external_classifier import build_runtime_adapter
             self._adapter = build_runtime_adapter()
         return self._adapter
 
-    def _llm_select(self, ranked: list[dict[str, Any]], facts: dict[str, list[str]], level: str) -> list[str]:
+    def _llm_select(self, ranked: list[JsonObject], facts: dict[str, list[str]], level: str) -> list[str]:
         if not ranked:
             return []
         from bussiness_logic.bridge.schema import LlmRequest, LlmGenerationOptions
@@ -413,7 +418,14 @@ class StagedClassificationTool:
         picked = [str(c) for c in (parsed.get("selected") or []) if str(c) in valid]
         return picked[: self.keep_per_level]
 
-    def _trace(self, level: str, ranked: list[dict[str, Any]], selected: list[str], facts: dict[str, list[str]], status: str) -> dict[str, Any]:
+    def _trace(
+        self,
+        level: str,
+        ranked: list[JsonObject],
+        selected: list[str],
+        facts: dict[str, list[str]],
+        status: str,
+    ) -> JsonObject:
         return {
             "stage": level,
             "status": status,

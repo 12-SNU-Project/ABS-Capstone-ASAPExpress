@@ -3,7 +3,7 @@
 import json
 import os
 from http.client import HTTPException
-from typing import Any, Dict, List
+from typing import Dict, List
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -192,8 +192,8 @@ def _BuildOpenAiChatPayload(
     runtimeConfig: LlmRuntimeConfig,
     request: LlmRequest,
     includeResponseFormat: bool,
-) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {
+) -> Dict[str, object]:
+    payload: Dict[str, object] = {
         "model": _ReadModelName(runtimeConfig),
         "messages": _BuildChatMessages(request),
         "stream": False,
@@ -221,8 +221,8 @@ def _BuildOpenAiChatPayload(
 def _BuildOllamaPayload(
     runtimeConfig: LlmRuntimeConfig,
     request: LlmRequest,
-) -> Dict[str, Any]:
-    options: Dict[str, Any] = {
+) -> Dict[str, object]:
+    options: Dict[str, object] = {
         "temperature": request.generationOptions.temperature,
     }
 
@@ -233,7 +233,7 @@ def _BuildOllamaPayload(
     if request.generationOptions.stopSequences:
         options["stop"] = list(request.generationOptions.stopSequences)
 
-    payload: Dict[str, Any] = {
+    payload: Dict[str, object] = {
         "model": _ReadModelName(runtimeConfig),
         "prompt": _BuildPlainPrompt(request),
         "stream": False,
@@ -283,10 +283,10 @@ def _BuildPlainPrompt(request: LlmRequest) -> str:
 
 def _PostJson(
     endpointUrl: str,
-    payload: Dict[str, Any],
+    payload: Dict[str, object],
     timeoutSeconds: int,
     headers: Dict[str, str],
-) -> Dict[str, Any]:
+) -> Dict[str, object]:
     request = Request(
         endpointUrl,
         data=json.dumps(payload).encode("utf-8"),
@@ -333,7 +333,7 @@ def _PostJson(
     return responseData
 
 
-def _ExtractOpenAiChatText(responseData: Dict[str, Any]) -> str:
+def _ExtractOpenAiChatText(responseData: Dict[str, object]) -> str:
     firstChoice = _ReadFirstOpenAiChoice(responseData)
     if firstChoice is None:
         return ""
@@ -351,7 +351,7 @@ def _ExtractOpenAiChatText(responseData: Dict[str, Any]) -> str:
     return ""
 
 
-def _ReadFirstOpenAiChoice(responseData: Dict[str, Any]) -> Dict[str, Any] | None:
+def _ReadFirstOpenAiChoice(responseData: Dict[str, object]) -> Dict[str, object] | None:
     choices = responseData.get("choices")
     if not isinstance(choices, list) or not choices:
         return None
@@ -364,7 +364,7 @@ def _ReadFirstOpenAiChoice(responseData: Dict[str, Any]) -> Dict[str, Any] | Non
 
 
 def _ExtractOpenAiProviderFinishReason(
-    responseData: Dict[str, Any],
+    responseData: Dict[str, object],
 ) -> str | None:
     firstChoice = _ReadFirstOpenAiChoice(responseData)
     if firstChoice is None:
@@ -378,7 +378,7 @@ def _ExtractOpenAiProviderFinishReason(
 
 
 def _ExtractOllamaProviderFinishReason(
-    responseData: Dict[str, Any],
+    responseData: Dict[str, object],
 ) -> str | None:
     finishReason = responseData.get("done_reason")
     if finishReason is not None:
@@ -409,7 +409,7 @@ def _NormalizeFinishReason(
     return LlmFinishReason.UNKNOWN
 
 
-def _ExtractOpenAiTokenUsage(responseData: Dict[str, Any]) -> LlmTokenUsage:
+def _ExtractOpenAiTokenUsage(responseData: Dict[str, object]) -> LlmTokenUsage:
     usage = responseData.get("usage")
     if not isinstance(usage, dict):
         return LlmTokenUsage()
@@ -421,7 +421,7 @@ def _ExtractOpenAiTokenUsage(responseData: Dict[str, Any]) -> LlmTokenUsage:
     )
 
 
-def _ExtractOllamaTokenUsage(responseData: Dict[str, Any]) -> LlmTokenUsage:
+def _ExtractOllamaTokenUsage(responseData: Dict[str, object]) -> LlmTokenUsage:
     inputTokens = _ReadOptionalInt(responseData, "prompt_eval_count")
     outputTokens = _ReadOptionalInt(responseData, "eval_count")
     totalTokens = None
@@ -435,7 +435,7 @@ def _ExtractOllamaTokenUsage(responseData: Dict[str, Any]) -> LlmTokenUsage:
     )
 
 
-def _ExtractResponseId(responseData: Dict[str, Any]) -> str | None:
+def _ExtractResponseId(responseData: Dict[str, object]) -> str | None:
     responseId = responseData.get("id")
     if isinstance(responseId, str) and responseId.strip() != "":
         return responseId
@@ -443,7 +443,7 @@ def _ExtractResponseId(responseData: Dict[str, Any]) -> str | None:
     return None
 
 
-def _ReadOptionalInt(data: Dict[str, Any], fieldName: str) -> int | None:
+def _ReadOptionalInt(data: Dict[str, object], fieldName: str) -> int | None:
     value = data.get(fieldName)
     if isinstance(value, bool):
         return None

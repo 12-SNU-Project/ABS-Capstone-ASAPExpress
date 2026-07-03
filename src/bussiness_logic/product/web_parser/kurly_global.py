@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import List, Optional
 from urllib.parse import urlparse
 
 from bussiness_logic.product.web_parser.kurly_parser import (
@@ -66,7 +66,7 @@ class KurlyGlobalPageParser(KurlyBasePageParser):
 
     def PrepareRenderedPage(
         self,
-        page: Any,
+        page: object,
         scrollCount: int,
         scrollWaitMilliseconds: int,
     ) -> bool:
@@ -76,7 +76,7 @@ class KurlyGlobalPageParser(KurlyBasePageParser):
         self._LimitedScroll(page, max(1, scrollCount // 2), scrollWaitMilliseconds)
         return True
 
-    def ReadProductSummaryEvidence(self, page: Any) -> ProductSummaryEvidence:
+    def ReadProductSummaryEvidence(self, page: object) -> ProductSummaryEvidence:
         try:
             value = page.evaluate(
                 """
@@ -107,7 +107,7 @@ class KurlyGlobalPageParser(KurlyBasePageParser):
             return ProductSummaryEvidence()
         return ProductSummaryEvidence.model_validate(value)
 
-    def ReadProductNoticeText(self, page: Any) -> str:
+    def ReadProductNoticeText(self, page: object) -> str:
         tableText = self._ReadProductInfoTableText(page)
         if tableText:
             return tableText
@@ -149,7 +149,7 @@ class KurlyGlobalPageParser(KurlyBasePageParser):
         )
 
     @staticmethod
-    def _ClickProductTab(page: Any, tabName: str) -> None:
+    def _ClickProductTab(page: object, tabName: str) -> None:
         try:
             page.get_by_text(tabName, exact=True).first.click(timeout=3000)
             page.wait_for_timeout(400)
@@ -158,7 +158,7 @@ class KurlyGlobalPageParser(KurlyBasePageParser):
 
     @staticmethod
     def _LimitedScroll(
-        page: Any,
+        page: object,
         scrollCount: int,
         scrollWaitMilliseconds: int,
     ) -> None:
@@ -170,7 +170,7 @@ class KurlyGlobalPageParser(KurlyBasePageParser):
                 page.wait_for_timeout(scrollWaitMilliseconds)
 
     @staticmethod
-    def _ReadProductInfoTableText(page: Any) -> str:
+    def _ReadProductInfoTableText(page: object) -> str:
         try:
             rows = page.evaluate(
                 """
@@ -210,7 +210,7 @@ class KurlyGlobalPageParser(KurlyBasePageParser):
         return NormalizeWhitespaceLines("\n".join(lines))
 
     @staticmethod
-    def _ReadJsonLdDescription(page: Any) -> str:
+    def _ReadJsonLdDescription(page: object) -> str:
         try:
             value = page.evaluate(
                 """

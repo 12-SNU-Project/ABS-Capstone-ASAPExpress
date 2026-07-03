@@ -1,1 +1,1 @@
-"""Deterministic helper tools used by agents."""
+"""Deterministic helper tools used by pipeline components."""

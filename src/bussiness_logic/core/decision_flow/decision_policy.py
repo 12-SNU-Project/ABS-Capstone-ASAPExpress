@@ -1,6 +1,6 @@
 """Stage 1 classification decision policy."""
 
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -275,7 +275,7 @@ class Stage1DecisionPolicy:
 
     def _FindBacktrackingTargetLevel(
         self,
-        classificationResult: Mapping[str, Any],
+        classificationResult: Mapping[str, object],
         rejectedHs8Codes: Sequence[str],
     ) -> str:
         rejectedHs8CodeSet = set(rejectedHs8Codes)
@@ -399,7 +399,7 @@ class Stage1DecisionPolicy:
     def _ExtendUniqueStrings(
         self,
         target: List[str],
-        values: Any,
+        values: object,
     ) -> None:
         if not isinstance(values, list):
             return

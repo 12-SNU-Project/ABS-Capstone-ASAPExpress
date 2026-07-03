@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from dash import Dash, Input, Output, dcc, html
 
 
@@ -11,13 +9,11 @@ def RegisterNavigationCallbacks(app: Dash) -> None:
     @app.callback(
         Output("app-topbar", "children"),
         Input("url", "pathname"),
-        Input("store-result", "data"),
     )
     def render_topbar(
         pathname: str | None,
-        result_data: dict[str, Any] | None,
-    ) -> list[Any]:
-        return RenderTopbar(pathname, result_data)
+    ) -> list[object]:
+        return RenderTopbar(pathname)
 
 
 def SplitPath(pathname: str | None) -> list[str]:
@@ -26,13 +22,9 @@ def SplitPath(pathname: str | None) -> list[str]:
 
 def RenderTopbar(
     pathname: str | None,
-    resultData: dict[str, Any] | None,
-) -> list[Any]:
+) -> list[object]:
     parts = SplitPath(pathname)
     page = parts[0] if parts else "classification"
-    result = resultData if isinstance(resultData, dict) else {}
-    runId = result.get("run_id") or ""
-    adminHref = f"/admin/{runId}" if runId else "/admin"
     documentLinks = (
         [_NavLink("서류 상세", f"/{'/'.join(parts)}", True)]
         if page == "document"
@@ -57,7 +49,6 @@ def RenderTopbar(
             [
                 _NavLink("프로젝트", "/classification", page in {"classification", ""}),
                 *documentLinks,
-                _NavLink("관리", adminHref, page == "admin"),
             ],
             className="app-topbar-tabs",
         ),

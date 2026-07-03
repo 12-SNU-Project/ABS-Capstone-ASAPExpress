@@ -7,7 +7,7 @@ import json
 import re
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set
+from typing import Dict, List, Mapping, Optional, Sequence, Set
 
 from pydantic import (
     BaseModel,
@@ -668,7 +668,7 @@ def _ReadCsvRows(csvPath: Path) -> List[Dict[str, str]]:
 
 
 def _LoadScopedCsvRows(
-    document: Any,
+    document: object,
     ontologyRootPath: Path,
     projectRootPath: Path,
 ) -> Dict[str, List[Dict[str, str]]]:
@@ -730,15 +730,15 @@ class ProductClassificationInput(BaseModel):
         default_factory=list,
         alias="normalized_ocr_fact_texts",
     )
-    structuredProductFacts: List[Dict[str, Any]] = Field(
+    structuredProductFacts: List[Dict[str, object]] = Field(
         default_factory=list,
         alias="structured_product_facts",
     )
-    unresolvedProductFacts: List[Dict[str, Any]] = Field(
+    unresolvedProductFacts: List[Dict[str, object]] = Field(
         default_factory=list,
         alias="unresolved_product_facts",
     )
-    productFactConflicts: List[Any] = Field(
+    productFactConflicts: List[object] = Field(
         default_factory=list,
         alias="product_fact_conflicts",
     )
@@ -909,7 +909,7 @@ class CnCandidatePromptPayload(BaseModel):
         alias="retrieval_sources",
     )
     semanticScore: Optional[float] = Field(default=None, alias="semantic_score")
-    semanticMatches: List[Dict[str, Any]] = Field(
+    semanticMatches: List[Dict[str, object]] = Field(
         default_factory=list,
         alias="semantic_matches",
     )
@@ -1060,7 +1060,7 @@ class CnCandidate(BaseModel):
         alias="retrieval_sources",
     )
     semanticScore: Optional[float] = Field(default=None, alias="semantic_score")
-    semanticMatches: List[Dict[str, Any]] = Field(
+    semanticMatches: List[Dict[str, object]] = Field(
         default_factory=list,
         alias="semantic_matches",
     )
@@ -1089,7 +1089,7 @@ class CnCandidate(BaseModel):
 
     @computed_field(alias="score_breakdown")
     @property
-    def scoreBreakdown(self) -> Dict[str, Any]:
+    def scoreBreakdown(self) -> Dict[str, object]:
         return {
             "include_rule_points": self.includeRulePoints,
             "search_keyword_points": self.searchKeywordPoints,
@@ -1124,7 +1124,7 @@ class CnCandidate(BaseModel):
             "hard_conditions": self.hardConditions,
         }
 
-    def ToPromptDict(self) -> Dict[str, Any]:
+    def ToPromptDict(self) -> Dict[str, object]:
         return self.ToPromptPayload().model_dump(mode="json", by_alias=True)
 
     def ToPromptPayload(self) -> CnCandidatePromptPayload:
@@ -1205,7 +1205,7 @@ class Stage1EvidencePackage(BaseModel):
         default_factory=dict,
         alias="candidate_evidence_ids",
     )
-    ontologyContextSummary: List[Dict[str, Any]] = Field(
+    ontologyContextSummary: List[Dict[str, object]] = Field(
         default_factory=list,
         alias="ontology_context_summary",
     )
@@ -1223,7 +1223,7 @@ class Stage1EvidencePackage(BaseModel):
         maxTextCharacters: int = DEFAULT_STAGE1_PROMPT_EVIDENCE_TEXT_MAX_CHARACTERS,
         commonEvidenceLimit: int = DEFAULT_STAGE1_PROMPT_COMMON_EVIDENCE_LIMIT,
         candidateEvidenceLimit: int = DEFAULT_STAGE1_PROMPT_CANDIDATE_EVIDENCE_LIMIT,
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, object]:
         def TrimText(text: str) -> str:
             if len(text) <= maxTextCharacters:
                 return text
@@ -1304,7 +1304,7 @@ class Stage1EvidencePackage(BaseModel):
 
         def BuildPromptEvidenceRecord(
             evidenceRecord: Stage1EvidenceRecord,
-        ) -> Dict[str, Any]:
+        ) -> Dict[str, object]:
             evidenceData = evidenceRecord.model_dump(mode="json", by_alias=True)
             evidenceText = evidenceRecord.text
             if evidenceRecord.evidenceType == "cn_candidate_card":
@@ -1522,8 +1522,8 @@ class Stage1EvidencePackageBuilder:
     def _BuildOntologyContextSummary(
         self,
         packagedContext: PackagedOntologyContext,
-    ) -> List[Dict[str, Any]]:
-        summaries: List[Dict[str, Any]] = []
+    ) -> List[Dict[str, object]]:
+        summaries: List[Dict[str, object]] = []
         for selectedResult in packagedContext.selectedResults:
             chunk = selectedResult.chunk
             summaries.append(
@@ -1674,7 +1674,7 @@ class Stage1EvidencePackageBuilder:
         priority = int(priorityText) if priorityText.isdigit() else 9999
         return (priority, self._ReadString(row.get("chunk_id")) or "")
 
-    def _FindDocument(self, documentId: str) -> Optional[Any]:
+    def _FindDocument(self, documentId: str) -> Optional[object]:
         documents = OntologyDocumentLoader(self.ontologyRootPath).LoadDocuments()
         for document in documents:
             if document.documentId == documentId:
@@ -1687,7 +1687,7 @@ class Stage1EvidencePackageBuilder:
             return normalizedText
         return normalizedText[: self.maxEvidenceTextCharacters].rstrip() + "..."
 
-    def _ReadString(self, value: Any) -> Optional[str]:
+    def _ReadString(self, value: object) -> Optional[str]:
         if not isinstance(value, str):
             return None
         normalizedValue = NormalizeWhiteSpace(value)
@@ -3086,7 +3086,7 @@ class CnCandidateRetriever:
         hierarchyLevelMatches: Mapping[str, Sequence[str]],
         retrievalSources: Optional[Sequence[str]] = None,
         semanticScore: Optional[float] = None,
-        semanticMatches: Optional[Sequence[Mapping[str, Any]]] = None,
+        semanticMatches: Optional[Sequence[Mapping[str, object]]] = None,
         hardConditionStatus: str = HARD_CONDITION_STATUS_NOT_APPLICABLE,
         hardConditionEvidence: Sequence[str] = (),
     ) -> CnCandidate:
@@ -3195,7 +3195,7 @@ class CnCandidateRetriever:
         self._rowsByDomainScope = rowsByDomainScope
         return rowsByDomainScope
 
-    def _FindLeafCardDocument(self) -> Optional[Any]:
+    def _FindLeafCardDocument(self) -> Optional[object]:
         documents = OntologyDocumentLoader(self.ontologyRootPath).LoadDocuments()
         for document in documents:
             if document.documentId == CN_LEAF_CODE_CARDS_DOCUMENT_ID:
@@ -3405,7 +3405,7 @@ class CnCandidateRetriever:
     def _BuildBranchRankKey(
         self,
         branchCandidates: Sequence[CnCandidate],
-    ) -> tuple[Any, ...]:
+    ) -> tuple[object, ...]:
         sortedBranchCandidates = self._SortCandidates(branchCandidates)
         representative = self._SelectBranchRepresentative(sortedBranchCandidates)
         if representative is None:
@@ -4053,7 +4053,7 @@ class Stage1ResponseValidationReport(BaseModel):
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
     isValid: bool = Field(alias="is_valid")
-    parsedResponse: Dict[str, Any] = Field(
+    parsedResponse: Dict[str, object] = Field(
         default_factory=dict,
         alias="parsed_response",
     )
@@ -4214,7 +4214,7 @@ class Stage1ResponseValidator:
 
     def _AttachRequiredCandidateEvidenceRefs(
         self,
-        parsedResponse: Dict[str, Any],
+        parsedResponse: Dict[str, object],
         candidates: Sequence[CnCandidate],
         evidencePackage: Stage1EvidencePackage,
     ) -> None:
@@ -4258,7 +4258,7 @@ class Stage1ResponseValidator:
         self,
         responseText: str,
         issues: List[Stage1ResponseValidationIssue],
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[Dict[str, object]]:
         strippedText = responseText.strip()
         if strippedText == "":
             self._AddIssue(
@@ -4374,7 +4374,7 @@ class Stage1ResponseValidator:
 
     def _ValidateClassificationResult(
         self,
-        parsedResponse: Mapping[str, Any],
+        parsedResponse: Mapping[str, object],
         productInput: ProductClassificationInput,
         candidates: Sequence[CnCandidate],
         evidencePackage: Optional[Stage1EvidencePackage],
@@ -4407,7 +4407,7 @@ class Stage1ResponseValidator:
 
     def _ValidateProductIdentity(
         self,
-        classificationResult: Mapping[str, Any],
+        classificationResult: Mapping[str, object],
         productInput: ProductClassificationInput,
         issues: List[Stage1ResponseValidationIssue],
     ) -> None:
@@ -4437,7 +4437,7 @@ class Stage1ResponseValidator:
 
     def _ValidateCandidateReviews(
         self,
-        classificationResult: Mapping[str, Any],
+        classificationResult: Mapping[str, object],
         candidates: Sequence[CnCandidate],
         evidencePackage: Optional[Stage1EvidencePackage],
         issues: List[Stage1ResponseValidationIssue],
@@ -4556,7 +4556,7 @@ class Stage1ResponseValidator:
 
     def _ValidateEvidenceRefs(
         self,
-        candidateReview: Mapping[str, Any],
+        candidateReview: Mapping[str, object],
         hs8: str,
         evidencePackage: Optional[Stage1EvidencePackage],
         fieldPath: str,
@@ -4700,14 +4700,14 @@ class Stage1ResponseValidator:
 
     def _SanitizeContradictoryCandidateCoverageClaims(
         self,
-        classificationResult: Mapping[str, Any],
+        classificationResult: Mapping[str, object],
         candidates: Sequence[CnCandidate],
         issues: List[Stage1ResponseValidationIssue],
     ) -> None:
         if not isinstance(classificationResult, dict):
             return
 
-        providedCandidateCodes = self._BuildProvidedCandidateCodeSet(candidates)
+        providedCandidateCodes = self._BuildProvidedClassificationCandidateSet(candidates)
         if not providedCandidateCodes:
             return
 
@@ -4736,7 +4736,7 @@ class Stage1ResponseValidator:
                 issues,
             )
 
-    def _BuildProvidedCandidateCodeSet(
+    def _BuildProvidedClassificationCandidateSet(
         self,
         candidates: Sequence[CnCandidate],
     ) -> Set[str]:
@@ -4758,7 +4758,7 @@ class Stage1ResponseValidator:
 
     def _SanitizeMissingInformationList(
         self,
-        targetPayload: Dict[str, Any],
+        targetPayload: Dict[str, object],
         fieldName: str,
         fieldPath: str,
         providedCandidateCodes: Set[str],
@@ -4768,7 +4768,7 @@ class Stage1ResponseValidator:
         if not isinstance(missingInformation, list):
             return
 
-        sanitizedValues: List[Any] = []
+        sanitizedValues: List[object] = []
         for index, value in enumerate(missingInformation):
             if not isinstance(value, str):
                 sanitizedValues.append(value)
@@ -4816,7 +4816,7 @@ class Stage1ResponseValidator:
 
     def _ValidateClassificationPathReview(
         self,
-        candidateReview: Mapping[str, Any],
+        candidateReview: Mapping[str, object],
         candidate: CnCandidate,
         fieldPath: str,
         issues: List[Stage1ResponseValidationIssue],
@@ -4934,7 +4934,7 @@ class Stage1ResponseValidator:
 
     def _ValidateClassificationRuleReview(
         self,
-        candidateReview: Mapping[str, Any],
+        candidateReview: Mapping[str, object],
         fieldPath: str,
         issues: List[Stage1ResponseValidationIssue],
     ) -> None:
@@ -4967,7 +4967,7 @@ class Stage1ResponseValidator:
 
     def _ValidateSimilarEbtiCases(
         self,
-        candidateReview: Mapping[str, Any],
+        candidateReview: Mapping[str, object],
         hs8: str,
         evidencePackage: Optional[Stage1EvidencePackage],
         fieldPath: str,
@@ -5067,7 +5067,7 @@ class Stage1ResponseValidator:
 
     def _ValidateHumanReviewWarning(
         self,
-        classificationResult: Mapping[str, Any],
+        classificationResult: Mapping[str, object],
         issues: List[Stage1ResponseValidationIssue],
     ) -> None:
         humanReviewWarning = classificationResult.get("human_review_warning")

@@ -18,10 +18,11 @@ import os
 import re
 import sys
 import threading
-from contextlib import contextmanager
 from collections import defaultdict
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Iterator, Optional
+from typing import Optional
 
 try:
     import psycopg2
@@ -42,11 +43,6 @@ _DB_POOL_LOCK = threading.Lock()
 _DB_POOL = None
 _DB_POOL_KEY = None
 _TABLE_EXISTS_CACHE: dict[str, bool] = {}
-
-# canonical TARIC table:
-#   taric_master_table = leaf-aware canonical table
-#   taric_master_selection_table = legacy compatibility table, do not use here
-
 
 def _db_connect_config():
     """Return psycopg2 connection config without exposing secret values."""
@@ -103,7 +99,7 @@ def _get_db_pool():
 
 
 @contextmanager
-def _connect_db() -> Iterator[Any]:
+def _connect_db() -> Iterator[object]:
     if DbSessionManager is not None:
         manager = DbSessionManager.GetInstance()
         with manager.OpenRawConnection() as connection:

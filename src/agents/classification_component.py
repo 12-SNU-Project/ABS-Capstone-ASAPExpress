@@ -1,32 +1,35 @@
 """
-Classification_Agent — delegates to ASAPExpress Stage 1 classifier.
+Classification_Component — delegates to ASAPExpress Stage 1 classifier.
 
-Inside BaseAgent.execute() this agent:
+Inside BasePipelineComponent.execute() this component:
   1. Reads ProductEvidenceState from the Blackboard.
   2. Hands it to agents._external_classifier.run_external_classifier(),
      which runs the full ASAPExpress 7-step Stage 1 pipeline
      (retriever → context → evidence → request → LLM → validator →
      decision → traversal → recommendation).
-  3. Translates the Stage1RecommendationReport back into CandidateCode
-     entries and stamps citations + reasoning trace.
+  3. Translates the Stage1RecommendationReport back into candidate entries.
 
 ASAPExpress code is loaded as-is via sys.path — no modifications.
 """
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
-from typing import Any
 
 from agents._external_classifier import (
     ExternalClassificationResult,
     run_external_classifier,
 )
-from agents.agent_base import BaseAgent
+from agents.component_base import BasePipelineComponent
 from agents.tools.taric_branch_resolver import TaricBranchResolverTool
 from agents.blackboard import BlackboardStore, now_iso
+from bussiness_logic.utils.json_types import JsonObject, JsonValue
 
 
-def _read_field(obj, *names, default=None):
+def _read_field(
+    obj: object,
+    *names: str,
+    default: JsonValue | object | None = None,
+) -> JsonValue | object | None:
     """Read a field from a dict, dataclass, or object — tries each name."""
     if obj is None:
         return default
@@ -48,12 +51,12 @@ def _read_field(obj, *names, default=None):
     return default
 
 
-def _truthy_env(value) -> bool:
+def _truthy_env(value: object) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-class ClassificationAgent(BaseAgent):
-    agent_name = "Classification_Agent"
+class ClassificationComponent(BasePipelineComponent):
+    component_name = "Classification_Component"
     stage = "Classification"
     llm_model = "gemma4:26b"  # actual model selected by bridge.RuntimeAdapter
 
@@ -69,19 +72,15 @@ class ClassificationAgent(BaseAgent):
         self.read_input(pes["product_id"])
         routingContext = bb.get("routing_context")
         if isinstance(routingContext, dict):
-            routingContextId = str(routingContext.get("routing_context_id") or "")
+            routingContextId = str(
+                routingContext.get("routing_decision_id")
+                or routingContext.get("routing_context_id")
+                or ""
+            )
             if routingContextId:
                 self.read_input(routingContextId)
         else:
             routingContext = None
-
-        # Step 0 — handle pending challenges first. If another agent has
-        # raised an open challenge against one of our candidates, write a
-        # ChallengeResponse instead of running ASAPExpress Stage 1 again.
-        open_challenges = self._read_open_challenges_for_me(bb)
-        if open_challenges:
-            self._respond_to_challenges(store, open_challenges)
-            return
 
         # Staged narrowing (opt-in, ASAP_USE_STAGED_CLASSIFIER). Replaces the
         # one-shot external classifier with the hs4->hs6->cn8 narrowing tool.
@@ -104,8 +103,6 @@ class ClassificationAgent(BaseAgent):
                 reason=c.get("reason", ""),
             )
 
-        if result.prompt_text:
-            self.record_prompt(result.prompt_text)
         if result.llm_model:
             self.llm_model = result.llm_model
 
@@ -115,15 +112,8 @@ class ClassificationAgent(BaseAgent):
                 store,
                 pes,
                 why=result.error,
-                trace=self._build_classification_trace(result),
             )
             return
-
-        # Preserve the LLM response excerpt in reasoning_summary so the admin
-        # viewer can debug Stage1ResponseValidator rejections.
-        resp_snippet = (result.llm_response_text or "").strip()
-        if resp_snippet:
-            self.reason(f"LLM response[:300]: {resp_snippet[:300]!r}")
 
         recommendation = result.recommendation
         if recommendation is None:
@@ -132,7 +122,6 @@ class ClassificationAgent(BaseAgent):
                 store,
                 pes,
                 why="no_recommendation",
-                trace=self._build_classification_trace(result),
             )
             return
 
@@ -140,7 +129,7 @@ class ClassificationAgent(BaseAgent):
         recommended = _read_field(recommendation, "recommendedCandidate") or {}
         retained = _read_field(recommendation, "retainedCandidates") or []
 
-        emitted: list[dict] = []
+        emitted: list[JsonObject] = []
         recommendedCn8 = str(_read_field(recommended, "hs8", default="") or "")[:8]
         retainedByCn8 = {
             str(_read_field(candidate, "hs8", default="") or "")[:8]: candidate
@@ -214,12 +203,11 @@ class ClassificationAgent(BaseAgent):
                 store,
                 pes,
                 why=why,
-                trace=self._build_classification_trace(result),
             )
             return
 
         ccs_id = store.next_id("ccs")
-        ccs_candidates: list[dict] = []
+        ccs_candidates: list[JsonObject] = []
         for c in emitted:
             cn8 = (c["hs8"] or "")[:8]
             if not cn8.isdigit() or len(cn8) != 8:
@@ -275,16 +263,14 @@ class ClassificationAgent(BaseAgent):
                 store,
                 pes,
                 why="no_valid_emitted_cn8",
-                trace=self._build_classification_trace(result),
             )
             return
         store.append("candidate_code_sets", {
-            "object_type": "CandidateCodeSet",
-            "created_by": self.agent_name,
+            "object_type": "ClassificationCandidateSet",
+            "created_by": self.component_name,
             "created_at": now_iso(),
             "candidate_set_id": ccs_id,
             "product_id": pes["product_id"],
-            "classification_trace": self._build_classification_trace(result),
             "candidates": ccs_candidates,
         })
         self.wrote(ccs_id)
@@ -292,16 +278,16 @@ class ClassificationAgent(BaseAgent):
             self.wrote(c["candidate_id"])
 
     # ------------------------------------------------------------------
-    # Staged narrowing (additive; opt-in). Emits a CandidateCodeSet in the
-    # exact baseline shape so the Document/Orchestrator downstream is unchanged.
-    # Any failure returns False -> run() falls back to run_external_classifier.
+    # Staged narrowing (additive; opt-in). Emits a ClassificationCandidateSet in the
+    # exact baseline shape so the Document downstream is unchanged.
+    # Failure returns False -> run() falls back to run_external_classifier.
     # ------------------------------------------------------------------
     def _maybe_classify_staged(
         self,
         store: BlackboardStore,
-        pes: dict,
-        routingContext,
-        bb: dict,
+        pes: JsonObject,
+        routingContext: JsonObject | None,
+        bb: JsonObject,
     ) -> bool:
         import os
 
@@ -332,7 +318,7 @@ class ClassificationAgent(BaseAgent):
                 return False
 
             ccs_id = store.next_id("ccs")
-            ccs_candidates: list[dict] = []
+            ccs_candidates: list[JsonObject] = []
             for candidate in candidates[:5]:
                 cn8 = str(candidate.get("cn8") or "")[:8]
                 if not cn8.isdigit() or len(cn8) != 8:
@@ -374,15 +360,11 @@ class ClassificationAgent(BaseAgent):
                 return False
 
             store.append("candidate_code_sets", {
-                "object_type": "CandidateCodeSet",
-                "created_by": self.agent_name,
+                "object_type": "ClassificationCandidateSet",
+                "created_by": self.component_name,
                 "created_at": now_iso(),
                 "candidate_set_id": ccs_id,
                 "product_id": pes["product_id"],
-                "classification_trace": {
-                    "mode": "staged_narrowing",
-                    "stages": stages,
-                },
                 "candidates": ccs_candidates,
             })
             self.wrote(ccs_id)
@@ -397,8 +379,8 @@ class ClassificationAgent(BaseAgent):
             self.reason(f"Staged classifier error ({exc!r}); using external.")
             return False
 
-    def _staged_static_tree(self, candidate: dict) -> dict:
-        nodes: list[dict] = []
+    def _staged_static_tree(self, candidate: JsonObject) -> JsonObject:
+        nodes: list[JsonObject] = []
         for level, label in (("hs4", "HS4"), ("hs6", "HS6"), ("cn8", "CN8")):
             code = str(candidate.get(level) or "").strip()
             if not code:
@@ -417,7 +399,7 @@ class ClassificationAgent(BaseAgent):
             "nodes": nodes,
         }
 
-    def _staged_basis(self, candidate: dict) -> str:
+    def _staged_basis(self, candidate: JsonObject) -> str:
         desc = str(candidate.get("description") or "")[:160]
         verdict = str(candidate.get("quantitative_verdict") or "")
         base = f"Staged narrowing hs4->hs6->cn8 selected CN8={candidate.get('cn8')}: {desc}"
@@ -425,7 +407,7 @@ class ClassificationAgent(BaseAgent):
             base += f" [%-gate: {verdict}]"
         return base[:600]
 
-    def _build_candidate_static_tree(self, candidate) -> dict:
+    def _build_candidate_static_tree(self, candidate: object) -> JsonObject:
         codeHierarchy = _read_field(candidate, "codeHierarchy", "code_hierarchy", default={}) or {}
         if not isinstance(codeHierarchy, dict):
             codeHierarchy = {}
@@ -440,7 +422,7 @@ class ClassificationAgent(BaseAgent):
         if not isinstance(hierarchyMatches, dict):
             hierarchyMatches = {}
 
-        nodes: list[dict] = []
+        nodes: list[JsonObject] = []
         for level, label in (
             ("hs2", "HS2"),
             ("hs4", "HS4"),
@@ -489,7 +471,7 @@ class ClassificationAgent(BaseAgent):
             "nodes": nodes,
         }
 
-    def _build_hard_condition_projection(self, candidate) -> dict:
+    def _build_hard_condition_projection(self, candidate: object) -> JsonObject:
         scoreBreakdown = _read_field(
             candidate,
             "scoreBreakdown",
@@ -530,125 +512,8 @@ class ClassificationAgent(BaseAgent):
             "evidence": self._read_text_list(evidenceValue, limit=8),
         }
 
-    def _build_classification_trace(
-        self,
-        result: ExternalClassificationResult,
-    ) -> dict[str, Any]:
-        traversalReport = result.traversal_report
-        decisionReport = result.decision_report
-        history = [
-            self._build_trace_history_entry(entry)
-            for entry in getattr(result, "traversal_history", []) or []
-            if isinstance(entry, dict)
-        ]
-        routeTrace = dict(result.routing_context_trace or {})
-        if (
-            traversalReport is None
-            and decisionReport is None
-            and not history
-            and not routeTrace
-        ):
-            return {}
-        backtrackingOccurred = any(
-            str(entry.get("phase") or "").startswith("backtracking")
-            or int(entry.get("round") or 1) > 1
-            for entry in history
-        )
-        trace = {
-            "decision_status": _read_field(
-                decisionReport,
-                "decisionStatus",
-                "decision_status",
-                default=_read_field(
-                    traversalReport,
-                    "decisionStatus",
-                    "decision_status",
-                    default="unknown",
-                ),
-            ),
-            "traversal_status": _read_field(
-                traversalReport,
-                "traversalStatus",
-                "traversal_status",
-                default="unknown",
-            ),
-            "next_action": _read_field(
-                traversalReport,
-                "nextAction",
-                "next_action",
-                default="",
-            ),
-            "backtracking_recommended": bool(_read_field(
-                traversalReport,
-                "backtrackingRecommended",
-                "backtracking_recommended",
-                default=False,
-            )),
-            "backtracking_occurred": backtrackingOccurred,
-            "backtracking_target_level": _read_field(
-                traversalReport,
-                "backtrackingTargetLevel",
-                "backtracking_target_level",
-                default=None,
-            ),
-            "backtracking_reason": _read_field(
-                traversalReport,
-                "backtrackingReason",
-                "backtracking_reason",
-                default=None,
-            ),
-            "retry_count": max(0, len(history) - 1),
-            "traversal_history": history,
-            "routing_context": routeTrace,
-        }
-        return {
-            key: value
-            for key, value in trace.items()
-            if value is not None and value != "" and value != [] and value != {}
-        }
-
-    def _build_trace_history_entry(self, entry: dict[str, Any]) -> dict[str, Any]:
-        candidateScope = entry.get("candidate_scope") or []
-        if not isinstance(candidateScope, list):
-            candidateScope = []
-        projectedScope = [
-            self._build_trace_candidate_projection(snapshot, index)
-            for index, snapshot in enumerate(candidateScope[:5], start=1)
-            if isinstance(snapshot, dict)
-        ]
-        out = {
-            key: value
-            for key, value in entry.items()
-            if key != "candidate_scope"
-        }
-        if "candidate_scope" in entry:
-            out["candidate_scope"] = projectedScope
-        return out
-
-    def _build_trace_candidate_projection(
-        self,
-        candidateSnapshot: dict[str, Any],
-        rank: int,
-    ) -> dict[str, Any]:
-        hs8 = str(_read_field(candidateSnapshot, "hs8", default="") or "")[:8]
-        staticTree = self._build_candidate_static_tree(candidateSnapshot)
-        staticTree.pop("hard_condition", None)
-        return {
-            "candidate_id": f"trace_round_candidate_{rank}_{hs8 or 'unknown'}",
-            "hs6": hs8[:6],
-            "cn8": hs8,
-            "rank": int(_read_field(candidateSnapshot, "rank", default=rank) or rank),
-            "status": "trace_scope",
-            "candidate_source": "stage1_trace",
-            "llm_recommended": False,
-            "candidate_static_tree": staticTree,
-            "classification_basis": [
-                "Stage 1 traversal candidate scope snapshot."
-            ],
-        }
-
     @staticmethod
-    def _read_text_list(value, *, limit: int) -> list[str]:
+    def _read_text_list(value: object, *, limit: int) -> list[str]:
         if not isinstance(value, (list, tuple)):
             return []
         return [
@@ -658,7 +523,7 @@ class ClassificationAgent(BaseAgent):
         ]
 
     @staticmethod
-    def _read_dict_list(value, *, limit: int) -> list[dict[str, Any]]:
+    def _read_dict_list(value: object, *, limit: int) -> list[JsonObject]:
         if not isinstance(value, (list, tuple)):
             return []
         return [
@@ -667,7 +532,7 @@ class ClassificationAgent(BaseAgent):
             if isinstance(item, dict)
         ]
 
-    def _resolve_taric_branches(self, cn8: str) -> list[dict]:
+    def _resolve_taric_branches(self, cn8: str) -> list[JsonObject]:
         if not cn8 or cn8 == "99999999":
             return []
         try:
@@ -690,30 +555,18 @@ class ClassificationAgent(BaseAgent):
             )
         return out
 
-    # ------------------------------------------------------------------ challenges
-    def _collect_my_candidate_ids(self, bb: dict) -> set[str]:
-        """All candidate IDs from CCS authored by this agent."""
-        out: set[str] = set()
-        for ccs in bb.get("candidate_code_sets") or []:
-            if ccs.get("created_by") != self.agent_name:
-                continue
-            for c in ccs.get("candidates") or []:
-                cid = c.get("candidate_id")
-                if cid:
-                    out.add(cid)
-        return out
-
-    def _select_taric_branch(self, branches: list[dict]) -> dict:
+    # ------------------------------------------------------------------ helpers
+    def _select_taric_branch(self, branches: list[JsonObject]) -> JsonObject:
         """Pick a compatibility primary TARIC10 from deterministic branches.
 
         This is not a legal recommendation. The full branch list remains on
-        the candidate and Document_Agent packages every branch. The primary
+        the candidate and Document_Component packages every branch. The primary
         value only preserves older UI/API paths that expect cand["taric10"].
         """
         if not branches:
             return {}
 
-        def score(branch: dict) -> tuple:
+        def score(branch: JsonObject) -> tuple[int, int, int, int, int]:
             description = (branch.get("branch_description") or "").strip().lower()
             return (
                 1 if branch.get("applies_to_origin_kr") else 0,
@@ -732,98 +585,17 @@ class ClassificationAgent(BaseAgent):
             "declarable leaves, then non-review branches, then measure coverage."
         )
         return out
-
-    def _read_open_challenges_for_me(self, bb: dict) -> list[dict]:
-        """Open challenges that target one of our candidates and were raised
-        by someone else. We skip our own challenges and resolved ones.
-        """
-        my_cands = self._collect_my_candidate_ids(bb)
-        if not my_cands:
-            return []
-        out: list[dict] = []
-        for chg in bb.get("challenges") or []:
-            if chg.get("status") != "open":
-                continue
-            if chg.get("raised_by") == self.agent_name:
-                continue
-            target = chg.get("target_candidate_id")
-            if target and target in my_cands:
-                out.append(chg)
-        return out
-
-    def _respond_to_challenges(
-        self,
-        store: BlackboardStore,
-        challenges: list[dict],
-    ) -> None:
-        """For each open challenge against our candidate, write a single
-        ChallengeResponse AND close the source challenge (status=resolved).
-
-        Decision rule (stub):
-          - challenge_type == measure_document_mismatch  → needs_more_facts
-            (Classification cannot invent product facts on its own.)
-          - any other type                                → needs_more_facts
-            (until a richer decision policy is wired in.)
-        """
-        target_chg_ids = {chg["challenge_id"] for chg in challenges}
-        bb = store.load()
-        for chg in challenges:
-            self.read_input(chg["challenge_id"])
-            chg_type = chg.get("challenge_type") or "unknown"
-            target_cand = chg.get("target_candidate_id") or "?"
-            if chg_type == "measure_document_mismatch":
-                reason_text = (
-                    f"Candidate {target_cand} returned no TARIC measure rows. "
-                    "Classification cannot reclassify without additional product "
-                    "facts (composition pct, intended use, processing state, "
-                    "establishment approval). Routing to the user."
-                )
-            else:
-                reason_text = (
-                    f"Acknowledged challenge {chg['challenge_id']} of type "
-                    f"{chg_type}; no automatic action available — escalating."
-                )
-
-            resp_id = store.next_id("rsp")
-            store.append("challenge_responses", {
-                "object_type": "ChallengeResponse",
-                "created_by": self.agent_name,
-                "created_at": now_iso(),
-                "response_id": resp_id,
-                "responds_to": chg["challenge_id"],
-                "action": "needs_more_facts",
-                "reason": reason_text,
-                "updates": [],
-                "status": "resolved",
-            })
-            self.wrote(resp_id)
-            self.reason(
-                f"Wrote ChallengeResponse {resp_id} to {chg['challenge_id']} "
-                f"({chg_type}, raised_by={chg.get('raised_by')}) → "
-                "action=needs_more_facts."
-            )
-        # Close the source Challenges so Orchestrator does not count them
-        # as still-open. store.append above re-loaded internally, so we
-        # do a final load+save here to mutate challenges in place.
-        bb = store.load()
-        for c in bb.get("challenges") or []:
-            if c.get("challenge_id") in target_chg_ids and c.get("status") == "open":
-                c["status"] = "resolved"
-        store.save(bb)
-
-    # ------------------------------------------------------------------ helpers
     def _emit_unresolved(
         self,
         store: BlackboardStore,
         pes: dict,
         *,
         why: str,
-        trace: dict[str, Any] | None = None,
     ) -> None:
         ccs_id = store.next_id("ccs")
         candidateCodeSet = {
-            "object_type": "CandidateCodeSet",
-            "created_by": self.agent_name,
+            "object_type": "ClassificationCandidateSet",
+            "created_by": self.component_name,
             "created_at": now_iso(),
             "candidate_set_id": ccs_id,
             "product_id": pes["product_id"],
@@ -832,11 +604,9 @@ class ClassificationAgent(BaseAgent):
             "shortlisted_candidates": list(self._ontology_reads),
             "candidates": [],
         }
-        if trace:
-            candidateCodeSet["classification_trace"] = trace
         store.append("candidate_code_sets", candidateCodeSet)
         self.wrote(ccs_id)
         self.reason(
-            f"Classification unresolved ({why}); wrote empty CandidateCodeSet "
+            f"Classification unresolved ({why}); wrote empty ClassificationCandidateSet "
             "instead of a synthetic 99999999 candidate."
         )

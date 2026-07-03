@@ -34,11 +34,6 @@ class PipelineApiClient:
             )
         )
 
-    def ReadAdminRunDebug(self, runId: str) -> dict[str, object]:
-        return self._GetJson(
-            "/api/admin/runs/{0}".format(quote(runId, safe="")),
-        )
-
     def _GetJson(self, path: str) -> dict[str, object]:
         response = requests.get(
             f"{self._baseUrl}{path}",

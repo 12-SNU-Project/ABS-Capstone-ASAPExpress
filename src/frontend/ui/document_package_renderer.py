@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import re
-from typing import Any
 
 import dash_mantine_components as dmc
 from dash import dcc, html
 
-from frontend.ui.document_package_debug import render_debug_pipeline_log
-
+from bussiness_logic.utils.json_types import JsonObject
 
 STATUS = {
     "required": ("필요", "#b91c1c", "#fef2f2"),
@@ -32,7 +29,7 @@ def status_badge(status: str) -> html.Span:
     return html.Span(label, className="badge", style={"color": color, "backgroundColor": bg, "border": f"1px solid {color}33"})
 
 
-def duty_rate(req: dict[str, Any] | None) -> str:
+def duty_rate(req: JsonObject | None) -> str:
     if not req:
         return "없음"
     return (req.get("duty") or {}).get("rate") or "조건부"
@@ -48,7 +45,7 @@ def cert_color(category: str) -> str:
     return "#475569"
 
 
-def cert_help(cert: dict[str, Any]) -> str:
+def cert_help(cert: JsonObject) -> str:
     guidance = cert.get("guidance") or {}
     if guidance.get("certificate_description") or guidance.get("when_required"):
         return guidance.get("certificate_description") or guidance.get("when_required") or ""
@@ -63,7 +60,7 @@ def cert_help(cert: dict[str, Any]) -> str:
     return f"{role} 코드별 세부 의미는 TARIC description 기준입니다: {cert.get('description') or 'description 없음'}"
 
 
-def guidance_row(label: str, value: Any) -> html.Div | None:
+def guidance_row(label: str, value: object) -> html.Div | None:
     if value is None:
         return None
     text = str(value).strip()
@@ -72,11 +69,11 @@ def guidance_row(label: str, value: Any) -> html.Div | None:
     return html.Div([html.Span(label + ": ", className="guidance-label"), html.Span(text)], className="guidance-row")
 
 
-def _compact_text(value: Any) -> str:
+def _compact_text(value: object) -> str:
     return str(value or "").strip()
 
 
-def _first_text(*values: Any) -> str:
+def _first_text(*values: object) -> str:
     for value in values:
         text = _compact_text(value)
         if text:
@@ -96,14 +93,14 @@ def _cert_kind_label(category: str) -> str:
     return "certificate/declaration 코드"
 
 
-def _readable_evidence(guidance: dict[str, Any]) -> str:
+def _readable_evidence(guidance: JsonObject) -> str:
     evidence = _compact_text(guidance.get("required_evidence"))
     if not evidence:
         return ""
     return ", ".join(part.strip() for part in re.split(r"[;,]", evidence) if part.strip())
 
 
-def _cert_topic(cert: dict[str, Any], guidance: dict[str, Any]) -> str:
+def _cert_topic(cert: JsonObject, guidance: JsonObject) -> str:
     title = _first_text(guidance.get("certificate_description"), cert.get("description"), guidance.get("guidance_title"))
     code = _compact_text(cert.get("code"))
     if title.lower().startswith((code or "").lower()):
@@ -124,21 +121,21 @@ def _certificate_content_label(category: str) -> str:
     return "선언문 내용" if category == "exemption_declaration" else "문서 내용"
 
 
-def _certificate_content(cert: dict[str, Any], guidance: dict[str, Any]) -> str:
+def _certificate_content(cert: JsonObject, guidance: JsonObject) -> str:
     category = cert.get("category") or "unknown"
     if category == "exemption_declaration":
         return _first_text(guidance.get("declaration_wording"), guidance.get("certificate_description"), cert.get("description"))
     return _first_text(guidance.get("certificate_description"), cert.get("description"), guidance.get("guidance_title"))
 
 
-def _certificate_condition(cert: dict[str, Any], guidance: dict[str, Any]) -> str:
+def _certificate_condition(cert: JsonObject, guidance: JsonObject) -> str:
     category = cert.get("category") or "unknown"
     if category == "exemption_declaration":
         return _first_text(guidance.get("not_applicable_condition"), guidance.get("when_required"))
     return _first_text(guidance.get("when_required"), guidance.get("not_applicable_condition"))
 
 
-def cert_guidance_detail(cert: dict[str, Any]) -> html.Details:
+def cert_guidance_detail(cert: JsonObject) -> html.Details:
     guidance = cert.get("guidance") or {}
     rows = [
         guidance_row("설명", _cert_topic(cert, guidance)),
@@ -156,7 +153,7 @@ def cert_guidance_detail(cert: dict[str, Any]) -> html.Details:
     )
 
 
-def cert_card(cert: dict[str, Any]) -> html.Div:
+def cert_card(cert: JsonObject) -> html.Div:
     category = cert.get("category") or "unknown"
     color = cert_color(category)
     guidance = cert.get("guidance") or {}
@@ -171,7 +168,7 @@ def cert_card(cert: dict[str, Any]) -> html.Div:
     )
 
 
-def detail_card(detail: dict[str, Any], label: str, related_declarations: list[str] | None = None) -> html.Div:
+def detail_card(detail: JsonObject, label: str, related_declarations: list[str] | None = None) -> html.Div:
     status = detail.get("decision_status") or "pending"
     _, color, _ = STATUS.get(status, ("검토", "#475569", "#f8fafc"))
     missing = ", ".join((detail.get("missing_facts") or [])[:5]) or "없음"
@@ -205,7 +202,7 @@ def detail_card(detail: dict[str, Any], label: str, related_declarations: list[s
     )
 
 
-def _is_control_measure(req: dict[str, Any]) -> bool:
+def _is_control_measure(req: JsonObject) -> bool:
     measure_type = req.get("measure_type") or ""
     return any(
         key in measure_type
@@ -224,35 +221,35 @@ def _is_control_measure(req: dict[str, Any]) -> bool:
     )
 
 
-def _is_preferential_measure(req: dict[str, Any]) -> bool:
+def _is_preferential_measure(req: JsonObject) -> bool:
     measure_type = req.get("measure_type") or ""
     return any(key in measure_type for key in ("Tariff preference", "Customs Union", "Preferential"))
 
 
-def _is_duty_measure(req: dict[str, Any]) -> bool:
+def _is_duty_measure(req: JsonObject) -> bool:
     measure_type = req.get("measure_type") or ""
     return any(key in measure_type for key in ("duty", "Duty", "Tariff", "Preference", "Preferential", "Customs Union", "Supplementary"))
 
 
-def _is_base_duty_measure(req: dict[str, Any]) -> bool:
+def _is_base_duty_measure(req: JsonObject) -> bool:
     if _is_preferential_measure(req):
         return False
     measure_type = req.get("measure_type") or ""
     return any(key in measure_type for key in ("Third country duty", "Additional duties", "Supplementary unit", "duty", "Duty"))
 
 
-def _find_measure(measures: list[dict[str, Any]], needles: tuple[str, ...]) -> dict[str, Any] | None:
+def _find_measure(measures: list[JsonObject], needles: tuple[str, ...]) -> JsonObject | None:
     return next((m for m in measures if any(n in (m.get("measure_type") or "") for n in needles)), None)
 
 
-def package_context(pkg: dict[str, Any]) -> dict[str, Any]:
+def package_context(pkg: JsonObject) -> JsonObject:
     raw_context = raw_package_context(pkg)
     if raw_context:
         return raw_context
     return _unresolved_context(pkg)
 
 
-def _unresolved_context(pkg: dict[str, Any]) -> dict[str, Any]:
+def _unresolved_context(pkg: JsonObject) -> JsonObject:
     return {
         "kr": [],
         "non_kr": [],
@@ -276,7 +273,7 @@ def _unresolved_context(pkg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _documents_from_checklist(checklist: dict[str, Any]) -> list[dict[str, Any]]:
+def _documents_from_checklist(checklist: JsonObject) -> list[JsonObject]:
     documents = checklist.get("documents") or []
     if isinstance(documents, list):
         return [
@@ -287,7 +284,7 @@ def _documents_from_checklist(checklist: dict[str, Any]) -> list[dict[str, Any]]
     if not isinstance(documents, dict):
         return []
 
-    out: list[dict[str, Any]] = []
+    out: list[JsonObject] = []
     seen: set[str] = set()
     for status, names in documents.items():
         if not isinstance(names, list):
@@ -313,7 +310,7 @@ def _documents_from_checklist(checklist: dict[str, Any]) -> list[dict[str, Any]]
     return out
 
 
-def _document_counts(documents: list[dict[str, Any]], counts: dict[str, Any] | None = None) -> dict[str, Any]:
+def _document_counts(documents: list[JsonObject], counts: JsonObject | None = None) -> JsonObject:
     out = dict(counts or {})
     out["total"] = len(documents)
     out.setdefault("required", sum(1 for doc in documents if _doc_status(doc) == "required"))
@@ -324,7 +321,7 @@ def _document_counts(documents: list[dict[str, Any]], counts: dict[str, Any] | N
     return out
 
 
-def raw_package_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
+def raw_package_context(pkg: JsonObject) -> JsonObject | None:
     reqs = pkg.get("requirements") or []
     if not isinstance(reqs, list):
         return None
@@ -338,12 +335,12 @@ def raw_package_context(pkg: dict[str, Any]) -> dict[str, Any] | None:
     counts = _document_counts(baseline_docs, checklist.get("counts") or {})
     groups = checklist.get("document_groups") or []
 
-    controls: list[dict[str, Any]] = []
-    duties: list[dict[str, Any]] = []
-    product_reqs: list[dict[str, Any]] = []
-    product_pre: list[dict[str, Any]] = []
-    product_post: list[dict[str, Any]] = []
-    pre_taric_checks: list[dict[str, Any]] = []
+    controls: list[JsonObject] = []
+    duties: list[JsonObject] = []
+    product_reqs: list[JsonObject] = []
+    product_pre: list[JsonObject] = []
+    product_post: list[JsonObject] = []
+    pre_taric_checks: list[JsonObject] = []
 
     for req in kr:
         measure_type = req.get("measure_type") or ""
@@ -532,9 +529,9 @@ def _render_drawer_toolbar(
 
 
 def _render_detail_drawer(
-    pkg: dict[str, Any],
+    pkg: JsonObject,
     selected: str,
-    cx: dict[str, Any],
+    cx: JsonObject,
     options: list[str],
     panelDefs: list[tuple[str, str, str]],
 ) -> dmc.Drawer:
@@ -584,7 +581,7 @@ def _render_drawer_title(title: str, sub: str) -> html.Div:
     )
 
 
-def render_unresolved(pkg: dict[str, Any], options: list[str]):
+def render_unresolved(pkg: JsonObject, options: list[str]):
     taric10 = pkg.get("taric10") or "-"
     children = [
         html.Div(
@@ -603,23 +600,10 @@ def render_unresolved(pkg: dict[str, Any], options: list[str]):
             style={"borderLeft": "4px solid #b91c1c", "padding": "16px"},
         ),
     ]
-    if "debug" in (options or []) or "blackboard" in (options or []):
-        children.append(
-            html.Details(
-                [
-                    html.Summary("document_package payload (debug)"),
-                    html.Pre(
-                        str(pkg)[:4000],
-                        style={"fontSize": "11px", "color": "#334155", "whiteSpace": "pre-wrap"},
-                    ),
-                ],
-                style={"marginTop": "16px"},
-            )
-        )
     return children
 
 
-def render_panel(pkg: dict[str, Any], panel: str, cx: dict[str, Any], options: list[str]):
+def render_panel(pkg: JsonObject, panel: str, cx: JsonObject, options: list[str]):
     if panel == "scenario":
         return render_trade_scenario(pkg, cx)
     if panel == "customs":
@@ -646,7 +630,7 @@ def render_panel(pkg: dict[str, Any], panel: str, cx: dict[str, Any], options: l
     return render_overview(cx, options, pkg)
 
 
-def _scenario_cert_codes(reqs: list[dict[str, Any]], categories: set[str] | None = None) -> list[str]:
+def _scenario_cert_codes(reqs: list[JsonObject], categories: set[str] | None = None) -> list[str]:
     codes: set[str] = set()
     for req in reqs:
         for cert in req.get("certificates") or []:
@@ -658,15 +642,15 @@ def _scenario_cert_codes(reqs: list[dict[str, Any]], categories: set[str] | None
     return sorted(codes)
 
 
-def _doc_name(doc: dict[str, Any]) -> str:
+def _doc_name(doc: JsonObject) -> str:
     return str(doc.get("document_name_ko") or doc.get("document_name") or doc.get("document_code") or "제출서류")
 
 
-def _doc_code(doc: dict[str, Any]) -> str:
+def _doc_code(doc: JsonObject) -> str:
     return str(doc.get("document_code") or "")
 
 
-def _doc_status(doc: dict[str, Any]) -> str:
+def _doc_status(doc: JsonObject) -> str:
     return str(doc.get("decision_status") or doc.get("required_level") or "conditional")
 
 
@@ -678,7 +662,7 @@ BASELINE_CORE_DOCUMENT_CODES = {
 }
 
 
-def _additional_detail_documents(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _additional_detail_documents(documents: list[JsonObject]) -> list[JsonObject]:
     detailed = []
     for doc in documents:
         code = _doc_code(doc)
@@ -694,7 +678,7 @@ def _additional_detail_documents(documents: list[dict[str, Any]]) -> list[dict[s
     return detailed
 
 
-def _scenario_field_rows(fields: list[dict[str, Any]]) -> list[html.Div]:
+def _scenario_field_rows(fields: list[JsonObject]) -> list[html.Div]:
     rows = []
     for field in fields[:8]:
         rows.append(
@@ -719,10 +703,10 @@ def _scenario_field_rows(fields: list[dict[str, Any]]) -> list[html.Div]:
     return rows
 
 
-def _scenario_documents(cx: dict[str, Any], scenario: str) -> list[dict[str, Any]]:
+def _scenario_documents(cx: JsonObject, scenario: str) -> list[JsonObject]:
     docs = cx.get("baseline_documents") or []
     required_docs = [doc for doc in docs if _doc_status(doc) == "required"]
-    selected: list[dict[str, Any]] = list(required_docs)
+    selected: list[JsonObject] = list(required_docs)
 
     def include_by_code(*codes: str) -> None:
         code_set = set(codes)
@@ -743,7 +727,7 @@ def _scenario_documents(cx: dict[str, Any], scenario: str) -> list[dict[str, Any
             ]
         )
 
-    deduped: list[dict[str, Any]] = []
+    deduped: list[JsonObject] = []
     seen: set[str] = set()
     for doc in selected:
         code = _doc_code(doc) or _doc_name(doc)
@@ -755,7 +739,7 @@ def _scenario_documents(cx: dict[str, Any], scenario: str) -> list[dict[str, Any
 
 
 def _scenario_document_window(
-    cx: dict[str, Any],
+    cx: JsonObject,
     scenario: str,
     cert_codes: list[str] | None,
     title: str = "이 시나리오 제출 창",
@@ -876,7 +860,7 @@ def _scenario_card(
     )
 
 
-def _scenario_parts(cx: dict[str, Any]) -> dict[str, Any]:
+def _scenario_parts(cx: JsonObject) -> JsonObject:
     controls = cx.get("controls") or []
     third_country = cx.get("third_country")
     fta_pref = cx.get("fta_pref")
@@ -896,7 +880,7 @@ def _scenario_parts(cx: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _scenario_comparison_cards(cx: dict[str, Any]) -> list[html.Div]:
+def _scenario_comparison_cards(cx: JsonObject) -> list[html.Div]:
     parts = _scenario_parts(cx)
     third_country = parts["third_country"]
     fta_pref = parts["fta_pref"]
@@ -972,7 +956,7 @@ def _scenario_comparison_cards(cx: dict[str, Any]) -> list[html.Div]:
     return scenarios
 
 
-def render_scenario_decision(pkg: dict[str, Any], cx: dict[str, Any], selected_values: list[str] | None) -> html.Div:
+def render_scenario_decision(pkg: JsonObject, cx: JsonObject, selected_values: list[str] | None) -> html.Div:
     parts = _scenario_parts(cx)
     third_country = parts["third_country"]
     fta_pref = parts["fta_pref"]
@@ -1051,7 +1035,7 @@ def render_scenario_decision(pkg: dict[str, Any], cx: dict[str, Any], selected_v
     )
 
 
-def _default_scenario_values(cx: dict[str, Any]) -> list[str]:
+def _default_scenario_values(cx: JsonObject) -> list[str]:
     parts = _scenario_parts(cx)
     values = ["origin_kr"]
     if not parts["has_control_requirements"]:
@@ -1061,7 +1045,7 @@ def _default_scenario_values(cx: dict[str, Any]) -> list[str]:
     return values
 
 
-def render_trade_scenario(pkg: dict[str, Any], cx: dict[str, Any]) -> html.Div:
+def render_trade_scenario(pkg: JsonObject, cx: JsonObject) -> html.Div:
     parts = _scenario_parts(cx)
     has_control_requirements = parts["has_control_requirements"]
     fta_pref = parts["fta_pref"]
@@ -1112,7 +1096,7 @@ def render_trade_scenario(pkg: dict[str, Any], cx: dict[str, Any]) -> html.Div:
         className="scenario-shell",
     )
 
-def render_overview(cx: dict[str, Any], options: list[str], pkg: dict[str, Any]):
+def render_overview(cx: JsonObject, options: list[str], pkg: JsonObject):
     missing = cx["missing"]
     items = [
         ("통관 조건", f"{len(cx['controls'])}개 control measure", "TARIC certificate/declaration 조건 확인"),
@@ -1164,14 +1148,10 @@ def render_overview(cx: dict[str, Any], options: list[str], pkg: dict[str, Any])
         ],
         className="document-overview-brief",
     )
-    raw = None
-    if "raw" in options:
-        raw = html.Details([html.Summary("Public document_package JSON"), html.Pre(json.dumps(pkg, ensure_ascii=False, indent=2), className="textarea")])
-    debug = render_debug_pipeline_log(pkg) if "debug" in (options or []) or "blackboard" in (options or []) else None
-    return html.Div([render_trade_scenario(pkg, cx), reviewTable, debug, raw])
+    return html.Div([render_trade_scenario(pkg, cx), reviewTable])
 
 
-def render_customs(pkg: dict[str, Any], controls: list[dict[str, Any]]):
+def render_customs(pkg: JsonObject, controls: list[JsonObject]):
     if not controls:
         return html.Div("별도 control measure가 없습니다.", className="card-meta")
     rows = []
@@ -1204,7 +1184,7 @@ def render_customs(pkg: dict[str, Any], controls: list[dict[str, Any]]):
     return html.Div([html.Div("세관 확인사항: measure -> certificate/declaration", className="section-title"), *rows])
 
 
-def render_base_duty(reqs: list[dict[str, Any]]):
+def render_base_duty(reqs: list[JsonObject]):
     if not reqs:
         return html.Div("현재 조회 결과에 기본 관세 measure가 없습니다.", className="card-meta")
     return html.Div(
@@ -1231,7 +1211,7 @@ def render_base_duty(reqs: list[dict[str, Any]]):
     )
 
 
-def render_preferential(reqs: list[dict[str, Any]]):
+def render_preferential(reqs: list[JsonObject]):
     if not reqs:
         return html.Div("현재 조회 결과에 우대 관세 measure가 없습니다.", className="card-meta")
     return html.Div(
@@ -1259,7 +1239,7 @@ def render_preferential(reqs: list[dict[str, Any]]):
 
 
 def render_bundles(
-    groups: list[dict[str, Any]],
+    groups: list[JsonObject],
     *,
     showHeading: bool = True,
 ):
@@ -1303,10 +1283,10 @@ def render_bundles(
 
 
 def render_document_checklist(
-    documents: list[dict[str, Any]],
-    pre_checks: list[dict[str, Any]],
-    checklist: dict[str, Any],
-    legacy_groups: list[dict[str, Any]],
+    documents: list[JsonObject],
+    pre_checks: list[JsonObject],
+    checklist: JsonObject,
+    legacy_groups: list[JsonObject],
 ):
     counts = checklist.get("counts") or {}
     intro = html.Div(
@@ -1339,7 +1319,7 @@ def render_document_checklist(
         className="document-checklist-intro",
     )
 
-    preRows: list[Any] = []
+    preRows: list[object] = []
     for check in pre_checks[:8]:
         preRows.append(
             html.Tr(
@@ -1383,7 +1363,7 @@ def render_document_checklist(
         className="document-checklist-details",
     )
 
-    documentRows: list[Any] = []
+    documentRows: list[object] = []
     for doc in documents:
         fields = doc.get("fields") or []
         pre_count = len(doc.get("pre_checks") or [])
@@ -1476,8 +1456,8 @@ def render_document_checklist(
 
 
 def render_product_rules_from_view(
-    pre: list[dict[str, Any]],
-    post: list[dict[str, Any]],
+    pre: list[JsonObject],
+    post: list[JsonObject],
     related_declarations: dict[str, list[str]],
 ):
     pre_col = html.Div(
@@ -1502,21 +1482,21 @@ def render_product_rules_from_view(
 
 
 
-def BuildDocumentPackageContext(package: dict[str, Any]) -> dict[str, Any]:
+def BuildDocumentPackageContext(package: JsonObject) -> JsonObject:
     return package_context(package)
 
 
 def RenderDocumentPackageResult(
-    package: dict[str, Any],
+    package: JsonObject,
     panel: str,
     options: list[str] | None = None,
-) -> Any:
+) -> object:
     return render_result(package, panel, options or [])
 
 
 def RenderScenarioDecision(
-    package: dict[str, Any],
-    context: dict[str, Any],
+    package: JsonObject,
+    context: JsonObject,
     selectedValues: list[str] | None,
 ) -> html.Div:
     return render_scenario_decision(package, context, selectedValues or [])

@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 from enum import Enum
 from pathlib import Path
-from typing import Any, List, Optional, Protocol
+from typing import List, Optional, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -101,7 +101,7 @@ class SentenceTransformerTextEmbeddingAdapter:
 
     def __init__(self, runtimeConfig: TextEmbeddingRuntimeConfig) -> None:
         self._runtimeConfig = runtimeConfig
-        self._model: Any = None
+        self._model: object = None
 
     def EmbedTexts(self, request: TextEmbeddingRequest) -> TextEmbeddingResponse:
         if not request.texts:
@@ -138,7 +138,7 @@ class SentenceTransformerTextEmbeddingAdapter:
             ],
         )
 
-    def _LoadModel(self) -> Any:
+    def _LoadModel(self) -> object:
         if self._model is not None:
             return self._model
 

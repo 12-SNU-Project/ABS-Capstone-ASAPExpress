@@ -1,7 +1,7 @@
 """
 TaricBranchResolverTool — CN8 → 모든 가능한 TARIC10 branch 후보.
 
-Owned by Classification_Agent. Pure deterministic lookup — no LLM. The Agent
+Owned by Classification_Component. Pure deterministic lookup — no LLM. The component
 calls this to enumerate the deterministic universe of TARIC10 lines under a
 CN8 before asking the LLM to rank/select one.
 

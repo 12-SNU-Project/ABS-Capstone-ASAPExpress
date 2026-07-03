@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import List, Mapping, Optional, Sequence
 
 from pydantic import (
     AliasChoices,
@@ -22,7 +22,6 @@ from bussiness_logic.bridge.schema import (
     LlmRequest,
     LlmResponseFormat,
 )
-from bussiness_logic.artifact_paths import ExtractProductIdFromUrl
 from bussiness_logic.input_process.dictionary import (
     DEFAULT_PRODUCT_INPUT_DICTIONARY_PATH,
     ProductDictionaryMatch,
@@ -34,6 +33,7 @@ from bussiness_logic.product.ocr.ocr_normalization import (
     ProductOcrFactNormalizer,
 )
 from bussiness_logic.utils import NormalizeWhiteSpace, NormalizeWhitespaceLines
+from bussiness_logic.utils.json_types import JsonObject
 
 
 DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS = 4096
@@ -46,18 +46,18 @@ Return only these top-level keys: reconstructed_tables, product_facts, unresolve
 reconstructed_tables preserves structured table OCR contents for UI review. Do not summarize tables away.
 reconstructed_tables must be an array of objects with exactly these keys: table_name, source_refs, rows.
 Each reconstructed_tables row must have exactly these keys:
-field_name, raw_value, normalized_value, unit, daily_value_percent, source_refs.
+field_name, normalized_value, unit, daily_value_percent, source_refs.
 For nutrition tables, return each nutrient as its own row. For label/specification tables, return each label field as its own row.
 product_facts is only the compact classification input facts derived from the same evidence.
 product_facts and unresolved_facts must be arrays of objects with exactly these keys:
-field_name, raw_value, normalized_value, source_refs, correction_type, validation_status.
+field_name, normalized_value, source_refs, correction_type, validation_status.
 conflicts and warnings must be arrays of strings.
 Do not infer HS, CN, TARIC, customs, legal, or regulatory conclusions.
 Do not create product facts that are absent from the provided evidence.
 Correct OCR typos only when the surrounding evidence strongly supports the correction.
-raw_value must be copied from the cited evidence as the original OCR/VLM reading. Do not fix typos, units, labels, spacing, or malformed characters in raw_value.
-Put OCR corrections and canonical wording only in normalized_value.
-If a corrected value is useful but the original reading cannot be copied from evidence, put the fact in unresolved_facts.
+Put the corrected/canonical classification value in normalized_value.
+Do not expose pre-correction OCR text in any output field.
+If evidence is insufficient for a corrected value, put the fact in unresolved_facts.
 If evidence is insufficient or conflicting, use unresolved_facts or conflicts.
 The application will generate normalized_fact_texts after validation.
 Preserve table rows in reconstructed_tables even when they are not selected as product_facts.
@@ -65,7 +65,7 @@ Prefer concise product_facts for classification: product name, food/cosmetic typ
 For food products, product_facts must include explicit ingredient/composition rows when they appear in evidence, including component-specific ingredients for multi-component products such as dumpling plus sauce.
 Do not put nutrient measurements such as sodium, carbohydrates, fat, protein, kcal, or daily value percentages in product_facts; keep nutrition rows only in reconstructed_tables.
 Do not include allergen warnings, same-facility/cross-contamination warnings, seller/vendor/manufacturer business-party names, expiry, package material, or marketing copy as product_facts unless they directly change customs classification.
-Return atomic field_name/raw_value pairs. Do not put a whole OCR block under a generic field.
+Return atomic field_name/normalized_value pairs. Do not put a whole OCR block under a generic field.
 Never use field names such as OCR observation, OCR 관찰, tile, raw OCR, table marker, or evidence id.
 [tile N], [table N], source_ref, source_type, and evidence_id are collection metadata, not product facts.
 Do not copy unrelated marketing copy or duplicate OCR fragments.
@@ -130,7 +130,6 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                     "rows": [
                         {
                             "field_name": "나트륨",
-                            "raw_value": "나트류 320mg",
                             "normalized_value": "나트륨 320mg",
                             "unit": "mg",
                             "daily_value_percent": "",
@@ -138,7 +137,6 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                         },
                         {
                             "field_name": "탄수화물",
-                            "raw_value": "탄수하물 40g",
                             "normalized_value": "탄수화물 40g",
                             "unit": "g",
                             "daily_value_percent": "",
@@ -146,7 +144,6 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                         },
                         {
                             "field_name": "단백질",
-                            "raw_value": "단백질 8g",
                             "normalized_value": "단백질 8g",
                             "unit": "g",
                             "daily_value_percent": "",
@@ -179,7 +176,6 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                     "rows": [
                         {
                             "field_name": "원재료명",
-                            "raw_value": "정제수, 율엣, 설량, 고초가루(고추·중국산)",
                             "normalized_value": "정제수, 물엿, 설탕, 고춧가루(고추:중국산)",
                             "unit": "",
                             "daily_value_percent": "",
@@ -191,7 +187,6 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
             "product_facts": [
                 {
                     "field_name": "원재료명",
-                    "raw_value": "정제수, 율엣, 설량, 고초가루(고추·중국산)",
                     "normalized_value": "정제수, 물엿, 설탕, 고춧가루(고추:중국산)",
                     "source_refs": ["evidence-1"],
                     "correction_type": "llm_reconstructed",
@@ -228,7 +223,6 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                     "rows": [
                         {
                             "field_name": "내용량",
-                            "raw_value": "300g(274kcal)",
                             "normalized_value": "300g(274kcal)",
                             "unit": "g",
                             "daily_value_percent": "",
@@ -242,7 +236,6 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                     "rows": [
                         {
                             "field_name": "내용량",
-                            "raw_value": "500g(457kcal)",
                             "normalized_value": "500g(457kcal)",
                             "unit": "g",
                             "daily_value_percent": "",
@@ -254,7 +247,6 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
             "product_facts": [
                 {
                     "field_name": "제품명",
-                    "raw_value": "오봉집낙지볶음",
                     "normalized_value": "오봉집낙지볶음",
                     "source_refs": ["evidence-1", "evidence-2"],
                     "correction_type": "none",
@@ -262,7 +254,6 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                 },
                 {
                     "field_name": "식품의 유형",
-                    "raw_value": "기타수산물가공품",
                     "normalized_value": "기타수산물가공품",
                     "source_refs": ["evidence-1", "evidence-2"],
                     "correction_type": "none",
@@ -303,22 +294,21 @@ class ProductInputEvidencePackage(BaseModel):
     records: List[ProductInputEvidenceRecord] = Field(default_factory=list)
 
 
-class ProductFactRecord(BaseModel):
+class ReconstructedProductFact(BaseModel):
     """복원된 상품 input fact."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    fieldName: str = Field(alias="field_name")
-    rawValue: str = Field(default="", alias="raw_value")
-    normalizedValue: str = Field(default="", alias="normalized_value")
-    sourceRefs: List[str] = Field(default_factory=list, alias="source_refs")
-    correctionType: str = Field(default="none", alias="correction_type")
-    validationStatus: str = Field(default="accepted", alias="validation_status")
+    fieldName: str = Field(alias="field_name", description="복원된 fact 필드명")
+    normalizedValue: str = Field(default="", alias="normalized_value", description="정규화된 fact 값")
+    sourceRefs: List[str] = Field(default_factory=list, alias="source_refs", description="근거 evidence ID")
+    correctionType: str = Field(default="none", alias="correction_type", description="보정 방식")
+    validationStatus: str = Field(default="accepted", alias="validation_status", description="검증 상태")
 
     def ToFactText(self) -> str:
         normalizedFieldName = NormalizeWhiteSpace(self.fieldName)
         displayValue = NormalizeWhitespaceLines(
-            self.normalizedValue or self.rawValue
+            self.normalizedValue
         )
         if normalizedFieldName == "":
             return displayValue
@@ -334,17 +324,16 @@ class ProductReconstructedTableRow(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    fieldName: str = Field(alias="field_name")
-    rawValue: str = Field(default="", alias="raw_value")
-    rawOcrHint: str = Field(default="", alias="raw_ocr_hint")
-    normalizedValue: str = Field(default="", alias="normalized_value")
-    unit: str = ""
-    dailyValuePercent: str = Field(default="", alias="daily_value_percent")
-    sourceRefs: List[str] = Field(default_factory=list, alias="source_refs")
-    validationStatus: str = Field(default="unverified", alias="validation_status")
+    fieldName: str = Field(alias="field_name", description="표 행 필드명")
+    normalizedValue: str = Field(default="", alias="normalized_value", description="정규화된 표 행 값")
+    unit: str = Field(default="", description="측정 단위")
+    dailyValuePercent: str = Field(default="", alias="daily_value_percent", description="영양성분 일일 기준치 비율")
+    sourceRefs: List[str] = Field(default_factory=list, alias="source_refs", description="근거 evidence ID")
+    validationStatus: str = Field(default="unverified", alias="validation_status", description="표 행 검증 상태")
     validationIssues: List[str] = Field(
         default_factory=list,
         alias="validation_issues",
+        description="표 행 검증 이슈",
     )
 
 
@@ -353,9 +342,9 @@ class ProductReconstructedTable(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    tableName: str = Field(default="", alias="table_name")
-    sourceRefs: List[str] = Field(default_factory=list, alias="source_refs")
-    rows: List[ProductReconstructedTableRow] = Field(default_factory=list)
+    tableName: str = Field(default="", alias="table_name", description="복원된 표 이름")
+    sourceRefs: List[str] = Field(default_factory=list, alias="source_refs", description="표 근거 evidence ID")
+    rows: List[ProductReconstructedTableRow] = Field(default_factory=list, description="복원된 표 행")
 
 
 def _StripOcrCollectionMarkers(text: str) -> str:
@@ -468,7 +457,7 @@ def _SplitKnownFieldText(text: str) -> Optional[tuple[str, str]]:
     return None
 
 
-class ProductFactReconstructionResult(BaseModel):
+class ProductReconstructionResult(BaseModel):
     """상품 input 복원 결과."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
@@ -476,46 +465,50 @@ class ProductFactReconstructionResult(BaseModel):
     reconstructedTables: List[ProductReconstructedTable] = Field(
         default_factory=list,
         alias="reconstructed_tables",
+        description="UI 검토용 복원 표",
     )
-    productFacts: List[ProductFactRecord] = Field(
+    productFacts: List[ReconstructedProductFact] = Field(
         default_factory=list,
         alias="product_facts",
+        description="분류 입력용 구조화 fact",
     )
-    unresolvedFacts: List[ProductFactRecord] = Field(
+    unresolvedFacts: List[ReconstructedProductFact] = Field(
         default_factory=list,
         alias="unresolved_facts",
+        description="근거 부족 또는 충돌 fact",
     )
-    conflicts: List[str] = Field(default_factory=list)
+    conflicts: List[str] = Field(default_factory=list, description="fact 충돌 목록")
     normalizedFactTexts: List[str] = Field(
         default_factory=list,
         alias="normalized_fact_texts",
+        description="분류 입력용 정규화 텍스트",
     )
-    warnings: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list, description="복원 경고 목록")
     usedLlmReconstruction: bool = Field(
         default=False,
         alias="used_llm_reconstruction",
+        description="LLM reconstruction 사용 여부",
     )
-    fallbackReason: Optional[str] = Field(default=None, alias="fallback_reason")
+    fallbackReason: Optional[str] = Field(default=None, alias="fallback_reason", description="fallback 사유")
     dictionaryMatches: List[ProductDictionaryMatch] = Field(
         default_factory=list,
         alias="dictionary_matches",
-    )
-    debugArtifacts: Dict[str, str] = Field(
-        default_factory=dict,
-        alias="debug_artifacts",
+        description="사전 기반 fact 매칭 결과",
     )
     sourceRefLabels: Dict[str, str] = Field(
         default_factory=dict,
         alias="source_ref_labels",
+        description="evidence ID 표시 라벨",
     )
     sourceEvidencePreview: List[Dict[str, str]] = Field(
         default_factory=list,
         alias="source_evidence_preview",
+        description="근거 evidence 미리보기",
     )
 
     @field_validator("conflicts", "warnings", mode="before")
     @classmethod
-    def NormalizeIssueTexts(cls, value: Any) -> List[str]:
+    def NormalizeIssueTexts(cls, value: object) -> List[str]:
         if value is None:
             return []
         if isinstance(value, str):
@@ -640,8 +633,8 @@ class ProductInputEvidenceBuilder:
 
     def BuildFromPipelineParts(
         self,
-        collectionResult: Any,
-        ocrImageResults: Sequence[Any],
+        collectionResult: object,
+        ocrImageResults: Sequence[object],
         combinedOcrText: str,
     ) -> ProductInputEvidencePackage:
         records: List[ProductInputEvidenceRecord] = []
@@ -876,16 +869,16 @@ class ProductFactReconstructionValidator:
 
     def Validate(
         self,
-        result: ProductFactReconstructionResult,
+        result: ProductReconstructionResult,
         evidencePackage: ProductInputEvidencePackage,
-    ) -> ProductFactReconstructionResult:
+    ) -> ProductReconstructionResult:
         validEvidenceIds = {record.evidenceId for record in evidencePackage.records}
         evidenceById = {
             record.evidenceId: record
             for record in evidencePackage.records
         }
-        productFacts: List[ProductFactRecord] = []
-        unresolvedFacts: List[ProductFactRecord] = []
+        productFacts: List[ReconstructedProductFact] = []
+        unresolvedFacts: List[ReconstructedProductFact] = []
         warnings = list(result.warnings)
         reconstructedTables = self._CleanReconstructedTables(
             result.reconstructedTables,
@@ -919,12 +912,12 @@ class ProductFactReconstructionValidator:
                 )
                 continue
             validationIssue = self._ValidateQuantityEvidence(
-                cleanedFactRecord.rawValue or cleanedFactRecord.normalizedValue,
+                cleanedFactRecord.normalizedValue,
                 cleanedFactRecord.sourceRefs,
                 evidenceById,
             )
             validationIssue = validationIssue or self._ValidateTextEvidence(
-                cleanedFactRecord.rawValue or cleanedFactRecord.normalizedValue,
+                cleanedFactRecord.normalizedValue,
                 cleanedFactRecord.sourceRefs,
                 evidenceById,
             )
@@ -969,15 +962,15 @@ class ProductFactReconstructionValidator:
 
     def _PromoteTableIngredientFacts(
         self,
-        productFacts: Sequence[ProductFactRecord],
+        productFacts: Sequence[ReconstructedProductFact],
         reconstructedTables: Sequence[ProductReconstructedTable],
         evidenceById: Mapping[str, ProductInputEvidenceRecord],
         warnings: List[str],
-    ) -> tuple[List[ProductFactRecord], List[ProductFactRecord]]:
+    ) -> tuple[List[ReconstructedProductFact], List[ReconstructedProductFact]]:
         promotedProductFacts = list(productFacts)
-        unresolvedFacts: List[ProductFactRecord] = []
+        unresolvedFacts: List[ReconstructedProductFact] = []
         seenIngredientValues = {
-            _CompactEvidenceText(fact.normalizedValue or fact.rawValue)
+            _CompactEvidenceText(fact.normalizedValue)
             for fact in promotedProductFacts
             if self._IsIngredientClassificationField(fact.fieldName)
         }
@@ -985,31 +978,26 @@ class ProductFactReconstructionValidator:
             for row in table.rows:
                 if not self._ShouldPromoteTableRow(row):
                     continue
-                valueKey = _CompactEvidenceText(row.normalizedValue or row.rawValue)
+                valueKey = _CompactEvidenceText(row.normalizedValue)
                 if valueKey == "" or valueKey in seenIngredientValues:
                     continue
-                factRecord = ProductFactRecord(
+                factRecord = ReconstructedProductFact(
                     fieldName=self._BuildPromotedFactFieldName(table, row),
-                    rawValue=row.rawValue,
-                    normalizedValue=row.normalizedValue or row.rawValue,
+                    normalizedValue=row.normalizedValue,
                     sourceRefs=list(row.sourceRefs or table.sourceRefs),
-                    correctionType=(
-                        "llm_reconstructed"
-                        if row.normalizedValue and row.normalizedValue != row.rawValue
-                        else "none"
-                    ),
+                    correctionType="llm_reconstructed",
                     validationStatus="accepted",
                 )
                 validationIssue = None
                 if row.validationStatus == "review_required":
                     validationIssue = ",".join(row.validationIssues) or "table_row_review_required"
                 validationIssue = validationIssue or self._ValidateQuantityEvidence(
-                    factRecord.rawValue or factRecord.normalizedValue,
+                    factRecord.normalizedValue,
                     factRecord.sourceRefs,
                     evidenceById,
                 )
                 validationIssue = validationIssue or self._ValidateTextEvidence(
-                    factRecord.rawValue or factRecord.normalizedValue,
+                    factRecord.normalizedValue,
                     factRecord.sourceRefs,
                     evidenceById,
                 )
@@ -1081,13 +1069,10 @@ class ProductFactReconstructionValidator:
                 fieldName = NormalizeWhiteSpace(
                     _StripOcrCollectionMarkers(row.fieldName)
                 )
-                rawValue = NormalizeWhitespaceLines(
-                    _StripOcrCollectionMarkers(row.rawValue)
-                )
                 normalizedValue = NormalizeWhitespaceLines(
                     _StripOcrCollectionMarkers(row.normalizedValue)
                 )
-                if fieldName == "" or (rawValue == "" and normalizedValue == ""):
+                if fieldName == "" or normalizedValue == "":
                     warnings.append(
                         "rejected_table_row_empty_field_or_value table={0} field={1}".format(
                             tableName,
@@ -1106,50 +1091,18 @@ class ProductFactReconstructionValidator:
                     tableSourceRefs,
                     evidenceById,
                 )
-                anchoredRawValue = self._FindTableRawValue(
-                    fieldName,
-                    rawValidationRefs,
-                    evidenceById,
-                )
-                if anchoredRawValue and anchoredRawValue != rawValue:
-                    if normalizedValue == "":
-                        normalizedValue = rawValue
-                    rawValue = anchoredRawValue
-                    rowSourceRefs = self._MergeSourceRefs(
-                        rawValidationRefs,
-                        rowSourceRefs,
-                    )
-                if normalizedValue == "":
-                    normalizedValue = rawValue
-                relatedRawOcrRefs = self._BuildRelatedRawOcrRefs(
-                    rawValidationRefs,
-                    evidenceById,
-                )
-                rawOcrHint = NormalizeWhitespaceLines(
-                    _StripOcrCollectionMarkers(row.rawOcrHint)
-                ) or self._FindRawOcrHint(
-                    fieldName,
-                    rawValue or normalizedValue,
-                    self._MergeSourceRefs(rowSourceRefs, relatedRawOcrRefs),
-                    evidenceById,
-                )
-                if rawOcrHint:
-                    rowSourceRefs = self._MergeSourceRefs(
-                        rowSourceRefs,
-                        relatedRawOcrRefs,
-                    )
                 validationIssue = self._ValidateQuantityEvidence(
-                    rawValue or normalizedValue,
+                    normalizedValue,
                     rawValidationRefs or rowSourceRefs or tableSourceRefs,
                     evidenceById,
                 )
                 validationIssue = validationIssue or self._ValidateTextEvidence(
-                    rawValue or normalizedValue,
+                    normalizedValue,
                     rawValidationRefs or rowSourceRefs or tableSourceRefs,
                     evidenceById,
                 )
                 validationStatus = self._ResolveRowValidationStatus(
-                    rawValue or normalizedValue,
+                    normalizedValue,
                     rawValidationRefs or rowSourceRefs or tableSourceRefs,
                     evidenceById,
                     validationIssue,
@@ -1158,8 +1111,6 @@ class ProductFactReconstructionValidator:
                     row.model_copy(
                         update={
                             "fieldName": fieldName,
-                            "rawValue": rawValue,
-                            "rawOcrHint": rawOcrHint,
                             "normalizedValue": normalizedValue,
                             "unit": NormalizeWhiteSpace(row.unit),
                             "dailyValuePercent": NormalizeWhiteSpace(
@@ -1330,14 +1281,13 @@ class ProductFactReconstructionValidator:
 
     def _CleanFactRecord(
         self,
-        factRecord: ProductFactRecord,
+        factRecord: ReconstructedProductFact,
         *,
         warnings: List[str],
-    ) -> Optional[ProductFactRecord]:
+    ) -> Optional[ReconstructedProductFact]:
         fieldName = _StripOcrCollectionMarkers(factRecord.fieldName)
-        rawValue = _StripOcrCollectionMarkers(factRecord.rawValue)
         normalizedValue = _StripOcrCollectionMarkers(factRecord.normalizedValue)
-        displayValue = normalizedValue or rawValue
+        displayValue = normalizedValue
         if _IsGenericOcrFieldName(fieldName):
             splitText = _SplitKnownFieldText(displayValue)
             if splitText is None:
@@ -1348,9 +1298,8 @@ class ProductFactReconstructionValidator:
                 )
                 return None
             fieldName, splitValue = splitText
-            rawValue = splitValue
             normalizedValue = splitValue
-        if fieldName == "" or (rawValue == "" and normalizedValue == ""):
+        if fieldName == "" or normalizedValue == "":
             warnings.append(
                 "rejected_fact_empty_field_or_value field={0}".format(
                     factRecord.fieldName,
@@ -1360,7 +1309,6 @@ class ProductFactReconstructionValidator:
         return factRecord.model_copy(
             update={
                 "fieldName": NormalizeWhiteSpace(fieldName),
-                "rawValue": NormalizeWhitespaceLines(rawValue),
                 "normalizedValue": NormalizeWhitespaceLines(
                     normalizedValue,
                 ),
@@ -1470,11 +1418,11 @@ class ProductFactReconstructionValidator:
             for token in valueTokens
         ):
             return None
-        return "raw_value_not_found_in_source"
+        return "normalized_value_not_found_in_source"
 
     def _BuildNormalizedFactTexts(
         self,
-        productFacts: Sequence[ProductFactRecord],
+        productFacts: Sequence[ReconstructedProductFact],
     ) -> List[str]:
         factTexts: List[str] = []
         seenFactTexts: set[str] = set()
@@ -1507,12 +1455,12 @@ class DeterministicProductFactReconstructor:
     def Reconstruct(
         self,
         evidencePackage: ProductInputEvidencePackage,
-    ) -> ProductFactReconstructionResult:
+    ) -> ProductReconstructionResult:
         dictionaryMatches = self._dictionaryRetriever.FindMatches(
             [record.text for record in evidencePackage.records]
         )
         factRecords = self._BuildFactRecords(evidencePackage, dictionaryMatches)
-        result = ProductFactReconstructionResult(
+        result = ProductReconstructionResult(
             productFacts=factRecords,
             usedLlmReconstruction=False,
             fallbackReason="llm_reconstruction_not_used",
@@ -1524,8 +1472,8 @@ class DeterministicProductFactReconstructor:
         self,
         evidencePackage: ProductInputEvidencePackage,
         dictionaryMatches: Sequence[ProductDictionaryMatch],
-    ) -> List[ProductFactRecord]:
-        factRecords: List[ProductFactRecord] = []
+    ) -> List[ReconstructedProductFact]:
+        factRecords: List[ReconstructedProductFact] = []
         for record in evidencePackage.records:
             if record.sourceType == "notice_field":
                 factRecord = self._BuildFactRecordFromText(record, dictionaryMatches)
@@ -1547,7 +1495,7 @@ class DeterministicProductFactReconstructor:
         self,
         record: ProductInputEvidenceRecord,
         dictionaryMatches: Sequence[ProductDictionaryMatch],
-    ) -> Optional[ProductFactRecord]:
+    ) -> Optional[ReconstructedProductFact]:
         splitText = _SplitFieldText(record.text)
         if splitText is None:
             return None
@@ -1566,9 +1514,8 @@ class DeterministicProductFactReconstructor:
             if normalizedValue != fieldValue
             else "none"
         )
-        return ProductFactRecord(
+        return ReconstructedProductFact(
             fieldName=fieldName,
-            rawValue=fieldValue,
             normalizedValue=normalizedValue,
             sourceRefs=[record.evidenceId],
             correctionType=correctionType,
@@ -1580,7 +1527,7 @@ class DeterministicProductFactReconstructor:
         factText: str,
         evidencePackage: ProductInputEvidencePackage,
         dictionaryMatches: Sequence[ProductDictionaryMatch],
-    ) -> Optional[ProductFactRecord]:
+    ) -> Optional[ReconstructedProductFact]:
         sourceRefs = self._FindSourceRefs(factText, evidencePackage)
         if not sourceRefs:
             sourceRefs = [evidencePackage.records[0].evidenceId] if evidencePackage.records else []
@@ -1598,9 +1545,8 @@ class DeterministicProductFactReconstructor:
             fieldValue,
             dictionaryMatches,
         )
-        return ProductFactRecord(
+        return ReconstructedProductFact(
             fieldName=fieldName,
-            rawValue=fieldValue,
             normalizedValue=normalizedValue,
             sourceRefs=sourceRefs,
             correctionType="dictionary_exact" if normalizedValue != fieldValue else "none",
@@ -1651,9 +1597,9 @@ class DeterministicProductFactReconstructor:
 
     def _DeduplicateFactRecords(
         self,
-        factRecords: Sequence[ProductFactRecord],
-    ) -> List[ProductFactRecord]:
-        deduplicatedRecords: List[ProductFactRecord] = []
+        factRecords: Sequence[ReconstructedProductFact],
+    ) -> List[ReconstructedProductFact]:
+        deduplicatedRecords: List[ReconstructedProductFact] = []
         seenFactTexts: set[str] = set()
         for factRecord in factRecords:
             factText = factRecord.ToFactText()
@@ -1669,72 +1615,42 @@ class LlmProductFactReconstructor:
 
     def __init__(
         self,
-        runtimeAdapter: Optional[RuntimeAdapter[Any]],
+        runtimeAdapter: Optional[RuntimeAdapter[object]],
         validator: Optional[ProductFactReconstructionValidator] = None,
         maxTokens: int = DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS,
-        debugArtifactRootPath: Optional[Path] = None,
     ) -> None:
         self._runtimeAdapter = runtimeAdapter
         self._validator = validator or ProductFactReconstructionValidator()
         self._maxTokens = max(1, maxTokens)
-        self._debugStore = (
-            ProductInputReconstructionDebugStore(debugArtifactRootPath)
-            if debugArtifactRootPath is not None
-            else None
-        )
 
     def Reconstruct(
         self,
         evidencePackage: ProductInputEvidencePackage,
-    ) -> ProductFactReconstructionResult:
+    ) -> ProductReconstructionResult:
         if self._runtimeAdapter is None:
-            return ProductFactReconstructionResult(
+            return ProductReconstructionResult(
                 warnings=["llm_reconstruction_failed: runtime adapter is not configured"],
                 fallbackReason="llm_runtime_not_configured",
             )
 
         request = self._BuildRequest(evidencePackage)
-        debugArtifacts = self._TryWriteDebugArtifact(
-            lambda: self._debugStore.WriteRequest(evidencePackage, request)
-            if self._debugStore is not None
-            else None,
-            "request",
-        )
         try:
             response = self._runtimeAdapter.Generate(request)
-            debugArtifacts.update(
-                self._TryWriteDebugArtifact(
-                    lambda: self._debugStore.WriteResponse(evidencePackage, response)
-                    if self._debugStore is not None
-                    else None,
-                    "response",
-                )
-            )
             payload = self._ParseJsonPayload(response.generatedText)
-            result = ProductFactReconstructionResult.model_validate(payload)
+            result = ProductReconstructionResult.model_validate(payload)
             result = result.model_copy(
                 update={
                     "normalizedFactTexts": [],
                     "usedLlmReconstruction": True,
                     "fallbackReason": None,
                     "dictionaryMatches": [],
-                    "debugArtifacts": debugArtifacts,
                 }
             )
             return self._validator.Validate(result, evidencePackage)
         except (ValueError, ValidationError, RuntimeError) as error:
-            debugArtifacts.update(
-                self._TryWriteDebugArtifact(
-                    lambda: self._debugStore.WriteError(evidencePackage, error)
-                    if self._debugStore is not None
-                    else None,
-                    "error",
-                )
-            )
-            return ProductFactReconstructionResult(
+            return ProductReconstructionResult(
                 warnings=["llm_reconstruction_failed: {0}".format(error)],
                 fallbackReason="llm_reconstruction_failed",
-                debugArtifacts=debugArtifacts,
             )
 
     def _BuildRequest(
@@ -1756,9 +1672,9 @@ class LlmProductFactReconstructor:
                     "출력 key는 reconstructed_tables, product_facts, unresolved_facts, conflicts, warnings만 사용하라.",
                     "reconstructed_tables에는 structured table/raw OCR에서 복원 가능한 표 행을 가능한 한 보존하라.",
                     "product_facts에는 분류 후보 생성에 필요한 핵심 상품 fact만 넣어라.",
-                    "raw_value는 source_refs의 evidence에 있는 OCR/VLM 원문 판독값을 그대로 복사하라.",
                     "오탈자 교정, 단위 정규화, 표준 필드명/값은 normalized_value에만 넣어라.",
-                    "원문 판독값을 evidence에서 복사할 수 없으면 해당 항목은 unresolved_facts로 보내라.",
+                    "교정 전 OCR 원문값을 별도 필드로 출력하지 마라.",
+                    "정규화된 값을 뒷받침할 evidence가 부족하면 해당 항목은 unresolved_facts로 보내라.",
                     "normalized_fact_texts, dictionary_matches, used_llm_reconstruction, fallback_reason은 출력하지 마라.",
                     "source_refs에는 evidence_id만 사용하라.",
                     json.dumps(contextPayload, ensure_ascii=False, separators=(",", ":")),
@@ -1771,7 +1687,7 @@ class LlmProductFactReconstructor:
             ),
         )
 
-    def _ParseJsonPayload(self, generatedText: str) -> Dict[str, Any]:
+    def _ParseJsonPayload(self, generatedText: str) -> JsonObject:
         strippedText = generatedText.strip()
         if strippedText == "":
             raise ValueError("empty LLM response")
@@ -1802,103 +1718,15 @@ class LlmProductFactReconstructor:
             raise ValueError("LLM reconstruction response must be a JSON object.")
         return payload
 
-    def _TryWriteDebugArtifact(
-        self,
-        writeCallable: Any,
-        artifactName: str,
-    ) -> Dict[str, str]:
-        if self._debugStore is None:
-            return {}
-        try:
-            artifactPath = writeCallable()
-        except OSError:
-            return {}
-        if artifactPath is None:
-            return {}
-        return {artifactName: str(artifactPath)}
-
-
-class ProductInputReconstructionDebugStore:
-    """LLM input reconstruction 요청/응답 artifact를 상품별 디렉터리에 저장한다."""
-
-    def __init__(self, artifactRootPath: Path) -> None:
-        self._artifactRootPath = artifactRootPath
-
-    def WriteRequest(
-        self,
-        evidencePackage: ProductInputEvidencePackage,
-        request: LlmRequest,
-    ) -> Path:
-        return self._WriteJson(
-            evidencePackage,
-            "llm-input-reconstruction-request.json",
-            {
-                "product_page_url": evidencePackage.productPageUrl,
-                "evidence_record_count": len(evidencePackage.records),
-                "request": request.model_dump(mode="json", by_alias=True),
-            },
-        )
-
-    def WriteResponse(
-        self,
-        evidencePackage: ProductInputEvidencePackage,
-        response: Any,
-    ) -> Path:
-        return self._WriteJson(
-            evidencePackage,
-            "llm-input-reconstruction-response.json",
-            response.model_dump(mode="json", by_alias=True),
-        )
-
-    def WriteError(
-        self,
-        evidencePackage: ProductInputEvidencePackage,
-        error: Exception,
-    ) -> Path:
-        return self._WriteJson(
-            evidencePackage,
-            "llm-input-reconstruction-error.json",
-            {
-                "product_page_url": evidencePackage.productPageUrl,
-                "error_type": type(error).__name__,
-                "error_message": str(error),
-            },
-        )
-
-    def _WriteJson(
-        self,
-        evidencePackage: ProductInputEvidencePackage,
-        fileName: str,
-        payload: Mapping[str, Any],
-    ) -> Path:
-        artifactDirectory = self._BuildArtifactDirectory(evidencePackage)
-        artifactDirectory.mkdir(parents=True, exist_ok=True)
-        artifactPath = artifactDirectory / fileName
-        artifactPath.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        return artifactPath
-
-    def _BuildArtifactDirectory(
-        self,
-        evidencePackage: ProductInputEvidencePackage,
-    ) -> Path:
-        return self._artifactRootPath / ExtractProductIdFromUrl(
-            evidencePackage.productPageUrl,
-        )
-
-
 class ProductInputReconstructionService:
     """Evidence build와 선택된 input reconstruction strategy를 묶는다."""
 
     def __init__(
         self,
         dictionaryPath: Optional[str] = None,
-        runtimeAdapter: Optional[RuntimeAdapter[Any]] = None,
+        runtimeAdapter: Optional[RuntimeAdapter[object]] = None,
         fuzzyMinRatio: float = 0.86,
         llmMaxTokens: int = DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS,
-        llmDebugArtifactRootPath: Optional[Path] = None,
     ) -> None:
         self._evidenceBuilder = ProductInputEvidenceBuilder()
         resolvedDictionaryPath = (
@@ -1923,7 +1751,6 @@ class ProductInputReconstructionService:
                 runtimeAdapter=runtimeAdapter,
                 validator=self._validator,
                 maxTokens=llmMaxTokens,
-                debugArtifactRootPath=llmDebugArtifactRootPath,
             )
             if runtimeAdapter is not None
             else None
@@ -1931,10 +1758,10 @@ class ProductInputReconstructionService:
 
     def ReconstructFromPipelineParts(
         self,
-        collectionResult: Any,
-        ocrImageResults: Sequence[Any],
+        collectionResult: object,
+        ocrImageResults: Sequence[object],
         combinedOcrText: str,
-    ) -> ProductFactReconstructionResult:
+    ) -> ProductReconstructionResult:
         evidencePackage = self._evidenceBuilder.BuildFromPipelineParts(
             collectionResult=collectionResult,
             ocrImageResults=ocrImageResults,
@@ -1945,7 +1772,7 @@ class ProductInputReconstructionService:
     def ReconstructFromEvidencePackage(
         self,
         evidencePackage: ProductInputEvidencePackage,
-    ) -> ProductFactReconstructionResult:
+    ) -> ProductReconstructionResult:
         if self._llmReconstructor is None:
             reconstructionResult = self._deterministicReconstructor.Reconstruct(
                 evidencePackage,
@@ -1973,9 +1800,9 @@ class ProductInputReconstructionService:
 
     def _SelectReconstructionResult(
         self,
-        llmResult: ProductFactReconstructionResult,
+        llmResult: ProductReconstructionResult,
         evidencePackage: ProductInputEvidencePackage,
-    ) -> ProductFactReconstructionResult:
+    ) -> ProductReconstructionResult:
         if llmResult.usedLlmReconstruction:
             return self._validator.Validate(llmResult, evidencePackage)
 
@@ -1990,14 +1817,13 @@ class ProductInputReconstructionService:
                     )
                 ),
                 "fallbackReason": llmResult.fallbackReason,
-                "debugArtifacts": dict(llmResult.debugArtifacts),
             }
         )
 
     def _BuildSourceRefLabels(
         self,
         evidencePackage: ProductInputEvidencePackage,
-        reconstructionResult: ProductFactReconstructionResult,
+        reconstructionResult: ProductReconstructionResult,
     ) -> Dict[str, str]:
         referencedEvidenceIds = self._CollectReferencedEvidenceIds(
             reconstructionResult,
@@ -2012,7 +1838,7 @@ class ProductInputReconstructionService:
     def _BuildSourceEvidencePreview(
         self,
         evidencePackage: ProductInputEvidencePackage,
-        reconstructionResult: ProductFactReconstructionResult,
+        reconstructionResult: ProductReconstructionResult,
         sourceRefLabels: Mapping[str, str],
     ) -> List[Dict[str, str]]:
         referencedEvidenceIds = self._CollectReferencedEvidenceIds(
@@ -2080,7 +1906,7 @@ class ProductInputReconstructionService:
 
     def _CollectReferencedEvidenceIds(
         self,
-        reconstructionResult: ProductFactReconstructionResult,
+        reconstructionResult: ProductReconstructionResult,
     ) -> set[str]:
         referencedEvidenceIds = {
             sourceRef

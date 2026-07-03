@@ -14,7 +14,7 @@ from bussiness_logic.product.ocr.ocr_normalization import (
 )
 from bussiness_logic.product.ocr.paddle_ocr import ProductOcrEngine
 from bussiness_logic.input_process.reconstruction import (
-    ProductFactReconstructionResult,
+    ProductReconstructionResult,
     ProductInputReconstructionService,
 )
 from bussiness_logic.product.pipeline.pipeline_schema import (
@@ -182,7 +182,7 @@ class KurlyProductPipeline:
             ocrNormalizationResult=ocrNormalizationResult,
             inputReconstructionResult=inputReconstructionResult
             if inputReconstructionResult is not None
-            else ProductFactReconstructionResult(),
+            else ProductReconstructionResult(),
             steps=steps,
             errors=errors,
         )

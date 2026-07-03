@@ -8,12 +8,10 @@ import threading
 import time
 import traceback
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.api_contract import (
-    AdminRunDebugResponse,
     DocumentPackageCollectionResponse,
     DocumentPackageDetailResponse,
     PipelineEventPayload,
@@ -21,9 +19,10 @@ from backend.api_contract import (
     RunNotFoundSsePayload,
 )
 from backend.pipeline_projection import PipelineResultProjector
+from bussiness_logic.utils.json_types import JsonMapping, JsonObject, JsonValue
 
 
-PipelineCallable = Callable[..., dict[str, Any]]
+PipelineCallable = Callable[..., dict[str, object]]
 
 
 class PipelineRunRequest(BaseModel):
@@ -32,7 +31,7 @@ class PipelineRunRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
     query: str
-    facts: dict[str, Any] = Field(default_factory=dict)
+    facts: JsonObject = Field(default_factory=dict)
     includeCelexExcerpt: bool = Field(
         default=False,
         alias="include_celex_excerpt",
@@ -43,7 +42,7 @@ class RunRegistry:
     """Thread-safe run state and event buffer."""
 
     def __init__(self) -> None:
-        self._runs: dict[str, dict[str, Any]] = {}
+        self._runs: dict[str, JsonObject] = {}
         self._condition = threading.Condition(threading.Lock())
         self._projector = PipelineResultProjector()
 
@@ -52,9 +51,9 @@ class RunRegistry:
         runId: str,
         *,
         query: str,
-        facts: Mapping[str, Any],
+        facts: JsonMapping,
         status: str = "queued",
-        events: list[dict[str, Any]] | None = None,
+        events: list[JsonObject] | None = None,
         reuseActive: bool = False,
     ) -> str:
         requestSignature = self._BuildRequestSignature(query, facts)
@@ -75,7 +74,7 @@ class RunRegistry:
             self._condition.notify_all()
             return runId
 
-    def UpdateRun(self, runId: str, **updates: Any) -> None:
+    def UpdateRun(self, runId: str, **updates: JsonValue) -> None:
         with self._condition:
             run = self._runs.setdefault(runId, {"events": []})
             if isinstance(updates.get("facts"), Mapping):
@@ -87,25 +86,25 @@ class RunRegistry:
         self,
         *,
         query: str,
-        facts: Mapping[str, Any],
+        facts: JsonMapping,
     ) -> str | None:
         requestSignature = self._BuildRequestSignature(query, facts)
         with self._condition:
             return self._FindActiveRunBySignatureLocked(requestSignature)
 
-    def AppendEvent(self, runId: str, event: Mapping[str, Any]) -> None:
+    def AppendEvent(self, runId: str, event: JsonMapping) -> None:
         with self._condition:
             self._AppendEventLocked(runId, event)
             self._condition.notify_all()
 
-    def ReadSnapshot(self, runId: str) -> dict[str, Any] | None:
+    def ReadSnapshot(self, runId: str) -> JsonObject | None:
         with self._condition:
             run = self._runs.get(runId)
             if run is None:
                 return None
             return self._SnapshotCopyLocked(run)
 
-    def ReadSnapshotByIdentifier(self, identifier: str) -> tuple[str, dict[str, Any]] | None:
+    def ReadSnapshotByIdentifier(self, identifier: str) -> tuple[str, JsonObject] | None:
         with self._condition:
             if identifier in self._runs:
                 return identifier, self._SnapshotCopyLocked(self._runs[identifier])
@@ -115,13 +114,13 @@ class RunRegistry:
                     return jobId, self._SnapshotCopyLocked(run)
         return None
 
-    def BuildUiResult(self, runId: str) -> dict[str, Any]:
+    def BuildUiResult(self, runId: str) -> JsonObject:
         snapshot = self.ReadSnapshot(runId)
         if snapshot is None:
             return {}
         return self._projector.BuildUiResult(snapshot, runId)
 
-    def BuildDocumentPackageCollection(self, runId: str) -> dict[str, Any]:
+    def BuildDocumentPackageCollection(self, runId: str) -> JsonObject:
         snapshotEntry = self.ReadSnapshotByIdentifier(runId)
         if snapshotEntry is None:
             return {}
@@ -139,7 +138,7 @@ class RunRegistry:
         self,
         runId: str,
         packageId: str,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         snapshotEntry = self.ReadSnapshotByIdentifier(runId)
         if snapshotEntry is None:
             return {}
@@ -160,9 +159,9 @@ class RunRegistry:
 
     def _DocumentPackagesFromSnapshot(
         self,
-        snapshot: Mapping[str, Any],
-        resultData: Mapping[str, Any],
-    ) -> list[dict[str, Any]]:
+        snapshot: JsonMapping,
+        resultData: JsonMapping,
+    ) -> list[JsonObject]:
         packages = self._projector.ExtractDocumentPackages(resultData)
         if packages:
             return packages
@@ -175,25 +174,10 @@ class RunRegistry:
             if isinstance(package, Mapping)
         ]
 
-    def BuildAdminDebugResult(self, runId: str) -> dict[str, Any]:
-        snapshotEntry = self.ReadSnapshotByIdentifier(runId)
-        if snapshotEntry is None:
-            return {}
-        jobId, snapshot = snapshotEntry
-        resultData = self._ResultData(snapshot)
-        return AdminRunDebugResponse(
-            job_id=jobId,
-            job_status=snapshot.get("status"),
-            run_id=resultData.get("run_id"),
-            run_dir=resultData.get("run_dir"),
-            events=snapshot.get("events") or [],
-            public_result=self._projector.BuildUiResult(snapshot, jobId),
-        ).ToDict()
-
     def BuildPipelineResultProjection(
         self,
-        pipelineOutput: Mapping[str, Any],
-    ) -> dict[str, Any]:
+        pipelineOutput: JsonMapping,
+    ) -> JsonObject:
         return self._projector.BuildPipelineResultProjection(pipelineOutput)
 
     def StreamEvents(
@@ -247,7 +231,7 @@ class RunRegistry:
 
             yield ": heartbeat\n\n"
 
-    def _AppendEventLocked(self, runId: str, event: Mapping[str, Any]) -> None:
+    def _AppendEventLocked(self, runId: str, event: JsonMapping) -> None:
         run = self._runs.setdefault(runId, {"events": []})
         eventData = self._projector.CompactEvent(event)
         eventData.setdefault("ts", time.strftime("%H:%M:%S"))
@@ -259,7 +243,7 @@ class RunRegistry:
                 run["document_packages"] = documentPackages
             run["partial_result"] = partialResult
 
-    def _SnapshotCopyLocked(self, run: Mapping[str, Any]) -> dict[str, Any]:
+    def _SnapshotCopyLocked(self, run: JsonMapping) -> JsonObject:
         snapshot = dict(run)
         snapshot["events"] = list(run.get("events") or [])
         partialResult = run.get("partial_result")
@@ -270,7 +254,7 @@ class RunRegistry:
             snapshot["result"] = dict(result)
         return snapshot
 
-    def _ResultData(self, snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    def _ResultData(self, snapshot: JsonMapping) -> JsonObject:
         result = snapshot.get("result")
         if isinstance(result, Mapping):
             return dict(result)
@@ -287,7 +271,7 @@ class RunRegistry:
         run = self._runs.get(runId)
         return bool(run is not None and run.get("status") in {"completed", "failed"})
 
-    def _BuildRequestSignature(self, query: str, facts: Mapping[str, Any]) -> str:
+    def _BuildRequestSignature(self, query: str, facts: JsonMapping) -> str:
         payload = {
             "query": query,
             "facts": dict(facts),
@@ -312,7 +296,7 @@ class RunRegistry:
     def _FormatSse(
         self,
         eventName: str,
-        payload: Mapping[str, Any],
+        payload: JsonMapping,
         eventId: str | None = None,
     ) -> str:
         eventIdLine = "id: {0}\n".format(eventId) if eventId is not None else ""
@@ -397,7 +381,7 @@ class PipelineRunService:
                 },
             )
 
-    def _StripRuntimeObjects(self, pipelineOutput: Mapping[str, Any]) -> dict[str, Any]:
+    def _StripRuntimeObjects(self, pipelineOutput: Mapping[str, object]) -> JsonObject:
         return {
             key: value
             for key, value in dict(pipelineOutput).items()
