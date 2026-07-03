@@ -80,6 +80,7 @@ class Hs2RoutingComponent(BasePipelineComponent):
             preGateDomains=routeHint.preGateDomains,
             routingBasis=self._TraceDict(routeHint.routingBasis.ToTrace()),
             missingFacts=routeHint.missingFacts,
+            candidateChapterDetails=routeHint.candidateChapterDetails,
         )
         store.put(
             "routing_context",

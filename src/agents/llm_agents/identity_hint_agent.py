@@ -44,6 +44,13 @@ chapter_hint_terms. Each term should be a short English or Korean keyword phrase
 product_form_terms may include physical form and preparation/processing signal
 terms when they are present in the Wikipedia evidence.
 
+Pipeline role (ontology summary):
+- ProductUnderstandingFacts feeds DomainRouter, not final classification.
+- DomainRouter matches chapter_hint_terms/product_form_terms/processing_state
+  against cn_chapter_index include/exclude/guardrail columns.
+- Prepared foods must not route only by raw ingredient/allergen mentions.
+- Never output HS/CN/TARIC codes; code selection happens downstream.
+
 JSON keys (all required):
 translated_product_name, commercial_identity, normalized_tariff_description,
 identity_terms, product_form_terms, domain_hints,
@@ -236,6 +243,15 @@ def _BuildIdentityFacts(
     except (TypeError, ValueError):
         confidence = 0.5
 
+    # Evidence text the model was given — the grounding reference for the guard.
+    evidenceText = "\n".join(
+        [
+            productName,
+            shortDescription,
+            *[str(text) for text in factTexts],
+            *[f"{entry.title} {entry.description}" for entry in encyclopediaEvidence.entries],
+        ],
+    )
     return {
         "translated_product_name": str(parsed.get("translated_product_name") or "").strip(),
         "commercial_identity": str(
