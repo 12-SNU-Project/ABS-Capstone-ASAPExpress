@@ -408,6 +408,7 @@ def _BuildInputReconstructionService(
         runtimeAdapter=runtime_adapter,
         fuzzyMinRatio=smoke_config.input_dictionary_fuzzy_min_ratio,
         llmMaxTokens=smoke_config.llm_input_reconstruction_max_tokens,
+        llmArtifactRootPath=PRODUCT_INPUT_ARTIFACT_ROOT,
     )
 
 

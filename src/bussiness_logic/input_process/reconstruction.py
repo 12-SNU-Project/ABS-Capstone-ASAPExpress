@@ -22,6 +22,7 @@ from bussiness_logic.bridge.schema import (
     LlmRequest,
     LlmResponseFormat,
 )
+from bussiness_logic.artifact_paths import ExtractProductIdFromUrl
 from bussiness_logic.input_process.dictionary import (
     DEFAULT_PRODUCT_INPUT_DICTIONARY_PATH,
     ProductDictionaryMatch,
@@ -52,6 +53,7 @@ product_facts is only the compact classification input facts derived from the sa
 product_facts and unresolved_facts must be arrays of objects with exactly these keys:
 field_name, normalized_value, source_refs, correction_type, validation_status.
 conflicts and warnings must be arrays of strings.
+Do not return JSON null. Use an empty string, empty array, or omit the uncertain fact.
 Do not infer HS, CN, TARIC, customs, legal, or regulatory conclusions.
 Do not create product facts that are absent from the provided evidence.
 Correct OCR typos only when the surrounding evidence strongly supports the correction.
@@ -305,6 +307,26 @@ class ClassificationFact(BaseModel):
     correctionType: str = Field(default="none", alias="correction_type", description="보정 방식")
     validationStatus: str = Field(default="accepted", alias="validation_status", description="검증 상태")
 
+    @field_validator("fieldName", "normalizedValue", mode="before")
+    @classmethod
+    def NormalizeRequiredText(cls, value: object) -> str:
+        return _NormalizeLlmScalarText(value)
+
+    @field_validator("correctionType", mode="before")
+    @classmethod
+    def NormalizeCorrectionType(cls, value: object) -> str:
+        return _NormalizeLlmScalarText(value, defaultValue="none") or "none"
+
+    @field_validator("validationStatus", mode="before")
+    @classmethod
+    def NormalizeValidationStatus(cls, value: object) -> str:
+        return _NormalizeLlmScalarText(value, defaultValue="accepted") or "accepted"
+
+    @field_validator("sourceRefs", mode="before")
+    @classmethod
+    def NormalizeSourceRefs(cls, value: object) -> List[str]:
+        return _NormalizeLlmTextList(value)
+
     def ToFactText(self) -> str:
         normalizedFieldName = NormalizeWhiteSpace(self.fieldName)
         displayValue = NormalizeWhitespaceLines(
@@ -336,6 +358,21 @@ class ReconstructionTableRow(BaseModel):
         description="표 행 검증 이슈",
     )
 
+    @field_validator("fieldName", "normalizedValue", "unit", "dailyValuePercent", mode="before")
+    @classmethod
+    def NormalizeRowText(cls, value: object) -> str:
+        return _NormalizeLlmScalarText(value)
+
+    @field_validator("validationStatus", mode="before")
+    @classmethod
+    def NormalizeValidationStatus(cls, value: object) -> str:
+        return _NormalizeLlmScalarText(value, defaultValue="unverified") or "unverified"
+
+    @field_validator("sourceRefs", "validationIssues", mode="before")
+    @classmethod
+    def NormalizeRowTextList(cls, value: object) -> List[str]:
+        return _NormalizeLlmTextList(value)
+
 
 class ReconstructionTable(BaseModel):
     """Table reconstruction preserved separately from classification facts."""
@@ -345,6 +382,21 @@ class ReconstructionTable(BaseModel):
     tableName: str = Field(default="", alias="table_name", description="복원된 표 이름")
     sourceRefs: List[str] = Field(default_factory=list, alias="source_refs", description="표 근거 evidence ID")
     rows: List[ReconstructionTableRow] = Field(default_factory=list, description="복원된 표 행")
+
+    @field_validator("tableName", mode="before")
+    @classmethod
+    def NormalizeTableName(cls, value: object) -> str:
+        return _NormalizeLlmScalarText(value)
+
+    @field_validator("sourceRefs", mode="before")
+    @classmethod
+    def NormalizeSourceRefs(cls, value: object) -> List[str]:
+        return _NormalizeLlmTextList(value)
+
+    @field_validator("rows", mode="before")
+    @classmethod
+    def NormalizeRows(cls, value: object) -> List[object]:
+        return _NormalizeLlmObjectList(value)
 
 
 def _StripOcrCollectionMarkers(text: str) -> str:
@@ -401,6 +453,36 @@ def _IsTokenCoveredByEvidenceParts(token: str, evidenceTokens: set[str]) -> bool
 
 def _CompactEvidenceText(text: str) -> str:
     return re.sub(r"[^0-9A-Za-z가-힣]+", "", text or "").lower()
+
+
+def _NormalizeLlmScalarText(value: object, *, defaultValue: str = "") -> str:
+    if value is None:
+        return defaultValue
+    if isinstance(value, str):
+        return NormalizeWhitespaceLines(value)
+    if isinstance(value, (int, float, bool)):
+        return NormalizeWhiteSpace(str(value))
+    return NormalizeWhitespaceLines(json.dumps(value, ensure_ascii=False, sort_keys=True))
+
+
+def _NormalizeLlmTextList(value: object) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        normalizedValue = NormalizeWhiteSpace(value)
+        return [normalizedValue] if normalizedValue else []
+    if not isinstance(value, list):
+        return []
+    normalizedValues: List[str] = []
+    for item in value:
+        normalizedItem = _NormalizeLlmScalarText(item)
+        if normalizedItem:
+            normalizedValues.append(normalizedItem)
+    return list(dict.fromkeys(normalizedValues))
+
+
+def _NormalizeLlmObjectList(value: object) -> List[object]:
+    return value if isinstance(value, list) else []
 
 
 def _IsGenericOcrFieldName(fieldName: str) -> bool:
@@ -505,6 +587,11 @@ class InputReconstructionResult(BaseModel):
         alias="source_evidence_preview",
         description="근거 evidence 미리보기",
     )
+
+    @field_validator("reconstructedTables", "productFacts", "unresolvedFacts", mode="before")
+    @classmethod
+    def NormalizeObjectLists(cls, value: object) -> List[object]:
+        return _NormalizeLlmObjectList(value)
 
     @field_validator("conflicts", "warnings", mode="before")
     @classmethod
@@ -1418,7 +1505,24 @@ class ProductFactReconstructionValidator:
             for token in valueTokens
         ):
             return None
+        if self._HasSufficientCorrectedTextCoverage(valueTokens, evidenceTokens):
+            return None
         return "normalized_value_not_found_in_source"
+
+    def _HasSufficientCorrectedTextCoverage(
+        self,
+        valueTokens: set[str],
+        evidenceTokens: set[str],
+    ) -> bool:
+        if len(valueTokens) < 4:
+            return False
+        coveredTokenCount = sum(
+            1
+            for token in valueTokens
+            if _IsTokenCoveredByEvidenceParts(token, evidenceTokens)
+        )
+        requiredTokenCount = max(2, (len(valueTokens) + 1) // 2)
+        return coveredTokenCount >= requiredTokenCount
 
     def _BuildNormalizedFactTexts(
         self,
@@ -1618,10 +1722,12 @@ class ProductFactReconstructionAgent:
         runtimeAdapter: Optional[RuntimeAdapter[object]],
         validator: Optional[ProductFactReconstructionValidator] = None,
         maxTokens: int = DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS,
+        artifactRootPath: Optional[Path] = None,
     ) -> None:
         self._runtimeAdapter = runtimeAdapter
         self._validator = validator or ProductFactReconstructionValidator()
         self._maxTokens = max(1, maxTokens)
+        self._artifactRootPath = artifactRootPath
 
     def Reconstruct(
         self,
@@ -1634,8 +1740,22 @@ class ProductFactReconstructionAgent:
             )
 
         request = self._BuildRequest(evidencePackage)
+        self._TryWriteArtifact(
+            evidencePackage,
+            "llm-input-reconstruction-request.json",
+            {
+                "product_page_url": evidencePackage.productPageUrl,
+                "evidence_record_count": len(evidencePackage.records),
+                "request": request.model_dump(mode="json", by_alias=True),
+            },
+        )
         try:
             response = self._runtimeAdapter.Generate(request)
+            self._TryWriteArtifact(
+                evidencePackage,
+                "llm-input-reconstruction-response.json",
+                response.model_dump(mode="json", by_alias=True),
+            )
             payload = self._ParseJsonPayload(response.generatedText)
             result = InputReconstructionResult.model_validate(payload)
             result = result.model_copy(
@@ -1648,6 +1768,15 @@ class ProductFactReconstructionAgent:
             )
             return self._validator.Validate(result, evidencePackage)
         except (ValueError, ValidationError, RuntimeError) as error:
+            self._TryWriteArtifact(
+                evidencePackage,
+                "llm-input-reconstruction-error.json",
+                {
+                    "product_page_url": evidencePackage.productPageUrl,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                },
+            )
             return InputReconstructionResult(
                 warnings=["llm_reconstruction_failed: {0}".format(error)],
                 fallbackReason="llm_reconstruction_failed",
@@ -1672,6 +1801,7 @@ class ProductFactReconstructionAgent:
                     "출력 key는 reconstructed_tables, product_facts, unresolved_facts, conflicts, warnings만 사용하라.",
                     "reconstructed_tables에는 structured table/raw OCR에서 복원 가능한 표 행을 가능한 한 보존하라.",
                     "product_facts에는 분류 후보 생성에 필요한 핵심 상품 fact만 넣어라.",
+                    "JSON null을 절대 출력하지 말고, 모르는 값은 빈 문자열/빈 배열 또는 항목 생략으로 표현하라.",
                     "오탈자 교정, 단위 정규화, 표준 필드명/값은 normalized_value에만 넣어라.",
                     "교정 전 OCR 원문값을 별도 필드로 출력하지 마라.",
                     "정규화된 값을 뒷받침할 evidence가 부족하면 해당 항목은 unresolved_facts로 보내라.",
@@ -1718,6 +1848,25 @@ class ProductFactReconstructionAgent:
             raise ValueError("LLM reconstruction response must be a JSON object.")
         return payload
 
+    def _TryWriteArtifact(
+        self,
+        evidencePackage: InputEvidencePackage,
+        fileName: str,
+        payload: Mapping[str, object],
+    ) -> None:
+        if self._artifactRootPath is None:
+            return
+        productId = ExtractProductIdFromUrl(evidencePackage.productPageUrl)
+        artifactDirectory = self._artifactRootPath / productId
+        try:
+            artifactDirectory.mkdir(parents=True, exist_ok=True)
+            (artifactDirectory / fileName).write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError:
+            return
+
 class ProductInputReconstructionService:
     """Evidence build와 선택된 input reconstruction strategy를 묶는다."""
 
@@ -1727,6 +1876,7 @@ class ProductInputReconstructionService:
         runtimeAdapter: Optional[RuntimeAdapter[object]] = None,
         fuzzyMinRatio: float = 0.86,
         llmMaxTokens: int = DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS,
+        llmArtifactRootPath: Optional[Path] = None,
     ) -> None:
         self._evidenceBuilder = ProductInputEvidenceBuilder()
         resolvedDictionaryPath = (
@@ -1751,6 +1901,7 @@ class ProductInputReconstructionService:
                 runtimeAdapter=runtimeAdapter,
                 validator=self._validator,
                 maxTokens=llmMaxTokens,
+                artifactRootPath=llmArtifactRootPath,
             )
             if runtimeAdapter is not None
             else None

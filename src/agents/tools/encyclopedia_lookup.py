@@ -15,12 +15,15 @@ from agents.pipeline_dto import EncyclopediaEntryDto, EncyclopediaEvidenceSet
 
 WIKIPEDIA_SEARCH_ENDPOINT = "https://en.wikipedia.org/w/rest.php/v1/search/title"
 WIKIPEDIA_SUMMARY_ENDPOINT = "https://en.wikipedia.org/api/rest_v1/page/summary/{title}"
+KO_WIKIPEDIA_SEARCH_ENDPOINT = "https://ko.wikipedia.org/w/rest.php/v1/search/title"
+KO_WIKIPEDIA_LANG_LINK_ENDPOINT = "https://ko.wikipedia.org/w/api.php"
 WIKI_REQUEST_HEADERS = {
     "Accept": "application/json",
     "User-Agent": "ASAPExpress/1.0 (+https://github.com/)",
 }
 TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"\s+")
+HANGUL_RE = re.compile(r"[가-힣]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,11 +55,17 @@ def LookupEncyclopediaEvidence(
 
     rows: list[WikipediaSearchResult] = []
     searchError = ""
+    qualityStatus = "raw_entries"
+    qualityReasons = ("raw_not_routing_input",)
     # Restored backup candidate fallback: brand/quantity-stripped full query
     # first, then trailing dish-name suffixes ("압구정낙지 낙지 볶음" -> "낙지 볶음").
     for candidate in _QueryCandidates(normalizedQuery):
         try:
-            rows = list(_search_wikipedia(candidate, limit=display, timeoutSeconds=timeoutSeconds))
+            rows, qualityStatus, qualityReasons = _lookup_candidate(
+                candidate,
+                limit=display,
+                timeoutSeconds=timeoutSeconds,
+            )
         except Exception as exc:  # noqa: BLE001 — keep lookup tolerant
             searchError = f"{type(exc).__name__}: {exc}"
             continue
@@ -100,8 +109,8 @@ def LookupEncyclopediaEvidence(
             )
             for row in rows
         ),
-        qualityStatus="raw_entries",
-        qualityReasons=("raw_not_routing_input",),
+        qualityStatus=qualityStatus,
+        qualityReasons=qualityReasons,
     )
 
 
@@ -129,6 +138,29 @@ def _QueryCandidates(cleanedQuery: str, *, limit: int = 4) -> tuple[str, ...]:
         if len(candidates) >= limit:
             break
     return tuple(candidates)
+
+
+def _lookup_candidate(
+    query: str,
+    *,
+    limit: int,
+    timeoutSeconds: float,
+) -> tuple[list[WikipediaSearchResult], str, tuple[str, ...]]:
+    if _ContainsHangul(query):
+        translatedRows = _search_korean_wikipedia_as_english(
+            query,
+            limit=limit,
+            timeoutSeconds=timeoutSeconds,
+        )
+        if translatedRows:
+            return (
+                translatedRows,
+                "translated_entries",
+                ("ko_wikipedia_langlink", "raw_not_routing_input"),
+            )
+
+    rows = _search_wikipedia(query, limit=limit, timeoutSeconds=timeoutSeconds)
+    return rows, "raw_entries", ("raw_not_routing_input",)
 
 
 def _search_wikipedia(
@@ -165,6 +197,96 @@ def _search_wikipedia(
             ),
         )
     return rows
+
+
+def _search_korean_wikipedia_as_english(
+    query: str,
+    *,
+    limit: int,
+    timeoutSeconds: float,
+) -> list[WikipediaSearchResult]:
+    request = urllib.request.Request(
+        _BuildSearchUrl(
+            query,
+            limit=limit,
+            endpoint=KO_WIKIPEDIA_SEARCH_ENDPOINT,
+        ),
+        headers=WIKI_REQUEST_HEADERS,
+    )
+    with urllib.request.urlopen(request, timeout=timeoutSeconds) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    rows: list[WikipediaSearchResult] = []
+    seenTitles: set[str] = set()
+    for rawItem in _ReadSearchItems(payload):
+        koreanTitle = _StripMarkup(str(rawItem.get("title") or "")).strip()
+        if not koreanTitle:
+            continue
+        englishTitle = _fetch_english_langlink(
+            koreanTitle,
+            timeoutSeconds=timeoutSeconds,
+        )
+        if not englishTitle or englishTitle in seenTitles:
+            continue
+        seenTitles.add(englishTitle)
+        snippet = _fetch_summary_snippet(
+            englishTitle,
+            timeoutSeconds=timeoutSeconds,
+        )
+        link = f"https://en.wikipedia.org/wiki/{urllib.parse.quote(englishTitle.replace(' ', '_'))}"
+        rows.append(
+            WikipediaSearchResult(
+                title=englishTitle,
+                description="",
+                snippet=snippet or englishTitle,
+                link=link,
+            ),
+        )
+    return rows
+
+
+def _fetch_english_langlink(title: str, *, timeoutSeconds: float) -> str:
+    request = urllib.request.Request(
+        KO_WIKIPEDIA_LANG_LINK_ENDPOINT
+        + "?"
+        + urllib.parse.urlencode(
+            {
+                "action": "query",
+                "prop": "langlinks",
+                "titles": title,
+                "lllang": "en",
+                "lllimit": 1,
+                "format": "json",
+                "formatversion": 2,
+            },
+        ),
+        headers=WIKI_REQUEST_HEADERS,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeoutSeconds) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    queryPayload = payload.get("query")
+    if not isinstance(queryPayload, dict):
+        return ""
+    pages = queryPayload.get("pages")
+    if not isinstance(pages, list):
+        return ""
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        langlinks = page.get("langlinks")
+        if not isinstance(langlinks, list):
+            continue
+        for langlink in langlinks:
+            if not isinstance(langlink, dict):
+                continue
+            if langlink.get("lang") == "en":
+                return str(langlink.get("title") or langlink.get("*") or "").strip()
+    return ""
 
 
 def _fetch_summary_snippet(title: str, *, timeoutSeconds: float) -> str:
@@ -204,14 +326,23 @@ def _ReadSearchItems(payload: object) -> list[dict[str, object]]:
     return [item for item in (fallback if isinstance(fallback, list) else []) if isinstance(item, dict)]
 
 
-def _BuildSearchUrl(query: str, *, limit: int) -> str:
-    return WIKIPEDIA_SEARCH_ENDPOINT + "?" + urllib.parse.urlencode(
+def _BuildSearchUrl(
+    query: str,
+    *,
+    limit: int,
+    endpoint: str = WIKIPEDIA_SEARCH_ENDPOINT,
+) -> str:
+    return endpoint + "?" + urllib.parse.urlencode(
         {
             "q": query,
             "limit": max(1, min(limit, 10)),
             "format": "json",
         },
     )
+
+
+def _ContainsHangul(value: str) -> bool:
+    return HANGUL_RE.search(value) is not None
 
 
 def _StripMarkup(markup: str) -> str:

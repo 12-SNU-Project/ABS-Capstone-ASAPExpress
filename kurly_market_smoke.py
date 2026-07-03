@@ -102,7 +102,8 @@ class AnswerRecord:
 class _BoundLogger:
     def __init__(self, logger: logging.Logger, className: str, functionName: str) -> None:
         self._logger = logger
-        self._prefix = f"{className}::{functionName}: "
+        self._className = className
+        self._functionName = functionName
 
     def info(self, message: str, *args: object) -> None:
         self._log(logging.INFO, message, *args)
@@ -118,7 +119,7 @@ class _BoundLogger:
             renderedMessage = message.format(*args)
         except Exception:
             renderedMessage = " ".join([message, *[str(arg) for arg in args]])
-        self._logger.log(level, "%s%s", self._prefix, renderedMessage)
+        self._logger.log(level, "%s", renderedMessage)
 
 
 def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
@@ -721,9 +722,10 @@ class KurlyMarketSmokeRunner:
         runLogger = self._Logger("Run")
         runLogger.info(
             (
-                "KurlyMarket 상품 수집 smoke를 시작합니다 url_count={} "
-                "run_ocr_fallback={} browser_mode={} compare_ocr={} "
-                "classify_reconstruction={} stage1_review_mode={}"
+                "pipeline_step=smoke_boot component=KurlyMarketSmokeRunner "
+                "output_dto=SmokeRunConfig url_count={} run_ocr_fallback={} "
+                "browser_mode={} compare_ocr={} classify_reconstruction={} "
+                "stage1_review_mode={}"
             ),
             len(self._productUrls),
             self._runOcrFallback,
@@ -747,17 +749,24 @@ class KurlyMarketSmokeRunner:
         if self._classifyReconstruction:
             self._RunClassificationPreflight(runLogger)
 
-        runLogger.info("STEP 1/4 상품 페이지 수집/OCR 파이프라인을 준비합니다")
+        runLogger.info(
+            "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyPipelineResult action=prepare"
+        )
         productSourcePipeline = self._BuildProductSourcePipeline()
 
         runLogger.info(
-            "STEP 2/4 KurlyMarket 상품 페이지를 수집합니다 url_count={}",
+            "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyPipelineResult action=run url_count={}",
             len(self._productUrls),
         )
         results: List[Dict[str]] = []
         for productIndex, productUrl in enumerate(self._productUrls, start=1):
             runLogger.info(
-                "STEP 2/4 상품 페이지 수집 index={}/{} url={}",
+                "========== pipeline_step=collection_ocr product_index={}/{} ==========",
+                productIndex,
+                len(self._productUrls),
+            )
+            runLogger.info(
+                "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyPipelineResult index={}/{} url={}",
                 productIndex,
                 len(self._productUrls),
                 productUrl,
@@ -766,16 +775,24 @@ class KurlyMarketSmokeRunner:
             results.append(resultData)
             self._LogOne(resultData)
 
-        runLogger.info("STEP 3/4 상품 수집 결과를 요약합니다")
+        runLogger.info(
+            "pipeline_step=summary component=KurlyMarketSmokeRunner output_dto=RuntimeSmokeSummary action=aggregate"
+        )
         self._LogSummary(results)
         if self._writeSummaryArtifact:
-            runLogger.info("STEP 4/4 상품 수집 결과 JSON artifact를 저장합니다")
+            runLogger.info(
+                "pipeline_step=summary component=KurlyMarketSmokeRunner output_dto=RuntimeSmokeSummary action=write_artifact"
+            )
             self._WriteSummaryArtifact(results)
         else:
-            runLogger.info("STEP 4/4 상품 수집 결과 JSON artifact 저장을 건너뜁니다")
+            runLogger.info(
+                "pipeline_step=summary component=KurlyMarketSmokeRunner output_dto=RuntimeSmokeSummary action=skip_artifact"
+            )
 
     def _RunClassificationPreflight(self, runLogger: _BoundLogger) -> None:
-        runLogger.info("PREFLIGHT classification DB/LLM 연결을 확인합니다")
+        runLogger.info(
+            "pipeline_step=preflight component=DbSessionManager/RuntimeAdapter output_dto=PreflightStatus action=check_db_and_llm"
+        )
         try:
             chapterRowCount = self._RequireTableRows("cn_chapter_index")
             cnTableName, cnTableRowCount = self._RequireFirstAvailableTableRows(
@@ -783,17 +800,28 @@ class KurlyMarketSmokeRunner:
             )
             llmRuntimeLabel = self._RequireLlmRuntime()
         except Exception as exc:
-            runLogger.error("PREFLIGHT failed: {}", exc)
+            runLogger.error(
+                "pipeline_step=preflight component=DbSessionManager/RuntimeAdapter output_dto=PreflightStatus status=failed error={}",
+                exc,
+            )
             raise SystemExit(2) from exc
 
         runLogger.info(
             (
-                "PREFLIGHT ok cn_chapter_index_rows={} {}_rows={} "
-                "llm_runtime={}"
+                "pipeline_step=preflight component=DbSessionManager "
+                "output_dto=cn_chapter_index/cn_table_index status=ok "
+                "cn_chapter_index_rows={} {}_rows={}"
             ),
             chapterRowCount,
             cnTableName,
             cnTableRowCount,
+        )
+        runLogger.info(
+            (
+                "pipeline_step=preflight component=RuntimeAdapter "
+                "agent=LLMHealthCheckAgent output_dto=LlmResponse "
+                "llm_status=request_response_ok runtime={}"
+            ),
             llmRuntimeLabel,
         )
 
@@ -887,14 +915,18 @@ class KurlyMarketSmokeRunner:
 
         runtimeAdapter = None
         if self._useLlmInputReconstruction:
+            reconstructionLogger = self._Logger("_BuildInputReconstructionService")
             try:
                 runtimeAdapter = BuildRuntimeAdapter(
                     BuildLlmRuntimeConfigFromEnv(projectRootPath=PROJECT_ROOT_PATH),
                     requireAvailable=True,
                 )
+                reconstructionLogger.info(
+                    "pipeline_step=llm_reconstruction component=ProductInputReconstructionService agent=ProductFactReconstructionAgent output_dto=RuntimeAdapter llm_status=adapter_ready"
+                )
             except RuntimeAdapterBuildError as error:
-                self._Logger("_BuildInputReconstructionService").warning(
-                    "LLM input reconstruction disabled because runtime is unavailable: {}",
+                reconstructionLogger.warning(
+                    "pipeline_step=llm_reconstruction component=ProductInputReconstructionService agent=ProductFactReconstructionAgent output_dto=RuntimeAdapter llm_status=unavailable error={}",
                     error,
                 )
 
@@ -907,6 +939,7 @@ class KurlyMarketSmokeRunner:
             runtimeAdapter=runtimeAdapter,
             fuzzyMinRatio=self._inputDictionaryFuzzyMinRatio,
             llmMaxTokens=self._llmInputReconstructionMaxTokens,
+            llmArtifactRootPath=self._artifactRootPath,
         )
 
     def _RunOne(
@@ -1930,7 +1963,7 @@ class KurlyMarketSmokeRunner:
         statusData = resultData["status"]
         if "runtime_error" in statusData:
             smokeLogger.error(
-                "url={} runtime_error={}",
+                "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyPipelineResult url={} runtime_error={}",
                 resultData["product_page_url"],
                 statusData["runtime_error"],
             )
@@ -1940,7 +1973,7 @@ class KurlyMarketSmokeRunner:
         productData = resultData["product"]
         noticeData = resultData["raw_collection"]["notice"]
         smokeLogger.info(
-            "url={} product_name={} domain={} parse_ok={} ocr_fallback_ok={}",
+            "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyPipelineResult url={} product_name={} domain={} parse_ok={} ocr_fallback_ok={}",
             resultData["product_page_url"],
             productData["product_name"],
             productData["product_domain"],
@@ -1948,13 +1981,14 @@ class KurlyMarketSmokeRunner:
             statusData["is_ocr_fallback_ok"],
         )
         smokeLogger.info(
-            "brand_name={} package_type={} sale_unit={}",
+            "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyCollectionResult brand_name={} package_type={} sale_unit={}",
             productData["brand_name"],
             productData["package_type"],
             productData["sale_unit"],
         )
         smokeLogger.info(
             (
+                "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyCollectionResult "
                 "notice_lines={} notice_options={} "
                 "notice_fields={} requires_ocr_fallback={} "
                 "image_reference_detected={}"
@@ -1975,7 +2009,7 @@ class KurlyMarketSmokeRunner:
         stepLogger = self._Logger("_LogPipelineSteps")
         for pipelineStep in resultData["pipeline_steps"]:
             stepLogger.info(
-                "pipeline_step name={} succeeded={} message={}",
+                "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=PipelineStepResult name={} succeeded={} message={}",
                 pipelineStep["step_name"],
                 pipelineStep["succeeded"],
                 pipelineStep["message"],
@@ -2012,10 +2046,18 @@ class KurlyMarketSmokeRunner:
         inputReconstruction = resultData.get("llm_reconstruction", {})
         if not isinstance(inputReconstruction, dict) or not inputReconstruction:
             return
+        llmStatus = self._BuildLlmReconstructionArtifactStatus(
+            resultData,
+            inputReconstruction,
+        )
+        reconstructionLogger.info("========== pipeline_step=llm_reconstruction ==========")
         reconstructionLogger.info(
             (
-                "llm_reconstruction method={} facts={} tables={} unresolved={} "
-                "conflicts={} used_llm={} fallback_reason={}"
+                "pipeline_step=llm_reconstruction component=ProductInputReconstructionService "
+                "agent=ProductFactReconstructionAgent output_dto=InputReconstructionResult "
+                "method={} facts={} tables={} unresolved={} conflicts={} used_llm={} "
+                "fallback_reason={} llm_status={} llm_request_artifact={} "
+                "llm_response_artifact={} llm_error_artifact={}"
             ),
             inputReconstruction.get("method"),
             len(inputReconstruction.get("facts", []) or []),
@@ -2024,22 +2066,75 @@ class KurlyMarketSmokeRunner:
             len(inputReconstruction.get("conflicts", []) or []),
             inputReconstruction.get("used_llm_reconstruction"),
             inputReconstruction.get("fallback_reason"),
+            llmStatus["status"],
+            llmStatus["request_exists"],
+            llmStatus["response_exists"],
+            llmStatus["error_exists"],
         )
         for factRecord in inputReconstruction.get("facts", []) or []:
+            reconstructedValue = str(factRecord.get("reconstructed_value") or "")
             reconstructionLogger.info(
-                "llm_fact field={} raw={} reconstructed={} status={}",
+                (
+                    "pipeline_step=llm_reconstruction component=ProductInputReconstructionService "
+                    "output_dto=ClassificationFact field={} reconstructed_value={} "
+                    "value_chars={} source_ref_count={} status={}"
+                ),
                 factRecord.get("field_name"),
-                factRecord.get("raw_evidence_value"),
-                factRecord.get("reconstructed_value"),
+                reconstructedValue,
+                len(reconstructedValue),
+                len(factRecord.get("source_refs", []) or []),
                 factRecord.get("validation_status"),
             )
         for tableRecord in inputReconstruction.get("reconstructed_tables", []) or []:
             reconstructionLogger.info(
-                "llm_table name={} row_count={} source_refs={}",
+                (
+                    "pipeline_step=llm_reconstruction component=ProductInputReconstructionService "
+                    "output_dto=ReconstructionTable table_name={} row_count={} source_ref_count={}"
+                ),
                 tableRecord.get("table_name"),
                 len(tableRecord.get("rows", []) or []),
-                tableRecord.get("source_refs", []),
+                len(tableRecord.get("source_refs", []) or []),
             )
+
+    def _BuildLlmReconstructionArtifactStatus(
+        self,
+        resultData: Dict[str],
+        inputReconstruction: Dict[str],
+    ) -> Dict[str, object]:
+        if not self._useLlmInputReconstruction:
+            return {
+                "status": "not_configured",
+                "request_exists": False,
+                "response_exists": False,
+                "error_exists": False,
+            }
+        productUrl = str(resultData.get("product_page_url") or "")
+        artifactDirectory = self._artifactRootPath / ExtractProductIdFromUrl(productUrl)
+        requestExists = (
+            artifactDirectory / "llm-input-reconstruction-request.json"
+        ).exists()
+        responseExists = (
+            artifactDirectory / "llm-input-reconstruction-response.json"
+        ).exists()
+        errorExists = (
+            artifactDirectory / "llm-input-reconstruction-error.json"
+        ).exists()
+        if requestExists and responseExists and inputReconstruction.get(
+            "used_llm_reconstruction",
+        ):
+            status = "request_response_ok"
+        elif requestExists and errorExists:
+            status = "request_error"
+        elif requestExists:
+            status = "request_written_response_missing"
+        else:
+            status = "not_written"
+        return {
+            "status": status,
+            "request_exists": requestExists,
+            "response_exists": responseExists,
+            "error_exists": errorExists,
+        }
 
     def _LogOcrSummary(self, resultData: Dict[str]) -> None:
         ocrLogger = self._Logger("_LogOcrSummary")
@@ -2093,16 +2188,6 @@ class KurlyMarketSmokeRunner:
                     imageResult["index"],
                     warning,
                 )
-        combinedOcrText = ocrData.get("combined_ocr_text", "")
-        if combinedOcrText:
-            ocrLogger.info(
-                "combined_ocr_text_preview={}",
-                self._BuildTextPreview(
-                    combinedOcrText,
-                    self._ocrTextPreviewCharacters,
-                ),
-            )
-
     def _LogWarningsAndErrors(self, resultData: Dict[str]) -> None:
         eventLogger = self._Logger("_LogWarningsAndErrors")
         for warning in resultData["warnings"]:
@@ -2126,6 +2211,7 @@ class KurlyMarketSmokeRunner:
         if not isinstance(classificationData, dict):
             return
         classificationLogger = self._Logger("_LogClassificationSmoke")
+        classificationLogger.info("========== pipeline_step=classification_merge_check ==========")
         status = classificationData.get("status") or {}
         productUnderstanding = classificationData.get("product_understanding") or {}
         domainRouting = classificationData.get("domain_routing") or {}
@@ -2135,19 +2221,20 @@ class KurlyMarketSmokeRunner:
             classificationData.get("llm_validation_recommendation") or {}
         )
         answerRecall = classificationData.get("answer_recall") or {}
-        classificationLogger.info("===== INTEGRATED PIPELINE MERGE CHECK =====")
         for componentResult in classificationData.get("component_results") or []:
             classificationLogger.info(
-                "component name={} success={} error={} outputs={}",
+                "pipeline_step=component_run component={} output_dto=BlackboardWriteSet success={} error={} outputs={}",
                 componentResult.get("component_name"),
                 componentResult.get("success"),
                 componentResult.get("error"),
                 componentResult.get("outputs_written"),
-            )
+        )
         classificationLogger.info(
             (
-                "product_understanding id={} product={} facts={} fact_texts={} "
-                "identity_mode={} form_terms={} chapter_hints={} coi_docs={} encyclopedia={}"
+                "pipeline_step=product_understanding component=ProductUnderstandingComponent "
+                "agent=IdentityHintAgent output_dto=ProductUnderstandingPackage id={} "
+                "product={} facts={} fact_texts={} identity_mode={} form_terms={} "
+                "chapter_hints={} coi_docs={} encyclopedia={}"
             ),
             productUnderstanding.get("understanding_id"),
             productUnderstanding.get("product_name"),
@@ -2161,7 +2248,8 @@ class KurlyMarketSmokeRunner:
         )
         classificationLogger.info(
             (
-                "domain_router routing_context_id={} allowed_hs2={} "
+                "pipeline_step=domain_routing component=Hs2RoutingComponent "
+                "output_dto=Hs2RoutingDecision routing_context_id={} allowed_hs2={} "
                 "blocked_hs2={} enforce_hs2_boundary={} fallback_allowed={} "
                 "boundary_applied={} fallback_used={} missing_facts={}"
             ),
@@ -2178,7 +2266,8 @@ class KurlyMarketSmokeRunner:
         )
         classificationLogger.info(
             (
-                "classification_smoke error={} candidates={} zero_score={} "
+                "pipeline_step=beam_classification component=ClassificationComponent "
+                "output_dto=CandidateCodeSet error={} candidates={} zero_score={} "
                 "decision={} backtracking={} traversal={} raw_input_match={} "
                 "answer_found={}"
             ),
@@ -2195,8 +2284,15 @@ class KurlyMarketSmokeRunner:
         )
         classificationLogger.info(
             (
-                "llm_validation_recommendation recommended={} rank={} cn8={} "
-                "hs6={} taric10={} hard_condition={} reason={}"
+                "pipeline_step=llm_validation component=ClassificationComponent "
+                "agent=CandidateValidationAgent output_dto=LlmValidationRecommendation "
+                "llm_status={} recommended={} rank={} cn8={} hs6={} taric10={} "
+                "hard_condition={} reason={}"
+            ),
+            (
+                "recommendation_ok"
+                if llmValidationRecommendation.get("recommended")
+                else "recommendation_missing"
             ),
             llmValidationRecommendation.get("recommended"),
             llmValidationRecommendation.get("rank"),
@@ -2210,7 +2306,8 @@ class KurlyMarketSmokeRunner:
         for candidate in classificationData.get("candidates") or []:
             classificationLogger.info(
                 (
-                    "classification_candidate rank={} cn8={} hs6={} "
+                    "pipeline_step=beam_classification component=ClassificationComponent "
+                    "output_dto=ClassificationCandidate rank={} cn8={} hs6={} "
                     "score={} llm_recommended={} taric_branches={} "
                     "evidence_refs={} ebti_cases={}"
                 ),
@@ -2223,7 +2320,6 @@ class KurlyMarketSmokeRunner:
                 len(candidate.get("classification_evidence_refs") or []),
                 len(candidate.get("similar_ebti_cases") or []),
             )
-        classificationLogger.info("===== END INTEGRATED PIPELINE MERGE CHECK =====")
 
     def _LogAnswerRecall(
         self,
@@ -2231,13 +2327,16 @@ class KurlyMarketSmokeRunner:
         answerRecall: JsonMapping,
     ) -> None:
         if not answerRecall.get("answer_found"):
-            logger.info("answer_recall skipped reason={}", answerRecall.get("reason"))
+            logger.info(
+                "pipeline_step=evaluation component=KurlyMarketSmokeRunner output_dto=AnswerRecallSummary status=skipped reason={}",
+                answerRecall.get("reason"),
+            )
             return
         answer = answerRecall.get("answer") or {}
         if not isinstance(answer, Mapping):
             answer = {}
         logger.info(
-            "answer_recall expected_taric10={} answer_product_id={}",
+            "pipeline_step=evaluation component=KurlyMarketSmokeRunner output_dto=AnswerRecallSummary expected_taric10={} answer_product_id={}",
             answer.get("taric10"),
             answer.get("product_id"),
         )
@@ -2249,7 +2348,8 @@ class KurlyMarketSmokeRunner:
                 continue
             logger.info(
                 (
-                    "answer_recall level={} expected={} top1={} top1_match={} "
+                    "pipeline_step=evaluation component=KurlyMarketSmokeRunner "
+                    "output_dto=AnswerRecallLevel level={} expected={} top1={} top1_match={} "
                     "top5_match={} llm_recommended={} "
                     "llm_recommended_match={} top5_codes={}"
                 ),
