@@ -17,14 +17,14 @@ class Hs2RoutingComponent(BasePipelineComponent):
     stage = "Regulatory_Domain_Routing"
     llm_model = None
 
-    def run(self, store: BlackboardStore) -> None:
+    def Run(self, store: BlackboardStore) -> None:
         bb = store.load()
         productUnderstanding = bb.get("product_understanding") or {}
         if not isinstance(productUnderstanding, dict):
             raise RuntimeError("No ProductUnderstandingPackage on the Blackboard.")
         understandingId = str(productUnderstanding.get("understanding_id") or "")
         productId = str(productUnderstanding.get("product_id") or "")
-        self.read_input(understandingId)
+        self.ReadBlackBoard(understandingId)
 
         factTexts = self._StringTuple(
             productUnderstanding.get("reconstructed_fact_texts") or [],
@@ -73,7 +73,7 @@ class Hs2RoutingComponent(BasePipelineComponent):
                 createdAt=now_iso(),
             ),
         )
-        self.wrote(routingDecisionId)
+        self.WriteBlackBoard(routingDecisionId)
         self.reason(
             "Hs2RoutingDecision 생성: "
             f"allowed_hs2={list(routeHint.candidateHs2)}, "

@@ -21,7 +21,7 @@ import re
 from typing import Protocol
 from sqlalchemy import bindparam, text
 
-from agents.tools.db_session_manager import DbSessionManager
+from db.db_session_manager import DbSessionManager
 from bussiness_logic.utils.json_types import JsonObject
 
 

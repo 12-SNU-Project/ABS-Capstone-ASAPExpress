@@ -217,7 +217,7 @@ class PipelineApi:
                 field="url",
             ).ToDict(), 400
         try:
-            from agents.document_pipeline import rerun_cached_input_reconstruction
+            from bussiness_logic.document.document_pipeline import rerun_cached_input_reconstruction
             from backend.pipeline_projection import InputProcessingViewProjector
 
             facts = rerun_cached_input_reconstruction(productIdentifier)

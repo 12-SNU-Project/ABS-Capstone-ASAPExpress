@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from agents.component_base import BasePipelineComponent
-from agents.document_package import get_document_package
+from bussiness_logic.document.document_package import get_document_package
 from agents.tools.domain_router import DomainRouteResult, DomainRouterTool
 from agents.blackboard import BlackboardStore, now_iso
 from bussiness_logic.utils.json_types import JsonObject
@@ -107,22 +107,22 @@ class DocumentComponent(BasePipelineComponent):
         self._include_celex_excerpt = include_celex_excerpt
         self._domain_tool = DomainRouterTool()
 
-    def run(self, store: BlackboardStore) -> None:
+    def Run(self, store: BlackboardStore) -> None:
         bb = store.load()
         pes = bb.get("product_evidence_state") or {}
         ccs_list = bb.get("candidate_code_sets") or []
         if not pes:
-            raise RuntimeError("Document_Component requires a ProductEvidenceState.")
+            raise RuntimeError("Document_Component requires a InputEvidenceState.")
         if not ccs_list:
             self.reason("No ClassificationCandidateSet present; nothing to package.")
             return
         latest = ccs_list[-1]
-        self.read_input(latest["candidate_set_id"])
+        self.ReadBlackBoard(latest["candidate_set_id"])
 
         product_facts = pes.get("observed_facts") or {}
 
         for cand in latest["candidates"]:
-            self.read_input(cand["candidate_id"])
+            self.ReadBlackBoard(cand["candidate_id"])
             cn8 = (cand.get("cn8") or "").strip()
             taric_targets = self._taric_targets_for_candidate(cand)
 
@@ -147,7 +147,7 @@ class DocumentComponent(BasePipelineComponent):
                     continue
 
                 requirements_raw = raw.get("requirements") or []
-                self.cite(
+                self.CreateCiteSource(
                     "taric_master_table",
                     f"goods_code_10={taric10}",
                     snippet=f"{raw.get('total_measure_rows')} measure rows / "
@@ -161,8 +161,8 @@ class DocumentComponent(BasePipelineComponent):
                     cn8=cn8, product_facts=product_facts, measure_type_hints=measure_hints,
                 )
                 for ev in dom.evidence:
-                    self.cite("Domain_Scope_Routes", str(ev.get("chapter") or ev.get("source") or ""),
-                              snippet=str(ev)[:100], reason="DomainRouterTool evidence.")
+                    self.CreateCiteSource("Domain_Scope_Routes", str(ev.get("chapter") or ev.get("source") or ""),
+                                          snippet=str(ev)[:100], reason="DomainRouterTool evidence.")
 
                 # 3. Bucket measures into 5 sections
                 customs, duties, preferential = self._bucket_requirements(requirements_raw)
@@ -220,7 +220,7 @@ class DocumentComponent(BasePipelineComponent):
                     "conflicts": [],
                 }
                 store.append("document_packages", dp)
-                self.wrote(dp_id)
+                self.WriteBlackBoard(dp_id)
                 branch_label = (
                     f"branch {target.get('branch_index')}/{target.get('branch_count')}"
                     if target.get("branch_count", 0) > 1
@@ -474,7 +474,7 @@ class DocumentComponent(BasePipelineComponent):
             },
             "conflicts": [],
         })
-        self.wrote(dp_id)
+        self.WriteBlackBoard(dp_id)
         self.reason(
             f"Empty package for unresolved cand {cand['candidate_id']} ({reason}); "
             "emitted backtracking signal."

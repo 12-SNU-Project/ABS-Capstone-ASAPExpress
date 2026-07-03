@@ -22,8 +22,8 @@ from agents.component_base import BasePipelineComponent, ComponentResult
 from agents.evidence_intake_component import EvidenceIntakeComponent
 from agents.product_understanding_component import ProductUnderstandingComponent
 from agents.hs2_routing_component import Hs2RoutingComponent
-from agents.classification_component import ClassificationComponent
-from agents.document_component import DocumentComponent
+from agents.classification_component import ClassificationAgent
+from bussiness_logic.document.document_component import DocumentComponent
 
 __all__ = [
     "BasePipelineComponent",
@@ -31,6 +31,6 @@ __all__ = [
     "EvidenceIntakeComponent",
     "ProductUnderstandingComponent",
     "Hs2RoutingComponent",
-    "ClassificationComponent",
+    "ClassificationAgent",
     "DocumentComponent",
 ]

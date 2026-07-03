@@ -23,9 +23,9 @@ for _path in (PROJECT_ROOT, SRC_ROOT):
     if _path.exists() and str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from agents.classification_component import ClassificationComponent
+from agents.classification_component import ClassificationAgent
 from agents.hs2_routing_component import Hs2RoutingComponent
-from agents.document_component import DocumentComponent
+from bussiness_logic.document.document_component import DocumentComponent
 from agents.evidence_intake_component import EvidenceIntakeComponent
 from agents.product_understanding_component import ProductUnderstandingComponent
 from agents.blackboard import BlackboardStore
@@ -301,7 +301,7 @@ def collect_kurly_url_facts(
 def rerun_cached_input_reconstruction(product_identifier: str) -> JsonObject:
     """저장된 OCR evidence request를 재사용해 LLM reconstruction만 다시 실행한다."""
 
-    from bussiness_logic.input_process.reconstruction import ProductInputEvidencePackage
+    from bussiness_logic.input_process.reconstruction import InputEvidencePackage
 
     warnings: list[str] = []
     productId = ExtractProductIdFromUrl(product_identifier)
@@ -320,7 +320,7 @@ def rerun_cached_input_reconstruction(product_identifier: str) -> JsonObject:
     if not isinstance(userPrompt, str) or not userPrompt.strip():
         raise ValueError("cached reconstruction request has no user_prompt.")
     contextPayload = json.loads(userPrompt.strip().splitlines()[-1])
-    evidencePackage = ProductInputEvidencePackage.model_validate(
+    evidencePackage = InputEvidencePackage.model_validate(
         {
             "product_page_url": (
                 requestArtifact.get("product_page_url")
@@ -748,14 +748,14 @@ def run_document_pipeline(
         EvidenceIntakeComponent(raw_input),
         ProductUnderstandingComponent(),
         Hs2RoutingComponent(),
-        ClassificationComponent(),
+        ClassificationAgent(),
         DocumentComponent(include_celex_excerpt=include_celex_excerpt),
     ]
 
     component_results: list[JsonObject] = []
     for component in components:
         emit(component.component_name, "running", message=f"{component.stage} 실행 중")
-        result = component.execute(store)
+        result = component.Execute(store)
         component_results.append({
             "component_name": component.component_name,
             "success": result.success,

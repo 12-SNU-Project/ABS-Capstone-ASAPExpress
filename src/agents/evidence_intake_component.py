@@ -2,7 +2,7 @@
 Evidence_Intake_Component — stub.
 
 Reads raw user input (product name, description, optional OCR text, source
-URLs) and writes a ProductEvidenceState onto the Blackboard.
+URLs) and writes a InputEvidenceState onto the Blackboard.
 
 This stub does *not* call an LLM. A real implementation would parse OCR
 output, extract composition tables, and normalize ingredient terms.
@@ -24,7 +24,7 @@ class EvidenceIntakeComponent(BasePipelineComponent):
         super().__init__()
         self.raw_input = raw_input
 
-    def run(self, store: BlackboardStore) -> None:
+    def Run(self, store: BlackboardStore) -> None:
         prod_id = store.next_id("prod")
         obs = {
             "product_name": self.raw_input.get("product_name", ""),
@@ -73,7 +73,7 @@ class EvidenceIntakeComponent(BasePipelineComponent):
                 break
 
         pes = {
-            "object_type": "ProductEvidenceState",
+            "object_type": "InputEvidenceState",
             "created_by": self.component_name,
             "created_at": now_iso(),
             "product_id": prod_id,
@@ -85,5 +85,5 @@ class EvidenceIntakeComponent(BasePipelineComponent):
         }
         pes["unknowns"] = [u for u in pes["unknowns"] if u]
         store.put("product_evidence_state", pes)
-        self.wrote(prod_id)
-        self.reason(f"Created ProductEvidenceState {prod_id} from raw input.")
+        self.WriteBlackBoard(prod_id)
+        self.reason(f"Created InputEvidenceState {prod_id} from raw input.")

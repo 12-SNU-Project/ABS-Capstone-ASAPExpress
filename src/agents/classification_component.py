@@ -2,7 +2,7 @@
 Classification_Component — delegates to ASAPExpress Stage 1 classifier.
 
 Inside BasePipelineComponent.execute() this component:
-  1. Reads ProductEvidenceState from the Blackboard.
+  1. Reads InputEvidenceState from the Blackboard.
   2. Hands it to agents._external_classifier.run_external_classifier(),
      which runs the full ASAPExpress 7-step Stage 1 pipeline
      (retriever → context → evidence → request → LLM → validator →
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 
-from agents._external_classifier import (
+from agents.candiate_classfier import (
     ExternalClassificationResult,
     run_external_classifier,
 )
@@ -55,7 +55,7 @@ def _truthy_env(value: object) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-class ClassificationComponent(BasePipelineComponent):
+class ClassificationAgent(BasePipelineComponent):
     component_name = "Classification_Component"
     stage = "Classification"
     llm_model = "gemma4:26b"  # actual model selected by bridge.RuntimeAdapter
@@ -64,12 +64,12 @@ class ClassificationComponent(BasePipelineComponent):
         super().__init__()
         self._taric_resolver = TaricBranchResolverTool()
 
-    def run(self, store: BlackboardStore) -> None:
+    def Run(self, store: BlackboardStore) -> None:
         bb = store.load()
         pes = bb.get("product_evidence_state") or {}
         if not pes:
-            raise RuntimeError("No ProductEvidenceState on the Blackboard.")
-        self.read_input(pes["product_id"])
+            raise RuntimeError("No InputEvidenceState on the Blackboard.")
+        self.ReadBlackBoard(pes["product_id"])
         routingContext = bb.get("routing_context")
         if isinstance(routingContext, dict):
             routingContextId = str(
@@ -78,7 +78,7 @@ class ClassificationComponent(BasePipelineComponent):
                 or ""
             )
             if routingContextId:
-                self.read_input(routingContextId)
+                self.ReadBlackBoard(routingContextId)
         else:
             routingContext = None
 
@@ -97,7 +97,7 @@ class ClassificationComponent(BasePipelineComponent):
 
         # Cite candidates from the retriever (every shortlisted CN8).
         for c in result.citations:
-            self.cite(
+            self.CreateCiteSource(
                 c["source_table"], c["source_id"],
                 snippet=c.get("snippet", ""),
                 reason=c.get("reason", ""),
@@ -273,9 +273,9 @@ class ClassificationComponent(BasePipelineComponent):
             "product_id": pes["product_id"],
             "candidates": ccs_candidates,
         })
-        self.wrote(ccs_id)
+        self.WriteBlackBoard(ccs_id)
         for c in ccs_candidates:
-            self.wrote(c["candidate_id"])
+            self.WriteBlackBoard(c["candidate_id"])
 
     # ------------------------------------------------------------------
     # Staged narrowing (additive; opt-in). Emits a ClassificationCandidateSet in the
@@ -367,9 +367,9 @@ class ClassificationComponent(BasePipelineComponent):
                 "product_id": pes["product_id"],
                 "candidates": ccs_candidates,
             })
-            self.wrote(ccs_id)
+            self.WriteBlackBoard(ccs_id)
             for c in ccs_candidates:
-                self.wrote(c["candidate_id"])
+                self.WriteBlackBoard(c["candidate_id"])
             self.reason(
                 f"Staged narrowing emitted {len(ccs_candidates)} candidate(s) "
                 f"(hs4->hs6->cn8, {len(stages)} stages)."
@@ -547,7 +547,7 @@ class ClassificationComponent(BasePipelineComponent):
 
         out = [b.to_dict() for b in branches]
         if out:
-            self.cite(
+            self.CreateCiteSource(
                 "taric_master_table",
                 f"cn8={cn8}",
                 snippet=f"{len(out)} TARIC10 branch candidate(s)",
@@ -605,8 +605,9 @@ class ClassificationComponent(BasePipelineComponent):
             "candidates": [],
         }
         store.append("candidate_code_sets", candidateCodeSet)
-        self.wrote(ccs_id)
+        self.WriteBlackBoard(ccs_id)
         self.reason(
             f"Classification unresolved ({why}); wrote empty ClassificationCandidateSet "
             "instead of a synthetic 99999999 candidate."
         )
+

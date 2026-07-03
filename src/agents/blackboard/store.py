@@ -48,6 +48,7 @@ DEFAULT_SCHEMA = APP_CONFIG.paths.ResolvePath(
 
 OBJECT_KEY: dict[str, str] = {
     "ProductEvidenceState": "product_evidence_state",
+    "InputEvidenceState": "product_evidence_state",
     "ProductUnderstandingPackage": "product_understanding",
     "Hs2RoutingDecision": "routing_context",
     "ClassificationCandidateSet": "candidate_code_sets",

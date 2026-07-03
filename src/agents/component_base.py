@@ -32,26 +32,26 @@ class BasePipelineComponent:
             raise ValueError(
                 f"{type(self).__name__} must set class attrs component_name and stage"
             )
-        self._reset_trace()
+        self._ResetTrace()
 
     # ------------------------------------------------------------------ trace
-    def _reset_trace(self) -> None:
+    def _ResetTrace(self) -> None:
         self._inputs_read: list[str] = []
         self._outputs_written: list[str] = []
         self._ontology_reads: list[JsonObject] = []
         self._reasoning_chunks: list[str] = []
 
-    def read_input(self, blackboard_object_id: str) -> None:
+    def ReadBlackBoard(self, blackboard_object_id: str) -> None:
         """Record a Blackboard object id that this run read."""
         if blackboard_object_id and blackboard_object_id not in self._inputs_read:
             self._inputs_read.append(blackboard_object_id)
 
-    def wrote(self, blackboard_object_id: str) -> None:
+    def WriteBlackBoard(self, blackboard_object_id: str) -> None:
         """Record a Blackboard object id that this run wrote."""
         if blackboard_object_id and blackboard_object_id not in self._outputs_written:
             self._outputs_written.append(blackboard_object_id)
 
-    def cite(
+    def CreateCiteSource(
         self,
         source_table: str,
         source_id: str,
@@ -78,24 +78,24 @@ class BasePipelineComponent:
         if chunk:
             self._reasoning_chunks.append(chunk.strip())
 
-    def record_prompt(self, prompt_excerpt: str) -> None:
+    def RecordPrompt(self, prompt_excerpt: str) -> None:
         """Deprecated no-op. Prompt text must not be persisted."""
         _ = prompt_excerpt
 
-    def record_tokens(self, tokens_in: int, tokens_out: int) -> None:
+    def RecordTokenUsage(self, tokens_in: int, tokens_out: int) -> None:
         """Deprecated no-op. Token counters are not part of pipeline DTOs."""
         _ = (tokens_in, tokens_out)
 
     # ------------------------------------------------------------------ exec
-    def execute(self, store: BlackboardStore) -> ComponentResult:
+    def Execute(self, store: BlackboardStore) -> ComponentResult:
         """Wrap ``run`` and persist only minimal component status."""
-        self._reset_trace()
+        self._ResetTrace()
         component_run_id = store.next_id("cr")
         started = now_iso()
         t0 = time.monotonic()
         error: str | None = None
         try:
-            self.run(store)
+            self.Run(store)
             success = True
         except Exception as e:  # noqa: BLE001
             error = f"{type(e).__name__}: {e}"
@@ -130,6 +130,6 @@ class BasePipelineComponent:
         )
 
     # ------------------------------------------------------------------ override
-    def run(self, store: BlackboardStore) -> None:
+    def Run(self, store: BlackboardStore) -> None:
         """Subclass entrypoint. Read inputs, cite core rows, reason, write outputs."""
         raise NotImplementedError

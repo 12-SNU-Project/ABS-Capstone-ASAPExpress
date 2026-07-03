@@ -14,7 +14,7 @@ its 7-step Stage 1 pipeline:
   7. Stage1ResponseValidator + Stage1DecisionPolicy + Stage1TraversalController
      + Stage1RecommendationReportBuilder
 
-Outputs collected into ExternalClassificationResult so ClassificationComponent
+Outputs collected into ExternalClassificationResult so ClassificationAgent
 can stamp citations / reasoning / candidates onto the Blackboard.
 """
 from __future__ import annotations

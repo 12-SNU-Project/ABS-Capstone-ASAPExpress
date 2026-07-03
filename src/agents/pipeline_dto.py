@@ -162,7 +162,7 @@ class CompositionFactSet:
 class ProductUnderstandingPackage:
     understandingId: str = field(metadata=_desc("상품 이해 패키지 ID"))
     productId: str = field(metadata=_desc("대상 상품 ID"))
-    sourceProductId: str = field(metadata=_desc("원천 ProductEvidenceState ID"))
+    sourceProductId: str = field(metadata=_desc("원천 InputEvidenceState ID"))
     productName: str = field(metadata=_desc("상품명"))
     shortDescription: str = field(metadata=_desc("짧은 상품 설명"))
     classificationText: str = field(metadata=_desc("분류 입력용 통합 텍스트"))

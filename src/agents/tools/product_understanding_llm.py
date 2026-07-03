@@ -71,7 +71,7 @@ _chapter_context_cache: list[str] = []
 
 def _get_adapter() -> object:
     if not _adapter_cache:
-        from agents._external_classifier import build_runtime_adapter
+        from agents.candiate_classfier import build_runtime_adapter
 
         _adapter_cache.append(build_runtime_adapter())
     return _adapter_cache[0]
@@ -82,7 +82,7 @@ def _extract_json(text: str) -> dict[str, object]:
     if "```" in raw:
         raw = re.sub(r"^```[a-zA-Z]*", "", raw).strip().rstrip("`").strip()
     start, end = raw.find("{"), raw.rfind("}")
-    if start >= 0 and end > start:
+    if 0 <= start < end:
         try:
             value = json.loads(raw[start : end + 1])
             if isinstance(value, dict):

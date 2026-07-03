@@ -19,7 +19,7 @@ from agents.pipeline_dto import (
     ProductUnderstandingPackage,
 )
 from agents.tools.encyclopedia_lookup import LookupEncyclopediaEvidence
-from agents.tools.identity_distiller import IdentityHintService
+from agents.tools.identity_distiller import IdentityDistillerAgent
 
 
 PERCENT_RE = re.compile(
@@ -38,13 +38,13 @@ class ProductUnderstandingComponent(BasePipelineComponent):
     stage = "Product_Understanding"
     llm_model = None
 
-    def run(self, store: BlackboardStore) -> None:
+    def Run(self, store: BlackboardStore) -> None:
         bb = store.load()
         pes = bb.get("product_evidence_state") or {}
         if not isinstance(pes, dict):
-            raise RuntimeError("No ProductEvidenceState on the Blackboard.")
+            raise RuntimeError("No InputEvidenceState on the Blackboard.")
         productId = str(pes.get("product_id") or "")
-        self.read_input(productId)
+        self.ReadBlackBoard(productId)
 
         observedFacts = pes.get("observed_facts") or {}
         if not isinstance(observedFacts, dict):
@@ -80,7 +80,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             productId=productId,
             query=productName,
         )
-        identity = IdentityHintService().BuildHints(
+        identity = IdentityDistillerAgent().BuildHints(
             identityHintId=store.next_id("hint"),
             productId=productId,
             productName=productName,
@@ -133,7 +133,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
                 createdAt=now_iso(),
             ),
         )
-        self.wrote(understandingId)
+        self.WriteBlackBoard(understandingId)
         self.reason(
             "ProductUnderstandingPackage 생성: "
             f"facts={len(productFacts)}, fact_texts={len(factTexts)}, "

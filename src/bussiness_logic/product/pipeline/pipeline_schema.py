@@ -15,7 +15,7 @@ from bussiness_logic.product.ocr.ocr_fallback import (
     ProductOcrImageResult,
 )
 from bussiness_logic.product.ocr.ocr_normalization import ProductOcrFactNormalizationResult
-from bussiness_logic.input_process.reconstruction import ProductReconstructionResult
+from bussiness_logic.input_process.reconstruction import InputReconstructionResult
 
 
 class KurlyPipelineInput(BaseModel):
@@ -63,8 +63,8 @@ class KurlyPipelineResult(BaseModel):
         default_factory=ProductOcrFactNormalizationResult,
         alias="ocr_normalization",
     )
-    inputReconstructionResult: ProductReconstructionResult = Field(
-        default_factory=ProductReconstructionResult,
+    inputReconstructionResult: InputReconstructionResult = Field(
+        default_factory=InputReconstructionResult,
         alias="input_reconstruction",
     )
     steps: List[PipelineStep] = Field(default_factory=list)

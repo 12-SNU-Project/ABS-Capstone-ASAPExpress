@@ -17,7 +17,7 @@ COSMETIC_PATTERN = re.compile(r"화장품|크림|로션|샴푸|cosmetic|cream|lo
 PROCESSED_PATTERN = re.compile(r"볶음|구이|조리|가공|양념|fried|cooked|prepared|seasoned", re.I)
 
 
-class IdentityHintService:
+class IdentityDistillerAgent:
     def BuildHints(
         self,
         *,

@@ -18,7 +18,7 @@ def CreateBackendApp(
     allowedFrontendOrigins: Sequence[str] = (),
 ) -> Flask:
     if pipelineCallable is None:
-        from agents.document_pipeline import run_document_pipeline
+        from bussiness_logic.document.document_pipeline import run_document_pipeline
 
         pipelineCallable = run_document_pipeline
 
