@@ -7,7 +7,6 @@ import os
 import shutil
 import socket
 import subprocess
-import sys
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -16,6 +15,8 @@ from urllib.parse import urlparse
 ASAP_ROOT = Path(
     os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parent),
 ).resolve()
+
+import sys
 ASAP_SRC_ROOT = ASAP_ROOT / "src"
 for searchPath in (ASAP_ROOT, ASAP_SRC_ROOT):
     if searchPath.exists() and str(searchPath) not in sys.path:
@@ -27,10 +28,6 @@ from bussiness_logic.app_config import LoadAppConfig
 
 appConfig = LoadAppConfig(ASAP_ROOT)
 app = CreateBackendApp(
-    debugRunsRoot=appConfig.paths.ResolvePath(
-        ASAP_ROOT,
-        appConfig.paths.pipeline_outputs_root,
-    ),
     allowedFrontendOrigins=appConfig.web.allowed_frontend_origins,
 )
 server = app

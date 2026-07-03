@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import List, Optional
 from urllib.parse import urlparse
 
 from bussiness_logic.product.web_parser.kurly_global import KurlyGlobalPageParser
@@ -50,7 +50,7 @@ class KurlyPageAdapter:
 
     def PrepareRenderedPage(
         self,
-        page: Any,
+        page: object,
         scrollCount: int,
         scrollWaitMilliseconds: int,
     ) -> bool:
@@ -62,12 +62,12 @@ class KurlyPageAdapter:
             scrollWaitMilliseconds,
         )
 
-    def ReadProductSummaryEvidence(self, page: Any) -> Optional[ProductSummaryEvidence]:
+    def ReadProductSummaryEvidence(self, page: object) -> Optional[ProductSummaryEvidence]:
         if not self._globalParser.IsSupportedProductPageUrl(page.url):
             return None
         return self._globalParser.ReadProductSummaryEvidence(page)
 
-    def ReadProductNoticeText(self, page: Any) -> Optional[str]:
+    def ReadProductNoticeText(self, page: object) -> Optional[str]:
         if not self._globalParser.IsSupportedProductPageUrl(page.url):
             return None
         return self._globalParser.ReadProductNoticeText(page)

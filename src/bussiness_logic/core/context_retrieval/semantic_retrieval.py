@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Mapping, Sequence
+from typing import Dict, List, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -356,7 +356,7 @@ class CnSemanticChunkBuilder:
             return ""
         return "{0}: {1}".format(label, normalizedValue)
 
-    def _Read(self, row: Mapping[str, Any], *fieldNames: str) -> str:
+    def _Read(self, row: Mapping[str, object], *fieldNames: str) -> str:
         for fieldName in fieldNames:
             value = row.get(fieldName)
             if isinstance(value, str) and value.strip():

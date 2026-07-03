@@ -1,8 +1,8 @@
 """End-to-end UI pipeline: product input -> classifier -> documents.
 
 This module is intentionally thin. It does not classify or recommend documents
-itself; it only runs the existing Blackboard agents in order and returns the
-Document_Agent output that the Dash UI can render.
+itself; it only runs the existing Blackboard components in order and returns the
+Document_Component output that the Dash UI can render.
 """
 from __future__ import annotations
 
@@ -10,30 +10,49 @@ from functools import lru_cache
 import hashlib
 import json
 import os
-import sys
+from collections.abc import Callable
 from threading import Lock
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Protocol
 
 PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
-SRC_ROOT = PROJECT_ROOT / "src"
-for _path in (PROJECT_ROOT, SRC_ROOT):
-    if _path.exists() and str(_path) not in sys.path:
-        sys.path.insert(0, str(_path))
 
-from agents.classification_agent import ClassificationAgent
-from agents.domain_router_agent import DomainRouterAgent
-from agents.document_agent import DocumentAgent
-from agents.evidence_intake_agent import EvidenceIntakeAgent
-from agents.orchestrator_agent import OrchestratorAgent
-from agents.product_understanding_agent import ProductUnderstandingAgent
+from agents.pipeline_components import (
+    ClassificationComponent,
+    Hs2RoutingComponent,
+    EvidenceIntakeComponent,
+    ProductUnderstandingComponent,
+)
+from bussiness_logic.document.document_component import DocumentComponent
 from agents.blackboard import BlackboardStore
 from bussiness_logic.artifact_paths import (
     BuildSafeArtifactPathSegment,
     ExtractProductIdFromUrl,
 )
 from bussiness_logic.app_config import LoadAppConfig
+from bussiness_logic.utils.json_types import JsonObject
+
+if TYPE_CHECKING:
+    from bussiness_logic.input_process.reconstruction import (
+        ProductInputReconstructionService,
+    )
+
+
+class KurlyPipelinePublicResult(Protocol):
+    def BuildPublicResult(self) -> JsonObject:
+        """Return the JSON-safe public pipeline result."""
+
+
+class ReconstructionDumpable(Protocol):
+    def model_dump(
+        self,
+        *,
+        mode: str,
+        by_alias: bool,
+        include: set[str],
+    ) -> JsonObject:
+        """Return the JSON-safe reconstruction DTO payload."""
 
 
 APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
@@ -49,7 +68,7 @@ _KURLY_OCR_RUNTIME_LOCK = Lock()
 
 
 @lru_cache(maxsize=1)
-def _BuildKurlyOcrEngines() -> tuple[Any, Any]:
+def _BuildKurlyOcrEngines() -> tuple[object, object | None]:
     """프로세스 수명 동안 무거운 Paddle OCR 모델을 재사용한다."""
 
     from bussiness_logic.product.ocr.paddle_ocr import PaddleOcrEngine, PaddleOcrVlEngine
@@ -76,11 +95,11 @@ def _BuildKurlyOcrEngines() -> tuple[Any, Any]:
     )
 
 
-def _read_agent_runs(store: BlackboardStore) -> list[dict[str, Any]]:
-    if not store.runs_path.exists():
+def _read_component_runs(store: BlackboardStore) -> list[JsonObject]:
+    if not store.component_runs_path.exists():
         return []
-    out: list[dict[str, Any]] = []
-    with store.runs_path.open(encoding="utf-8") as f:
+    out: list[JsonObject] = []
+    with store.component_runs_path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -94,11 +113,11 @@ def _read_agent_runs(store: BlackboardStore) -> list[dict[str, Any]]:
 
 def build_kurly_url_facts_from_pipeline_result(
     url: str,
-    result: Any,
+    result: KurlyPipelinePublicResult,
     *,
     artifact_root: Path,
     warnings: list[str] | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Project a Kurly pipeline result into the exact Dash Product facts shape."""
 
     from bussiness_logic.input_process.product_input_adapter import ProductInputAdapter
@@ -131,8 +150,8 @@ def build_kurly_url_facts_from_pipeline_result(
     )
     mergedWarnings = list(dict.fromkeys(mergedWarnings))
 
-    classification_input_product_facts = (
-        input_reconstruction.get("classification_input_product_facts") or []
+    reconstructed_product_facts = (
+        input_reconstruction.get("reconstructed_product_facts") or []
     )
     unresolved_product_facts = (
         input_reconstruction.get("unresolved_product_facts") or []
@@ -140,8 +159,8 @@ def build_kurly_url_facts_from_pipeline_result(
     product_fact_conflicts = (
         input_reconstruction.get("product_fact_conflicts") or []
     )
-    classification_input_text_lines = (
-        input_reconstruction.get("classification_input_fact_texts") or []
+    reconstructed_fact_texts = (
+        input_reconstruction.get("reconstructed_fact_texts") or []
     )
     facts = {
         "url": url,
@@ -153,10 +172,10 @@ def build_kurly_url_facts_from_pipeline_result(
         "product_domain": product_input.productDomain or "unknown",
         "source_product_page": source_product_page,
         "ocr_text": [product_input.ocrText] if product_input.ocrText else [],
-        "classification_input_product_facts": classification_input_product_facts,
+        "reconstructed_product_facts": reconstructed_product_facts,
         "unresolved_product_facts": unresolved_product_facts,
         "product_fact_conflicts": product_fact_conflicts,
-        "classification_input_fact_texts": classification_input_text_lines,
+        "reconstructed_fact_texts": reconstructed_fact_texts,
         "origin_country": "KR",
         "intended_use": "human consumption",
         "warnings": mergedWarnings,
@@ -191,11 +210,11 @@ def collect_kurly_url_facts(
     timeout_seconds: int | None = None,
     scroll_count: int | None = None,
     max_ocr_images: int | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Collect product facts from a Kurly product URL.
 
     This keeps URL/OCR intake outside the Dash callback and before
-    Evidence_Intake_Agent, so the Blackboard still starts from normalized
+    Evidence_Intake_Component, so the Blackboard still starts from normalized
     product facts.
     """
     from bussiness_logic.product.pipeline.pipeline import KurlyProductPipeline
@@ -276,10 +295,10 @@ def collect_kurly_url_facts(
     )
 
 
-def rerun_cached_input_reconstruction(product_identifier: str) -> dict[str, Any]:
+def rerun_cached_input_reconstruction(product_identifier: str) -> JsonObject:
     """저장된 OCR evidence request를 재사용해 LLM reconstruction만 다시 실행한다."""
 
-    from bussiness_logic.input_process.reconstruction import ProductInputEvidencePackage
+    from bussiness_logic.input_process.reconstruction import InputEvidencePackage
 
     warnings: list[str] = []
     productId = ExtractProductIdFromUrl(product_identifier)
@@ -298,7 +317,7 @@ def rerun_cached_input_reconstruction(product_identifier: str) -> dict[str, Any]
     if not isinstance(userPrompt, str) or not userPrompt.strip():
         raise ValueError("cached reconstruction request has no user_prompt.")
     contextPayload = json.loads(userPrompt.strip().splitlines()[-1])
-    evidencePackage = ProductInputEvidencePackage.model_validate(
+    evidencePackage = InputEvidencePackage.model_validate(
         {
             "product_page_url": (
                 requestArtifact.get("product_page_url")
@@ -327,15 +346,15 @@ def rerun_cached_input_reconstruction(product_identifier: str) -> dict[str, Any]
             or [requestArtifact.get("product_page_url") or product_identifier],
             "product_id": productId,
             "input_reconstruction": inputReconstruction,
-            "classification_input_product_facts": inputReconstruction[
-                "classification_input_product_facts"
+            "reconstructed_product_facts": inputReconstruction[
+                "reconstructed_product_facts"
             ],
             "unresolved_product_facts": inputReconstruction[
                 "unresolved_product_facts"
             ],
             "product_fact_conflicts": inputReconstruction["product_fact_conflicts"],
-            "classification_input_fact_texts": inputReconstruction[
-                "classification_input_fact_texts"
+            "reconstructed_fact_texts": inputReconstruction[
+                "reconstructed_fact_texts"
             ],
             "warnings": list(
                 dict.fromkeys(
@@ -351,7 +370,9 @@ def rerun_cached_input_reconstruction(product_identifier: str) -> dict[str, Any]
     return cachedFacts
 
 
-def _BuildInputReconstructionService(warnings: list[str]) -> Any:
+def _BuildInputReconstructionService(
+    warnings: list[str],
+) -> "ProductInputReconstructionService | None":
     from bussiness_logic.bridge.factory import (
         BuildRuntimeAdapter,
         RuntimeAdapterBuildError,
@@ -387,18 +408,11 @@ def _BuildInputReconstructionService(warnings: list[str]) -> Any:
         runtimeAdapter=runtime_adapter,
         fuzzyMinRatio=smoke_config.input_dictionary_fuzzy_min_ratio,
         llmMaxTokens=smoke_config.llm_input_reconstruction_max_tokens,
-        llmDebugArtifactRootPath=(
-            PRODUCT_INPUT_ARTIFACT_ROOT
-            if (
-                runtime_adapter is not None
-                and smoke_config.write_llm_input_reconstruction_debug_artifacts
-            )
-            else None
-        ),
+        llmArtifactRootPath=PRODUCT_INPUT_ARTIFACT_ROOT,
     )
 
 
-def _ReadCachedProductInputFacts(artifactDirectory: Path) -> dict[str, Any]:
+def _ReadCachedProductInputFacts(artifactDirectory: Path) -> JsonObject:
     artifactPath = artifactDirectory / "product-input.json"
     if not artifactPath.exists():
         return {}
@@ -406,7 +420,7 @@ def _ReadCachedProductInputFacts(artifactDirectory: Path) -> dict[str, Any]:
     return dict(payload) if isinstance(payload, dict) else {}
 
 
-def load_cached_product_input_facts(product_identifier: str) -> dict[str, Any]:
+def load_cached_product_input_facts(product_identifier: str) -> JsonObject:
     """저장된 product-input.json을 읽어 downstream pipeline 입력으로 재사용한다."""
 
     productId = ExtractProductIdFromUrl(product_identifier)
@@ -425,7 +439,9 @@ def load_cached_product_input_facts(product_identifier: str) -> dict[str, Any]:
     return facts
 
 
-def _BuildPublicInputReconstruction(reconstructionResult: Any) -> dict[str, Any]:
+def _BuildPublicInputReconstruction(
+    reconstructionResult: ReconstructionDumpable,
+) -> JsonObject:
     reconstructionData = reconstructionResult.model_dump(
         mode="json",
         by_alias=True,
@@ -469,26 +485,25 @@ def _BuildPublicInputReconstruction(reconstructionResult: Any) -> dict[str, Any]
         "unresolved_count": len(unresolvedFacts),
         "conflict_count": len(reconstructionData.get("conflicts", [])),
         "fact_text_count": len(factTexts),
-        "classification_input_product_facts": productFacts,
+        "reconstructed_product_facts": productFacts,
         "reconstructed_tables": reconstructedTables,
         "unresolved_product_facts": unresolvedFacts,
         "product_fact_conflicts": list(reconstructionData.get("conflicts", [])),
-        "classification_input_fact_texts": factTexts,
+        "reconstructed_fact_texts": factTexts,
         "source_ref_labels": dict(reconstructionData.get("source_ref_labels", {})),
         "source_evidence_preview": list(
             reconstructionData.get("source_evidence_preview", [])
         ),
         "warnings": list(reconstructionData.get("warnings", [])),
-        "debug_artifact_count": len(reconstructionResult.debugArtifacts),
     }
 
 
 def build_raw_input_from_ui(
     *,
     query: str,
-    facts: dict[str, Any],
-) -> dict[str, Any]:
-    """Map Dash text + Product facts JSON into EvidenceIntakeAgent input."""
+    facts: JsonObject,
+) -> JsonObject:
+    """Map Dash text + Product facts JSON into EvidenceIntakeComponent input."""
     facts = _normalize_product_facts(facts or {})
     url = str(facts.get("url") or "").strip()
     if facts.get("use_cached_product_input"):
@@ -538,9 +553,9 @@ def build_raw_input_from_ui(
     input_reconstruction = facts.get("input_reconstruction") or {}
     if not isinstance(input_reconstruction, dict):
         input_reconstruction = {}
-    classification_input_product_facts = (
-        facts.get("classification_input_product_facts")
-        or input_reconstruction.get("classification_input_product_facts")
+    reconstructed_product_facts = (
+        facts.get("reconstructed_product_facts")
+        or input_reconstruction.get("reconstructed_product_facts")
         or []
     )
     unresolved_product_facts = (
@@ -553,20 +568,20 @@ def build_raw_input_from_ui(
         or input_reconstruction.get("product_fact_conflicts")
         or []
     )
-    classification_input_text_lines = (
-        facts.get("classification_input_fact_texts")
-        or input_reconstruction.get("classification_input_fact_texts")
+    reconstructed_fact_texts = (
+        facts.get("reconstructed_fact_texts")
+        or input_reconstruction.get("reconstructed_fact_texts")
         or []
     )
 
     return {
         "product_name": facts.get("product_name") or query,
         "description": facts.get("description") or facts.get("short_description") or "",
-        "composition": facts.get("composition") or classification_input_text_lines or [],
-        "classification_input_product_facts": classification_input_product_facts,
+        "composition": facts.get("composition") or reconstructed_fact_texts or [],
+        "reconstructed_product_facts": reconstructed_product_facts,
         "unresolved_product_facts": unresolved_product_facts,
         "product_fact_conflicts": product_fact_conflicts,
-        "classification_input_fact_texts": classification_input_text_lines,
+        "reconstructed_fact_texts": reconstructed_fact_texts,
         "ocr_text": ocr_text,
         "source_urls": source_urls,
         "origin_country": facts.get("origin_country") or "KR",
@@ -577,27 +592,27 @@ def build_raw_input_from_ui(
     }
 
 
-def _HasCollectedKurlyFacts(facts: dict[str, Any]) -> bool:
+def _HasCollectedKurlyFacts(facts: JsonObject) -> bool:
     input_reconstruction = facts.get("input_reconstruction") or {}
     if not isinstance(input_reconstruction, dict):
         input_reconstruction = {}
     return bool(
-        facts.get("classification_input_product_facts")
-        or facts.get("classification_input_fact_texts")
-        or input_reconstruction.get("classification_input_product_facts")
-        or input_reconstruction.get("classification_input_fact_texts")
+        facts.get("reconstructed_product_facts")
+        or facts.get("reconstructed_fact_texts")
+        or input_reconstruction.get("reconstructed_product_facts")
+        or input_reconstruction.get("reconstructed_fact_texts")
         or facts.get("url_intake")
     )
 
 
-def _normalize_product_facts(facts: dict[str, Any]) -> dict[str, Any]:
+def _normalize_product_facts(facts: JsonObject) -> JsonObject:
     """Normalize explicit Product facts payloads."""
     if not isinstance(facts, dict):
         return {}
     return _normalize_kurly_result_facts(facts)
 
 
-def _normalize_kurly_result_facts(facts: dict[str, Any]) -> dict[str, Any]:
+def _normalize_kurly_result_facts(facts: JsonObject) -> JsonObject:
     """Flatten current Kurly URL intake result shape into Product facts."""
     if not isinstance(facts, dict):
         return {}
@@ -609,15 +624,15 @@ def _normalize_kurly_result_facts(facts: dict[str, Any]) -> dict[str, Any]:
         input_reconstruction = {}
 
     fact_texts = (
-        facts.get("classification_input_fact_texts")
-        or input_reconstruction.get("classification_input_fact_texts")
+        facts.get("reconstructed_fact_texts")
+        or input_reconstruction.get("reconstructed_fact_texts")
         or []
     )
     if not isinstance(fact_texts, list):
         fact_texts = []
-    classification_input_product_facts = (
-        facts.get("classification_input_product_facts")
-        or input_reconstruction.get("classification_input_product_facts")
+    reconstructed_product_facts = (
+        facts.get("reconstructed_product_facts")
+        or input_reconstruction.get("reconstructed_product_facts")
         or []
     )
     unresolved_product_facts = (
@@ -668,10 +683,10 @@ def _normalize_kurly_result_facts(facts: dict[str, Any]) -> dict[str, Any]:
         "package_type": facts.get("package_type") or parsed.get("package_type") or "",
         "sale_unit": facts.get("sale_unit") or parsed.get("sale_unit") or "",
         "ocr_text": ocr_text or facts.get("ocr_text") or [],
-        "classification_input_product_facts": classification_input_product_facts,
+        "reconstructed_product_facts": reconstructed_product_facts,
         "unresolved_product_facts": unresolved_product_facts,
         "product_fact_conflicts": product_fact_conflicts,
-        "classification_input_fact_texts": fact_texts,
+        "reconstructed_fact_texts": fact_texts,
     })
     return flattened
 
@@ -679,12 +694,12 @@ def _normalize_kurly_result_facts(facts: dict[str, Any]) -> dict[str, Any]:
 def run_document_pipeline(
     *,
     query: str,
-    facts: dict[str, Any],
+    facts: JsonObject,
     include_celex_excerpt: bool = False,
-    progress_callback=None,
+    progress_callback: Callable[[JsonObject], None] | None = None,
     job_id: str | None = None,
-) -> dict[str, Any]:
-    """Run Evidence -> Classification -> Document -> Orchestrator.
+) -> dict[str, object]:
+    """Run Evidence -> ProductUnderstanding -> HS2 routing -> Classification -> Document.
 
     Return shape:
       {
@@ -694,7 +709,7 @@ def run_document_pipeline(
         "document_package": dict | None,
         "candidate_code_set": dict | None,
         "decision": dict | None,
-        "agent_results": list[dict],
+        "component_results": list[JsonObject],
       }
     """
     effectiveJobId = job_id or f"job_{uuid.uuid4().hex[:10]}"
@@ -710,7 +725,7 @@ def run_document_pipeline(
         run_dir=runDirectory,
     )
 
-    def emit(stage: str, status: str, **payload) -> None:
+    def emit(stage: str, status: str, **payload: object) -> None:
         if progress_callback is None:
             return
         try:
@@ -727,21 +742,20 @@ def run_document_pipeline(
     raw_input = build_raw_input_from_ui(query=query, facts=facts)
     emit("Input_Intake", "completed", message="raw product facts 생성", raw_input=raw_input)
 
-    agents = [
-        EvidenceIntakeAgent(raw_input),
-        ProductUnderstandingAgent(),
-        DomainRouterAgent(),
-        ClassificationAgent(),
-        DocumentAgent(include_celex_excerpt=include_celex_excerpt),
-        OrchestratorAgent(),
+    components = [
+        EvidenceIntakeComponent(raw_input),
+        ProductUnderstandingComponent(),
+        Hs2RoutingComponent(),
+        ClassificationComponent(),
+        DocumentComponent(include_celex_excerpt=include_celex_excerpt),
     ]
 
-    agent_results: list[dict[str, Any]] = []
-    for agent in agents:
-        emit(agent.agent_name, "running", message=f"{agent.stage} 실행 중")
-        result = agent.execute(store)
-        agent_results.append({
-            "agent_name": agent.agent_name,
+    component_results: list[JsonObject] = []
+    for component in components:
+        emit(component.component_name, "running", message=f"{component.stage} 실행 중")
+        result = component.Execute(store)
+        component_results.append({
+            "component_name": component.component_name,
             "success": result.success,
             "error": result.error,
             "outputs_written": result.outputs_written,
@@ -751,30 +765,29 @@ def run_document_pipeline(
             "blackboard": bb_snapshot,
             "candidate_code_set": (bb_snapshot.get("candidate_code_sets") or [None])[-1],
             "document_package": (bb_snapshot.get("document_packages") or [None])[-1],
-            "decision": (bb_snapshot.get("orchestrator_decisions") or [None])[-1],
-            "agent_results": list(agent_results),
-            "agent_runs": _read_agent_runs(store),
+            "component_results": list(component_results),
+            "component_runs": _read_component_runs(store),
             "run_id": store.run_id,
             "run_dir": str(Path(store.run_dir)),
         }
         emit(
-            agent.agent_name,
+            component.component_name,
             "completed" if result.success else "failed",
-            message=f"{agent.agent_name} 완료" if result.success else f"{agent.agent_name} 실패",
-            agent_result=agent_results[-1],
+            message=f"{component.component_name} 완료" if result.success else f"{component.component_name} 실패",
+            component_result=component_results[-1],
             partial_result=partial,
         )
         if not result.success:
             break
-        latestCandidateCodeSet = partial.get("candidate_code_set")
+        latestClassificationCandidateSet = partial.get("candidate_code_set")
         if (
-            agent.agent_name == "Classification_Agent"
-            and isinstance(latestCandidateCodeSet, dict)
-            and latestCandidateCodeSet.get("classification_status")
-            and not latestCandidateCodeSet.get("candidates")
+            component.component_name == "Classification_Component"
+            and isinstance(latestClassificationCandidateSet, dict)
+            and latestClassificationCandidateSet.get("classification_status")
+            and not latestClassificationCandidateSet.get("candidates")
         ):
             emit(
-                "Document_Agent",
+                "Document_Component",
                 "skipped",
                 message="분류 후보가 없어 문서 추천을 건너뜁니다.",
                 partial_result=partial,
@@ -784,7 +797,6 @@ def run_document_pipeline(
     bb = store.load()
     document_package = (bb.get("document_packages") or [None])[-1]
     candidate_code_set = (bb.get("candidate_code_sets") or [None])[-1]
-    decision = (bb.get("orchestrator_decisions") or [None])[-1]
     raw_document_package = (
         document_package.get("raw_document_package")
         if isinstance(document_package, dict)
@@ -797,15 +809,14 @@ def run_document_pipeline(
         "raw_document_package": raw_document_package,
         "document_package": document_package,
         "candidate_code_set": candidate_code_set,
-        "decision": decision,
-        "agent_results": agent_results,
-        "agent_runs": _read_agent_runs(store),
+        "component_results": component_results,
+        "component_runs": _read_component_runs(store),
         "run_id": store.run_id,
         "run_dir": str(Path(store.run_dir)),
     }
 
 
-def _ResolveProductArtifactId(query: str, facts: dict[str, Any]) -> str:
+def _ResolveProductArtifactId(query: str, facts: JsonObject) -> str:
     explicitProductId = BuildSafeArtifactPathSegment(
         str(facts.get("product_id") or ""),
         fallback="",

@@ -1,7 +1,7 @@
 """Markdown 기반 core 문서 loader."""
 
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from bussiness_logic.core.context_retrieval.schema import OntologyDocument, OntologyDocumentKind
 from bussiness_logic.utils import NormalizeWhiteSpace
@@ -60,7 +60,7 @@ class OntologyDocumentLoader:
                 continue
             yield filePath
 
-    def _SplitFrontmatter(self, rawText: str) -> Tuple[Dict[str, Any], str]:
+    def _SplitFrontmatter(self, rawText: str) -> Tuple[Dict[str, object], str]:
         lines = rawText.splitlines()
         if not lines or lines[0].strip() != "---":
             return {}, rawText.strip()
@@ -73,14 +73,14 @@ class OntologyDocumentLoader:
 
         return {}, rawText.strip()
 
-    def _ParseFrontmatter(self, frontmatterText: str) -> Dict[str, Any]:
+    def _ParseFrontmatter(self, frontmatterText: str) -> Dict[str, object]:
         parsedByYaml = self._ParseWithYamlIfAvailable(frontmatterText)
         if isinstance(parsedByYaml, dict):
             return parsedByYaml
 
         return self._ParseSimpleYamlSubset(frontmatterText)
 
-    def _ParseWithYamlIfAvailable(self, frontmatterText: str) -> Optional[Any]:
+    def _ParseWithYamlIfAvailable(self, frontmatterText: str) -> Optional[object]:
         try:
             import yaml
         except Exception:
@@ -91,8 +91,8 @@ class OntologyDocumentLoader:
         except Exception:
             return None
 
-    def _ParseSimpleYamlSubset(self, frontmatterText: str) -> Dict[str, Any]:
-        result: Dict[str, Any] = {}
+    def _ParseSimpleYamlSubset(self, frontmatterText: str) -> Dict[str, object]:
+        result: Dict[str, object] = {}
         currentKey: Optional[str] = None
 
         for rawLine in frontmatterText.splitlines():
@@ -124,7 +124,7 @@ class OntologyDocumentLoader:
         self,
         relativePath: str,
         bodyText: str,
-        frontmatter: Dict[str, Any],
+        frontmatter: Dict[str, object],
     ) -> str:
         frontmatterTitle = frontmatter.get("title")
         if isinstance(frontmatterTitle, str) and frontmatterTitle.strip():
@@ -140,7 +140,7 @@ class OntologyDocumentLoader:
     def _BuildDocumentId(
         self,
         relativePath: str,
-        frontmatter: Dict[str, Any],
+        frontmatter: Dict[str, object],
     ) -> str:
         frontmatterId = frontmatter.get("doc_id")
         if isinstance(frontmatterId, str) and frontmatterId.strip():

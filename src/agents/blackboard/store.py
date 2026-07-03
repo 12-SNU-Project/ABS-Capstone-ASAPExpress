@@ -4,7 +4,7 @@ Blackboard storage — one JSON document + one append-only jsonl per run.
 Default standalone layout:
   artifacts/runs/run_<NNN>/
     blackboard.json     full Blackboard root (mutable)
-    agent_runs.jsonl    AgentRun records (append-only)
+    component_runs.jsonl    ComponentRun records (append-only)
 
 UI pipeline callers may provide an explicit run directory while retaining the
 schema-compatible ``run_<digits>`` internal run identifier.
@@ -13,7 +13,7 @@ Schema validation is against the LinkML-generated JSON Schema
 (docs/ASAP_Ontology_v1/linkml/generated/asap_runtime.schema.json).
 
 Identifier format: prefix_counter, zero-padded to 3 digits
-(cand_001, chg_001, …). Counters are derived from the live Blackboard so
+(cand_001, dp_001, …). Counters are derived from the live Blackboard so
 nothing external needs to remember the next value.
 """
 from __future__ import annotations
@@ -22,10 +22,11 @@ import json
 import re
 from datetime import datetime, timezone
 import os
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
 
 from bussiness_logic.app_config import LoadAppConfig
+from bussiness_logic.utils.json_types import JsonObject
 
 try:
     import jsonschema
@@ -47,29 +48,19 @@ DEFAULT_SCHEMA = APP_CONFIG.paths.ResolvePath(
 
 OBJECT_KEY: dict[str, str] = {
     "ProductEvidenceState": "product_evidence_state",
-    "ProductUnderstandingFacts": "product_understanding",
-    "RoutingContext": "routing_context",
-    "CandidateCodeSet": "candidate_code_sets",
-    # Legacy draft object names retained for old run inspection only. Current
-    # agents should fold this context into CandidateCodeSet / DocumentPackage.
-    "TaricMeasureContext": "taric_measure_contexts",
+    "InputEvidenceState": "product_evidence_state",
+    "ProductUnderstandingPackage": "product_understanding",
+    "Hs2RoutingDecision": "routing_context",
+    "ClassificationCandidateSet": "candidate_code_sets",
     "DocumentPackage": "document_packages",
-    # Legacy draft object name retained for old run inspection only. Current
-    # domain routing is owned by Document_Agent and folded into DocumentPackage.
-    "RegulatoryRoute": "regulatory_routes",
-    "Challenge": "challenges",
-    "ChallengeResponse": "challenge_responses",
-    "OrchestratorDecision": "orchestrator_decisions",
-    "UserQuestion": "user_questions",
 }
 
-AGENT_WRITE_KEYS: dict[str, set[str]] = {
-    "Evidence_Intake_Agent": {"product_evidence_state", "user_questions"},
-    "Product_Understanding_Agent": {"product_understanding", "user_questions"},
-    "Domain_Router_Agent": {"routing_context", "user_questions"},
-    "Classification_Agent": {"candidate_code_sets", "challenge_responses", "user_questions"},
-    "Document_Agent": {"document_packages", "challenges", "user_questions"},
-    "Orchestrator_Agent": {"orchestrator_decisions", "user_questions"},
+COMPONENT_WRITE_KEYS: dict[str, set[str]] = {
+    "Evidence_Intake_Component": {"product_evidence_state"},
+    "Product_Understanding_Component": {"product_understanding"},
+    "HS2_Routing_Component": {"routing_context"},
+    "Classification_Component": {"candidate_code_sets"},
+    "Document_Component": {"document_packages"},
 }
 
 
@@ -91,7 +82,7 @@ def _next_run_id(runs_dir: Path) -> str:
 
 
 class BlackboardStore:
-    """Per-run Blackboard JSON + AgentRun jsonl I/O."""
+    """Per-run Blackboard JSON + ComponentRun jsonl I/O."""
 
     def __init__(
         self,
@@ -104,9 +95,10 @@ class BlackboardStore:
         self.run_id = run_id
         self.run_dir = Path(run_dir) if run_dir is not None else Path(runs_dir) / run_id
         self.bb_path = self.run_dir / "blackboard.json"
-        self.runs_path = self.run_dir / "agent_runs.jsonl"
+        self.component_runs_path = self.run_dir / "component_runs.jsonl"
+        self.runs_path = self.component_runs_path
         self.schema_path = Path(schema_path)
-        self._schema: dict | None = None
+        self._schema: JsonObject | None = None
         self._counters: dict[str, int] = {}
         self.validate_on_write = (
             os.environ.get("ASAP_VALIDATE_BLACKBOARD_ON_WRITE") == "1"
@@ -157,26 +149,20 @@ class BlackboardStore:
             "candidate_code_sets": [],
             "product_understanding": None,
             "routing_context": None,
-            "taric_measure_contexts": [],
             "document_packages": [],
-            "regulatory_routes": [],
-            "challenges": [],
-            "challenge_responses": [],
-            "orchestrator_decisions": [],
-            "user_questions": [],
-            "agent_runs": [],
+            "component_runs": [],
         }
         store.save(bb)
-        store.runs_path.touch()
+        store.component_runs_path.touch()
         return store
 
     # ------------------------------------------------------------------ io
-    def load(self) -> dict:
+    def load(self) -> JsonObject:
         if not self.bb_path.exists():
             raise FileNotFoundError(f"blackboard not found: {self.bb_path}")
         return json.loads(self.bb_path.read_text(encoding="utf-8"))
 
-    def save(self, bb: dict) -> None:
+    def save(self, bb: JsonObject) -> None:
         self.run_dir.mkdir(parents=True, exist_ok=True)
         if self.validate_on_write:
             self.validate(bb)
@@ -199,11 +185,11 @@ class BlackboardStore:
         return f"{prefix}_{self._counters[prefix]:03d}"
 
     @staticmethod
-    def _scan_highest(obj: Any, prefix: str) -> int:
+    def _scan_highest(obj: object, prefix: str) -> int:
         pat = re.compile(rf"^{re.escape(prefix)}_(\d+)$")
         highest = 0
 
-        def walk(node: Any) -> None:
+        def walk(node: object) -> None:
             nonlocal highest
             if isinstance(node, dict):
                 for v in node.values():
@@ -220,7 +206,7 @@ class BlackboardStore:
         return highest
 
     # ------------------------------------------------------------------ mutate
-    def put(self, key: str, obj: dict) -> dict:
+    def put(self, key: str, obj: JsonObject) -> JsonObject:
         """Overwrite ``bb[key]`` (single-instance slot like product_evidence_state)."""
         self._enforce_write(key, obj)
         bb = self.load()
@@ -228,7 +214,7 @@ class BlackboardStore:
         self.save(bb)
         return obj
 
-    def append(self, key: str, obj: dict) -> dict:
+    def append(self, key: str, obj: JsonObject) -> JsonObject:
         """Append ``obj`` to ``bb[key]`` (multivalued slot)."""
         self._enforce_write(key, obj)
         bb = self.load()
@@ -237,8 +223,8 @@ class BlackboardStore:
         return obj
 
     @staticmethod
-    def _enforce_write(key: str, obj: dict) -> None:
-        """Enforce the v2 Agent Read/Write Matrix for Blackboard writes."""
+    def _enforce_write(key: str, obj: JsonObject) -> None:
+        """Enforce the component write matrix for Blackboard writes."""
         object_type = obj.get("object_type")
         created_by = obj.get("created_by")
 
@@ -251,7 +237,7 @@ class BlackboardStore:
         if not created_by:
             raise PermissionError(f"Blackboard object written to {key!r} is missing created_by")
 
-        allowed = AGENT_WRITE_KEYS.get(created_by)
+        allowed = COMPONENT_WRITE_KEYS.get(created_by)
         if allowed is None:
             raise PermissionError(f"Unknown Blackboard writer: {created_by!r}")
         if key not in allowed:
@@ -259,34 +245,33 @@ class BlackboardStore:
                 f"{created_by} may not write {key!r}; allowed keys: {sorted(allowed)}"
             )
 
-    # ------------------------------------------------------------------ agent run log
-    def log_agent_run(self, agent_run: dict) -> dict:
-        """Append AgentRun to the per-run jsonl. Also mirror its id in
-        Blackboard.agent_runs for fast indexing."""
+    # ------------------------------------------------------------------ component run log
+    def log_component_run(self, component_run: JsonObject) -> JsonObject:
+        """Append ComponentRun to jsonl and mirror its id in the Blackboard."""
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        with self.runs_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(agent_run, ensure_ascii=False) + "\n")
+        with self.component_runs_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(component_run, ensure_ascii=False) + "\n")
         bb = self.load()
-        bb.setdefault("agent_runs", []).append(agent_run.get("agent_run_id"))
+        bb.setdefault("component_runs", []).append(component_run.get("component_run_id"))
         self.save(bb)
-        return agent_run
+        return component_run
 
-    def iter_agent_runs(self) -> Iterator[dict]:
-        if not self.runs_path.exists():
+    def iter_component_runs(self) -> Iterator[JsonObject]:
+        if not self.component_runs_path.exists():
             return
-        with self.runs_path.open(encoding="utf-8") as f:
+        with self.component_runs_path.open(encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line:
                     yield json.loads(line)
 
     # ------------------------------------------------------------------ validate
-    def _load_schema(self) -> dict:
+    def _load_schema(self) -> JsonObject:
         if self._schema is None:
             self._schema = json.loads(self.schema_path.read_text(encoding="utf-8"))
         return self._schema
 
-    def validate(self, bb: dict | None = None) -> None:
+    def validate(self, bb: JsonObject | None = None) -> None:
         """Validate against the LinkML-generated JSON Schema.
 
         Raises ``jsonschema.ValidationError`` on the first rule violation.

@@ -18,10 +18,11 @@ import os
 import re
 import sys
 import threading
-from contextlib import contextmanager
 from collections import defaultdict
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Iterator, Optional
+from typing import Optional
 
 try:
     import psycopg2
@@ -30,7 +31,7 @@ except ImportError:
     sys.exit("[fatal] psycopg2 missing. pip install psycopg2-binary")
 
 try:
-    from agents.tools.db_session_manager import DbSessionManager
+    from db.db_session_manager import DbSessionManager
 except Exception:
     DbSessionManager = None
 
@@ -42,11 +43,6 @@ _DB_POOL_LOCK = threading.Lock()
 _DB_POOL = None
 _DB_POOL_KEY = None
 _TABLE_EXISTS_CACHE: dict[str, bool] = {}
-
-# canonical TARIC table:
-#   taric_master_table = leaf-aware canonical table
-#   taric_master_selection_table = legacy compatibility table, do not use here
-
 
 def _db_connect_config():
     """Return psycopg2 connection config without exposing secret values."""
@@ -103,7 +99,7 @@ def _get_db_pool():
 
 
 @contextmanager
-def _connect_db() -> Iterator[Any]:
+def _connect_db() -> Iterator[object]:
     if DbSessionManager is not None:
         manager = DbSessionManager.GetInstance()
         with manager.OpenRawConnection() as connection:
@@ -559,7 +555,7 @@ def _fetch_document_binding_cards(
     if not clauses:
         return []
 
-    cur.execute(
+    cur.Execute(
         f"""
         SELECT binding_id, document_id, source_layer, source_id, binding_action,
                required_level, field_key, required_fact_key, sort_order
@@ -588,7 +584,7 @@ def _fetch_document_binding_cards(
     if not document_ids:
         return []
 
-    cur.execute(
+    cur.Execute(
         """
         SELECT *
         FROM baseline_document_master
@@ -891,7 +887,7 @@ def _table_exists(cur, table_name: str) -> bool:
     cached = _TABLE_EXISTS_CACHE.get(table_name)
     if cached is not None:
         return cached
-    cur.execute("SELECT to_regclass(%s)", (f"public.{table_name}",))
+    cur.Execute("SELECT to_regclass(%s)", (f"public.{table_name}",))
     row = cur.fetchone()
     exists = bool(row and row[0])
     _TABLE_EXISTS_CACHE[table_name] = exists
@@ -915,7 +911,7 @@ def _column_exists(cur, table_name: str, column_name: str) -> bool:
             return bool(value)
         except Exception:
             pass
-    cur.execute(
+    cur.Execute(
         """
         SELECT 1
         FROM information_schema.columns
@@ -932,7 +928,7 @@ def _column_exists(cur, table_name: str, column_name: str) -> bool:
 def _fetch_certificate_guidance(cur, certificate_codes: list[str]) -> dict[str, dict]:
     if not certificate_codes or not _table_exists(cur, "taric_certificate_declaration_guidance"):
         return {}
-    cur.execute(
+    cur.Execute(
         """
         SELECT *
         FROM taric_certificate_declaration_guidance
@@ -1171,7 +1167,7 @@ def _fetch_baseline_documents(
     chapter = (product_facts.get("chapter") or goods_code_10[:2] or "").zfill(2)
     routed_domains = _baseline_domain_scopes(product_facts, chapter)
 
-    cur.execute(
+    cur.Execute(
         f"""
         SELECT {", ".join(BASELINE_DOC_FIELDS)}
         FROM baseline_document_master
@@ -1233,7 +1229,7 @@ def _fetch_detailed_requirements(
         if celex_map.get(lb, {}).get("celex_id")
     })
 
-    cur.execute(
+    cur.Execute(
         f"""
         SELECT {", ".join(POST_REQ_FIELDS)}
         FROM post_taric_requirement_master
@@ -1315,7 +1311,7 @@ def _fetch_product_domain_requirements(
     heading = goods_code_10[:4]
     cn8 = goods_code_10[:8]
     allowed_domains = _allowed_product_domains(product_facts)
-    cur.execute(
+    cur.Execute(
         f"""
         SELECT {", ".join(POST_REQ_FIELDS)}
         FROM post_taric_requirement_master AS prm
@@ -1372,7 +1368,7 @@ def _fetch_pre_taric_requirements(
     if not pre_gate_domains:
         pre_gate_domains = ["sanctions"]
 
-    cur.execute(
+    cur.Execute(
         f"""
         SELECT {", ".join(PRE_REQ_FIELDS)}
         FROM pre_taric_requirement_master
@@ -1505,7 +1501,7 @@ def _product_fact_tokens(product_facts: dict) -> set[str]:
 
 
 def _lookup_nomenclature_row(cur, goods_code_10: str) -> Optional[dict]:
-    cur.execute(
+    cur.Execute(
         """
         SELECT
             master_id, row_kind, goods_code_10, line_id, parent_line_id,
@@ -1586,7 +1582,7 @@ def get_document_package(
             # A2M inherits measures attached to broader TARIC/CN nodes, e.g. R1227/25
             # attached to 2100000000 appears when querying 2103901000.
             candidate_codes = _candidate_goods_codes(cur, code, notes)
-            cur.execute(
+            cur.Execute(
                 """
                 SELECT
                     master_id, goods_code_10, cn8, line_id,
@@ -1636,7 +1632,7 @@ def get_document_package(
             legal_bases = sorted({r['legal_base'] for r in rows if r['legal_base']})
             celex_map: dict[str, dict] = {}
             if legal_bases:
-                cur.execute(
+                cur.Execute(
                     """SELECT legal_base, celex_id, full_description, celex_match_status
                     FROM taric_celex_table WHERE legal_base = ANY(%s)""",
                     (legal_bases,),
@@ -1649,7 +1645,7 @@ def get_document_package(
             if include_celex_excerpt and _table_exists(cur, "taric_celex_source_chunks"):
                 celex_ids = [c["celex_id"] for c in celex_map.values() if c.get("celex_id")]
                 if celex_ids:
-                    cur.execute(
+                    cur.Execute(
                         """SELECT celex_id, string_agg(chunk_text, ' ' ORDER BY chunk_index) AS body
                         FROM taric_celex_source_chunks
                         WHERE celex_id = ANY(%s)

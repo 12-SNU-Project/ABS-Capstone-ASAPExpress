@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 import logging
 
-from agents.tools.db_session_manager import DbSessionManager
+from db.db_session_manager import DbSessionManager
 
 LOGGER = logging.getLogger(__name__)
 

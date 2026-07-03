@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from agents.agent_base import BaseAgent
+from agents.component_base import BasePipelineComponent
 from agents.blackboard import BlackboardStore, now_iso
-from agents.pipeline_dto import JsonValue, RoutingContext
+from agents.pipeline_dto import JsonValue, Hs2RoutingDecision
 from agents.tools.chapter_index_repository import LoadPreClassificationChapterRows
 from agents.tools.pre_classification_router import (
     BuildPreClassificationRouteInput,
@@ -12,54 +12,69 @@ from agents.tools.pre_classification_router import (
 )
 
 
-class DomainRouterAgent(BaseAgent):
-    agent_name = "Domain_Router_Agent"
+class Hs2RoutingComponent(BasePipelineComponent):
+    component_name = "HS2_Routing_Component"
     stage = "Regulatory_Domain_Routing"
     llm_model = None
 
-    def run(self, store: BlackboardStore) -> None:
+    def Run(self, store: BlackboardStore) -> None:
         bb = store.load()
         productUnderstanding = bb.get("product_understanding") or {}
         if not isinstance(productUnderstanding, dict):
-            raise RuntimeError("No ProductUnderstandingFacts on the Blackboard.")
+            raise RuntimeError("No ProductUnderstandingPackage on the Blackboard.")
         understandingId = str(productUnderstanding.get("understanding_id") or "")
         productId = str(productUnderstanding.get("product_id") or "")
-        self.read_input(understandingId)
+        self.ReadBlackBoard(understandingId)
 
-        factTexts = self._StringTuple(
-            productUnderstanding.get("classification_input_fact_texts") or [],
-        )
-        routingTerms = self._StringTuple(
-            productUnderstanding.get("routing_terms") or [],
-        )
-        identityLane = productUnderstanding.get("identity_lane") or {}
+        identityLane = productUnderstanding.get("identity_hints") or {}
         if not isinstance(identityLane, dict):
             identityLane = {}
+        distilledIdentity = productUnderstanding.get("distilled_identity") or {}
+        if not isinstance(distilledIdentity, dict):
+            distilledIdentity = {}
+        identityTerms = self._StringTuple(identityLane.get("identity_terms") or [])
+        productFormTerms = self._StringTuple(identityLane.get("product_form_terms") or [])
+        distilledFormTerms = self._StringTuple(
+            distilledIdentity.get("product_form_signal_terms") or [],
+        )
+        distilledProcessingTerms = self._StringTuple(
+            distilledIdentity.get("processing_signal_terms") or [],
+        )
+        domainHints = self._StringTuple(identityLane.get("domain_hints") or [])
         chapterHints = self._StringTuple(
             identityLane.get("chapter_hint_terms") or [],
         )
         chapterHintSources = self._StringTuple(
             identityLane.get("chapter_hint_source_terms") or [],
         )
-        productFacts = productUnderstanding.get("classification_input_product_facts")
-        structuredFacts = self._FactDictList(productFacts)
         routeInput = BuildPreClassificationRouteInput(
             productName=str(productUnderstanding.get("product_name") or ""),
-            shortDescription=str(productUnderstanding.get("short_description") or ""),
-            factTexts=(*factTexts, *routingTerms, *chapterHints, *chapterHintSources),
-            structuredProductFacts=structuredFacts,
+            shortDescription="",
+            factTexts=(
+                str(identityLane.get("commercial_identity") or ""),
+                str(identityLane.get("translated_product_name") or ""),
+                str(identityLane.get("normalized_tariff_description") or ""),
+                *identityTerms,
+                *productFormTerms,
+                *distilledFormTerms,
+                *distilledProcessingTerms,
+                *domainHints,
+                *chapterHints,
+                *chapterHintSources,
+            ),
+            structuredProductFacts=[],
         )
         routeHint = PreClassificationDomainRouter(
             chapterRowsProvider=LoadPreClassificationChapterRows,
         ).Route(routeInput)
-        routingContextId = store.next_id("route")
-        routingContext = RoutingContext(
-            routingContextId=routingContextId,
+        routingDecisionId = store.next_id("route")
+        routingContext = Hs2RoutingDecision(
+            routingDecisionId=routingDecisionId,
             productId=productId,
             sourceUnderstandingId=understandingId,
-            candidateHs2=routeHint.candidateHs2,
+            allowedHs2=routeHint.candidateHs2,
             blockedHs2=routeHint.blockedHs2,
-            strictRoute=bool(routeHint.candidateHs2),
+            enforceHs2Boundary=bool(routeHint.candidateHs2),
             fallbackAllowed=True,
             domainScopes=routeHint.domainScopes,
             preGateDomains=routeHint.preGateDomains,
@@ -70,14 +85,14 @@ class DomainRouterAgent(BaseAgent):
         store.put(
             "routing_context",
             routingContext.ToBlackboard(
-                createdBy=self.agent_name,
+                createdBy=self.component_name,
                 createdAt=now_iso(),
             ),
         )
-        self.wrote(routingContextId)
+        self.WriteBlackBoard(routingDecisionId)
         self.reason(
-            "RoutingContext 생성: "
-            f"candidate_hs2={list(routeHint.candidateHs2)}, "
+            "Hs2RoutingDecision 생성: "
+            f"allowed_hs2={list(routeHint.candidateHs2)}, "
             f"fallback_allowed={routingContext.fallbackAllowed}."
         )
 
@@ -88,21 +103,6 @@ class DomainRouterAgent(BaseAgent):
         if not isinstance(value, list):
             return ()
         return tuple(str(item).strip() for item in value if str(item).strip())
-
-    @staticmethod
-    def _FactDictList(value: object) -> list[dict[str, object]]:
-        if not isinstance(value, list):
-            return []
-        facts: list[dict[str, object]] = []
-        for item in value:
-            if not isinstance(item, dict):
-                continue
-            facts.append({
-                str(key): factValue
-                for key, factValue in item.items()
-                if isinstance(key, str)
-            })
-        return facts
 
     @staticmethod
     def _TraceDict(value: dict[str, JsonValue]) -> dict[str, JsonValue]:

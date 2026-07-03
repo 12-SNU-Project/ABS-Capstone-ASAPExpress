@@ -2,7 +2,7 @@
 
 import csv
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -118,7 +118,7 @@ class OntologyResourceResolver:
     def _CheckDataSource(
         self,
         document: OntologyDocument,
-        dataSource: Dict[str, Any],
+        dataSource: Dict[str, object],
     ) -> OntologyDataSourceCheck:
         resourceId = self._ReadString(dataSource.get("resource_id")) or "unknown"
         declaredPath = self._ReadString(dataSource.get("path")) or ""
@@ -239,7 +239,7 @@ class OntologyResourceResolver:
     def _ReadDataSources(
         self,
         document: OntologyDocument,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[Dict[str, object]]:
         dataSources = document.frontmatter.get("data_sources")
         if not isinstance(dataSources, list):
             return []
@@ -262,13 +262,13 @@ class OntologyResourceResolver:
                 return candidatePath
         return None
 
-    def _ReadString(self, value: Any) -> Optional[str]:
+    def _ReadString(self, value: object) -> Optional[str]:
         if not isinstance(value, str):
             return None
         normalizedValue = NormalizeWhiteSpace(value)
         return normalizedValue or None
 
-    def _ReadStringList(self, value: Any) -> List[str]:
+    def _ReadStringList(self, value: object) -> List[str]:
         if isinstance(value, str):
             normalizedValue = NormalizeWhiteSpace(value)
             return [normalizedValue] if normalizedValue else []

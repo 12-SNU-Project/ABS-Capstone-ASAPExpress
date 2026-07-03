@@ -1,7 +1,7 @@
 """Ontology RAG 계층의 데이터 계약."""
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -24,7 +24,7 @@ class OntologyDocument(BaseModel):
     relativePath: str = Field(alias="relative_path")
     title: Optional[str] = None
     content: str = Field(default="", exclude=True)
-    frontmatter: Dict[str, Any] = Field(default_factory=dict)
+    frontmatter: Dict[str, object] = Field(default_factory=dict)
     documentKind: OntologyDocumentKind = Field(
         default=OntologyDocumentKind.UNKNOWN,
         alias="document_kind",
@@ -49,7 +49,7 @@ class OntologyChunk(BaseModel):
     text: str = Field(exclude=True)
     headingPath: List[str] = Field(default_factory=list, alias="heading_path")
     tokenEstimate: int = Field(default=0, alias="token_estimate")
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, object] = Field(default_factory=dict)
 
     def ToContextText(self) -> str:
         headingText = " > ".join(self.headingPath)

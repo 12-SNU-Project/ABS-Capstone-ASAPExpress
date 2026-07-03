@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import dash_mantine_components as dmc
 from dash import dcc, html
+
+from bussiness_logic.utils.json_types import JsonObject
 
 
 CARD = {
@@ -49,14 +50,12 @@ STAGE_DISPLAY_NAMES = {
     "Input": "Input",
     "Pipeline": "Pipeline",
     "Input_Intake": "Input Processing",
-    "Evidence_Intake_Agent": "Product Evidence Builder",
-    "Classification_Agent": "Classification",
-    "Document_Agent": "Document Recommendation",
-    "Orchestrator_Agent": "Result Orchestration",
+    "Evidence_Intake_Component": "Product Evidence Builder",
+    "Classification_Component": "Classification",
+    "Document_Component": "Document Recommendation",
     "Product_Intake": "Product Evidence",
     "Classification": "Classification",
     "Document_Recommendation": "Document Recommendation",
-    "Orchestration": "Result Orchestration",
 }
 PROGRESS_STEP_DEFINITIONS = [
     {
@@ -76,43 +75,19 @@ PROGRESS_STEP_DEFINITIONS = [
         "title": "산출 결과 검증",
     },
 ]
-RECONSTRUCTION_GROUPS = (
-    (
-        "ingredients",
-        "원재료명 및 함량",
-        (
-            "원재료",
-            "원료명",
-            "원제",
-            "주원료",
-            "배합",
-            "전성분",
-            "ingredients",
-            "inci",
-            "성분명",
-            "함량",
-            "함유량",
-            "함유",
-            "조성",
-        ),
-    ),
-)
-VLM_EVIDENCE_SOURCE_TYPES = {"vlm_table", "pp_table"}
-
-
-def display_stage_name(stage: Any) -> str:
+def display_stage_name(stage: object) -> str:
     stageText = str(stage or "").strip()
     return STAGE_DISPLAY_NAMES.get(stageText, stageText or "-")
 
 
-def display_stage_message(message: Any) -> str:
+def display_stage_message(message: object) -> str:
     messageText = str(message or "")
     for rawStageName, displayName in STAGE_DISPLAY_NAMES.items():
         messageText = messageText.replace(rawStageName, displayName)
     return messageText
 
 
-def _small(label: str, value: Any) -> html.Div:
+def _small(label: str, value: object) -> html.Div:
     return html.Div(
         [
             html.Div(label, style={"fontSize": "11px", "color": "#64748b", "marginBottom": "4px"}),
@@ -128,7 +103,7 @@ def _small(label: str, value: Any) -> html.Div:
     )
 
 
-def json_pre(data: Any, *, max_height: int = 420) -> html.Pre:
+def json_pre(data: object, *, max_height: int = 420) -> html.Pre:
     return html.Pre(
         json.dumps(data, ensure_ascii=False, indent=2),
         style={
@@ -145,7 +120,7 @@ def json_pre(data: Any, *, max_height: int = 420) -> html.Pre:
     )
 
 
-def detail_block(title: str, data: Any, *, max_height: int = 320, open_: bool = False) -> html.Details:
+def detail_block(title: str, data: object, *, max_height: int = 320, open_: bool = False) -> html.Details:
     return html.Details(
         [
             html.Summary(title, style={"cursor": "pointer", "fontSize": "12px", "fontWeight": 850, "color": "#334155"}),
@@ -156,14 +131,14 @@ def detail_block(title: str, data: Any, *, max_height: int = 320, open_: bool = 
     )
 
 
-def _short_text(value: Any, *, max_length: int = 160) -> str:
+def _short_text(value: object, *, max_length: int = 160) -> str:
     text = str(value or "").strip()
     if len(text) <= max_length:
         return text or "-"
     return text[: max_length - 1].rstrip() + "..."
 
 
-def _expandable_text(value: Any, *, max_length: int = 180) -> Any:
+def _expandable_text(value: object, *, max_length: int = 180) -> object:
     text = str(value or "").strip()
     if len(text) <= max_length:
         return text or "-"
@@ -176,7 +151,7 @@ def _expandable_text(value: Any, *, max_length: int = 180) -> Any:
     )
 
 
-def _display_source_type(source_type: Any) -> str:
+def _display_source_type(source_type: object) -> str:
     labels = {
         "vlm_table": "VLM table",
         "pp_table": "VLM table",
@@ -189,13 +164,13 @@ def _display_source_type(source_type: Any) -> str:
     return labels.get(sourceType, sourceType or "-")
 
 
-def _display_source_label(label: Any) -> str:
+def _display_source_label(label: object) -> str:
     return str(label or "-").replace("구조화 표", "VLM 표")
 
 
 def _fact_source_text(
-    fact: dict[str, Any],
-    source_labels: dict[str, Any] | None = None,
+    fact: JsonObject,
+    source_labels: JsonObject | None = None,
 ) -> str:
     refs = fact.get("source_refs") or []
     if isinstance(refs, list):
@@ -208,11 +183,11 @@ def _fact_source_text(
     return str(refs or "")
 
 
-def _evidence_id(row: dict[str, Any]) -> str:
+def _evidence_id(row: JsonObject) -> str:
     return str(row.get("evidence_id") or row.get("id") or "").strip()
 
 
-def _table_source_refs(table: dict[str, Any]) -> list[str]:
+def _table_source_refs(table: JsonObject) -> list[str]:
     refs: list[str] = []
     for sourceRef in table.get("source_refs") or []:
         sourceRefText = str(sourceRef).strip()
@@ -229,8 +204,8 @@ def _table_source_refs(table: dict[str, Any]) -> list[str]:
 
 
 def _table_product_context_text(
-    table: dict[str, Any],
-    evidence_rows: list[Any],
+    table: JsonObject,
+    evidence_rows: list[object],
 ) -> str:
     evidenceById = {
         evidenceId: row
@@ -266,206 +241,20 @@ def _table_product_context_text(
     return "상품/옵션: " + ", ".join(labels[:2])
 
 
-def _is_ingredient_text(value: Any) -> bool:
-    compactText = str(value or "").replace(" ", "").lower()
-    return any(
-        marker.replace(" ", "").lower() in compactText
-        for _, _, markers in RECONSTRUCTION_GROUPS
-        for marker in markers
-    )
-
-
-def _filter_ingredient_facts(facts: list[Any]) -> list[dict[str, Any]]:
-    return [
-        fact
-        for fact in facts
-        if isinstance(fact, dict) and _is_ingredient_text(fact.get("field_name"))
-    ]
-
-
-def _ingredient_fact_compare_sections(facts: list[Any]) -> list[dict[str, Any]]:
-    beforeRows: list[dict[str, str]] = []
-    afterRows: list[dict[str, str]] = []
-    for fact in _filter_ingredient_facts(facts):
-        fieldName = str(fact.get("field_name") or "원재료명 및 함량").strip()
-        rawValue = str(fact.get("raw_value") or "").strip()
-        normalizedValue = str(fact.get("normalized_value") or rawValue).strip()
-        if rawValue:
-            beforeRows.append({"field_name": fieldName, "value": rawValue})
-        if normalizedValue:
-            afterRows.append({"field_name": fieldName, "value": normalizedValue})
-    if not beforeRows and not afterRows:
-        return []
-    return [
-        {
-            "table_name": "원재료명 및 함량 교정 비교",
-            "before_rows": beforeRows,
-            "after_rows": afterRows,
-        }
-    ]
-
-
-def _vlm_evidence_tables(evidence_rows: list[Any]) -> list[dict[str, Any]]:
-    tables: list[dict[str, Any]] = []
-    for record in evidence_rows:
-        if (
-            not isinstance(record, dict)
-            or record.get("source_type") not in VLM_EVIDENCE_SOURCE_TYPES
-        ):
-            continue
-        rows: list[dict[str, str]] = []
-        for line in str(record.get("text") or "").splitlines():
-            cells = [cell.strip() for cell in line.split("|") if cell.strip()]
-            for cellIndex in range(0, len(cells) - 1, 2):
-                fieldName = cells[cellIndex]
-                rawValue = cells[cellIndex + 1]
-                if _is_ingredient_text("{0} {1}".format(fieldName, rawValue)):
-                    rows.append({"field_name": fieldName, "value": rawValue})
-        if rows:
-            tables.append(
-                {
-                    "table_name": record.get("source_label")
-                    or record.get("evidence_id")
-                    or "VLM 표 원문",
-                    "rows": rows,
-                }
-            )
-    return tables
-
-
-def _llm_reconstruction_tables(tables: list[Any]) -> list[dict[str, Any]]:
-    cleanedTables: list[dict[str, Any]] = []
-    for table in tables:
-        if not isinstance(table, dict):
-            continue
-        tableName = str(table.get("table_name") or "LLM reconstruction")
-        rows: list[dict[str, str]] = []
-        for row in table.get("rows") or []:
-            if not isinstance(row, dict):
-                continue
-            fieldName = str(row.get("field_name") or "").strip()
-            rawValue = str(row.get("raw_value") or "").strip()
-            normalizedValue = str(row.get("normalized_value") or "").strip()
-            if normalizedValue and _is_ingredient_text(
-                "{0} {1} {2} {3}".format(
-                    tableName,
-                    fieldName,
-                    rawValue,
-                    normalizedValue,
-                )
-            ):
-                rows.append({"field_name": fieldName, "value": normalizedValue})
-        if rows:
-            cleanedTables.append({"table_name": tableName, "rows": rows})
-    return cleanedTables
-
-
-def _vlm_rows_for_source_refs(
-    source_refs: list[Any],
-    evidence_by_id: dict[str, dict[str, Any]],
-) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    seenKeys: set[tuple[str, str]] = set()
-    for sourceRef in source_refs:
-        record = evidence_by_id.get(str(sourceRef))
-        if (
-            not isinstance(record, dict)
-            or record.get("source_type") not in VLM_EVIDENCE_SOURCE_TYPES
-        ):
-            continue
-        for line in str(record.get("text") or "").splitlines():
-            cells = [cell.strip() for cell in line.split("|") if cell.strip()]
-            for cellIndex in range(0, len(cells) - 1, 2):
-                fieldName = cells[cellIndex]
-                rawValue = cells[cellIndex + 1]
-                if not _is_ingredient_text("{0} {1}".format(fieldName, rawValue)):
-                    continue
-                key = (fieldName, rawValue)
-                if key in seenKeys:
-                    continue
-                seenKeys.add(key)
-                rows.append({"field_name": fieldName, "value": rawValue})
-    return rows
-
-
-def _reconstruction_option_sections(
-    tables: list[Any],
-    evidence_rows: list[Any],
-) -> list[dict[str, Any]]:
-    evidenceById = {
-        str(record.get("evidence_id")): record
-        for record in evidence_rows
-        if isinstance(record, dict) and str(record.get("evidence_id") or "").strip()
-    }
-    sections: list[dict[str, Any]] = []
-    for table in tables:
-        if not isinstance(table, dict):
-            continue
-        tableName = str(table.get("table_name") or "LLM reconstruction").strip()
-        tableSourceRefs = [
-            str(sourceRef)
-            for sourceRef in table.get("source_refs") or []
-            if str(sourceRef).strip()
-        ]
-        beforeRows: list[dict[str, str]] = []
-        afterRows: list[dict[str, str]] = []
-        for row in table.get("rows") or []:
-            if not isinstance(row, dict):
-                continue
-            fieldName = str(row.get("field_name") or "").strip()
-            rawValue = str(row.get("raw_value") or "").strip()
-            normalizedValue = str(row.get("normalized_value") or "").strip()
-            if not _is_ingredient_text(
-                "{0} {1} {2} {3}".format(
-                    tableName,
-                    fieldName,
-                    rawValue,
-                    normalizedValue,
-                )
-            ):
-                continue
-            rowSourceRefs = [
-                str(sourceRef)
-                for sourceRef in row.get("source_refs") or []
-                if str(sourceRef).strip()
-            ]
-            rowVlmRows = _vlm_rows_for_source_refs(
-                [*rowSourceRefs, *tableSourceRefs],
-                evidenceById,
-            )
-            if rowVlmRows:
-                beforeRows.extend(rowVlmRows)
-            elif rawValue:
-                beforeRows.append({"field_name": fieldName, "value": rawValue})
-            if normalizedValue:
-                afterRows.append({"field_name": fieldName, "value": normalizedValue})
-        if beforeRows or afterRows:
-            sections.append(
-                {
-                    "table_name": tableName,
-                    "before_rows": beforeRows,
-                    "after_rows": afterRows,
-                }
-            )
-    return sections
-
-
 def _reconstruction_fact_table(
     title: str,
-    facts: list[dict[str, Any]],
+    facts: list[JsonObject],
     *,
-    source_labels: dict[str, Any] | None = None,
+    source_labels: JsonObject | None = None,
     max_rows: int = 10,
 ) -> html.Div | None:
     if not facts:
         return None
 
-    rows: list[Any] = []
+    rows: list[object] = []
     for fact in facts[:max_rows]:
         validationStatus = str(fact.get("validation_status") or "-").strip()
         correctionType = str(fact.get("correction_type") or "").strip()
-        rawValue = str(fact.get("raw_value") or "").strip()
-        normalizedValue = str(fact.get("normalized_value") or "").strip()
         rows.append(
             html.Tr(
                 [
@@ -474,11 +263,8 @@ def _reconstruction_fact_table(
                         className="input-reconstruction-primary",
                     ),
                     html.Td(
-                        _short_text(fact.get("raw_value"), max_length=220),
-                    ),
-                    html.Td(
                         _short_text(
-                            fact.get("normalized_value") or fact.get("raw_value"),
+                            fact.get("normalized_value"),
                             max_length=220,
                         ),
                     ),
@@ -529,7 +315,6 @@ def _reconstruction_fact_table(
                             html.Tr(
                                 [
                                     html.Th("필드"),
-                                    html.Th("원문 값"),
                                     html.Th("정규화 값"),
                                     html.Th("검증 / 교정"),
                                     html.Th("출처"),
@@ -549,7 +334,7 @@ def _reconstruction_fact_table(
 
 
 def _classification_fact_text_table(
-    fact_texts: list[Any],
+    fact_texts: list[object],
     *,
     title: str = "Classification input text lines",
     max_rows: int = 12,
@@ -558,7 +343,7 @@ def _classification_fact_text_table(
     if not cleaned:
         return None
 
-    rows: list[Any] = []
+    rows: list[object] = []
     for index, text in enumerate(cleaned[:max_rows], start=1):
         rows.append(
             html.Tr(
@@ -598,7 +383,7 @@ def _classification_fact_text_table(
     )
 
 
-def _product_page_basic_card(raw: dict[str, Any]) -> html.Div | None:
+def _product_page_basic_card(raw: JsonObject) -> html.Div | None:
     productName = raw.get("product_name") or ""
     description = raw.get("description") or ""
     sourceUrls = raw.get("source_urls") or []
@@ -640,7 +425,7 @@ def _product_page_basic_card(raw: dict[str, Any]) -> html.Div | None:
 
 def _source_evidence_table(
     title: str,
-    records: list[Any],
+    records: list[object],
     *,
     max_rows: int = 6,
 ) -> html.Div | None:
@@ -648,7 +433,7 @@ def _source_evidence_table(
     if not cleaned:
         return None
 
-    def evidence_card(record: dict[str, Any]) -> html.Div:
+    def evidence_card(record: JsonObject) -> html.Div:
         sourceType = record.get("source_type") or ""
         sourceLabel = (
             record.get("source_label")
@@ -686,7 +471,7 @@ def _source_evidence_table(
 
     def evidence_panel(
         panel_title: str,
-        panel_records: list[dict[str, Any]],
+        panel_records: list[JsonObject],
         class_name: str,
     ) -> html.Div | None:
         if not panel_records:
@@ -774,10 +559,10 @@ def _source_evidence_table(
 
 def _reconstructed_tables_widget(
     title: str,
-    tables: list[Any],
+    tables: list[object],
     *,
-    source_labels: dict[str, Any] | None = None,
-    evidence_rows: list[Any] | None = None,
+    source_labels: JsonObject | None = None,
+    evidence_rows: list[object] | None = None,
     max_rows_per_table: int = 12,
 ) -> html.Div | None:
     cleanedTables = [table for table in tables if isinstance(table, dict)]
@@ -786,13 +571,13 @@ def _reconstructed_tables_widget(
 
     labels = source_labels or {}
     evidenceRows = evidence_rows or []
-    tableBlocks: list[Any] = []
+    tableBlocks: list[object] = []
     for tableIndex, table in enumerate(cleanedTables, start=1):
         rows = table.get("rows") or []
         if not isinstance(rows, list) or not rows:
             continue
         tableName = table.get("table_name") or f"Table {tableIndex}"
-        tableRows: list[Any] = []
+        tableRows: list[object] = []
         for row in [item for item in rows if isinstance(item, dict)][:max_rows_per_table]:
             sourceRefs = row.get("source_refs") or []
             if isinstance(sourceRefs, list):
@@ -810,10 +595,9 @@ def _reconstructed_tables_widget(
                             _short_text(row.get("field_name"), max_length=90),
                             className="input-reconstruction-primary",
                         ),
-                        html.Td(_short_text(row.get("raw_value"), max_length=220)),
                         html.Td(
                             _short_text(
-                                row.get("normalized_value") or row.get("raw_value"),
+                                row.get("normalized_value"),
                                 max_length=220,
                             ),
                         ),
@@ -865,7 +649,6 @@ def _reconstructed_tables_widget(
                                     html.Tr(
                                         [
                                             html.Th("항목"),
-                                            html.Th("원문 값"),
                                             html.Th("정규화 값"),
                                             html.Th("단위"),
                                             html.Th("일일 기준"),
@@ -902,221 +685,8 @@ def _reconstructed_tables_widget(
     )
 
 
-def _simple_reconstruction_table_widget(
-    title: str,
-    tables: list[dict[str, Any]],
-    value_header: str,
-) -> html.Div | None:
-    if not tables:
-        return None
-    blocks: list[Any] = []
-    for table in tables:
-        rows = table.get("rows") or []
-        if not rows:
-            continue
-        blocks.append(
-            html.Div(
-                [
-                    html.Div(
-                        [
-                            html.Div(
-                                _short_text(table.get("table_name"), max_length=120),
-                                className="input-card-title",
-                            ),
-                            html.Div(f"{len(rows)} rows", className="input-card-count"),
-                        ],
-                        className="input-reconstruction-section-head",
-                    ),
-                    html.Div(
-                        html.Table(
-                            [
-                                html.Thead(
-                                    html.Tr(
-                                        [
-                                            html.Th("항목"),
-                                            html.Th(value_header),
-                                        ]
-                                    )
-                                ),
-                                html.Tbody(
-                                    [
-                                        html.Tr(
-                                            [
-                                                html.Td(
-                                                    _short_text(
-                                                        row.get("field_name"),
-                                                        max_length=90,
-                                                    ),
-                                                    className="input-reconstruction-primary",
-                                                ),
-                                                html.Td(
-                                                    _expandable_text(
-                                                        row.get("value"),
-                                                        max_length=360,
-                                                    ),
-                                                    className="input-reconstruction-raw-value",
-                                                ),
-                                            ]
-                                        )
-                                        for row in rows
-                                        if isinstance(row, dict)
-                                    ]
-                                ),
-                            ],
-                            className="input-reconstruction-table simple",
-                        ),
-                        className="input-reconstruction-table-wrap",
-                    ),
-                ],
-                className="input-reconstruction-table-block",
-            )
-        )
-    if not blocks:
-        return None
-    return html.Div(
-        [
-            html.Div(title, className="input-reconstruction-pane-title"),
-            *blocks,
-        ],
-        className="input-reconstruction-pane",
-    )
-
-
-def _simple_reconstruction_rows_widget(
-    rows: list[dict[str, Any]],
-    value_header: str,
-) -> html.Div | None:
-    cleanedRows = [row for row in rows if isinstance(row, dict)]
-    if not cleanedRows:
-        return html.Div("표시할 값이 없습니다.", className="drawer-empty-state compact")
-    return html.Div(
-        html.Table(
-            [
-                html.Thead(
-                    html.Tr(
-                        [
-                            html.Th("항목"),
-                            html.Th(value_header),
-                        ]
-                    )
-                ),
-                html.Tbody(
-                    [
-                        html.Tr(
-                            [
-                                html.Td(
-                                    _short_text(row.get("field_name"), max_length=90),
-                                    className="input-reconstruction-primary",
-                                ),
-                                html.Td(
-                                    _expandable_text(
-                                        row.get("value"),
-                                        max_length=420,
-                                    ),
-                                    className="input-reconstruction-raw-value",
-                                ),
-                            ]
-                        )
-                        for row in cleanedRows
-                    ]
-                ),
-            ],
-            className="input-reconstruction-table simple",
-        ),
-        className="input-reconstruction-table-wrap",
-    )
-
-
-def _reconstruction_option_compare_widget(
-    sections: list[dict[str, Any]],
-) -> html.Div | None:
-    if not sections:
-        return None
-    blocks: list[Any] = []
-    for section in sections:
-        beforeRows = section.get("before_rows") or []
-        afterRows = section.get("after_rows") or []
-        rowCount = max(len(beforeRows), len(afterRows))
-        blocks.append(
-            html.Div(
-                [
-                    html.Div(
-                        [
-                            html.Div(
-                                _short_text(section.get("table_name"), max_length=120),
-                                className="input-card-title",
-                            ),
-                            html.Div(f"{rowCount} rows", className="input-card-count"),
-                        ],
-                        className="input-reconstruction-section-head",
-                    ),
-                    html.Div(
-                        [
-                            html.Div(
-                                [
-                                    html.Div(
-                                        "교정 전 원문값",
-                                        className="input-reconstruction-pane-title",
-                                    ),
-                                    _simple_reconstruction_rows_widget(
-                                        beforeRows,
-                                        "OCR/VLM 판독값",
-                                    ),
-                                ],
-                                className="input-reconstruction-pane",
-                            ),
-                            html.Div(
-                                [
-                                    html.Div(
-                                        "교정 후 LLM Reconstruction",
-                                        className="input-reconstruction-pane-title",
-                                    ),
-                                    _simple_reconstruction_rows_widget(
-                                        afterRows,
-                                        "LLM 교정값",
-                                    ),
-                                ],
-                                className="input-reconstruction-pane",
-                            ),
-                        ],
-                        className="input-reconstruction-compare-grid",
-                    ),
-                ],
-                className="input-reconstruction-option-section",
-            )
-        )
-    return html.Div(blocks, className="input-reconstruction-option-list")
-
-
-def _reconstruction_compare_widget(
-    before_tables: list[dict[str, Any]],
-    after_tables: list[dict[str, Any]],
-) -> html.Div | None:
-    beforePanel = _simple_reconstruction_table_widget(
-        "교정 전 VLM 표 원문",
-        before_tables,
-        "VLM 판독값",
-    )
-    afterPanel = _simple_reconstruction_table_widget(
-        "교정 후 LLM Reconstruction",
-        after_tables,
-        "LLM 교정값",
-    )
-    if beforePanel is None and afterPanel is None:
-        return None
-    return html.Div(
-        [
-            beforePanel
-            or html.Div("VLM 표 원문이 없습니다.", className="drawer-empty-state"),
-            afterPanel
-            or html.Div("LLM 교정 결과가 없습니다.", className="drawer-empty-state"),
-        ],
-        className="input-reconstruction-compare-grid",
-    )
-
-
 def input_processing_detail_card(
-    input_processing_view: dict[str, Any],
+    input_processing_view: JsonObject,
     drawerMode: str,
 ) -> html.Div | None:
     if not input_processing_view:
@@ -1151,10 +721,10 @@ def input_processing_detail_card(
     status = input_processing_view.get("reconstruction_status") or {}
     if not isinstance(status, dict):
         status = {}
-    productFacts = input_processing_view.get("classification_input_facts") or []
-    unresolvedFacts = input_processing_view.get("unresolved_input_facts") or []
-    conflicts = input_processing_view.get("input_fact_conflicts") or []
-    factTexts = input_processing_view.get("classification_input_text_lines") or []
+    productFacts = input_processing_view.get("reconstructed_product_facts") or []
+    unresolvedFacts = input_processing_view.get("unresolved_product_facts") or []
+    conflicts = input_processing_view.get("product_fact_conflicts") or []
+    factTexts = input_processing_view.get("reconstructed_fact_texts") or []
     if not isinstance(productFacts, list):
         productFacts = []
     if not isinstance(unresolvedFacts, list):
@@ -1174,22 +744,6 @@ def input_processing_detail_card(
         input_processing_view,
         status,
     )
-    ingredientComparePanel = _reconstruction_option_compare_widget(
-        _ingredient_fact_compare_sections([*productFacts, *unresolvedFacts]),
-    )
-    genericProductFacts = productFacts
-    genericUnresolvedFacts = unresolvedFacts
-    if ingredientComparePanel is not None:
-        genericProductFacts = [
-            fact
-            for fact in productFacts
-            if not (isinstance(fact, dict) and _is_ingredient_text(fact.get("field_name")))
-        ]
-        genericUnresolvedFacts = [
-            fact
-            for fact in unresolvedFacts
-            if not (isinstance(fact, dict) and _is_ingredient_text(fact.get("field_name")))
-        ]
     afterPanel = (
         _reconstructed_tables_widget(
             "LLM 복원 후 구조화된 상세 표",
@@ -1265,14 +819,13 @@ def input_processing_detail_card(
                 ],
                 className=f"drawer-notice {reconstructionNotice['kind']}",
             ) if reconstructionNotice else None,
-            ingredientComparePanel,
             afterPanel,
             _reconstruction_fact_table(
                 "최종 분류 입력 facts",
-                genericProductFacts,
+                productFacts,
                 source_labels=sourceLabels,
                 max_rows=16,
-            ) if genericProductFacts else None,
+            ) if productFacts else None,
             html.Details(
                 [
                     html.Summary(
@@ -1291,7 +844,7 @@ def input_processing_detail_card(
             ) if factTexts else None,
             _reconstruction_fact_table(
                 "미해결 facts",
-                genericUnresolvedFacts,
+                unresolvedFacts,
                 source_labels=sourceLabels,
                 max_rows=6,
             ),
@@ -1311,7 +864,7 @@ def input_processing_detail_card(
 
 
 def input_processing_detail_drawer(
-    input_processing_view: dict[str, Any],
+    input_processing_view: JsonObject,
     drawerMode: str | bool | None,
 ) -> html.Div | None:
     activeMode = drawerMode if drawerMode in {"raw", "reconstructed"} else ""
@@ -1366,7 +919,7 @@ def _popup_card(
     *,
     popupId: str,
     title: html.Div,
-    body: Any,
+    body: object,
     cardClassName: str = "",
 ) -> html.Div:
     return html.Div(
@@ -1384,7 +937,7 @@ def _popup_card(
 
 
 def render_input_form(
-    facts: dict[str, Any] | None = None,
+    facts: JsonObject | None = None,
     *,
     runDisabled: bool = False,
 ) -> html.Div:
@@ -1464,7 +1017,7 @@ def render_input_form(
     )
 
 
-def _event_summary(event: dict[str, Any]) -> html.Div | None:
+def _event_summary(event: JsonObject) -> html.Div | None:
     partial = event.get("partial_result") or {}
     stage = event.get("stage") or ""
     status = event.get("status") or ""
@@ -1503,7 +1056,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
                     ).format(
                         raw.get("input_reconstruction_mode") or "-",
                         "yes" if raw.get("input_reconstruction_available") else "no",
-                        raw.get("classification_input_fact_texts_count"),
+                        raw.get("reconstructed_fact_texts_count"),
                     )
                 ) if raw.get("input_reconstruction_available") else None,
                 detail_block(
@@ -1515,7 +1068,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
             style={"fontSize": "12px", "color": "#334155", "marginTop": "6px"},
         )
 
-    if stage == "Evidence_Intake_Agent":
+    if stage == "Evidence_Intake_Component":
         if status == "running":
             return html.Div(
                 "Product Evidence Builder 실행 전입니다. 완료 이벤트에서 실제 OCR/composition count를 표시합니다.",
@@ -1538,7 +1091,7 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
             style={"fontSize": "12px", "color": "#334155", "marginTop": "6px"},
         )
 
-    if stage == "Classification_Agent":
+    if stage == "Classification_Component":
         if status == "running":
             return html.Div(
                 "Classification retriever/LLM/TARIC branch resolver 실행 중입니다. 완료 이벤트에서 후보 수를 표시합니다.",
@@ -1559,12 +1112,12 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
                     ],
                     style={"margin": "4px 0 0 18px", "padding": 0},
                 ),
-                detail_block("CandidateCodeSet JSON", ccs, max_height=420) if ccs else None,
+                detail_block("ClassificationCandidateSet JSON", ccs, max_height=420) if ccs else None,
             ],
             style={"fontSize": "12px", "color": "#334155", "marginTop": "6px"},
         )
 
-    if stage == "Document_Agent":
+    if stage == "Document_Component":
         dp = partial.get("document_package") or {}
         if not dp:
             return None
@@ -1588,24 +1141,10 @@ def _event_summary(event: dict[str, Any]) -> html.Div | None:
             style={"fontSize": "12px", "color": "#334155", "marginTop": "6px"},
         )
 
-    if stage == "Orchestrator_Agent":
-        dec = partial.get("decision") or {}
-        if not dec:
-            return None
-        return html.Div(
-            [
-                html.Div(f"decision: {dec.get('decision_status') or '-'}"),
-                html.Div(f"selected: {', '.join(dec.get('selected_candidate_ids') or []) or '-'}"),
-                html.Div(f"user_questions: {', '.join(dec.get('user_questions') or []) or '-'}"),
-                detail_block("OrchestratorDecision JSON", dec, max_height=300),
-            ],
-            style={"fontSize": "12px", "color": "#334155", "marginTop": "6px"},
-        )
-
     return None
 
 
-def render_stage_events(result: dict[str, Any]) -> html.Div:
+def render_stage_events(result: JsonObject) -> html.Div:
     status = result.get("job_status") or result.get("status") or "idle"
     events = result.get("events") or []
     rows = []
@@ -1638,7 +1177,7 @@ def render_stage_events(result: dict[str, Any]) -> html.Div:
                     _small("job", status),
                     _small("run_id", result.get("run_id")),
                     _small("run_dir", result.get("run_dir")),
-                    _small("agents", len(result.get("agent_results") or [])),
+                    _small("components", len(result.get("component_results") or [])),
                 ],
                 style={"display": "flex", "gap": "10px", "flexWrap": "wrap", "marginBottom": "10px"},
             ),
@@ -1647,7 +1186,7 @@ def render_stage_events(result: dict[str, Any]) -> html.Div:
     )
 
 
-def _event_status(events: list[Any], stageNames: set[str]) -> str:
+def _event_status(events: list[object], stageNames: set[str]) -> str:
     matched = [
         event
         for event in events
@@ -1659,9 +1198,9 @@ def _event_status(events: list[Any], stageNames: set[str]) -> str:
     return str(matched[-1].get("status") or "idle")
 
 
-def _has_classification_input(inputView: dict[str, Any]) -> bool:
-    facts = inputView.get("classification_input_facts")
-    textLines = inputView.get("classification_input_text_lines")
+def _has_reconstructed_input(inputView: JsonObject) -> bool:
+    facts = inputView.get("reconstructed_product_facts")
+    textLines = inputView.get("reconstructed_fact_texts")
     return bool(
         (isinstance(facts, list) and facts)
         or (isinstance(textLines, list) and textLines)
@@ -1669,8 +1208,8 @@ def _has_classification_input(inputView: dict[str, Any]) -> bool:
 
 
 def _input_reconstruction_notice(
-    inputView: dict[str, Any],
-    reconstructionStatus: dict[str, Any],
+    inputView: JsonObject,
+    reconstructionStatus: JsonObject,
 ) -> dict[str, str] | None:
     error = str(reconstructionStatus.get("error") or "").strip()
     if error:
@@ -1679,7 +1218,7 @@ def _input_reconstruction_notice(
             "title": "입력 복원 중단",
             "message": error,
         }
-    if inputView and not _has_classification_input(inputView):
+    if inputView and not _has_reconstructed_input(inputView):
         return {
             "kind": "danger",
             "title": "분류 입력 없음",
@@ -1707,7 +1246,7 @@ def _pipeline_notify_label(status: str) -> str:
     }.get(status, "")
 
 
-def _pipeline_step_statuses(result: dict[str, Any]) -> dict[str, dict[str, str]]:
+def _pipeline_step_statuses(result: JsonObject) -> dict[str, dict[str, str]]:
     events = result.get("events") or []
     if not isinstance(events, list):
         events = []
@@ -1727,7 +1266,7 @@ def _pipeline_step_statuses(result: dict[str, Any]) -> dict[str, dict[str, str]]
 
     collectStatus = _event_status(
         events,
-        {"Input_Intake", "Evidence_Intake_Agent", "Product_Intake"},
+        {"Input_Intake", "Evidence_Intake_Component", "Product_Intake"},
     )
     if inputView and collectStatus == "idle":
         collectStatus = "completed"
@@ -1746,7 +1285,7 @@ def _pipeline_step_statuses(result: dict[str, Any]) -> dict[str, dict[str, str]]
     elif collectStatus == "completed" and jobStatus in {"queued", "running"}:
         reconstructStatus = "running"
 
-    candidateEventStatus = _event_status(events, {"Classification_Agent", "Classification"})
+    candidateEventStatus = _event_status(events, {"Classification_Component", "Classification"})
     hasClassificationStatus = bool(candidateSet.get("classification_status"))
     classificationUnresolved = hasClassificationStatus and not candidates
     if reconstructStatus == "failed":
@@ -1799,11 +1338,11 @@ def _pipeline_step_statuses(result: dict[str, Any]) -> dict[str, dict[str, str]]
     }
 
 
-def pipeline_step_statuses(result: dict[str, Any]) -> dict[str, dict[str, str]]:
+def pipeline_step_statuses(result: JsonObject) -> dict[str, dict[str, str]]:
     return _pipeline_step_statuses(result)
 
 
-def _progress_collect_meta(inputView: dict[str, Any]) -> str:
+def _progress_collect_meta(inputView: JsonObject) -> str:
     rows = inputView.get("detail_evidence_rows") or []
     if isinstance(rows, list) and rows:
         return f"{len(rows)} evidence rows"
@@ -1814,7 +1353,7 @@ def _progress_collect_meta(inputView: dict[str, Any]) -> str:
 
 
 def _progress_reconstruction_meta(
-    reconstructionStatus: dict[str, Any],
+    reconstructionStatus: JsonObject,
     reconstructionNotice: dict[str, str] | None,
 ) -> str:
     if reconstructionNotice:
@@ -1832,7 +1371,7 @@ def _progress_reconstruction_meta(
     return f"{mode} · {llm} · tables {tableCount} · facts {factCount}"
 
 
-def _progress_validation_meta(candidates: list[Any]) -> str:
+def _progress_validation_meta(candidates: list[object]) -> str:
     if not candidates:
         return "waiting"
     statuses = [
@@ -1845,7 +1384,7 @@ def _progress_validation_meta(candidates: list[Any]) -> str:
     return ", ".join(statuses[:3])
 
 
-def render_progress(result: dict[str, Any]) -> html.Div:
+def render_progress(result: JsonObject) -> html.Div:
     stepStates = _pipeline_step_statuses(result)
     return html.Div(
         [
@@ -1894,7 +1433,7 @@ def render_progress(result: dict[str, Any]) -> html.Div:
     )
 
 
-def render_candidate_cards(result: dict[str, Any]) -> html.Div:
+def render_candidate_cards(result: JsonObject) -> html.Div:
     ccs = result.get("candidate_code_set") or {}
     candidates = ccs.get("candidates") or []
     if not isinstance(candidates, list):
@@ -1904,7 +1443,7 @@ def render_candidate_cards(result: dict[str, Any]) -> html.Div:
             return _classification_unresolved_card(ccs)
         return html.Div("분류 후보가 없습니다.", style=PLACEHOLDER)
 
-    cards: list[Any] = []
+    cards: list[object] = []
     packagesByTaric = _document_packages_by_taric(result)
 
     for displayRank, cand in enumerate(candidates, start=1):
@@ -1941,12 +1480,12 @@ def render_candidate_cards(result: dict[str, Any]) -> html.Div:
 
 
 def _candidate_result_card(
-    candidate: dict[str, Any],
+    candidate: JsonObject,
     *,
     displayRank: int,
-    packagesByTaric: dict[str, list[dict[str, Any]]],
+    packagesByTaric: dict[str, list[JsonObject]],
     interactive: bool,
-    jobStatus: Any = None,
+    jobStatus: object = None,
 ) -> html.Button | html.Div:
     themeClass = _candidate_theme_class(candidate)
     branchList = _candidate_branch_list(candidate)
@@ -2019,7 +1558,7 @@ def _candidate_result_card(
 
 
 def _candidate_branch_flyout_menu(
-    branchList: list[dict[str, Any]],
+    branchList: list[JsonObject],
     candidateKey: str,
 ) -> html.Div | None:
     if not branchList:
@@ -2047,7 +1586,7 @@ def _candidate_branch_flyout_menu(
     )
 
 
-def _candidate_card_display_code(candidate: dict[str, Any]) -> str:
+def _candidate_card_display_code(candidate: JsonObject) -> str:
     cn8 = _clean_code(candidate.get("cn8"))
     if cn8:
         return f"CN8 {cn8}"
@@ -2055,7 +1594,7 @@ def _candidate_card_display_code(candidate: dict[str, Any]) -> str:
     return f"TARIC {taric10}" if taric10 else "-"
 
 
-def _candidate_branch_list(candidate: dict[str, Any]) -> list[dict[str, Any]]:
+def _candidate_branch_list(candidate: JsonObject) -> list[JsonObject]:
     taric10 = candidate.get("taric10") or ""
     branches = candidate.get("taric10_branch_candidates") or []
     branchList = [
@@ -2068,8 +1607,8 @@ def _candidate_branch_list(candidate: dict[str, Any]) -> list[dict[str, Any]]:
     return [{"taric10": taric10, "branch_description": "primary TARIC10"}] if taric10 else []
 
 
-def _document_packages_by_taric(result: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
-    packagesByTaric: dict[str, list[dict[str, Any]]] = {}
+def _document_packages_by_taric(result: JsonObject) -> dict[str, list[JsonObject]]:
+    packagesByTaric: dict[str, list[JsonObject]] = {}
     seenPackageKeys: set[tuple[str, str]] = set()
     documentPackages = list(result.get("document_packages") or [])
     primaryDocumentPackage = result.get("document_package")
@@ -2090,23 +1629,23 @@ def _document_packages_by_taric(result: dict[str, Any]) -> dict[str, list[dict[s
     return packagesByTaric
 
 
-def _document_package_identity(package: dict[str, Any]) -> str:
+def _document_package_identity(package: JsonObject) -> str:
     return str(package.get("document_package_id") or _clean_code(package.get("taric10")) or id(package))
 
 
 def _document_packages_for_taric(
-    packagesByTaric: dict[str, list[dict[str, Any]]],
-    taric10: Any,
-) -> list[dict[str, Any]]:
+    packagesByTaric: dict[str, list[JsonObject]],
+    taric10: object,
+) -> list[JsonObject]:
     rawTaric = str(taric10 or "")
     return packagesByTaric.get(rawTaric) or packagesByTaric.get(_clean_code(rawTaric)) or []
 
 
-def _clean_code(value: Any) -> str:
+def _clean_code(value: object) -> str:
     return "".join(ch for ch in str(value or "") if ch.isdigit())
 
 
-def _candidate_key(candidate: dict[str, Any], displayRank: int) -> str:
+def _candidate_key(candidate: JsonObject, displayRank: int) -> str:
     return str(
         candidate.get("candidate_id")
         or candidate.get("taric10")
@@ -2115,7 +1654,7 @@ def _candidate_key(candidate: dict[str, Any], displayRank: int) -> str:
     )
 
 
-def _candidate_hierarchy_text(candidate: dict[str, Any]) -> str:
+def _candidate_hierarchy_text(candidate: JsonObject) -> str:
     nodes = _candidate_nodes(candidate)
     parts = []
     for node in nodes:
@@ -2128,7 +1667,7 @@ def _candidate_hierarchy_text(candidate: dict[str, Any]) -> str:
     return " → ".join(parts) or "-"
 
 
-def _classification_unresolved_card(candidateSet: dict[str, Any]) -> html.Div:
+def _classification_unresolved_card(candidateSet: JsonObject) -> html.Div:
     shortlisted = candidateSet.get("shortlisted_candidates") or []
     if not isinstance(shortlisted, list):
         shortlisted = []
@@ -2152,11 +1691,11 @@ def _classification_unresolved_card(candidateSet: dict[str, Any]) -> html.Div:
     )
 
 
-def _candidate_theme_class(candidate: dict[str, Any]) -> str:
+def _candidate_theme_class(candidate: JsonObject) -> str:
     return "recommended" if candidate.get("llm_recommended") else "alternate"
 
 
-def _candidate_theme_label(candidate: dict[str, Any]) -> str:
+def _candidate_theme_label(candidate: JsonObject) -> str:
     if candidate.get("llm_recommended"):
         return "LLM 추천"
     status = str(candidate.get("status") or "").lower()
@@ -2165,33 +1704,26 @@ def _candidate_theme_label(candidate: dict[str, Any]) -> str:
     return "검토 후보"
 
 
-def has_candidate_scope_tree(result: dict[str, Any] | None) -> bool:
+def has_candidate_scope_tree(result: JsonObject | None) -> bool:
     if not isinstance(result, dict):
         return False
     candidateSet = result.get("candidate_code_set") or {}
     return bool(_initial_candidate_scope(candidateSet))
 
 
-def _classification_trace(candidateSet: dict[str, Any]) -> dict[str, Any]:
-    trace = candidateSet.get("classification_trace") if isinstance(candidateSet, dict) else {}
-    return trace if isinstance(trace, dict) else {}
+def _trace_history(candidateSet: JsonObject) -> list[JsonObject]:
+    _ = candidateSet
+    return []
 
 
-def _trace_history(candidateSet: dict[str, Any]) -> list[dict[str, Any]]:
-    history = _classification_trace(candidateSet).get("traversal_history") or []
-    if not isinstance(history, list):
-        return []
-    return [entry for entry in history if isinstance(entry, dict)]
-
-
-def _history_candidate_scope(entry: dict[str, Any]) -> list[dict[str, Any]]:
+def _history_candidate_scope(entry: JsonObject) -> list[JsonObject]:
     scope = entry.get("candidate_scope") or []
     if not isinstance(scope, list):
         return []
     return [candidate for candidate in scope if isinstance(candidate, dict)]
 
 
-def _initial_candidate_scope(candidateSet: dict[str, Any]) -> list[dict[str, Any]]:
+def _initial_candidate_scope(candidateSet: JsonObject) -> list[JsonObject]:
     for entry in _trace_history(candidateSet):
         scope = _history_candidate_scope(entry)
         if scope:
@@ -2203,7 +1735,7 @@ def _initial_candidate_scope(candidateSet: dict[str, Any]) -> list[dict[str, Any
 
 
 def candidate_tree_drawer(
-    result: dict[str, Any],
+    result: JsonObject,
     drawerOpened: bool,
 ) -> html.Div | None:
     candidateSet = result.get("candidate_code_set") or {}
@@ -2248,21 +1780,16 @@ def candidate_tree_drawer(
     )
 
 
-def _classification_unresolved_panel(candidateSet: dict[str, Any]) -> html.Div:
+def _classification_unresolved_panel(candidateSet: JsonObject) -> html.Div:
     return html.Div(
         [
             _classification_unresolved_card(candidateSet),
-            (
-                _classification_backtracking_route_panel(candidateSet, [])
-                if _classification_trace(candidateSet).get("backtracking_occurred")
-                else None
-            ),
         ],
         className="candidate-tree-panel",
     )
 
 
-def _candidate_nodes(candidate: dict[str, Any]) -> list[dict[str, Any]]:
+def _candidate_nodes(candidate: JsonObject) -> list[JsonObject]:
     tree = candidate.get("candidate_static_tree") or {}
     if not isinstance(tree, dict):
         tree = {}
@@ -2282,7 +1809,7 @@ def _candidate_nodes(candidate: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _candidate_merged_tree_panel(
-    candidates: list[Any],
+    candidates: list[object],
     *,
     title: str = "통합 탐색 트리",
     nodeStates: dict[tuple[str, str], set[str]] | None = None,
@@ -2339,130 +1866,14 @@ def _candidate_merged_tree_panel(
 
 
 def _classification_backtracking_route_panel(
-    candidateSet: dict[str, Any],
-    finalCandidates: list[dict[str, Any]],
+    candidateSet: JsonObject,
+    finalCandidates: list[JsonObject],
 ) -> html.Div | None:
-    trace = _classification_trace(candidateSet)
-    history = _trace_history(candidateSet)
-    initialCandidates = (
-        _history_candidate_scope(history[0])
-        if history
-        else []
-    )
-    lastEntry = history[-1] if history else {}
-    finalScope = (
-        _history_candidate_scope(lastEntry)
-        if "candidate_scope" in lastEntry
-        else finalCandidates
-    )
-    backtrackingOccurred = bool(trace.get("backtracking_occurred"))
-
-    if not backtrackingOccurred:
-        return None
-
-    sourceCandidates = _backtracking_source_candidates(
-        history[0] if history else {},
-    )
-    targetLevel = str(trace.get("backtracking_target_level") or "").lower()
-    combinedCandidates = _combine_candidate_scopes(
-        initialCandidates or finalCandidates,
-        [*finalScope, *finalCandidates],
-    )
-    nodeStates = _build_backtracking_node_states(sourceCandidates, targetLevel)
-    sourceCodes = [
-        str(candidate.get("cn8") or candidate.get("hs8") or "")
-        for candidate in sourceCandidates
-        if str(candidate.get("cn8") or candidate.get("hs8") or "").strip()
-    ]
-    reason = trace.get("backtracking_reason") or (
-        history[0].get("backtracking_reason") if history else ""
-    )
-    if not reason:
-        reason = next(
-            (
-                str(entry.get("error") or "").strip()
-                for entry in reversed(history)
-                if str(entry.get("error") or "").strip()
-            ),
-            str(candidateSet.get("failure_reason") or "").strip(),
-        )
-    retryCount = int(trace.get("retry_count") or max(0, len(history) - 1))
-    sourceLabel = ", ".join(sourceCodes[:3]) or "초기 CN8 후보"
-    targetLabel = targetLevel.upper() or "상위"
-    basisText = _backtracking_basis_description(
-        reason,
-        sourceLabel=sourceLabel,
-        targetLabel=targetLabel,
-        retryCount=retryCount,
-    )
-
-    return html.Div(
-        [
-            html.Div(
-                [
-                    html.Div("백트래킹 근거", className="classification-backtracking-basis-title"),
-                    html.Div(basisText, className="classification-backtracking-basis-text"),
-                    html.Div(
-                        [
-                            html.Span(
-                                f"재탐색 경계 {targetLabel}",
-                                className="classification-backtracking-basis-tag",
-                            ),
-                            html.Span(
-                                f"재검증 {retryCount}회",
-                                className="classification-backtracking-basis-tag",
-                            ),
-                        ],
-                        className="classification-backtracking-basis-tags",
-                    ),
-                ],
-                className="classification-backtracking-basis",
-            ),
-            _backtracking_candidate_change_panel(
-                initialCandidates or sourceCandidates,
-                finalScope or finalCandidates,
-            ),
-            html.Div(
-                [
-                    html.Span("기본 탐색", className="candidate-tree-legend-item normal"),
-                    html.Span("역방향 백트래킹 경로", className="candidate-tree-legend-item backtracking"),
-                    html.Span("재탐색 추가 경로", className="candidate-tree-legend-item retry"),
-                ],
-                className="candidate-tree-legend",
-            ),
-            _candidate_merged_tree_panel(
-                combinedCandidates,
-                title="",
-                nodeStates=nodeStates,
-                showMetrics=False,
-            ),
-            html.Div(
-                "재탐색 후보군이 없습니다.",
-                className="classification-route-empty",
-            )
-            if not finalScope
-            else None,
-        ],
-        className="classification-backtracking-route-panel",
-    )
+    _ = (candidateSet, finalCandidates)
+    return None
 
 
-def _backtracking_basis_description(
-    reason: Any,
-    *,
-    sourceLabel: str,
-    targetLabel: str,
-    retryCount: int,
-) -> str:
-    return (
-        f"초기 후보({sourceLabel})를 검증했을 때 "
-        f"{_backtracking_reason_korean(reason)} "
-        f"그래서 후보를 바로 확정하지 않고 {targetLabel} 계층으로 되돌아가 "
-        f"하위 후보를 다시 넓혀 탐색했습니다. 재검증은 {retryCount}회 수행됐습니다."
-    )
-
-
-def _backtracking_reason_korean(reason: Any) -> str:
+def _backtracking_reason_korean(reason: object) -> str:
     reasonText = str(reason or "").strip()
     lowerReason = reasonText.lower()
     if not lowerReason:
@@ -2479,8 +1890,8 @@ def _backtracking_reason_korean(reason: Any) -> str:
 
 
 def _backtracking_candidate_change_panel(
-    beforeCandidates: list[dict[str, Any]],
-    afterCandidates: list[dict[str, Any]],
+    beforeCandidates: list[JsonObject],
+    afterCandidates: list[JsonObject],
 ) -> html.Div:
     beforeCodes = _candidate_scope_code_list(beforeCandidates)
     afterCodes = _candidate_scope_code_list(afterCandidates)
@@ -2510,7 +1921,7 @@ def _backtracking_candidate_change_panel(
     )
 
 
-def _candidate_scope_code_list(candidates: list[dict[str, Any]]) -> list[str]:
+def _candidate_scope_code_list(candidates: list[JsonObject]) -> list[str]:
     codes: list[str] = []
     for candidate in candidates:
         code = str(candidate.get("cn8") or candidate.get("hs8") or candidate.get("taric10") or "").strip()
@@ -2547,7 +1958,7 @@ def _candidate_change_column(
     )
 
 
-def _backtracking_source_candidates(entry: dict[str, Any]) -> list[dict[str, Any]]:
+def _backtracking_source_candidates(entry: JsonObject) -> list[JsonObject]:
     candidates = _history_candidate_scope(entry)
     sourceCodes = entry.get("rejected_candidate_hs8_codes") or entry.get("candidate_hs8_codes") or []
     if not isinstance(sourceCodes, list) or not sourceCodes:
@@ -2562,10 +1973,10 @@ def _backtracking_source_candidates(entry: dict[str, Any]) -> list[dict[str, Any
 
 
 def _combine_candidate_scopes(
-    initialCandidates: list[dict[str, Any]],
-    retryCandidates: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    combined: dict[str, dict[str, Any]] = {}
+    initialCandidates: list[JsonObject],
+    retryCandidates: list[JsonObject],
+) -> list[JsonObject]:
+    combined: dict[str, JsonObject] = {}
     for origin, candidates in (
         ("initial", initialCandidates),
         ("retry", retryCandidates),
@@ -2594,7 +2005,7 @@ def _combine_candidate_scopes(
 
 
 def _build_backtracking_node_states(
-    sourceCandidates: list[dict[str, Any]],
+    sourceCandidates: list[JsonObject],
     targetLevel: str,
 ) -> dict[tuple[str, str], set[str]]:
     nodeStates: dict[tuple[str, str], set[str]] = {}
@@ -2624,12 +2035,12 @@ def _build_backtracking_node_states(
 
 
 def _build_merged_candidate_tree(
-    candidates: list[dict[str, Any]],
+    candidates: list[JsonObject],
     *,
     nodeStates: dict[tuple[str, str], set[str]] | None = None,
-) -> list[dict[str, Any]]:
-    roots: list[dict[str, Any]] = []
-    rootIndex: dict[str, dict[str, Any]] = {}
+) -> list[JsonObject]:
+    roots: list[JsonObject] = []
+    rootIndex: dict[str, JsonObject] = {}
     for rank, candidate in enumerate(candidates, start=1):
         candidateRef = {
             "rank": rank,
@@ -2639,7 +2050,7 @@ def _build_merged_candidate_tree(
         }
         siblings = roots
         siblingIndex = rootIndex
-        lastMergedNode: dict[str, Any] | None = None
+        lastMergedNode: JsonObject | None = None
         for node in _candidate_nodes(candidate):
             level = str(node.get("level") or "").strip().lower()
             code = str(node.get("code") or "").strip()
@@ -2677,7 +2088,7 @@ def _build_merged_candidate_tree(
     return roots
 
 
-def _candidate_merged_branch(node: dict[str, Any]) -> html.Li:
+def _candidate_merged_branch(node: JsonObject) -> html.Li:
     children = node.get("children") or []
     candidateRefs = [
         ref
@@ -2709,12 +2120,12 @@ def _candidate_merged_branch(node: dict[str, Any]) -> html.Li:
     )
 
 
-def _candidate_merged_node(node: dict[str, Any]) -> html.Div:
+def _candidate_merged_node(node: JsonObject) -> html.Div:
     level = str(node.get("level") or "").strip().lower()
     candidateRefs = node.get("candidate_refs") or []
     leafCandidates = node.get("leaf_candidates") or []
     routeStates = set(node.get("route_states") or [])
-    annotations: list[Any] = []
+    annotations: list[object] = []
     if "backtracking-source" in routeStates:
         annotations.append(
             html.Span("역방향 시작 ↑", className="candidate-tree-route-note backtracking"),
@@ -2785,8 +2196,8 @@ def _candidate_merged_node(node: dict[str, Any]) -> html.Div:
 
 
 def classification_result_drawer(
-    result: dict[str, Any],
-    drawerOpened: bool | str | dict[str, Any] | None,
+    result: JsonObject,
+    drawerOpened: bool | str | JsonObject | None,
 ) -> html.Div | None:
     candidateSet = result.get("candidate_code_set") or {}
     candidates = candidateSet.get("candidates") if isinstance(candidateSet, dict) else []
@@ -2852,7 +2263,7 @@ def classification_result_drawer(
 
 
 def _drawer_candidate_selection(
-    drawerOpened: bool | str | dict[str, Any] | None,
+    drawerOpened: bool | str | JsonObject | None,
 ) -> tuple[str, str]:
     if isinstance(drawerOpened, dict):
         return str(drawerOpened.get("candidate") or ""), _clean_code(drawerOpened.get("taric10"))
@@ -2862,8 +2273,8 @@ def _drawer_candidate_selection(
 
 
 def _classification_result_panel(
-    candidateSet: dict[str, Any],
-    candidates: list[Any],
+    candidateSet: JsonObject,
+    candidates: list[object],
 ) -> html.Div:
     cleanCandidates = [candidate for candidate in candidates if isinstance(candidate, dict)]
     backtrackingPanel = _classification_backtracking_route_panel(candidateSet, cleanCandidates)
@@ -2881,9 +2292,9 @@ def _classification_result_panel(
 
 
 def _selected_candidate(
-    candidates: list[dict[str, Any]],
+    candidates: list[JsonObject],
     selectedKey: str,
-) -> dict[str, Any] | None:
+) -> JsonObject | None:
     if not selectedKey:
         return None
     for displayRank, candidate in enumerate(candidates, start=1):
@@ -2893,8 +2304,8 @@ def _selected_candidate(
 
 
 def _taric_candidate_detail_panel(
-    candidate: dict[str, Any],
-    result: dict[str, Any],
+    candidate: JsonObject,
+    result: JsonObject,
     *,
     selectedTaric10: str = "",
     selectedKey: str = "",
@@ -2922,11 +2333,11 @@ def _taric_candidate_detail_panel(
 
 
 def _selected_branch_package(
-    branchPackages: list[tuple[str, dict[str, Any] | None]],
+    branchPackages: list[tuple[str, JsonObject | None]],
     *,
     selectedTaric10: str,
     fallbackTaric: str,
-) -> tuple[str, dict[str, Any] | None]:
+) -> tuple[str, JsonObject | None]:
     if selectedTaric10:
         selected = next(
             ((taric10, package) for taric10, package in branchPackages if taric10 == selectedTaric10),
@@ -2941,12 +2352,12 @@ def _selected_branch_package(
 
 
 def _candidate_branch_document_packages(
-    candidate: dict[str, Any],
-    result: dict[str, Any],
-) -> list[tuple[str, dict[str, Any] | None]]:
+    candidate: JsonObject,
+    result: JsonObject,
+) -> list[tuple[str, JsonObject | None]]:
     branchList = _candidate_branch_list(candidate)
     packagesByTaric = _document_packages_by_taric(result)
-    branchPackages: list[tuple[str, dict[str, Any] | None]] = []
+    branchPackages: list[tuple[str, JsonObject | None]] = []
     seenTaricCodes: set[str] = set()
     for branch in branchList:
         taric10 = _clean_code(branch.get("taric10"))
@@ -2961,8 +2372,8 @@ def _candidate_branch_document_packages(
 
 
 def _candidate_branch_package_list(
-    branchPackages: list[tuple[str, dict[str, Any] | None]],
-    jobStatus: Any,
+    branchPackages: list[tuple[str, JsonObject | None]],
+    jobStatus: object,
     *,
     selectedTaric10: str,
     selectedKey: str,
@@ -2993,7 +2404,7 @@ def _candidate_branch_package_list(
 
 def _candidate_branch_package_row(
     taric10: str,
-    package: dict[str, Any] | None,
+    package: JsonObject | None,
     isRunning: bool,
     *,
     selected: bool,
@@ -3028,7 +2439,7 @@ def _candidate_branch_package_row(
 
 def _embedded_document_package_panel(
     taric10: str,
-    package: dict[str, Any] | None,
+    package: JsonObject | None,
     isConnecting: bool,
 ) -> html.Div:
     if package:
@@ -3078,7 +2489,7 @@ def _embedded_document_package_panel(
     )
 
 
-def _document_package_counts(package: dict[str, Any]) -> dict[str, int]:
+def _document_package_counts(package: JsonObject) -> dict[str, int]:
     return {
         "required": len(package.get("required_documents") or []),
         "customs": len(package.get("customs_check_items") or []),
@@ -3087,7 +2498,7 @@ def _document_package_counts(package: dict[str, Any]) -> dict[str, int]:
     }
 
 
-def _candidate_reason_text(candidate: dict[str, Any]) -> str:
+def _candidate_reason_text(candidate: JsonObject) -> str:
     basis = candidate.get("classification_basis") or []
     if isinstance(basis, list):
         return " ".join(str(item).strip() for item in basis if str(item).strip())
@@ -3098,7 +2509,7 @@ def _has_korean_text(value: str) -> bool:
     return any("\uac00" <= char <= "\ud7a3" for char in value)
 
 
-def _candidate_code_path(candidate: dict[str, Any]) -> str:
+def _candidate_code_path(candidate: JsonObject) -> str:
     parts = []
     for node in _candidate_nodes(candidate):
         level = str(node.get("level") or "").strip().upper()
@@ -3108,7 +2519,7 @@ def _candidate_code_path(candidate: dict[str, Any]) -> str:
     return " → ".join(parts)
 
 
-def _candidate_matched_keyword_text(candidate: dict[str, Any]) -> str:
+def _candidate_matched_keyword_text(candidate: JsonObject) -> str:
     tree = candidate.get("candidate_static_tree") or {}
     keywords = tree.get("matched_keywords") if isinstance(tree, dict) else []
     if not isinstance(keywords, list):
@@ -3116,7 +2527,7 @@ def _candidate_matched_keyword_text(candidate: dict[str, Any]) -> str:
     return ", ".join(str(keyword) for keyword in keywords[:6] if str(keyword).strip())
 
 
-def _score_text(value: Any) -> str:
+def _score_text(value: object) -> str:
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -3126,7 +2537,7 @@ def _score_text(value: Any) -> str:
     return f"{number:.1f}점"
 
 
-def _candidate_score_breakdown(candidate: dict[str, Any]) -> dict[str, Any]:
+def _candidate_score_breakdown(candidate: JsonObject) -> JsonObject:
     directBreakdown = candidate.get("score_breakdown")
     if isinstance(directBreakdown, dict):
         return directBreakdown
@@ -3135,7 +2546,7 @@ def _candidate_score_breakdown(candidate: dict[str, Any]) -> dict[str, Any]:
     return treeBreakdown if isinstance(treeBreakdown, dict) else {}
 
 
-def _candidate_hierarchy_score_text(candidate: dict[str, Any]) -> str:
+def _candidate_hierarchy_score_text(candidate: JsonObject) -> str:
     parts = []
     for node in _candidate_nodes(candidate):
         level = str(node.get("level") or node.get("label") or "").strip().upper()
@@ -3145,7 +2556,7 @@ def _candidate_hierarchy_score_text(candidate: dict[str, Any]) -> str:
     return " · ".join(parts) or "HS2:0점 · HS4:0점 · HS6:0점"
 
 
-def _candidate_score_summary(candidate: dict[str, Any]) -> html.Div:
+def _candidate_score_summary(candidate: JsonObject) -> html.Div:
     breakdown = _candidate_score_breakdown(candidate)
     items = [
         ("강한 조건", _score_text(breakdown.get("include_rule_points"))),
@@ -3179,7 +2590,7 @@ def _candidate_score_summary(candidate: dict[str, Any]) -> html.Div:
     )
 
 
-def _candidate_recommendation_description(candidate: dict[str, Any]) -> str:
+def _candidate_recommendation_description(candidate: JsonObject) -> str:
     reasonText = _candidate_reason_text(candidate)
     if _has_korean_text(reasonText):
         return _short_text(reasonText, max_length=430)
@@ -3199,7 +2610,7 @@ def _candidate_recommendation_description(candidate: dict[str, Any]) -> str:
     return " ".join(sentences)
 
 
-def _candidate_text_list(candidate: dict[str, Any], field: str, *, limit: int) -> list[str]:
+def _candidate_text_list(candidate: JsonObject, field: str, *, limit: int) -> list[str]:
     value = candidate.get(field)
     if not isinstance(value, list):
         return []
@@ -3210,7 +2621,7 @@ def _candidate_text_list(candidate: dict[str, Any], field: str, *, limit: int) -
     ]
 
 
-def _candidate_decision_support_blocks(candidate: dict[str, Any]) -> list[Any]:
+def _candidate_decision_support_blocks(candidate: JsonObject) -> list[object]:
     facts = _candidate_text_list(candidate, "supporting_product_facts", limit=3)
     evidenceRefs = _candidate_text_list(
         candidate,
@@ -3222,7 +2633,7 @@ def _candidate_decision_support_blocks(candidate: dict[str, Any]) -> list[Any]:
         for case in (candidate.get("similar_ebti_cases") or [])[:2]
         if isinstance(case, dict)
     ]
-    blocks: list[Any] = []
+    blocks: list[object] = []
     if facts:
         blocks.append(
             html.Div(
@@ -3281,7 +2692,7 @@ def _candidate_decision_support_blocks(candidate: dict[str, Any]) -> list[Any]:
     return blocks
 
 
-def render_decision(result: dict[str, Any]) -> html.Div:
+def render_decision(result: JsonObject) -> html.Div:
     dec = result.get("decision") or {}
     candidateSet = result.get("candidate_code_set") or {}
     candidates = (candidateSet.get("candidates") if isinstance(candidateSet, dict) else []) or []
@@ -3338,11 +2749,11 @@ def render_decision(result: dict[str, Any]) -> html.Div:
 
 
 def render_page(
-    result: dict[str, Any] | None = None,
+    result: JsonObject | None = None,
     *,
     input_detail_drawer_mode: str | bool | None = None,
     candidate_tree_drawer_open: bool = False,
-    classification_result_drawer_open: bool | str | dict[str, Any] | None = False,
+    classification_result_drawer_open: bool | str | JsonObject | None = False,
 ) -> html.Div:
     result = result or {}
     inputProcessingSource = result.get("input_processing_view")

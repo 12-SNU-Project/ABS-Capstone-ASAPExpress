@@ -1,40 +1,38 @@
-"""ASAP v2 Agents — 3-Agent + Tool architecture.
+"""ASAP v2 components and tools.
 
 Architecture (codex 2026-06-08):
 
-  Agents:
-    - Evidence_Intake_Agent    PES 생성 (OCR/parser)
-    - Classification_Agent     CN8 후보 + TARIC10 branch 추천
+  Components:
+    - Evidence_Intake_Component    PES 생성 (OCR/parser)
+    - Classification_Component     CN8 후보 + TARIC10 branch 추천
                                tools: ASAPExpressClassifierTool,
                                       TaricBranchResolverTool
-    - Document_Agent           서류/관세/제품규제 추천
+    - Document_Component           서류/관세/제품규제 추천
                                document package resolver,
                                       DomainRouterTool,
                                       CelexBasisTool (planned)
-    - Orchestrator_Agent       병합 + backtracking + ask_user
-
-  Legacy standalone agents were removed from active source:
+  Legacy standalone components were removed from active source:
     - TARIC resolver behavior      → agents.tools.TaricBranchResolverTool
-    - document requirement behavior → Document_Agent + document package resolver
-    - regulatory domain behavior   → Document_Agent + DomainRouterTool
+    - document requirement behavior → Document_Component + document package resolver
+    - regulatory domain behavior   → Document_Component + DomainRouterTool
 
-Agents are exposed at the package level; Tools at agents.tools.
+Components are exposed at the package level; tools at agents.tools.
 """
-from agents.agent_base import BaseAgent, AgentResult
-from agents.evidence_intake_agent import EvidenceIntakeAgent
-from agents.product_understanding_agent import ProductUnderstandingAgent
-from agents.domain_router_agent import DomainRouterAgent
-from agents.classification_agent import ClassificationAgent
-from agents.document_agent import DocumentAgent
-from agents.orchestrator_agent import OrchestratorAgent
+from agents.component_base import BasePipelineComponent, ComponentResult
+from agents.pipeline_components import (
+    ClassificationComponent,
+    EvidenceIntakeComponent,
+    Hs2RoutingComponent,
+    ProductUnderstandingComponent,
+)
+from bussiness_logic.document.document_component import DocumentComponent
 
 __all__ = [
-    "BaseAgent",
-    "AgentResult",
-    "EvidenceIntakeAgent",
-    "ProductUnderstandingAgent",
-    "DomainRouterAgent",
-    "ClassificationAgent",
-    "DocumentAgent",
-    "OrchestratorAgent",
+    "BasePipelineComponent",
+    "ComponentResult",
+    "EvidenceIntakeComponent",
+    "ProductUnderstandingComponent",
+    "Hs2RoutingComponent",
+    "ClassificationComponent",
+    "DocumentComponent",
 ]

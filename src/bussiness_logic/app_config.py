@@ -1,7 +1,7 @@
 """비밀값이 아닌 앱 실행 설정을 TOML에서 Pydantic model로 읽는다."""
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import (
     BaseModel,
@@ -159,7 +159,6 @@ class KurlySmokeAppConfig(BaseModel):
     structured_ocr_vl_rec_api_model_name: Optional[StrictStr] = None
     use_input_reconstruction: StrictBool = True
     use_llm_input_reconstruction: StrictBool = False
-    write_llm_input_reconstruction_debug_artifacts: StrictBool = True
     llm_input_reconstruction_max_tokens: StrictInt = 4096
     input_dictionary_path: Optional[Path] = None
     input_dictionary_fuzzy_min_ratio: StrictFloat = 0.86

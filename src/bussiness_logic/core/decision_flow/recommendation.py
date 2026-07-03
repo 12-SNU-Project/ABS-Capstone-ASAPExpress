@@ -1,6 +1,6 @@
 """Stage 1 classification candidate report."""
 
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -27,23 +27,23 @@ class Stage1RecommendationReport(BaseModel):
         default="candidate_generation_for_human_review",
         alias="candidate_output_mode",
     )
-    candidateGenerationProcess: Dict[str, Any] = Field(
+    candidateGenerationProcess: Dict[str, object] = Field(
         default_factory=dict,
         alias="candidate_generation_process",
     )
-    recommendedCandidate: Optional[Dict[str, Any]] = Field(
+    recommendedCandidate: Optional[Dict[str, object]] = Field(
         default=None,
         alias="recommended_candidate",
     )
-    retainedCandidates: List[Dict[str, Any]] = Field(
+    retainedCandidates: List[Dict[str, object]] = Field(
         default_factory=list,
         alias="retained_candidates",
     )
-    rejectedCandidatesSummary: List[Dict[str, Any]] = Field(
+    rejectedCandidatesSummary: List[Dict[str, object]] = Field(
         default_factory=list,
         alias="rejected_candidates_summary",
     )
-    backtrackingSummary: Dict[str, Any] = Field(
+    backtrackingSummary: Dict[str, object] = Field(
         default_factory=dict,
         alias="backtracking_summary",
     )
@@ -51,7 +51,7 @@ class Stage1RecommendationReport(BaseModel):
         default_factory=list,
         alias="key_evidence_refs",
     )
-    evidenceSummary: List[Dict[str, Any]] = Field(
+    evidenceSummary: List[Dict[str, object]] = Field(
         default_factory=list,
         alias="evidence_summary",
     )
@@ -77,7 +77,7 @@ class Stage1RecommendationReportBuilder:
         decisionReport: ClassificationDecisionHandler,
         traversalReport: Stage1TraversalReport,
         evidencePackage: Optional[Stage1EvidencePackage] = None,
-        backtrackingSummary: Optional[Mapping[str, Any]] = None,
+        backtrackingSummary: Optional[Mapping[str, object]] = None,
     ) -> Stage1RecommendationReport:
         candidateByHs8 = {candidate.hs8: candidate for candidate in candidates}
         candidateReviews = self._ReadCandidateReviews(validationReport)
@@ -88,8 +88,8 @@ class Stage1RecommendationReportBuilder:
         }
 
         recommendedCandidate = None
-        retainedCandidates: List[Dict[str, Any]] = []
-        rejectedCandidatesSummary: List[Dict[str, Any]] = []
+        retainedCandidates: List[Dict[str, object]] = []
+        rejectedCandidatesSummary: List[Dict[str, object]] = []
         deterministicEvidenceRetainedCodeSet = set(
             decisionReport.deterministicEvidenceRetainedHs8Codes,
         )
@@ -159,9 +159,9 @@ class Stage1RecommendationReportBuilder:
     def _BuildCandidateRecord(
         self,
         candidate: Optional[CnCandidate],
-        candidateReview: Mapping[str, Any],
+        candidateReview: Mapping[str, object],
         summaryOnly: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, object]:
         record = {
             "hs8": candidate.hs8 if candidate is not None else candidateReview.get("hs8"),
             "hs6_code": (
@@ -266,7 +266,7 @@ class Stage1RecommendationReportBuilder:
         self,
         productInput: ProductClassificationInput,
         candidates: Sequence[CnCandidate],
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, object]:
         return {
             "output_purpose": (
                 "Generate HS6/CN8 candidates and explain why each candidate "
@@ -309,7 +309,7 @@ class Stage1RecommendationReportBuilder:
     def _BuildCandidateScoringDetail(
         self,
         candidate: CnCandidate,
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, object]:
         return {
             "score": candidate.score,
             "score_breakdown": candidate.scoreBreakdown,
@@ -327,14 +327,14 @@ class Stage1RecommendationReportBuilder:
         self,
         evidenceRefs: Sequence[str],
         evidencePackage: Optional[Stage1EvidencePackage],
-    ) -> List[Dict[str, Any]]:
+    ) -> List[Dict[str, object]]:
         if evidencePackage is None:
             return []
         evidenceRecordById = {
             evidenceRecord.evidenceId: evidenceRecord
             for evidenceRecord in evidencePackage.evidenceRecords
         }
-        evidenceSummary: List[Dict[str, Any]] = []
+        evidenceSummary: List[Dict[str, object]] = []
         for evidenceRef in evidenceRefs:
             evidenceRecord = evidenceRecordById.get(evidenceRef)
             if evidenceRecord is None:
@@ -373,7 +373,7 @@ class Stage1RecommendationReportBuilder:
     def _ReadCandidateReviews(
         self,
         validationReport: Stage1ResponseValidationReport,
-    ) -> List[Mapping[str, Any]]:
+    ) -> List[Mapping[str, object]]:
         classificationResult = validationReport.parsedResponse.get(
             "classification_result",
         )
@@ -388,7 +388,7 @@ class Stage1RecommendationReportBuilder:
             if isinstance(candidateReview, Mapping)
         ]
 
-    def _BuildUniqueStrings(self, values: Sequence[Any]) -> List[str]:
+    def _BuildUniqueStrings(self, values: Sequence[object]) -> List[str]:
         uniqueValues: List[str] = []
         seenValues: set[str] = set()
         for value in values:

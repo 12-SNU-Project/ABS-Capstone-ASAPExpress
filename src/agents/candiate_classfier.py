@@ -1,5 +1,5 @@
 """
-agents/_external_classifier — adapter for the vendored Stage 1 classifier.
+agents.candiate_classfier — adapter for the vendored Stage 1 classifier.
 
 The classifier runtime code lives in ``src/bussiness_logic``. It reads our core
 data from ``docs/ASAP_Ontology_v1`` and orchestrates
@@ -14,7 +14,7 @@ its 7-step Stage 1 pipeline:
   7. Stage1ResponseValidator + Stage1DecisionPolicy + Stage1TraversalController
      + Stage1RecommendationReportBuilder
 
-Outputs collected into ExternalClassificationResult so ClassificationAgent
+Outputs collected into ExternalClassificationResult so ClassificationComponent
 can stamp citations / reasoning / candidates onto the Blackboard.
 """
 from __future__ import annotations
@@ -23,13 +23,14 @@ from collections.abc import Mapping
 import json
 import os
 import re
-import sys
 from dataclasses import dataclass, field, is_dataclass, replace
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Sequence
+
+from bussiness_logic.utils.json_types import JsonObject
 
 
-def _copy_with_clamped_max_tokens(request: Any, max_tokens: int) -> Any:
+def _copy_with_clamped_max_tokens(request: object, max_tokens: int) -> object:
     """Return a copy of ``request`` whose generationOptions.maxTokens == max_tokens.
 
     Works for both the legacy ``@dataclass(frozen=True)`` LlmRequest /
@@ -52,13 +53,13 @@ def _copy_with_clamped_max_tokens(request: Any, max_tokens: int) -> Any:
 
 
 def _copy_with_prompts(
-    request: Any,
+    request: object,
     *,
     system_prompt: str | None = None,
     user_prompt: str | None = None,
     context_chunks: list[str] | None = None,
-) -> Any:
-    updates: dict[str, Any] = {}
+) -> object:
+    updates: JsonObject = {}
     if system_prompt is not None:
         updates["systemPrompt"] = system_prompt
     if user_prompt is not None:
@@ -72,7 +73,7 @@ def _copy_with_prompts(
     raise TypeError(f"Unsupported LlmRequest type: {type(request).__name__}")
 
 
-def _candidate_code(candidate: Any, *names: str) -> str:
+def _candidate_code(candidate: object, *names: str) -> str:
     for name in names:
         value = getattr(candidate, name, None)
         if isinstance(value, str) and value.strip():
@@ -80,8 +81,8 @@ def _candidate_code(candidate: Any, *names: str) -> str:
     return ""
 
 
-def _build_candidate_contract(candidates: Sequence[Any]) -> list[dict[str, Any]]:
-    contract: list[dict[str, Any]] = []
+def _build_candidate_contract(candidates: Sequence[object]) -> list[JsonObject]:
+    contract: list[JsonObject] = []
     for candidate in candidates:
         hs8 = _candidate_code(candidate, "hs8", "hs8Code")
         if not hs8:
@@ -109,8 +110,8 @@ def _build_candidate_contract(candidates: Sequence[Any]) -> list[dict[str, Any]]
     return contract
 
 
-def _build_stage1_response_skeleton(candidates: Sequence[Any]) -> dict[str, Any]:
-    reviews: list[dict[str, Any]] = []
+def _build_stage1_response_skeleton(candidates: Sequence[object]) -> JsonObject:
+    reviews: list[JsonObject] = []
     for item in _build_candidate_contract(candidates):
         path_codes = item["path_codes"]
         reviews.append({
@@ -166,8 +167,8 @@ def _build_stage1_response_skeleton(candidates: Sequence[Any]) -> dict[str, Any]
 
 
 def _build_strict_stage1_prompt_suffix(
-    product_input: Any,
-    candidates: Sequence[Any],
+    product_input: object,
+    candidates: Sequence[object],
 ) -> str:
     candidate_contract = _build_candidate_contract(candidates)
     skeleton = _build_stage1_response_skeleton(candidates[: min(len(candidates), 5)])
@@ -191,10 +192,10 @@ def _build_strict_stage1_prompt_suffix(
 
 
 def _harden_stage1_request(
-    request: Any,
-    product_input: Any,
-    candidates: Sequence[Any],
-) -> Any:
+    request: object,
+    product_input: object,
+    candidates: Sequence[object],
+) -> object:
     system_suffix = "\n".join([
         "",
         "Hard output rule for local gemma4-ctx:",
@@ -211,12 +212,12 @@ def _harden_stage1_request(
 
 
 def _build_repair_request(
-    request: Any,
-    product_input: Any,
-    candidates: Sequence[Any],
+    request: object,
+    product_input: object,
+    candidates: Sequence[object],
     response_text: str,
-    validation_report: Any,
-) -> Any:
+    validation_report: object,
+) -> object:
     issues = []
     for issue in getattr(validation_report, "issues", []) or []:
         issues.append({
@@ -238,17 +239,17 @@ def _build_repair_request(
 
 
 def _build_compact_decision_request(
-    request: Any,
-    product_input: Any,
-    candidates: Sequence[Any],
-) -> Any:
+    request: object,
+    product_input: object,
+    candidates: Sequence[object],
+) -> object:
     candidate_contract = _build_candidate_contract(candidates)
-    classification_input_facts = list(
+    reconstructed_product_facts = list(
         getattr(product_input, "structuredProductFacts", []) or []
     )
     unresolved_facts = list(getattr(product_input, "unresolvedProductFacts", []) or [])
     fact_conflicts = list(getattr(product_input, "productFactConflicts", []) or [])
-    classification_input_text_lines = list(
+    reconstructed_fact_texts = list(
         getattr(product_input, "normalizedOcrFactTexts", []) or []
     )
     compact_shape = {
@@ -277,9 +278,9 @@ def _build_compact_decision_request(
         "Do not select an ingredient-specific candidate unless that ingredient or condition is explicit in the product facts.",
         "For example, `Containing eggs` requires explicit egg/난/albumen/egg powder evidence; fish/meat/stuffed candidates require explicit matching evidence and percentage conditions.",
         "For instant ramen/noodle products described as 유탕면/라면/dried noodles with wheat flour and no explicit egg/stuffed/fish/meat percentage condition, prefer the dry/other noodle candidate over egg/stuffed/meat/fish candidates.",
-        "Use classification_input_facts_json as the primary product facts for candidate review.",
-        "classification_input_text_lines_json is OCR/detail-text evidence, not a substitute for structured facts.",
-        "Do not infer facts that are not explicitly present in classification_input_facts_json.",
+        "Use reconstructed_product_facts_json as the primary product facts for candidate review.",
+        "reconstructed_fact_texts_json is OCR/detail-text evidence, not a substitute for structured facts.",
+        "Do not infer facts that are not explicitly present in reconstructed_product_facts_json.",
         "Use product type, physical form, processing state, storage state, ingredients, composition ratios, content weight, and origin facts when they are explicit.",
         "Use unlikely_candidate only when reconstructed product facts clearly contradict the candidate, or when the candidate requires an explicit essential condition that is absent from reconstructed facts.",
         "Do not mark a candidate as unlikely only because another candidate scores higher.",
@@ -289,12 +290,12 @@ def _build_compact_decision_request(
         "Review the strongest few candidates; unreviewed candidates will be filled deterministically as insufficient_information.",
         "product_name: {0}".format(product_input.productName or "unknown"),
         "product_domain: {0}".format(product_input.productDomain),
-        "classification_input_text_line_count: {0}".format(
-            len(classification_input_text_lines)
+        "reconstructed_fact_text_count: {0}".format(
+            len(reconstructed_fact_texts)
         ),
-        "classification_input_facts_json:",
+        "reconstructed_product_facts_json:",
         json.dumps(
-            classification_input_facts[:60],
+            reconstructed_product_facts[:60],
             ensure_ascii=False,
             separators=(",", ":"),
         ),
@@ -302,9 +303,9 @@ def _build_compact_decision_request(
         json.dumps(unresolved_facts[:20], ensure_ascii=False, separators=(",", ":")),
         "product_fact_conflicts_json:",
         json.dumps(fact_conflicts[:20], ensure_ascii=False, separators=(",", ":")),
-        "classification_input_text_lines_json:",
+        "reconstructed_fact_texts_json:",
         json.dumps(
-            classification_input_text_lines[:80],
+            reconstructed_fact_texts[:80],
             ensure_ascii=False,
             separators=(",", ":"),
         ),
@@ -316,7 +317,7 @@ def _build_compact_decision_request(
     return _copy_with_prompts(request, user_prompt=prompt, context_chunks=[])
 
 
-def _extract_json_object(text: str) -> dict[str, Any] | None:
+def _extract_json_object(text: str) -> JsonObject | None:
     stripped = (text or "").strip()
     if not stripped:
         return None
@@ -339,8 +340,8 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
 
 def _extract_compact_decision(
     text: str,
-    candidates: Sequence[Any],
-) -> dict[str, Any] | None:
+    candidates: Sequence[object],
+) -> JsonObject | None:
     parsed = _extract_json_object(text)
     candidate_codes = {item["hs8"] for item in _build_candidate_contract(candidates)}
     if parsed is not None:
@@ -374,10 +375,10 @@ def _extract_compact_decision(
 
 
 def _apply_domain_selection_guard(
-    compact: dict[str, Any],
-    product_input: Any,
-    candidates: Sequence[Any],
-) -> dict[str, Any]:
+    compact: JsonObject,
+    product_input: object,
+    candidates: Sequence[object],
+) -> JsonObject:
     """Correct obvious local-LLM slips before Stage1 validator expansion."""
     candidate_codes = {item["hs8"] for item in _build_candidate_contract(candidates)}
     text = (product_input.BuildSearchText() or "").lower()
@@ -413,7 +414,7 @@ def _apply_domain_selection_guard(
     return compact
 
 
-def _copy_response_with_text(response: Any, generated_text: str) -> Any:
+def _copy_response_with_text(response: object, generated_text: str) -> object:
     if hasattr(response, "model_copy"):
         return response.model_copy(update={"generatedText": generated_text})
     if is_dataclass(response):
@@ -421,7 +422,7 @@ def _copy_response_with_text(response: Any, generated_text: str) -> Any:
     raise TypeError(f"Unsupported LlmResponse type: {type(response).__name__}")
 
 
-def _normalize_compact_status(value: Any) -> str:
+def _normalize_compact_status(value: object) -> str:
     if value in {
         "strong_candidate",
         "possible_candidate",
@@ -432,7 +433,7 @@ def _normalize_compact_status(value: Any) -> str:
     return "insufficient_information"
 
 
-def _list_of_strings(value: Any) -> list[str]:
+def _list_of_strings(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     out: list[str] = []
@@ -444,9 +445,9 @@ def _list_of_strings(value: Any) -> list[str]:
 
 
 def _expand_compact_decision_to_stage1_json(
-    compact: dict[str, Any],
-    product_input: Any,
-    candidates: Sequence[Any],
+    compact: JsonObject,
+    product_input: object,
+    candidates: Sequence[object],
 ) -> str:
     candidate_contract = _build_candidate_contract(candidates)
     candidate_codes = {item["hs8"] for item in candidate_contract}
@@ -454,7 +455,7 @@ def _expand_compact_decision_to_stage1_json(
     if selected_hs8 not in candidate_codes:
         selected_hs8 = None
 
-    review_by_hs8: dict[str, dict[str, Any]] = {}
+    review_by_hs8: dict[str, JsonObject] = {}
     for review in compact.get("candidate_reviews") or []:
         if not isinstance(review, dict):
             continue
@@ -462,7 +463,7 @@ def _expand_compact_decision_to_stage1_json(
         if hs8 in candidate_codes:
             review_by_hs8[str(hs8)] = review
 
-    expanded_reviews: list[dict[str, Any]] = []
+    expanded_reviews: list[JsonObject] = []
     for index, item in enumerate(candidate_contract):
         hs8 = item["hs8"]
         compact_review = review_by_hs8.get(hs8, {})
@@ -491,7 +492,7 @@ def _expand_compact_decision_to_stage1_json(
 
         path_codes = item["path_codes"]
 
-        def PathLevel(level: str) -> dict[str, Any]:
+        def PathLevel(level: str) -> JsonObject:
             return {
                 "code": path_codes[level],
                 "consistency": "needs_review",
@@ -550,12 +551,7 @@ LLM_MAX_TOKENS = 2048
 STAGE1_REVIEW_MODE_FULL = "full"
 
 ASAP_PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
-ASAP_SRC_ROOT = ASAP_PROJECT_ROOT / "src"
-for _path in (ASAP_PROJECT_ROOT, ASAP_SRC_ROOT):
-    if _path.exists() and str(_path) not in sys.path:
-        sys.path.insert(0, str(_path))
 
-from agents.pipeline_dto import JsonValue
 from bussiness_logic.app_config import LoadAppConfig
 from bussiness_logic.bridge.embedding import (
     BuildTextEmbeddingAdapter,
@@ -604,7 +600,7 @@ ASAP_ONTOLOGY_ROOT = APP_CONFIG.paths.ResolvePath(
 )
 ASAP_ENV_FILE = ASAP_PROJECT_ROOT / ".env"
 SEMANTIC_CANDIDATE_INDEX: CnSemanticCandidateIndex | None = None
-SEMANTIC_CANDIDATE_INDEX_STATUS: dict[str, Any] | None = None
+SEMANTIC_CANDIDATE_INDEX_STATUS: JsonObject | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -612,36 +608,32 @@ SEMANTIC_CANDIDATE_INDEX_STATUS: dict[str, Any] | None = None
 # ---------------------------------------------------------------------------
 @dataclass
 class ExternalClassificationResult:
-    candidates: list = field(default_factory=list)
-    recommendation: Any = None
-    validation_report: Any = None
-    decision_report: Any = None
-    traversal_report: Any = None
-    traversal_history: list[dict[str, Any]] = field(default_factory=list)
-    llm_response_text: str = ""
+    candidates: list[object] = field(default_factory=list)
+    recommendation: object | None = None
+    validation_report: object | None = None
+    decision_report: object | None = None
+    traversal_report: object | None = None
+    traversal_history: list[JsonObject] = field(default_factory=list)
     llm_model: str = ""
-    prompt_text: str = ""
-    citations: list[dict] = field(default_factory=list)
-    semantic_retrieval_status: dict[str, Any] = field(default_factory=dict)
-    routing_context_trace: dict[str, JsonValue] = field(default_factory=dict)
+    citations: list[JsonObject] = field(default_factory=list)
     error: str | None = None
 
 
 @dataclass
 class _Stage1ReviewRound:
-    candidates: list[Any]
-    evidencePackage: Any = None
-    validationReport: Any = None
-    decisionReport: Any = None
-    traversalReport: Any = None
+    candidates: list[object]
+    evidencePackage: object | None = None
+    validationReport: object | None = None
+    decisionReport: object | None = None
+    traversalReport: object | None = None
     responseText: str = ""
     modelName: str = ""
     promptText: str = ""
     error: str | None = None
 
 
-def _BuildCandidateCitations(candidates: Sequence[Any]) -> list[dict[str, Any]]:
-    citations: list[dict[str, Any]] = []
+def _BuildCandidateCitations(candidates: Sequence[object]) -> list[JsonObject]:
+    citations: list[JsonObject] = []
     for candidate in candidates:
         citations.append({
             "source_table": "cn_table",
@@ -660,7 +652,11 @@ def _BuildCandidateCitations(candidates: Sequence[Any]) -> list[dict[str, Any]]:
     return citations
 
 
-def _ReadField(obj: Any, *names: str, default: Any = None) -> Any:
+def _ReadField(
+    obj: object,
+    *names: str,
+    default: object | None = None,
+) -> object | None:
     if obj is None:
         return default
     if isinstance(obj, dict):
@@ -676,7 +672,7 @@ def _ReadField(obj: Any, *names: str, default: Any = None) -> Any:
     return default
 
 
-def _ReadTextList(value: Any, *, limit: int) -> list[str]:
+def _ReadTextList(value: object, *, limit: int) -> list[str]:
     if not isinstance(value, (list, tuple)):
         return []
     return [
@@ -686,7 +682,7 @@ def _ReadTextList(value: Any, *, limit: int) -> list[str]:
     ]
 
 
-def _BuildCandidateTraceSnapshot(candidate: Any, rank: int) -> dict[str, Any]:
+def _BuildCandidateTraceSnapshot(candidate: object, rank: int) -> JsonObject:
     hs8 = _candidate_code(candidate, "hs8", "hs8Code")
     codeHierarchy = _ReadField(
         candidate,
@@ -756,11 +752,11 @@ def _BuildTraversalHistoryEntry(
     *,
     roundNumber: int,
     phase: str,
-    candidates: Sequence[Any],
-    traversalReport: Any = None,
-    decisionReport: Any = None,
+    candidates: Sequence[object],
+    traversalReport: object | None = None,
+    decisionReport: object | None = None,
     error: str | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     entry = {
         "round": roundNumber,
         "phase": phase,
@@ -845,8 +841,8 @@ def _BuildTraversalHistoryEntry(
 
 def _RunStage1ReviewRound(
     productInput: ProductClassificationInput,
-    candidates: Sequence[Any],
-    adapter: Any,
+    candidates: Sequence[object],
+    adapter: object,
 ) -> _Stage1ReviewRound:
     reviewMode = os.environ.get("ASAP_STAGE1_REVIEW_MODE", "compact").strip().lower()
     contextBuilder = OntologyContextBuilder(ASAP_ONTOLOGY_ROOT)
@@ -986,7 +982,7 @@ def build_runtime_adapter():
 
 def build_semantic_candidate_index(
     retriever: CnCandidateRetriever,
-) -> tuple[CnSemanticCandidateIndex | None, dict[str, Any]]:
+) -> tuple[CnSemanticCandidateIndex | None, JsonObject]:
     global SEMANTIC_CANDIDATE_INDEX
     global SEMANTIC_CANDIDATE_INDEX_STATUS
 
@@ -1077,18 +1073,18 @@ def pes_to_input(pes: dict, *, domain_scope: str = "food_16_21") -> ProductClass
     else:
         ocr_text = str(ocr_chunks)
     composition = (
-        obs.get("classification_input_fact_texts")
+        obs.get("reconstructed_fact_texts")
         or obs.get("composition")
         or []
     )
     if not isinstance(composition, list):
         composition = [str(composition)] if str(composition).strip() else []
-    classification_input_facts = (
-        obs.get("classification_input_product_facts")
+    reconstructed_product_facts = (
+        obs.get("reconstructed_product_facts")
         or []
     )
-    if not isinstance(classification_input_facts, list):
-        classification_input_facts = []
+    if not isinstance(reconstructed_product_facts, list):
+        reconstructed_product_facts = []
     unresolved_product_facts = obs.get("unresolved_product_facts") or []
     if not isinstance(unresolved_product_facts, list):
         unresolved_product_facts = []
@@ -1103,7 +1099,7 @@ def pes_to_input(pes: dict, *, domain_scope: str = "food_16_21") -> ProductClass
         domainScopes=[domain_scope],
         normalizedOcrFactTexts=[str(t) for t in composition if str(t).strip()],
         structuredProductFacts=[
-            dict(item) for item in classification_input_facts if isinstance(item, dict)
+            dict(item) for item in reconstructed_product_facts if isinstance(item, dict)
         ],
         unresolvedProductFacts=[
             dict(item) for item in unresolved_product_facts if isinstance(item, dict)
@@ -1132,29 +1128,13 @@ def _ReadRoutingFlag(value: object, *, default: bool) -> bool:
     return value if isinstance(value, bool) else default
 
 
-def _JsonTraceValue(value: object) -> JsonValue:
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, list):
-        return [_JsonTraceValue(item) for item in value]
-    if isinstance(value, tuple):
-        return [_JsonTraceValue(item) for item in value]
-    if isinstance(value, Mapping):
-        return {
-            str(key): _JsonTraceValue(item)
-            for key, item in value.items()
-            if isinstance(key, str)
-        }
-    return str(value)
-
-
 def _BuildRoutingBoundary(
     routingContext: Mapping[str, object] | None,
 ) -> HierarchySearchBoundary | None:
     if routingContext is None:
         return None
     candidateHs2 = _ReadRoutingCodeTuple(
-        routingContext.get("candidate_hs2"),
+        routingContext.get("allowed_hs2"),
         codeLength=2,
     )
     blockedHs2 = _ReadRoutingCodeTuple(
@@ -1162,7 +1142,7 @@ def _BuildRoutingBoundary(
         codeLength=2,
     )
     strictRoute = _ReadRoutingFlag(
-        routingContext.get("strict_route"),
+        routingContext.get("enforce_hs2_boundary"),
         default=bool(candidateHs2),
     )
 
@@ -1188,49 +1168,6 @@ def _RoutingFallbackAllowed(
     return _ReadRoutingFlag(routingContext.get("fallback_allowed"), default=True)
 
 
-def _BuildRoutingTrace(
-    routingContext: Mapping[str, object] | None,
-    *,
-    boundaryApplied: bool,
-    fallbackUsed: bool,
-) -> dict[str, JsonValue]:
-    if routingContext is None:
-        return {}
-    trace: dict[str, JsonValue] = {
-        "routing_context_id": str(routingContext.get("routing_context_id") or ""),
-        "candidate_hs2": list(
-            _ReadRoutingCodeTuple(
-                routingContext.get("candidate_hs2"),
-                codeLength=2,
-            )
-        ),
-        "blocked_hs2": list(
-            _ReadRoutingCodeTuple(
-                routingContext.get("blocked_hs2"),
-                codeLength=2,
-            )
-        ),
-        "strict_route": _ReadRoutingFlag(
-            routingContext.get("strict_route"),
-            default=False,
-        ),
-        "fallback_allowed": _RoutingFallbackAllowed(routingContext),
-        "boundary_applied": boundaryApplied,
-        "fallback_used": fallbackUsed,
-        "routing_basis": _JsonTraceValue(
-            routingContext.get("routing_basis") or {},
-        ),
-        "missing_facts": _JsonTraceValue(
-            routingContext.get("missing_facts") or [],
-        ),
-    }
-    return {
-        key: value
-        for key, value in trace.items()
-        if value not in ("", [], {})
-    }
-
-
 def _FindClassifierCandidates(
     *,
     productInput: ProductClassificationInput,
@@ -1238,7 +1175,7 @@ def _FindClassifierCandidates(
     semanticIndex: CnSemanticCandidateIndex | None,
     candidateLimit: int,
     boundary: HierarchySearchBoundary | None,
-) -> list[Any]:
+) -> list[object]:
     if semanticIndex is None:
         return list(
             retriever.FindCandidates(
@@ -1278,12 +1215,6 @@ def run_external_classifier(
     productInput = pes_to_input(pes, domain_scope=domain_scope)
     candidateLimit = max(1, min(int(top_k_candidates), 5))
     routeBoundary = _BuildRoutingBoundary(routing_context)
-    routeFallbackUsed = False
-    routeTrace = _BuildRoutingTrace(
-        routing_context,
-        boundaryApplied=routeBoundary is not None,
-        fallbackUsed=routeFallbackUsed,
-    )
 
     # 2. Retrieval
     classificationConfig = APP_CONFIG.classification
@@ -1302,7 +1233,7 @@ def run_external_classifier(
             ),
         ),
     )
-    semanticIndex, semanticStatus = build_semantic_candidate_index(retriever)
+    semanticIndex, _ = build_semantic_candidate_index(retriever)
     candidates = _FindClassifierCandidates(
         productInput=productInput,
         retriever=retriever,
@@ -1315,12 +1246,6 @@ def run_external_classifier(
         and routeBoundary is not None
         and _RoutingFallbackAllowed(routing_context)
     ):
-        routeFallbackUsed = True
-        routeTrace = _BuildRoutingTrace(
-            routing_context,
-            boundaryApplied=True,
-            fallbackUsed=routeFallbackUsed,
-        )
         candidates = _FindClassifierCandidates(
             productInput=productInput,
             retriever=retriever,
@@ -1331,8 +1256,6 @@ def run_external_classifier(
     if not candidates:
         return ExternalClassificationResult(
             candidates=[],
-            semantic_retrieval_status=semanticStatus,
-            routing_context_trace=routeTrace,
             error="no_candidates_from_retriever",
         )
 
@@ -1342,8 +1265,6 @@ def run_external_classifier(
         return ExternalClassificationResult(
             candidates=list(candidates),
             citations=_BuildCandidateCitations(candidates),
-            semantic_retrieval_status=semanticStatus,
-            routing_context_trace=routeTrace,
             error=f"llm_adapter_error: {exception}",
         )
 
@@ -1356,9 +1277,6 @@ def run_external_classifier(
         return ExternalClassificationResult(
             candidates=reviewRound.candidates,
             citations=_BuildCandidateCitations(reviewRound.candidates),
-            prompt_text=reviewRound.promptText[:2000],
-            semantic_retrieval_status=semanticStatus,
-            routing_context_trace=routeTrace,
             error=reviewRound.error,
         )
 
@@ -1410,12 +1328,8 @@ def run_external_classifier(
                 decision_report=reviewRound.decisionReport,
                 traversal_report=reviewRound.traversalReport,
                 traversal_history=traversalHistory,
-                llm_response_text=reviewRound.responseText,
                 llm_model=reviewRound.modelName,
-                prompt_text=reviewRound.promptText[:2000],
                 citations=_BuildCandidateCitations(reviewRound.candidates),
-                semantic_retrieval_status=semanticStatus,
-                routing_context_trace=routeTrace,
                 error="backtracking_scope_exhausted",
             )
         reviewRound = _RunStage1ReviewRound(
@@ -1439,9 +1353,6 @@ def run_external_classifier(
                 candidates=reviewRound.candidates,
                 citations=_BuildCandidateCitations(reviewRound.candidates),
                 traversal_history=traversalHistory,
-                prompt_text=reviewRound.promptText[:2000],
-                semantic_retrieval_status=semanticStatus,
-                routing_context_trace=routeTrace,
                 error=error,
             )
         traversalHistory.append(
@@ -1470,10 +1381,6 @@ def run_external_classifier(
         decision_report=reviewRound.decisionReport,
         traversal_report=reviewRound.traversalReport,
         traversal_history=traversalHistory,
-        llm_response_text=reviewRound.responseText,
         llm_model=reviewRound.modelName,
-        prompt_text=reviewRound.promptText[:2000],
         citations=_BuildCandidateCitations(reviewRound.candidates),
-        semantic_retrieval_status=semanticStatus,
-        routing_context_trace=routeTrace,
     )

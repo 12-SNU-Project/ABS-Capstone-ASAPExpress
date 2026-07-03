@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from dash import ALL, Dash, Input, Output, State, ctx, no_update
 
+from bussiness_logic.utils.json_types import JsonObject
 from frontend.ui import classification_dash
 
 
@@ -30,8 +29,8 @@ def _update_classification_drawers(
     _inputCloseClicks: list[int | None],
     _candidateCloseClicks: list[int | None],
     _classificationCloseClicks: list[int | None],
-    resultData: dict[str, Any] | None,
-) -> tuple[str | bool | Any, bool | Any, bool | Any]:
+    resultData: JsonObject | None,
+) -> tuple[object, object, object]:
     if _triggered_click_count() <= 0:
         return (no_update, no_update, no_update)
     return _resolve_classification_drawer_state(ctx.triggered_id, resultData)
@@ -47,9 +46,9 @@ def _triggered_click_count() -> int:
 
 
 def _resolve_classification_drawer_state(
-    triggered: Any,
-    resultData: dict[str, Any] | None,
-) -> tuple[str | bool | Any, bool | Any, bool | Any]:
+    triggered: object,
+    resultData: JsonObject | None,
+) -> tuple[object, object, object]:
     closedState = (False, False, False)
     if isinstance(triggered, dict) and triggered.get("type") in {
         "input-detail-drawer-close",

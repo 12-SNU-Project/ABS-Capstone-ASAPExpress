@@ -1,4 +1,4 @@
-"""Build ProductUnderstandingFacts from reconstructed product input."""
+"""Build ProductUnderstandingPackage from reconstructed product input."""
 
 from __future__ import annotations
 
@@ -7,19 +7,21 @@ import os
 import re
 from collections.abc import Mapping
 
-from agents.agent_base import BaseAgent
 from agents.blackboard import BlackboardStore, now_iso
+from agents.component_base import BasePipelineComponent
 from agents.coi_loader import LoadCoiEvidence
+from agents.llm_agents import IdentityHintAgent
 from agents.pipeline_dto import (
-    CompositionLaneFacts,
+    CompositionFactSet,
     CoiEvidenceSet,
     DistilledIdentityFacts,
     EncyclopediaEvidenceSet,
+    IdentityHintSet,
     JsonValue,
-    ProductUnderstandingFacts,
+    ProductUnderstandingPackage,
 )
 from agents.tools.encyclopedia_lookup import LookupEncyclopediaEvidence
-from agents.tools.identity_distiller import IdentityDistillerTool
+from agents.tools.identity_distiller import IdentityDistillerService
 
 
 PERCENT_RE = re.compile(
@@ -40,18 +42,18 @@ ADMIN_LABEL_LINE_RE = re.compile(
 )
 
 
-class ProductUnderstandingAgent(BaseAgent):
-    agent_name = "Product_Understanding_Agent"
+class ProductUnderstandingComponent(BasePipelineComponent):
+    component_name = "Product_Understanding_Component"
     stage = "Product_Understanding"
     llm_model = None
 
-    def run(self, store: BlackboardStore) -> None:
+    def Run(self, store: BlackboardStore) -> None:
         bb = store.load()
         pes = bb.get("product_evidence_state") or {}
         if not isinstance(pes, dict):
-            raise RuntimeError("No ProductEvidenceState on the Blackboard.")
+            raise RuntimeError("No InputEvidenceState on the Blackboard.")
         productId = str(pes.get("product_id") or "")
-        self.read_input(productId)
+        self.ReadBlackBoard(productId)
 
         observedFacts = pes.get("observed_facts") or {}
         if not isinstance(observedFacts, dict):
@@ -59,7 +61,7 @@ class ProductUnderstandingAgent(BaseAgent):
         productName = str(observedFacts.get("product_name") or "")
         shortDescription = str(observedFacts.get("description") or "")
         factTexts = self._ReadTextTuple(
-            observedFacts.get("classification_input_fact_texts")
+            observedFacts.get("reconstructed_fact_texts")
             or observedFacts.get("composition")
             or [],
         )
@@ -68,7 +70,7 @@ class ProductUnderstandingAgent(BaseAgent):
         # detail-page composition tables still reach the understanding stage.
         factTexts = (*factTexts, *self._OcrCompositionLines(observedFacts, factTexts))
         productFacts = self._ReadFactTuple(
-            observedFacts.get("classification_input_product_facts") or [],
+            observedFacts.get("reconstructed_product_facts") or [],
         )
         classificationText = "\n".join(
             text
@@ -91,48 +93,49 @@ class ProductUnderstandingAgent(BaseAgent):
             productId=productId,
             query=productName,
         )
-        identity = IdentityDistillerTool().Distill(
-            distilledIdentityId=store.next_id("dist"),
+        distilledIdentity = IdentityDistillerService().BuildFacts(
+            distilledIdentityId=store.next_id("distid"),
             productId=productId,
-            productName=productName,
-            shortDescription=shortDescription,
-            classificationText=classificationText,
             encyclopediaEvidence=encyclopediaEvidence,
+        )
+        identity = self._BuildIdentitySeed(
+            identityHintId=store.next_id("hint"),
+            productId=productId,
+            distilledIdentity=distilledIdentity,
         )
         identity = self._MaybeEnrichIdentityWithLlm(
             identity,
             productName=productName,
-            shortDescription=shortDescription,
-            factTexts=factTexts,
+            distilledIdentity=distilledIdentity,
             encyclopediaEvidence=encyclopediaEvidence,
         )
         composition = self._BuildCompositionLane(
             factTexts=factTexts,
             productFacts=productFacts,
-            identity=identity,
             coiEvidence=coiEvidence,
         )
         understandingId = store.next_id("under")
-        productUnderstanding = ProductUnderstandingFacts(
+        productUnderstanding = ProductUnderstandingPackage(
             understandingId=understandingId,
             productId=productId,
             sourceProductId=productId,
             productName=productName,
             shortDescription=shortDescription,
             classificationText=classificationText,
-            classificationInputFactTexts=factTexts,
-            classificationInputProductFacts=productFacts,
-            identity=identity,
-            composition=composition,
+            reconstructedFactTexts=factTexts,
+            reconstructedProductFacts=productFacts,
+            distilledIdentity=distilledIdentity,
+            identityHints=identity,
+            compositionFacts=composition,
             coiEvidence=coiEvidence,
             encyclopediaEvidence=encyclopediaEvidence,
             routingTerms=self._RoutingTerms(
                 productName=productName,
-                factTexts=factTexts,
+                distilledIdentity=distilledIdentity,
                 identity=identity,
             ),
             unknowns=(
-                ("classification_input_product_facts",)
+                ("reconstructed_product_facts",)
                 if not productFacts
                 else ()
             ),
@@ -140,13 +143,13 @@ class ProductUnderstandingAgent(BaseAgent):
         store.put(
             "product_understanding",
             productUnderstanding.ToBlackboard(
-                createdBy=self.agent_name,
+                createdBy=self.component_name,
                 createdAt=now_iso(),
             ),
         )
-        self.wrote(understandingId)
+        self.WriteBlackBoard(understandingId)
         self.reason(
-            "ProductUnderstandingFacts 생성: "
+            "ProductUnderstandingPackage 생성: "
             f"facts={len(productFacts)}, fact_texts={len(factTexts)}, "
             f"encyclopedia={encyclopediaEvidence.qualityStatus}, "
             f"composition_terms={len(composition.compositionTerms)}."
@@ -228,7 +231,7 @@ class ProductUnderstandingAgent(BaseAgent):
         if not isinstance(value, list):
             return ()
         return tuple(
-            ProductUnderstandingAgent._JsonDict(item)
+            ProductUnderstandingComponent._JsonDict(item)
             for item in value
             if isinstance(item, dict)
         )
@@ -238,7 +241,7 @@ class ProductUnderstandingAgent(BaseAgent):
         out: dict[str, JsonValue] = {}
         for key, item in value.items():
             if isinstance(key, str):
-                out[key] = ProductUnderstandingAgent._JsonValue(item)
+                out[key] = ProductUnderstandingComponent._JsonValue(item)
         return out
 
     @staticmethod
@@ -247,11 +250,11 @@ class ProductUnderstandingAgent(BaseAgent):
             return value
         if isinstance(value, list):
             return [
-                ProductUnderstandingAgent._JsonValue(item)
+                ProductUnderstandingComponent._JsonValue(item)
                 for item in value
             ]
         if isinstance(value, dict):
-            return ProductUnderstandingAgent._JsonDict(value)
+            return ProductUnderstandingComponent._JsonDict(value)
         return str(value)
 
     @staticmethod
@@ -267,7 +270,6 @@ class ProductUnderstandingAgent(BaseAgent):
             value = str(
                 fact.get("normalized_value")
                 or fact.get("value")
-                or fact.get("raw_value")
                 or fact.get("text")
                 or ""
             ).strip()
@@ -278,33 +280,44 @@ class ProductUnderstandingAgent(BaseAgent):
         return tuple(texts)
 
     @staticmethod
+    def _BuildIdentitySeed(
+        *,
+        identityHintId: str,
+        productId: str,
+        distilledIdentity: DistilledIdentityFacts,
+    ) -> IdentityHintSet:
+        return IdentityHintSet(
+            identityHintId=identityHintId,
+            productId=productId,
+            commercialIdentity=distilledIdentity.commercialIdentity,
+            normalizedTariffDescription=distilledIdentity.normalizedDescription,
+            identityTerms=distilledIdentity.identityTerms,
+            productFormTerms=distilledIdentity.productFormSignalTerms,
+            confidence=0.4 if distilledIdentity.identityTerms else 0.0,
+            understandingMode="wikipedia_distilled",
+        )
+
+    @staticmethod
     def _MaybeEnrichIdentityWithLlm(
-        identity: DistilledIdentityFacts,
+        identity: IdentityHintSet,
         *,
         productName: str,
-        shortDescription: str,
-        factTexts: tuple[str, ...],
+        distilledIdentity: DistilledIdentityFacts,
         encyclopediaEvidence: EncyclopediaEvidenceSet,
-    ) -> DistilledIdentityFacts:
-        """Overlay bounded LLM identity fields when the opt-in flag is set.
+    ) -> IdentityHintSet:
+        """Overlay bounded LLM identity fields unless explicitly disabled.
 
-        Off by default (``ASAP_USE_LLM_UNDERSTANDING``): the deterministic regex
-        identity is returned unchanged. On LLM failure the regex identity is
-        returned with the error recorded for the admin trace. LLM output is
+        On by default (``ASAP_USE_LLM_UNDERSTANDING``). On LLM failure the regex identity is
+        returned with the error recorded in the identity hint reasons. LLM output is
         already vocab-validated, so the overlay cannot introduce codes.
         """
-        # LLM combination is the DEFAULT understanding path (designer decision,
-        # 2026-07-03); the regex distiller stays only as the failure parachute.
-        # Set ASAP_USE_LLM_UNDERSTANDING=0 to force the regex-only path.
         flag = (os.environ.get("ASAP_USE_LLM_UNDERSTANDING", "1") or "").strip().lower()
-        if flag in ("0", "false", "no", "off"):
+        if flag not in ("1", "true", "yes", "on"):
             return identity
-        from agents.tools.product_understanding_llm import BuildIdentityFactsFromLlm
 
-        result = BuildIdentityFactsFromLlm(
+        result = IdentityHintAgent().BuildIdentityFacts(
             productName=productName,
-            shortDescription=shortDescription,
-            factTexts=list(factTexts),
+            distilledIdentity=distilledIdentity,
             encyclopediaEvidence=encyclopediaEvidence,
         )
         if result.get("understanding_mode") != "llm_json":
@@ -314,9 +327,6 @@ class ProductUnderstandingAgent(BaseAgent):
                 llmError=str(result.get("llm_error") or ""),
             )
         overlay: dict[str, object] = {
-            "ingredientClass": result["ingredient_class"],
-            "foodForm": result["food_form"],
-            "processingState": result["processing_state"],
             "productFormTerms": result["product_form_terms"],
             "domainHints": result["domain_hints"],
             "chapterHintTerms": result["chapter_hint_terms"],
@@ -336,10 +346,6 @@ class ProductUnderstandingAgent(BaseAgent):
             overlay["normalizedTariffDescription"] = result["normalized_tariff_description"]
         if result["identity_terms"]:
             overlay["identityTerms"] = result["identity_terms"]
-        if result["composition_terms"]:
-            overlay["compositionTerms"] = result["composition_terms"]
-        if result["processing_terms"]:
-            overlay["processingTerms"] = result["processing_terms"]
         return dataclasses.replace(identity, **overlay)
 
     @staticmethod
@@ -347,13 +353,12 @@ class ProductUnderstandingAgent(BaseAgent):
         *,
         factTexts: tuple[str, ...],
         productFacts: tuple[dict[str, JsonValue], ...],
-        identity: DistilledIdentityFacts,
         coiEvidence: CoiEvidenceSet,
-    ) -> CompositionLaneFacts:
+    ) -> CompositionFactSet:
         # COI (식품원재료풀이) is composition evidence — it belongs to this lane,
         # not the identity lane. Feed its matched texts into %-parsing and terms.
         coiTexts = tuple(coiEvidence.matchedTexts)
-        text = "\n".join([*factTexts, *ProductUnderstandingAgent._FactTexts(productFacts), *coiTexts])
+        text = "\n".join([*factTexts, *ProductUnderstandingComponent._FactTexts(productFacts), *coiTexts])
         percentages: list[dict[str, JsonValue]] = []
         seenPercentages: set[tuple[str, str]] = set()
         for match in PERCENT_RE.finditer(text):
@@ -377,33 +382,26 @@ class ProductUnderstandingAgent(BaseAgent):
         if not percentages:
             missing.append("ingredient_percentages")
 
-        compositionTerms = ProductUnderstandingAgent._DedupStrings(
+       
+        compositionTerms = ProductUnderstandingComponent._DedupStrings(
             [
-                term
-                for term in (
-                    *identity.compositionTerms,
-                    *ProductUnderstandingAgent._FactTexts(productFacts),
-                    *factTexts,
-                    *coiTexts,
-                )
-                # Allergen notices and admin label lines are not composition.
-                if not ALLERGEN_RE.search(term) and not ADMIN_LABEL_LINE_RE.search(term)
+                *ProductUnderstandingComponent._FactTexts(productFacts),
+                *factTexts,
+                *coiTexts,
             ],
             limit=80,
         )
-        return CompositionLaneFacts(
-            processingState=identity.processingState,
+        return CompositionFactSet(
+            processingState="processed_or_prepared" if processingTerms else "unknown",
             principalIngredient=(
                 str(percentages[0].get("term") or "")
                 if percentages
-                else identity.compositionTerms[0]
-                if identity.compositionTerms
                 else ""
             ),
-            ingredientClasses=(identity.ingredientClass,) if identity.ingredientClass else (),
+            ingredientClasses=(),
             ingredientPercentages=tuple(percentages[:20]),
             compositionTerms=compositionTerms,
-            processingTerms=identity.processingTerms,
+            processingTerms=identity.charp,
             compositionBasis="label" if percentages else ("coi_text" if coiTexts else "label_text_no_percent"),
             containsWrapperOrDough=bool(WRAPPER_RE.search(text)),
             containsSauceOrBroth=bool(SAUCE_BROTH_RE.search(text)),
@@ -432,8 +430,8 @@ class ProductUnderstandingAgent(BaseAgent):
     def _RoutingTerms(
         *,
         productName: str,
-        factTexts: tuple[str, ...],
-        identity: DistilledIdentityFacts,
+        distilledIdentity: DistilledIdentityFacts,
+        identity: IdentityHintSet,
     ) -> tuple[str, ...]:
         terms: list[str] = []
         for value in (
@@ -445,13 +443,9 @@ class ProductUnderstandingAgent(BaseAgent):
             *identity.domainHints,
             *identity.chapterHintTerms,
             *identity.chapterHintSourceTerms,
-            identity.ingredientClass,
-            identity.foodForm,
-            identity.processingState,
+            *distilledIdentity.productFormSignalTerms,
+            *distilledIdentity.processingSignalTerms,
             *identity.identityTerms,
-            *identity.compositionTerms,
-            *identity.processingTerms,
-            *factTexts,
         ):
             text = str(value).strip()
             if text and text not in terms:

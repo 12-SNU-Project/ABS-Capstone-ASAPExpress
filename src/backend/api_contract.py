@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from bussiness_logic.utils.json_types import JsonObject
 
 
 RunStatus = Literal["queued", "running", "completed", "failed"]
@@ -16,7 +18,7 @@ class ApiContractModel(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, frozen=True, extra="forbid")
 
-    def ToDict(self) -> dict[str, Any]:
+    def ToDict(self) -> JsonObject:
         return self.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
@@ -37,7 +39,7 @@ class RunCreateRequestPayload(BaseModel):
     description: str = ""
     url: str = ""
     kurlyUrl: str = Field(default="", alias="kurly_url")
-    facts: dict[str, Any] = Field(default_factory=dict)
+    facts: JsonObject = Field(default_factory=dict)
 
 
 class RunCreateAcceptedResponse(ApiContractModel):
@@ -50,7 +52,7 @@ class RunCreateAcceptedResponse(ApiContractModel):
 
 class RunRequestView(ApiContractModel):
     query: str = ""
-    facts: dict[str, Any] = Field(default_factory=dict)
+    facts: JsonObject = Field(default_factory=dict)
 
 
 class PageProductFactsView(ApiContractModel):
@@ -81,29 +83,29 @@ class ReconstructionStatusView(ApiContractModel):
 
 class InputProcessingView(ApiContractModel):
     pageProductFacts: PageProductFactsView = Field(alias="page_product_facts")
-    detailEvidenceRows: list[dict[str, Any]] = Field(
+    detailEvidenceRows: list[JsonObject] = Field(
         default_factory=list,
         alias="detail_evidence_rows",
     )
-    reconstructedDetailTables: list[dict[str, Any]] = Field(
+    reconstructedDetailTables: list[JsonObject] = Field(
         default_factory=list,
         alias="reconstructed_detail_tables",
     )
-    classificationInputFacts: list[dict[str, Any]] = Field(
+    reconstructedProductFacts: list[JsonObject] = Field(
         default_factory=list,
-        alias="classification_input_facts",
+        alias="reconstructed_product_facts",
     )
-    classificationInputTextLines: list[str] = Field(
+    reconstructedFactTextLines: list[str] = Field(
         default_factory=list,
-        alias="classification_input_text_lines",
+        alias="reconstructed_fact_texts",
     )
-    unresolvedInputFacts: list[dict[str, Any]] = Field(
+    unresolvedProductFacts: list[JsonObject] = Field(
         default_factory=list,
-        alias="unresolved_input_facts",
+        alias="unresolved_product_facts",
     )
-    inputFactConflicts: list[str] = Field(
+    productFactConflicts: list[str] = Field(
         default_factory=list,
-        alias="input_fact_conflicts",
+        alias="product_fact_conflicts",
     )
     evidenceSourceLabels: dict[str, str] = Field(
         default_factory=dict,
@@ -121,7 +123,7 @@ class CandidateCodeView(ApiContractModel):
     hs6: str | None = None
     cn8: str | None = None
     taric10: str | None = None
-    taric10BranchCandidates: list[dict[str, Any]] = Field(
+    taric10BranchCandidates: list[JsonObject] = Field(
         default_factory=list,
         alias="taric10_branch_candidates",
     )
@@ -141,7 +143,7 @@ class CandidateCodeView(ApiContractModel):
     status: str | None = None
     candidateSource: str | None = Field(default=None, alias="candidate_source")
     llmRecommended: bool | None = Field(default=None, alias="llm_recommended")
-    candidateStaticTree: dict[str, Any] | None = Field(
+    candidateStaticTree: JsonObject | None = Field(
         default=None,
         alias="candidate_static_tree",
     )
@@ -158,7 +160,7 @@ class CandidateCodeView(ApiContractModel):
         default_factory=list,
         alias="classification_basis",
     )
-    classificationCitations: list[dict[str, Any]] = Field(
+    classificationCitations: list[JsonObject] = Field(
         default_factory=list,
         alias="classification_citations",
     )
@@ -167,7 +169,7 @@ class CandidateCodeView(ApiContractModel):
 
     @model_validator(mode="before")
     @classmethod
-    def DropLegacyTaricReasonFields(cls, value: Any) -> Any:
+    def DropLegacyTaricReasonFields(cls, value: object) -> object:
         if not isinstance(value, Mapping):
             return value
         cleanedValue = dict(value)
@@ -176,7 +178,7 @@ class CandidateCodeView(ApiContractModel):
         return cleanedValue
 
 
-class CandidateCodeSetView(ApiContractModel):
+class ClassificationCandidateSetView(ApiContractModel):
     model_config = ConfigDict(populate_by_name=True, frozen=True, extra="allow")
 
     candidateSetId: str | None = Field(default=None, alias="candidate_set_id")
@@ -186,13 +188,9 @@ class CandidateCodeSetView(ApiContractModel):
         alias="classification_status",
     )
     failureReason: str | None = Field(default=None, alias="failure_reason")
-    shortlistedCandidates: list[dict[str, Any]] = Field(
+    shortlistedCandidates: list[JsonObject] = Field(
         default_factory=list,
         alias="shortlisted_candidates",
-    )
-    classificationTrace: dict[str, Any] | None = Field(
-        default=None,
-        alias="classification_trace",
     )
     candidates: list[CandidateCodeView] = Field(default_factory=list)
 
@@ -206,7 +204,7 @@ class DocumentPackageView(ApiContractModel):
 
     @model_validator(mode="before")
     @classmethod
-    def RejectRawDocumentPackage(cls, value: Any) -> Any:
+    def RejectRawDocumentPackage(cls, value: object) -> object:
         if isinstance(value, Mapping) and "raw_document_package" in value:
             raise ValueError("raw_document_package is not part of the public API.")
         return value
@@ -232,25 +230,14 @@ class PipelineEventPayload(ApiContractModel):
     status: str = ""
     message: str = ""
     ts: str | None = None
-    partialResult: dict[str, Any] | None = Field(
+    partialResult: JsonObject | None = Field(
         default=None,
         alias="partial_result",
     )
-    collectedInputSummary: dict[str, Any] | None = Field(
+    collectedInputSummary: JsonObject | None = Field(
         default=None,
         alias="collected_input_summary",
     )
-
-
-class AdminRunDebugResponse(ApiContractModel):
-    jobId: str | None = Field(default=None, alias="job_id")
-    jobStatus: RunStatus | None = Field(default=None, alias="job_status")
-    runId: str | None = Field(default=None, alias="run_id")
-    runDir: str | None = Field(default=None, alias="run_dir")
-    events: list[PipelineEventPayload] = Field(default_factory=list)
-    publicResult: dict[str, Any] = Field(default_factory=dict, alias="public_result")
-    blackboard: dict[str, Any] = Field(default_factory=dict)
-    agentRuns: list[dict[str, Any]] = Field(default_factory=list, alias="agent_runs")
 
 
 class RunSnapshotResponse(ApiContractModel):
@@ -260,8 +247,8 @@ class RunSnapshotResponse(ApiContractModel):
     request: RunRequestView
     runId: str | None = Field(default=None, alias="run_id")
     runDir: str | None = Field(default=None, alias="run_dir")
-    auditRef: dict[str, Any] | None = Field(default=None, alias="audit_ref")
-    inputProcessingSummary: dict[str, Any] | None = Field(
+    auditRef: JsonObject | None = Field(default=None, alias="audit_ref")
+    inputProcessingSummary: JsonObject | None = Field(
         default=None,
         alias="input_processing_summary",
     )
@@ -269,7 +256,7 @@ class RunSnapshotResponse(ApiContractModel):
         default=None,
         alias="input_processing_view",
     )
-    candidateCodeSet: CandidateCodeSetView | None = Field(
+    candidateCodeSet: ClassificationCandidateSetView | None = Field(
         default=None,
         alias="candidate_code_set",
     )
@@ -281,14 +268,10 @@ class RunSnapshotResponse(ApiContractModel):
         default_factory=list,
         alias="document_packages",
     )
-    decision: dict[str, Any] | None = None
-    agentResults: list[dict[str, Any]] | None = Field(
+    decision: JsonObject | None = None
+    componentResults: list[JsonObject] | None = Field(
         default=None,
-        alias="agent_results",
-    )
-    userQuestions: list[dict[str, Any]] | None = Field(
-        default=None,
-        alias="user_questions",
+        alias="component_results",
     )
     error: str | None = None
 

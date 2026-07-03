@@ -3,7 +3,7 @@
 import os
 import platform
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Dict, Mapping, Optional
 
 from bussiness_logic.app_config import LlmAppConfig, LoadAppConfig
 from bussiness_logic.bridge.probe import HOSTED_LLM_API_KEY_ENV_NAMES
@@ -377,8 +377,8 @@ def _ReadConfigOrEnvString(
 def _BuildCommonExtraOptions(
     llmConfig: LlmAppConfig,
     envValues: Mapping[str, str],
-) -> Dict[str, Any]:
-    extraOptions: Dict[str, Any] = {}
+) -> Dict[str, object]:
+    extraOptions: Dict[str, object] = {}
     timeoutSeconds = _ReadPositiveIntEnvValue(
         envValues,
         "EU_EXPORT_LLM_TIMEOUT_SECONDS",

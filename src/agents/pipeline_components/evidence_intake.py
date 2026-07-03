@@ -1,37 +1,37 @@
 """
-Evidence_Intake_Agent — stub.
+Evidence_Intake_Component — stub.
 
 Reads raw user input (product name, description, optional OCR text, source
-URLs) and writes a ProductEvidenceState onto the Blackboard.
+URLs) and writes a InputEvidenceState onto the Blackboard.
 
 This stub does *not* call an LLM. A real implementation would parse OCR
 output, extract composition tables, and normalize ingredient terms.
 """
 from __future__ import annotations
 
-from typing import Any
 
-from agents.agent_base import BaseAgent
+from agents.component_base import BasePipelineComponent
 from agents.blackboard import BlackboardStore, now_iso
+from bussiness_logic.utils.json_types import JsonObject
 
 
-class EvidenceIntakeAgent(BaseAgent):
-    agent_name = "Evidence_Intake_Agent"
+class EvidenceIntakeComponent(BasePipelineComponent):
+    component_name = "Evidence_Intake_Component"
     stage = "Product_Intake"
     llm_model = None  # deterministic intake; flip to a model when OCR/LLM is wired
 
-    def __init__(self, raw_input: dict[str, Any]):
+    def __init__(self, raw_input: JsonObject):
         super().__init__()
         self.raw_input = raw_input
 
-    def run(self, store: BlackboardStore) -> None:
+    def Run(self, store: BlackboardStore) -> None:
         prod_id = store.next_id("prod")
         obs = {
             "product_name": self.raw_input.get("product_name", ""),
             "description": self.raw_input.get("description", ""),
             "composition": self.raw_input.get("composition", []),
-            "classification_input_product_facts": self.raw_input.get(
-                "classification_input_product_facts",
+            "reconstructed_product_facts": self.raw_input.get(
+                "reconstructed_product_facts",
                 [],
             ),
             "unresolved_product_facts": self.raw_input.get(
@@ -42,8 +42,8 @@ class EvidenceIntakeAgent(BaseAgent):
                 "product_fact_conflicts",
                 [],
             ),
-            "classification_input_fact_texts": self.raw_input.get(
-                "classification_input_fact_texts",
+            "reconstructed_fact_texts": self.raw_input.get(
+                "reconstructed_fact_texts",
                 [],
             ),
             "input_reconstruction": self.raw_input.get("input_reconstruction", {}),
@@ -55,8 +55,8 @@ class EvidenceIntakeAgent(BaseAgent):
         }
 
         # Stub-level inferred facts: a single proposed principal_form when the
-        # name string hints at one. A real agent would do much more.
-        inferred: list[dict] = []
+        # name string hints at one. A production component would do much more.
+        inferred: list[JsonObject] = []
         name = (obs["product_name"] or "").lower()
         for kw, form in [("noodle", "pasta_dry"), ("ramen", "pasta_dry"),
                          ("라면", "pasta_dry"), ("cream", "cosmetic_cream"),
@@ -73,8 +73,8 @@ class EvidenceIntakeAgent(BaseAgent):
                 break
 
         pes = {
-            "object_type": "ProductEvidenceState",
-            "created_by": self.agent_name,
+            "object_type": "InputEvidenceState",
+            "created_by": self.component_name,
             "created_at": now_iso(),
             "product_id": prod_id,
             "observed_facts": obs,
@@ -85,5 +85,5 @@ class EvidenceIntakeAgent(BaseAgent):
         }
         pes["unknowns"] = [u for u in pes["unknowns"] if u]
         store.put("product_evidence_state", pes)
-        self.wrote(prod_id)
-        self.reason(f"Created ProductEvidenceState {prod_id} from raw input.")
+        self.WriteBlackBoard(prod_id)
+        self.reason(f"Created InputEvidenceState {prod_id} from raw input.")

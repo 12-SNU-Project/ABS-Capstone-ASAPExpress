@@ -1,6 +1,6 @@
 """KurlyMarket product page collection via Playwright."""
 
-from typing import Any, List, Optional, Protocol
+from typing import List, Optional, Protocol
 from urllib.parse import urljoin, urlparse
 
 from bussiness_logic.product.web_parser.kurly_market_schema import (
@@ -8,6 +8,36 @@ from bussiness_logic.product.web_parser.kurly_market_schema import (
     KurlyProductPage,
     ProductSummaryEvidence,
     RenderedPageEvidence,
+)
+from bussiness_logic.utils import NormalizeWhiteSpace
+
+
+CLASSIFICATION_NOTICE_FIELD_MARKERS = (
+    "제품명",
+    "품명",
+    "식품유형",
+    "식품의유형",
+    "원재료",
+    "원료",
+    "전성분",
+    "성분",
+    "함량",
+    "주성분",
+    "구성품",
+    "구성",
+)
+CLASSIFICATION_NOTICE_EXCLUDED_FIELD_MARKERS = (
+    "알레르기",
+    "주의",
+    "소비기한",
+    "유통기한",
+    "품질유지기한",
+    "포장",
+    "판매단위",
+    "중량",
+    "용량",
+    "내용량",
+    "원산지",
 )
 
 
@@ -179,6 +209,10 @@ class KurlyPageCollector:
             parsedProductPage,
             renderedPageEvidence.productSummaryEvidence,
         )
+        parsedProductPage = self._ApplyClassificationOcrNeed(
+            parsedProductPage,
+            renderedPageEvidence.productDetailImageUrls,
+        )
         ocrCandidateImageUrls = self._BuildOcrCandidateImageUrls(
             parsedProductPage,
             renderedPageEvidence.productDetailImageUrls,
@@ -206,13 +240,13 @@ class KurlyPageCollector:
         return KurlyPageAdapter()
 
 
-    def _BlockUnnecessaryResource(self, route: Any) -> None:
+    def _BlockUnnecessaryResource(self, route: object) -> None:
         if route.request.resource_type in ("media", "font"):
             route.abort()
             return
         route.continue_()
 
-    def _ScrollUntilProductNoticeLoaded(self, page: Any) -> None:
+    def _ScrollUntilProductNoticeLoaded(self, page: object) -> None:
         prepareRenderedPage = getattr(self._parser, "PrepareRenderedPage", None)
         if callable(prepareRenderedPage):
             if prepareRenderedPage(
@@ -241,7 +275,7 @@ class KurlyPageCollector:
             if self._scrollWaitMilliseconds > 0:
                 page.wait_for_timeout(self._scrollWaitMilliseconds)
 
-    def _ReadVisibleText(self, page: Any) -> str:
+    def _ReadVisibleText(self, page: object) -> str:
         try:
             value = page.locator("body").inner_text(
                 timeout=self._timeoutMilliseconds,
@@ -253,7 +287,7 @@ class KurlyPageCollector:
             return ""
         return value
 
-    def _ReadProductSummaryEvidence(self, page: Any) -> ProductSummaryEvidence:
+    def _ReadProductSummaryEvidence(self, page: object) -> ProductSummaryEvidence:
         readProductSummaryEvidence = getattr(
             self._parser,
             "ReadProductSummaryEvidence",
@@ -384,7 +418,54 @@ class KurlyPageCollector:
             return parsedProductPage
         return parsedProductPage.model_copy(update=updates)
 
-    def _ReadProductNoticeText(self, page: Any) -> str:
+    @staticmethod
+    def _ApplyClassificationOcrNeed(
+        parsedProductPage: KurlyProductPage,
+        productDetailImageUrls: List[str],
+    ) -> KurlyProductPage:
+        if parsedProductPage.requiresOcrFallback or not productDetailImageUrls:
+            return parsedProductPage
+        if KurlyPageCollector._HasClassificationNoticeEvidence(parsedProductPage):
+            return parsedProductPage
+        return parsedProductPage.model_copy(
+            update={
+                "requiresOcrFallback": True,
+                "warnings": [
+                    *parsedProductPage.warnings,
+                    "ocr_fallback_enabled_for_classification_evidence",
+                ],
+            }
+        )
+
+    @staticmethod
+    def _HasClassificationNoticeEvidence(parsedProductPage: KurlyProductPage) -> bool:
+        fields = [
+            *parsedProductPage.productNoticeFields,
+            *[
+                field
+                for option in parsedProductPage.productNoticeOptions
+                for field in option.fields
+            ],
+        ]
+        for field in fields:
+            fieldName = NormalizeWhiteSpace(field.fieldName).replace(" ", "")
+            if any(
+                marker in fieldName
+                for marker in CLASSIFICATION_NOTICE_EXCLUDED_FIELD_MARKERS
+            ):
+                continue
+            fieldText = "{0}{1}".format(
+                fieldName,
+                NormalizeWhiteSpace(field.fieldValue or "").replace(" ", ""),
+            )
+            if any(
+                marker in fieldText
+                for marker in CLASSIFICATION_NOTICE_FIELD_MARKERS
+            ):
+                return True
+        return False
+
+    def _ReadProductNoticeText(self, page: object) -> str:
         readProductNoticeText = getattr(self._parser, "ReadProductNoticeText", None)
         if callable(readProductNoticeText):
             value = readProductNoticeText(page)
@@ -503,7 +584,7 @@ class KurlyPageCollector:
             return ""
         return value
 
-    def _ReadProductDetailImageUrls(self, page: Any) -> List[str]:
+    def _ReadProductDetailImageUrls(self, page: object) -> List[str]:
         values = page.evaluate(
             """
             () => {

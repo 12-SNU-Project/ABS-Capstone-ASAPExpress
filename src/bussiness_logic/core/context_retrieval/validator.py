@@ -2,7 +2,7 @@
 
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Dict, List, Optional, Sequence, Set
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -317,7 +317,7 @@ class OntologyGraphValidator:
 
         return issues
 
-    def _ReadReferenceIds(self, value: Any) -> List[str]:
+    def _ReadReferenceIds(self, value: object) -> List[str]:
         if isinstance(value, str):
             normalizedValue = NormalizeWhiteSpace(value)
             return [normalizedValue] if normalizedValue else []
@@ -331,16 +331,16 @@ class OntologyGraphValidator:
             return references
         return []
 
-    def _ReadStringList(self, value: Any) -> List[str]:
+    def _ReadStringList(self, value: object) -> List[str]:
         return self._ReadReferenceIds(value)
 
-    def _ReadOptionalString(self, value: Any) -> Optional[str]:
+    def _ReadOptionalString(self, value: object) -> Optional[str]:
         if not isinstance(value, str):
             return None
         normalizedValue = NormalizeWhiteSpace(value)
         return normalizedValue or None
 
-    def _IsMissingValue(self, value: Any) -> bool:
+    def _IsMissingValue(self, value: object) -> bool:
         if value is None:
             return True
         if isinstance(value, str):

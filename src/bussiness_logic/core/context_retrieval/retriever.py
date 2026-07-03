@@ -3,7 +3,7 @@
 import hashlib
 import json
 import re
-from typing import Any, Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Sequence, Tuple
 
 from bussiness_logic.core.context_retrieval.schema import (
     OntologyChunk,
@@ -354,7 +354,7 @@ class OntologyRetriever:
         return sorted(set(terms))
 
     @staticmethod
-    def _ReadAuthorityRank(value: Any) -> float | None:
+    def _ReadAuthorityRank(value: object) -> float | None:
         if isinstance(value, bool):
             return None
         if isinstance(value, (float, int)):

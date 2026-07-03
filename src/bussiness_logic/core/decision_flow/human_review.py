@@ -1,6 +1,6 @@
 """Stage 1 human review package."""
 
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -26,17 +26,17 @@ class Stage1HumanReviewPackage(BaseModel):
 
     packageId: str = Field(alias="package_id")
     selectedSource: str = Field(alias="selected_source")
-    productFacts: Dict[str, Any] = Field(alias="product_facts")
-    recommendationReport: Dict[str, Any] = Field(alias="recommendation_report")
-    evidenceCitations: List[Dict[str, Any]] = Field(
+    productFacts: Dict[str, object] = Field(alias="product_facts")
+    recommendationReport: Dict[str, object] = Field(alias="recommendation_report")
+    evidenceCitations: List[Dict[str, object]] = Field(
         default_factory=list,
         alias="evidence_citations",
     )
-    sourceEvidenceRecords: List[Dict[str, Any]] = Field(
+    sourceEvidenceRecords: List[Dict[str, object]] = Field(
         default_factory=list,
         alias="source_evidence_records",
     )
-    validationIssues: List[Dict[str, Any]] = Field(
+    validationIssues: List[Dict[str, object]] = Field(
         default_factory=list,
         alias="validation_issues",
     )
@@ -164,7 +164,7 @@ class Stage1HumanReviewPackageBuilder:
     def BuildProductFacts(
         self,
         productInput: ProductClassificationInput,
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, object]:
         return {
             **productInput.model_dump(mode="json", by_alias=True),
             "product_notice_text_preview": self.BuildTextPreview(
@@ -175,7 +175,7 @@ class Stage1HumanReviewPackageBuilder:
 
     def BuildCitationPurposeMap(
         self,
-        recommendationData: Mapping[str, Any],
+        recommendationData: Mapping[str, object],
     ) -> Dict[str, str]:
         citationPurposes: Dict[str, str] = {}
         for evidenceRef in recommendationData.get("key_evidence_refs", []):
@@ -252,7 +252,7 @@ class Stage1HumanReviewPackageBuilder:
             evidenceRecord: Stage1EvidenceRecord,
         purpose: str,
         citationOrigin: str,
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, object]:
         return {
             "evidence_id": evidenceRecord.evidenceId,
             "purpose": purpose,
@@ -261,7 +261,7 @@ class Stage1HumanReviewPackageBuilder:
 
     @staticmethod
     def BuildReviewChecklist(
-            recommendationData: Mapping[str, Any],
+            recommendationData: Mapping[str, object],
     ) -> List[str]:
         checklist = [
             "우선 검토 후보의 HS2-HS4-HS6-CN8 계층 검토 코멘트가 상품 정보와 모순되지 않는지 확인한다.",
@@ -279,7 +279,7 @@ class Stage1HumanReviewPackageBuilder:
 
     def BuildLimitations(
         self,
-        recommendationData: Mapping[str, Any],
+        recommendationData: Mapping[str, object],
     ) -> List[str]:
         limitations = [
             limitation

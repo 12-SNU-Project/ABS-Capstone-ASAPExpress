@@ -1,4 +1,4 @@
-from agents._external_classifier import _BuildRoutingBoundary
+from agents.candiate_classfier import _BuildRoutingBoundary
 from agents.tools.pre_classification_router import (
     PreClassificationDomainRouter,
     PreClassificationRouteInput,
@@ -20,7 +20,7 @@ def test_router_builds_noodle_route_dto() -> None:
     assert routeHint.candidateHs2 == ("19",)
     assert routeHint.domainScopes == ("food",)
     assert routeHint.routingBasis.matchedTerms == ("유탕면",)
-    assert routeHint.ToTrace()["candidate_hs2"] == ["19"]
+    assert routeHint.ToTrace()["allowed_hs2"] == ["19"]
 
 
 def test_router_marks_processed_animal_route_without_hard_filtering() -> None:
@@ -101,9 +101,9 @@ def test_router_uses_chapter_index_guardrail_for_prepared_seafood() -> None:
 
 def test_routing_context_builds_hs2_hard_boundary() -> None:
     boundary = _BuildRoutingBoundary({
-        "candidate_hs2": ["19"],
+        "allowed_hs2": ["19"],
         "blocked_hs2": ["03"],
-        "strict_route": True,
+        "enforce_hs2_boundary": True,
     })
 
     assert boundary is not None

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from dash import ALL, MATCH, Dash, Input, Output, State, ctx, no_update
 
+from bussiness_logic.utils.json_types import JsonObject
 from frontend.ui import document_package_renderer
 
 
@@ -28,7 +27,7 @@ def RegisterDocumentPackageCallbacks(app: Dash) -> None:
 def _select_document_panel(
     _panelClicks: list[int | None],
     _closeClicks: list[int | None],
-) -> str | Any:
+) -> object:
     triggered = ctx.triggered_id
     if isinstance(triggered, dict) and triggered.get("type") == "panel-btn":
         return triggered.get("panel") or "overview"
@@ -39,8 +38,8 @@ def _select_document_panel(
 
 def _update_document_scenario(
     selectedValues: list[str] | None,
-    packageData: dict[str, Any] | None,
-) -> Any:
+    packageData: JsonObject | None,
+) -> object:
     if not packageData:
         return no_update
     cx = document_package_renderer.BuildDocumentPackageContext(packageData)

@@ -1,7 +1,7 @@
 """Ontology 문서 로드, 검색, context 포장을 묶는 외부용 facade."""
 
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from bussiness_logic.core.context_retrieval.context import ContextPackager
 from bussiness_logic.core.context_retrieval.loader import OntologyDocumentLoader
@@ -183,14 +183,14 @@ class OntologyContextBuilder:
         return phaseId in activePhases
 
     @staticmethod
-    def _ReadOptionalString(value: Any) -> Optional[str]:
+    def _ReadOptionalString(value: object) -> Optional[str]:
         if not isinstance(value, str):
             return None
         normalizedValue = NormalizeWhiteSpace(value).lower()
         return normalizedValue or None
 
     @staticmethod
-    def _ReadStringList(value: Any) -> List[str]:
+    def _ReadStringList(value: object) -> List[str]:
         if isinstance(value, str):
             normalizedValue = NormalizeWhiteSpace(value)
             return [normalizedValue] if normalizedValue else []

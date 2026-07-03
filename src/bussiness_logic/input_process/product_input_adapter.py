@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Annotated, Any, Dict, List, Mapping, Optional, Sequence, Set, TypeAlias
+from typing import Annotated, List, Mapping, Optional, Sequence, Set, TypeAlias
 
 from pydantic import (
     AliasChoices,
@@ -23,16 +23,17 @@ from bussiness_logic.product.ocr.ocr_normalization import (
     ProductOcrFactNormalizer,
 )
 from bussiness_logic.utils import NormalizeWhiteSpace, NormalizeWhitespaceLines
+from bussiness_logic.utils.json_types import JsonMapping, JsonObject
 
 
-def _NormalizeOptionalText(value: Any) -> Optional[str]:
+def _NormalizeOptionalText(value: object) -> Optional[str]:
     if not isinstance(value, str):
         return None
     normalizedValue = NormalizeWhitespaceLines(value)
     return normalizedValue or None
 
 
-def _NormalizeTextList(value: Any) -> List[str]:
+def _NormalizeTextList(value: object) -> List[str]:
     if not isinstance(value, list):
         return []
     normalizedValues: List[str] = []
@@ -43,7 +44,7 @@ def _NormalizeTextList(value: Any) -> List[str]:
     return normalizedValues
 
 
-def _NormalizeMapping(value: Any) -> Mapping[str, Any]:
+def _NormalizeMapping(value: object) -> JsonMapping:
     if isinstance(value, Mapping):
         return value
     if isinstance(value, BaseModel):
@@ -51,10 +52,10 @@ def _NormalizeMapping(value: Any) -> Mapping[str, Any]:
     return {}
 
 
-def _NormalizeMappingList(value: Any) -> List[Mapping[str, Any]]:
+def _NormalizeMappingList(value: object) -> List[JsonMapping]:
     if not isinstance(value, list):
         return []
-    normalizedItems: List[Mapping[str, Any]] = []
+    normalizedItems: List[JsonMapping] = []
     for item in value:
         if isinstance(item, Mapping):
             normalizedItems.append(item)
@@ -112,7 +113,7 @@ class NoticeOptionData(_AdapterDataModel):
 
     @field_validator("fields", mode="before")
     @classmethod
-    def _NormalizeFields(cls, value: Any) -> List[Mapping[str, Any]]:
+    def _NormalizeFields(cls, value: object) -> List[JsonMapping]:
         return _NormalizeMappingList(value)
 
 
@@ -131,22 +132,22 @@ class InputReconstructionData(_AdapterDataModel):
     normalizedFactTexts: TextList = Field(
         default_factory=list,
         validation_alias=AliasChoices(
-            "classification_input_fact_texts",
+            "reconstructed_fact_texts",
             "classification_fact_texts",
             "normalized_fact_texts",
             "normalizedFactTexts",
         ),
     )
-    structuredProductFacts: List[Mapping[str, Any]] = Field(
+    structuredProductFacts: List[JsonMapping] = Field(
         default_factory=list,
         validation_alias=AliasChoices(
-            "classification_input_product_facts",
+            "reconstructed_product_facts",
             "structured_product_facts",
             "product_facts",
             "structuredProductFacts",
         ),
     )
-    unresolvedProductFacts: List[Mapping[str, Any]] = Field(
+    unresolvedProductFacts: List[JsonMapping] = Field(
         default_factory=list,
         validation_alias=AliasChoices(
             "unresolved_product_facts",
@@ -154,7 +155,7 @@ class InputReconstructionData(_AdapterDataModel):
             "unresolvedProductFacts",
         ),
     )
-    productFactConflicts: List[Any] = Field(
+    productFactConflicts: List[object] = Field(
         default_factory=list,
         validation_alias=AliasChoices(
             "product_fact_conflicts",
@@ -165,12 +166,12 @@ class InputReconstructionData(_AdapterDataModel):
 
     @field_validator("structuredProductFacts", "unresolvedProductFacts", mode="before")
     @classmethod
-    def _NormalizeFactRecords(cls, value: Any) -> List[Mapping[str, Any]]:
+    def _NormalizeFactRecords(cls, value: object) -> List[JsonMapping]:
         return _NormalizeMappingList(value)
 
     @field_validator("productFactConflicts", mode="before")
     @classmethod
-    def _NormalizeConflicts(cls, value: Any) -> List[Any]:
+    def _NormalizeConflicts(cls, value: object) -> List[object]:
         if value is None:
             return []
         if isinstance(value, list):
@@ -231,12 +232,12 @@ class ParsedProductPageData(_AdapterDataModel):
 
     @field_validator("productNoticeFields", mode="before")
     @classmethod
-    def _NormalizeNoticeFields(cls, value: Any) -> List[Mapping[str, Any]]:
+    def _NormalizeNoticeFields(cls, value: object) -> List[JsonMapping]:
         return _NormalizeMappingList(value)
 
     @field_validator("productNoticeOptions", mode="before")
     @classmethod
-    def _NormalizeNoticeOptions(cls, value: Any) -> List[Mapping[str, Any]]:
+    def _NormalizeNoticeOptions(cls, value: object) -> List[JsonMapping]:
         return _NormalizeMappingList(value)
 
 
@@ -276,7 +277,7 @@ class TopLevelParsedPageData(_AdapterDataModel):
         mode="before",
     )
     @classmethod
-    def _NormalizeNestedPayload(cls, value: Any) -> Mapping[str, Any]:
+    def _NormalizeNestedPayload(cls, value: object) -> JsonMapping:
         return _NormalizeMapping(value)
 
 
@@ -292,7 +293,7 @@ class CollectionResultPayload(_AdapterDataModel):
 
     @field_validator("parsedProductPage", mode="before")
     @classmethod
-    def _NormalizeParsedProductPage(cls, value: Any) -> Mapping[str, Any]:
+    def _NormalizeParsedProductPage(cls, value: object) -> JsonMapping:
         return _NormalizeMapping(value)
 
 
@@ -324,7 +325,7 @@ class CollectionResultData(_AdapterDataModel):
         mode="before",
     )
     @classmethod
-    def _NormalizeNestedPayload(cls, value: Any) -> Mapping[str, Any]:
+    def _NormalizeNestedPayload(cls, value: object) -> JsonMapping:
         return _NormalizeMapping(value)
 
 class OcrImageResultData(_AdapterDataModel):
@@ -349,7 +350,7 @@ class FlatSmokeArtifactData(_AdapterDataModel):
 
     @field_validator("ocrImageResults", mode="before")
     @classmethod
-    def _NormalizeOcrImageResults(cls, value: Any) -> List[Mapping[str, Any]]:
+    def _NormalizeOcrImageResults(cls, value: object) -> List[JsonMapping]:
         return _NormalizeMappingList(value)
 
 class ProductInputAdapter:
@@ -363,7 +364,7 @@ class ProductInputAdapter:
 
     def BuildFromData(
         self,
-        productData: Mapping[str, Any],
+        productData: JsonMapping,
     ) -> ProductClassificationInput:
         dataShape = self._DetectDataShape(productData)
         if dataShape == ProductInputDataShape.TopLevelParsedPage:
@@ -376,7 +377,7 @@ class ProductInputAdapter:
 
     def BuildFromObject(
         self,
-        productObject: Any,
+        productObject: object,
     ) -> ProductClassificationInput:
         if isinstance(productObject, Mapping):
             return self.BuildFromData(productObject)
@@ -395,7 +396,7 @@ class ProductInputAdapter:
 
     def _DetectDataShape(
         self,
-        productData: Mapping[str, Any],
+        productData: JsonMapping,
     ) -> ProductInputDataShape:
         if self._HasAnyKey(
             productData,
@@ -412,7 +413,7 @@ class ProductInputAdapter:
 
     def _BuildFromTopLevelParsedPageData(
         self,
-        productData: Mapping[str, Any],
+        productData: JsonMapping,
     ) -> ProductClassificationInput:
         sourceData = TopLevelParsedPageData.model_validate(productData)
         return self._BuildInput(
@@ -425,7 +426,7 @@ class ProductInputAdapter:
 
     def _BuildFromCollectionResultData(
         self,
-        productData: Mapping[str, Any],
+        productData: JsonMapping,
     ) -> ProductClassificationInput:
         sourceData = CollectionResultData.model_validate(productData)
         return self._BuildInput(
@@ -439,7 +440,7 @@ class ProductInputAdapter:
 
     def _BuildFromFlatSmokeArtifactData(
         self,
-        productData: Mapping[str, Any],
+        productData: JsonMapping,
     ) -> ProductClassificationInput:
         sourceData = FlatSmokeArtifactData.model_validate(productData)
         return self._BuildInput(
@@ -476,9 +477,9 @@ class ProductInputAdapter:
         )
         normalizedOcrFactTexts: List[str] = []
         excludedOcrTextPreview = ""
-        structuredProductFacts: List[Dict[str, Any]] = []
-        unresolvedProductFacts: List[Dict[str, Any]] = []
-        productFactConflicts: List[Any] = []
+        structuredProductFacts: List[JsonObject] = []
+        unresolvedProductFacts: List[JsonObject] = []
+        productFactConflicts: List[object] = []
         if inputReconstructionData is not None:
             normalizedOcrFactTexts = inputReconstructionData.normalizedFactTexts
             structuredProductFacts = [
@@ -623,10 +624,10 @@ class ProductInputAdapter:
             )
         )
 
-    def _HasAnyKey(self, productData: Mapping[str, Any], *keys: str) -> bool:
+    def _HasAnyKey(self, productData: JsonMapping, *keys: str) -> bool:
         return any(key in productData for key in keys)
 
-    def _LooksLikeFlatSmokeArtifact(self, productData: Mapping[str, Any]) -> bool:
+    def _LooksLikeFlatSmokeArtifact(self, productData: JsonMapping) -> bool:
         return self._HasAnyKey(
             productData,
             "product_name",

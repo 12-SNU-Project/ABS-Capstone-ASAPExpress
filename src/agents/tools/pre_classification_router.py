@@ -67,7 +67,7 @@ class PreClassificationRouteHint:
 
     def ToTrace(self) -> dict[str, JsonValue]:
         return {
-            "candidate_hs2": list(self.candidateHs2),
+            "allowed_hs2": list(self.candidateHs2),
             "blocked_hs2": list(self.blockedHs2),
             "domain_scopes": list(self.domainScopes),
             "pre_gate_domains": list(self.preGateDomains),

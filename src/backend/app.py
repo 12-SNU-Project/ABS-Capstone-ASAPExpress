@@ -3,25 +3,22 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from pathlib import Path
-from typing import Any
 
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request
 
 from backend.pipeline_api import PipelineApi
 from backend.pipeline_service import PipelineRunService, RunRegistry
 
-PipelineCallable = Callable[..., dict[str, Any]]
+PipelineCallable = Callable[..., dict[str, object]]
 
 
 def CreateBackendApp(
     *,
     pipelineCallable: PipelineCallable | None = None,
-    debugRunsRoot: Path | None = None,
     allowedFrontendOrigins: Sequence[str] = (),
 ) -> Flask:
     if pipelineCallable is None:
-        from agents.document_pipeline import run_document_pipeline
+        from bussiness_logic.document.document_pipeline import run_document_pipeline
 
         pipelineCallable = run_document_pipeline
 
@@ -33,7 +30,6 @@ def CreateBackendApp(
     pipelineApi = PipelineApi(
         registry=registry,
         service=service,
-        debugRunsRoot=debugRunsRoot,
     )
 
     app = Flask(__name__)
@@ -41,7 +37,7 @@ def CreateBackendApp(
     _RegisterCors(app, allowedFrontendOrigins)
 
     @app.get("/api/health")
-    def read_health() -> Any:
+    def read_health() -> Response:
         return jsonify({"status": "ok"})
 
     return app
@@ -51,7 +47,7 @@ def _RegisterCors(app: Flask, allowedOrigins: Sequence[str]) -> None:
     allowed = frozenset(origin.rstrip("/") for origin in allowedOrigins if origin)
 
     @app.after_request
-    def add_cors_headers(response: Any) -> Any:
+    def add_cors_headers(response: Response) -> Response:
         origin = (request.headers.get("Origin") or "").rstrip("/")
         if origin not in allowed:
             return response

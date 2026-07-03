@@ -1,7 +1,7 @@
 """LLM 런타임 계층의 데이터 계약."""
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -87,7 +87,7 @@ class LlmRuntimeConfig(BaseModel):
     modelName: Optional[str] = Field(default=None, alias="model_name")
     executablePath: Optional[str] = Field(default=None, alias="executable_path")
     endpointUrl: Optional[str] = Field(default=None, alias="endpoint_url")
-    extraOptions: Dict[str, Any] = Field(default_factory=dict, alias="extra_options")
+    extraOptions: Dict[str, object] = Field(default_factory=dict, alias="extra_options")
 
 
 class RuntimeDescriptor(BaseModel):
@@ -100,7 +100,7 @@ class RuntimeDescriptor(BaseModel):
     moduleName: Optional[str] = Field(default=None, alias="module_name")
     executablePath: Optional[str] = Field(default=None, alias="executable_path")
     endpointUrl: Optional[str] = Field(default=None, alias="endpoint_url")
-    extraOptions: Dict[str, Any] = Field(default_factory=dict, alias="extra_options")
+    extraOptions: Dict[str, object] = Field(default_factory=dict, alias="extra_options")
 
 
 class LlmRequest(BaseModel):
@@ -146,5 +146,5 @@ class LlmResponse(BaseModel):
         alias="token_usage",
     )
     responseId: Optional[str] = Field(default=None, alias="response_id")
-    rawResponse: Dict[str, Any] = Field(default_factory=dict, alias="raw_response")
+    rawResponse: Dict[str, object] = Field(default_factory=dict, alias="raw_response")
     limitations: List[str] = Field(default_factory=list)

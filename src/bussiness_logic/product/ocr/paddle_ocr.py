@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from math import ceil, floor
 import re
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -131,7 +131,7 @@ class PaddleOcrEngine(ProductOcrEngine):
         useDocOrientationClassify: bool = False,
         useDocUnwarping: bool = False,
         useTextlineOrientation: bool = False,
-        extraOptions: Optional[Dict[str, Any]] = None,
+        extraOptions: Optional[Dict[str, object]] = None,
     ) -> None:
         self._lang = lang
         self._device = device
@@ -139,7 +139,7 @@ class PaddleOcrEngine(ProductOcrEngine):
         self._useDocUnwarping = useDocUnwarping
         self._useTextlineOrientation = useTextlineOrientation
         self._extraOptions = dict(extraOptions or {})
-        self._ocr: Any = None
+        self._ocr: object = None
         self.Initialize()
 
     def Initialize(self) -> None:
@@ -190,7 +190,7 @@ class PaddleOcrEngine(ProductOcrEngine):
             self._ExtractTextRegions(result),
         )
 
-    def _PredictDecodedImage(self, image: Any) -> Any:
+    def _PredictDecodedImage(self, image: object) -> object:
         ocr = self._ReadInitializedOcr()
 
         if hasattr(ocr, "predict"):
@@ -199,16 +199,16 @@ class PaddleOcrEngine(ProductOcrEngine):
             return ocr.ocr(image, cls=self._useTextlineOrientation)
         raise ProductOcrError("PaddleOCR object does not expose predict or ocr.")
 
-    def _EncodeImageBytes(self, image: Any, suffix: str = ".jpg") -> bytes:
+    def _EncodeImageBytes(self, image: object, suffix: str = ".jpg") -> bytes:
         return _EncodeImageBytes(image, suffix)
 
-    def _ReadInitializedOcr(self) -> Any:
+    def _ReadInitializedOcr(self) -> object:
         if self._ocr is None:
             raise ProductOcrError("PaddleOCR engine is not initialized.")
 
         return self._ocr
 
-    def _CreateOcr(self) -> Any:
+    def _CreateOcr(self) -> object:
         try:
             from paddleocr import PaddleOCR
         except ImportError as error:
@@ -218,8 +218,8 @@ class PaddleOcrEngine(ProductOcrEngine):
 
         return self._CreatePaddleOcr(PaddleOCR)
 
-    def _CreatePaddleOcr(self, paddleOcrClass: Any) -> Any:
-        options: Dict[str, Any] = {
+    def _CreatePaddleOcr(self, paddleOcrClass: object) -> object:
+        options: Dict[str, object] = {
             "lang": self._lang,
             "use_doc_orientation_classify": self._useDocOrientationClassify,
             "use_doc_unwarping": self._useDocUnwarping,
@@ -232,22 +232,22 @@ class PaddleOcrEngine(ProductOcrEngine):
         try:
             return paddleOcrClass(**options)
         except TypeError:
-            legacyOptions: Dict[str, Any] = {
+            legacyOptions: Dict[str, object] = {
                 "lang": self._lang,
                 "use_angle_cls": self._useTextlineOrientation,
                 **self._extraOptions,
             }
             return paddleOcrClass(**legacyOptions)
 
-    def _DecodeImageBytes(self, imageBytes: bytes) -> Any:
+    def _DecodeImageBytes(self, imageBytes: bytes) -> object:
         return _DecodeImageBytes(imageBytes)
 
-    def _ExtractResultTexts(self, result: Any) -> List[str]:
+    def _ExtractResultTexts(self, result: object) -> List[str]:
         texts: List[str] = []
         self._CollectTextValues(result, texts)
         return [NormalizeWhiteSpace(text) for text in texts if NormalizeWhiteSpace(text)]
 
-    def _CollectTextValues(self, value: Any, texts: List[str]) -> None:
+    def _CollectTextValues(self, value: object, texts: List[str]) -> None:
         if value is None:
             return
 
@@ -274,7 +274,7 @@ class PaddleOcrEngine(ProductOcrEngine):
 
     def _CollectTextValuesFromDict(
         self,
-        value: Dict[str, Any],
+        value: Dict[str, object],
         texts: List[str],
     ) -> None:
         for key in ["rec_texts", "texts"]:
@@ -292,7 +292,7 @@ class PaddleOcrEngine(ProductOcrEngine):
 
     def _CollectTextValuesFromSequence(
         self,
-        value: Any,
+        value: object,
         texts: List[str],
     ) -> None:
         if self._LooksLegacyOcrLine(value):
@@ -304,7 +304,7 @@ class PaddleOcrEngine(ProductOcrEngine):
         for item in value:
             self._CollectTextValues(item, texts)
 
-    def _LooksLegacyOcrLine(self, value: Any) -> bool:
+    def _LooksLegacyOcrLine(self, value: object) -> bool:
         return (
             isinstance(value, (list, tuple))
             and len(value) >= 2
@@ -313,14 +313,14 @@ class PaddleOcrEngine(ProductOcrEngine):
             and isinstance(value[1][0], str)
         )
 
-    def _ExtractTextRegions(self, result: Any) -> List[ProductOcrTextRegion]:
+    def _ExtractTextRegions(self, result: object) -> List[ProductOcrTextRegion]:
         regions: List[ProductOcrTextRegion] = []
         self._CollectTextRegions(result, regions)
         return list(dict.fromkeys(regions))
 
     def _CollectTextRegions(
         self,
-        value: Any,
+        value: object,
         regions: List[ProductOcrTextRegion],
     ) -> None:
         if value is None:
@@ -358,7 +358,7 @@ class PaddleOcrEngine(ProductOcrEngine):
 
     def _CollectTextRegionsFromMapping(
         self,
-        value: Mapping[str, Any],
+        value: Mapping[str, object],
         regions: List[ProductOcrTextRegion],
     ) -> None:
         textValues = value.get("rec_texts")
@@ -396,8 +396,8 @@ class PaddleOcrVlEngine(ProductOcrEngine):
         device: Optional[str] = None,
         useDocOrientationClassify: bool = False,
         useDocUnwarping: bool = False,
-        vlExtraOptions: Optional[Dict[str, Any]] = None,
-        tableExtraOptions: Optional[Dict[str, Any]] = None,
+        vlExtraOptions: Optional[Dict[str, object]] = None,
+        tableExtraOptions: Optional[Dict[str, object]] = None,
         useImageTiling: bool = True,
         useProjectionTiling: bool = True,
         maxTileHeightPixels: int = 2400,
@@ -405,8 +405,8 @@ class PaddleOcrVlEngine(ProductOcrEngine):
         tileOverlapPixels: int = 240,
         allowHardCutFallback: bool = False,
         tableCropPaddingPixels: int = 24,
-        vlPipeline: Any = None,
-        tablePipeline: Any = None,
+        vlPipeline: object = None,
+        tablePipeline: object = None,
     ) -> None:
         self._device = device
         self._useDocOrientationClassify = useDocOrientationClassify
@@ -537,7 +537,7 @@ class PaddleOcrVlEngine(ProductOcrEngine):
             warnings=list(warnings),
         )
 
-    def _ReadInitializedVlPipeline(self) -> Any:
+    def _ReadInitializedVlPipeline(self) -> object:
         if self._vlPipeline is not None:
             return self._vlPipeline
 
@@ -548,7 +548,7 @@ class PaddleOcrVlEngine(ProductOcrEngine):
                 "paddleocr package with PaddleOCRVL is required."
             ) from error
 
-        options: Dict[str, Any] = {
+        options: Dict[str, object] = {
             "pipeline_version": "v1.6",
             "use_layout_detection": True,
             "use_chart_recognition": False,
@@ -568,10 +568,10 @@ class PaddleOcrVlEngine(ProductOcrEngine):
     def _ExtractVlTile(
         self,
         tile: ProductOcrImageTile,
-    ) -> Tuple[str, List[Mapping[str, Any]]]:
+    ) -> Tuple[str, List[Mapping[str, object]]]:
         output = self._ReadInitializedVlPipeline().predict(tile.image)
         markdownTexts: List[str] = []
-        tableBlocks: List[Mapping[str, Any]] = []
+        tableBlocks: List[Mapping[str, object]] = []
         blockTexts: List[str] = []
         for result in output:
             payload = self._ReadResultPayload(result)
@@ -617,7 +617,7 @@ class PaddleOcrVlEngine(ProductOcrEngine):
     def _BuildTableResultFromVlBlock(
         self,
         tile: ProductOcrImageTile,
-        tableBlock: Mapping[str, Any],
+        tableBlock: Mapping[str, object],
         tableIndex: int,
     ) -> Tuple[
         Optional[ProductOcrTableResult],
@@ -701,8 +701,8 @@ class PaddleOcrVlEngine(ProductOcrEngine):
     def _BuildTableCrop(
         self,
         tile: ProductOcrImageTile,
-        rawBounds: Any,
-    ) -> Optional[Tuple[Any, Tuple[int, int, int, int]]]:
+        rawBounds: object,
+    ) -> Optional[Tuple[object, Tuple[int, int, int, int]]]:
         bounds = self._ReadBox(rawBounds)
         if bounds is None:
             return None
@@ -730,7 +730,7 @@ class PaddleOcrVlEngine(ProductOcrEngine):
         )
         return tile.image[top:bottom, left:right], originalBounds
 
-    def _ReadInitializedTablePipeline(self) -> Any:
+    def _ReadInitializedTablePipeline(self) -> object:
         if self._tablePipeline is not None:
             return self._tablePipeline
         try:
@@ -739,7 +739,7 @@ class PaddleOcrVlEngine(ProductOcrEngine):
             raise ProductOcrError(
                 "paddleocr package with TableRecognitionPipelineV2 is required."
             ) from error
-        options: Dict[str, Any] = {
+        options: Dict[str, object] = {
             "use_doc_orientation_classify": False,
             "use_doc_unwarping": False,
             "use_layout_detection": False,
@@ -751,7 +751,7 @@ class PaddleOcrVlEngine(ProductOcrEngine):
         self._tablePipeline = TableRecognitionPipelineV2(**options)
         return self._tablePipeline
 
-    def _ReadVerifiedTablePayload(self, tableCrop: Any) -> Mapping[str, Any]:
+    def _ReadVerifiedTablePayload(self, tableCrop: object) -> Mapping[str, object]:
         output = self._ReadInitializedTablePipeline().predict(
             tableCrop,
             use_doc_orientation_classify=False,
@@ -770,8 +770,8 @@ class PaddleOcrVlEngine(ProductOcrEngine):
 
     def _ValidateVerifiedTablePayload(
         self,
-        payload: Mapping[str, Any],
-        tableCrop: Any,
+        payload: Mapping[str, object],
+        tableCrop: object,
     ) -> Optional[str]:
         html = payload.get("pred_html")
         if not isinstance(html, str) or not self._LooksLikeTableHtml(html):
@@ -802,7 +802,7 @@ class PaddleOcrVlEngine(ProductOcrEngine):
             return "empty_cell_texts"
         return None
 
-    def _ReadCellTexts(self, payload: Mapping[str, Any]) -> List[str]:
+    def _ReadCellTexts(self, payload: Mapping[str, object]) -> List[str]:
         tableOcrPayload = payload.get("table_ocr_pred")
         if not isinstance(tableOcrPayload, Mapping):
             return []
@@ -815,7 +815,7 @@ class PaddleOcrVlEngine(ProductOcrEngine):
             if isinstance(text, str) and NormalizeWhiteSpace(text)
         ]
 
-    def _ReadResultPayload(self, result: Any) -> Mapping[str, Any]:
+    def _ReadResultPayload(self, result: object) -> Mapping[str, object]:
         jsonPayload = getattr(result, "json", None)
         payload = jsonPayload if isinstance(jsonPayload, Mapping) else result
         if not isinstance(payload, Mapping):
@@ -823,7 +823,7 @@ class PaddleOcrVlEngine(ProductOcrEngine):
         nestedPayload = payload.get("res")
         return nestedPayload if isinstance(nestedPayload, Mapping) else payload
 
-    def _ReadMarkdownText(self, result: Any) -> str:
+    def _ReadMarkdownText(self, result: object) -> str:
         markdown = getattr(result, "markdown", None)
         if isinstance(markdown, str):
             return markdown.strip()
@@ -840,7 +840,7 @@ class PaddleOcrVlEngine(ProductOcrEngine):
             )
         return ""
 
-    def _ReadBox(self, value: Any) -> Optional[Tuple[float, float, float, float]]:
+    def _ReadBox(self, value: object) -> Optional[Tuple[float, float, float, float]]:
         return _ReadBox(value)
 
     def _IsDuplicateTable(
@@ -1111,7 +1111,7 @@ def BuildOcrRegionCrop(
     )
 
 
-def _DecodeImageBytes(imageBytes: bytes) -> Any:
+def _DecodeImageBytes(imageBytes: bytes) -> object:
     try:
         import cv2
         import numpy as np
@@ -1126,7 +1126,7 @@ def _DecodeImageBytes(imageBytes: bytes) -> Any:
     return image
 
 
-def _ReadBox(value: Any) -> Optional[Tuple[float, float, float, float]]:
+def _ReadBox(value: object) -> Optional[Tuple[float, float, float, float]]:
     try:
         import numpy as np
 
@@ -1145,7 +1145,7 @@ def _ReadBox(value: Any) -> Optional[Tuple[float, float, float, float]]:
     )
 
 
-def _EncodeImageBytes(image: Any, suffix: str = ".jpg") -> bytes:
+def _EncodeImageBytes(image: object, suffix: str = ".jpg") -> bytes:
     try:
         import cv2
     except ImportError as error:

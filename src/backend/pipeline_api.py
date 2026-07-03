@@ -5,24 +5,20 @@ from __future__ import annotations
 import time
 import uuid
 from collections import defaultdict, deque
-from collections.abc import Mapping
 from math import ceil
-from pathlib import Path
 from threading import Lock
-from typing import Any
 
-from flask import Response, jsonify, request as flask_request
+from flask import Flask, Response, jsonify, request as flask_request
 from flask.typing import ResponseReturnValue
 from pydantic import ValidationError
 
 from backend.api_contract import (
-    AdminRunDebugResponse,
     ApiErrorResponse,
     RunCreateAcceptedResponse,
     RunCreateRequestPayload,
 )
 from backend.pipeline_service import PipelineRunRequest, PipelineRunService, RunRegistry
-from backend.run_debug_store import RunDebugStore
+from bussiness_logic.utils.json_types import JsonMapping, JsonObject
 
 
 class PipelineApi:
@@ -34,20 +30,15 @@ class PipelineApi:
         service: PipelineRunService,
         *,
         maxRunCreatesPerMinute: int = 12,
-        debugRunsRoot: Path | None = None,
-        debugStore: RunDebugStore | None = None,
     ) -> None:
         self._registry = registry
         self._service = service
         self._maxRunCreatesPerMinute = max(1, maxRunCreatesPerMinute)
-        self._debugStore = debugStore or (
-            RunDebugStore(debugRunsRoot) if debugRunsRoot is not None else None
-        )
         self._rateLimitWindowSeconds = 60.0
         self._rateLimitLock = Lock()
         self._runCreateTimestamps: defaultdict[str, deque[float]] = defaultdict(deque)
 
-    def RegisterRoutes(self, server: Any) -> None:
+    def RegisterRoutes(self, server: Flask) -> None:
         @server.route("/api/runs", methods=["POST"])
         def create_run() -> ResponseReturnValue:
             isAllowed, retryAfterSeconds = self._AllowRunCreate(
@@ -129,18 +120,6 @@ class PipelineApi:
                 ).ToDict()), 404
             return jsonify(packagePayload)
 
-        @server.route("/api/admin/runs/<run_id>")
-        def read_admin_run_debug(run_id: str) -> ResponseReturnValue:
-            payload = self.ReadAdminRunDebug(run_id)
-            if not payload:
-                return jsonify(ApiErrorResponse(
-                    error="admin_run_not_found",
-                    message="No live or stored debug run exists for the requested run_id.",
-                    field="run_id",
-                    job_id=run_id,
-                ).ToDict()), 404
-            return jsonify(payload)
-
         @server.route("/api/runs/<job_id>/events")
         def stream_run_events(job_id: str) -> Response:
             lastEventId = flask_request.headers.get("Last-Event-ID")
@@ -161,40 +140,17 @@ class PipelineApi:
                 },
             )
 
-    def ReadDocumentPackageCollection(self, jobId: str) -> dict[str, Any]:
+    def ReadDocumentPackageCollection(self, jobId: str) -> JsonObject:
         return self._registry.BuildDocumentPackageCollection(jobId)
 
     def ReadDocumentPackageDetail(
         self,
         jobId: str,
         packageId: str,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         return self._registry.BuildDocumentPackageDetail(jobId, packageId)
 
-    def ReadAdminRunDebug(self, runId: str) -> dict[str, Any]:
-        registryPayload = self._registry.BuildAdminDebugResult(runId)
-        storedRunId = str(registryPayload.get("run_id") or runId)
-        storedPayload = (
-            self._debugStore.ReadRunDebug(
-                storedRunId,
-                runDir=registryPayload.get("run_dir"),
-            )
-            if self._debugStore is not None
-            else {}
-        )
-        if not registryPayload and not storedPayload:
-            return {}
-        payload = {
-            **registryPayload,
-            **{
-                key: value
-                for key, value in storedPayload.items()
-                if value not in ({}, [], None, "")
-            },
-        }
-        return AdminRunDebugResponse.model_validate(payload).ToDict()
-
-    def StartRunFromPayload(self, payload: Mapping[str, Any]) -> tuple[dict[str, Any], int]:
+    def StartRunFromPayload(self, payload: JsonMapping) -> tuple[JsonObject, int]:
         try:
             requestPayload = RunCreateRequestPayload.model_validate(payload)
         except ValidationError:
@@ -246,8 +202,8 @@ class PipelineApi:
 
     def RerunCachedInputReconstruction(
         self,
-        payload: Mapping[str, Any],
-    ) -> tuple[dict[str, Any], int]:
+        payload: JsonMapping,
+    ) -> tuple[JsonObject, int]:
         productIdentifier = str(
             payload.get("url")
             or payload.get("kurly_url")
@@ -261,7 +217,7 @@ class PipelineApi:
                 field="url",
             ).ToDict(), 400
         try:
-            from agents.document_pipeline import rerun_cached_input_reconstruction
+            from bussiness_logic.document.document_pipeline import rerun_cached_input_reconstruction
             from backend.pipeline_projection import InputProcessingViewProjector
 
             facts = rerun_cached_input_reconstruction(productIdentifier)
@@ -320,9 +276,9 @@ class PipelineApi:
         productName: str,
         description: str,
         kurlyUrl: str,
-        extraFacts: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        facts = dict(extraFacts or {})
+        extraFacts: JsonMapping | None = None,
+    ) -> JsonObject:
+        facts: JsonObject = dict(extraFacts or {})
         facts.update({
             "product_name": productName,
             "description": description,
@@ -337,7 +293,7 @@ class PipelineApi:
         self,
         *,
         query: str,
-        facts: Mapping[str, Any],
+        facts: JsonMapping,
     ) -> tuple[str, bool]:
         jobId = f"job_{uuid.uuid4().hex[:10]}"
         runId = self._registry.CreateRun(
