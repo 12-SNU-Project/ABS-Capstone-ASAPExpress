@@ -28,7 +28,7 @@ def LoadBranchRows(stage: str, parentCodes: tuple[str, ...]) -> tuple[Mapping[st
     try:
         from sqlalchemy import bindparam, text
 
-        from agents.tools.db_session_manager import DbSessionManager
+        from db.db_session_manager import DbSessionManager
     except Exception:  # noqa: BLE001
         return ()
     try:

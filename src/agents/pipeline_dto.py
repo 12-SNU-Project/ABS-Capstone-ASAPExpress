@@ -119,7 +119,6 @@ class IdentityHintSet:
     normalizedTariffDescription: str = field(default="", metadata=_desc("관세 분류용 정규 설명"))
     identityTerms: tuple[str, ...] = field(default=(), metadata=_desc("상품 정체성 토큰"))
     compositionTerms: tuple[str, ...] = field(default=(), metadata=_desc("구성 성분 토큰"))
-    processingTerms: tuple[str, ...] = field(default=(), metadata=_desc("가공 관련 토큰"))
     confidence: float = field(default=0.0, metadata=_desc("힌트 신뢰도"))
     conflictReason: str = field(default="", metadata=_desc("힌트 충돌 이유"))
     translatedProductName: str = field(default="", metadata=_desc("영문 번역 상품명"))
@@ -144,7 +143,6 @@ class IdentityHintSet:
             "normalized_tariff_description": self.normalizedTariffDescription,
             "identity_terms": list(self.identityTerms),
             "composition_terms": list(self.compositionTerms),
-            "processing_terms": list(self.processingTerms),
             "confidence": self.confidence,
             "conflict_reason": self.conflictReason,
             "translated_product_name": self.translatedProductName,
@@ -167,7 +165,6 @@ class CompositionFactSet:
     ingredientClasses: tuple[str, ...] = field(default=(), metadata=_desc("성분 계열 목록"))
     ingredientPercentages: tuple[dict[str, JsonValue], ...] = field(default=(), metadata=_desc("성분 함량 정보"))
     compositionTerms: tuple[str, ...] = field(default=(), metadata=_desc("성분/함량 분류 토큰"))
-    processingTerms: tuple[str, ...] = field(default=(), metadata=_desc("가공 조건 토큰"))
     compositionBasis: str = field(default="label", metadata=_desc("성분 정보 출처"))
     containsWrapperOrDough: bool = field(default=False, metadata=_desc("피/도우 포함 여부"))
     containsSauceOrBroth: bool = field(default=False, metadata=_desc("소스/육수 포함 여부"))
@@ -181,7 +178,6 @@ class CompositionFactSet:
             "ingredient_classes": list(self.ingredientClasses),
             "ingredient_percentages": list(self.ingredientPercentages),
             "composition_terms": list(self.compositionTerms),
-            "processing_terms": list(self.processingTerms),
             "composition_basis": self.compositionBasis,
             "contains_wrapper_or_dough": self.containsWrapperOrDough,
             "contains_sauce_or_broth": self.containsSauceOrBroth,

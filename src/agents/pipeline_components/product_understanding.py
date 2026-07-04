@@ -382,7 +382,6 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         if not percentages:
             missing.append("ingredient_percentages")
 
-       
         compositionTerms = ProductUnderstandingComponent._DedupStrings(
             [
                 *ProductUnderstandingComponent._FactTexts(productFacts),
@@ -392,7 +391,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             limit=80,
         )
         return CompositionFactSet(
-            processingState="processed_or_prepared" if processingTerms else "unknown",
+            processingState="unknown",
             principalIngredient=(
                 str(percentages[0].get("term") or "")
                 if percentages
@@ -401,7 +400,6 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             ingredientClasses=(),
             ingredientPercentages=tuple(percentages[:20]),
             compositionTerms=compositionTerms,
-            processingTerms=identity.charp,
             compositionBasis="label" if percentages else ("coi_text" if coiTexts else "label_text_no_percent"),
             containsWrapperOrDough=bool(WRAPPER_RE.search(text)),
             containsSauceOrBroth=bool(SAUCE_BROTH_RE.search(text)),

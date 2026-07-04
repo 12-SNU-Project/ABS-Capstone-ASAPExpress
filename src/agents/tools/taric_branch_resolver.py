@@ -105,7 +105,7 @@ def _load_rows_from_db(cn8: str) -> tuple[dict, ...]:
     try:
         from sqlalchemy import text
 
-        from agents.tools.db_session_manager import DbSessionManager
+        from db.db_session_manager import DbSessionManager
 
         manager = DbSessionManager.GetInstance()
         rows = manager.FetchRows(

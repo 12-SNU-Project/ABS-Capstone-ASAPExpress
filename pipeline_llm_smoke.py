@@ -105,7 +105,15 @@ def _run_chain(rawInput: JsonObject, *, productId: str, use_llm: bool,
                 break
 
         bb = store.load()
-        identity = (bb.get("product_understanding") or {}).get("identity_lane") or {}
+        productUnderstanding = bb.get("product_understanding") or {}
+        if not isinstance(productUnderstanding, dict):
+            productUnderstanding = {}
+        identity = productUnderstanding.get("identity_hints") or {}
+        if not isinstance(identity, dict):
+            identity = {}
+        distilledIdentity = productUnderstanding.get("distilled_identity") or {}
+        if not isinstance(distilledIdentity, dict):
+            distilledIdentity = {}
         routing = bb.get("routing_context") or {}
         routerChapters = [
             f"{d.get('chapter')}({d.get('score')})"
@@ -142,6 +150,8 @@ def _run_chain(rawInput: JsonObject, *, productId: str, use_llm: bool,
             "llm_error": identity.get("llm_error"),
             "router_chapters": routerChapters,
             "cn8_candidates": cn8s,
+            "product_form_signal_terms": identity.get("product_form_signal_terms") or [],
+            "processing_signal_terms": identity.get("processing_signal_terms") or [],
             "errors": errors,
         }
     finally:
@@ -187,9 +197,9 @@ def main(arguments: list[str] | None = None) -> int:
             agg["off"][name] += int(rOff[name])
             agg["on"][name] += int(rOn[name])
         print(f"    OFF hs2={','.join(off['router_chapters'][:4])}")
-        print(f"        food_form={off['food_form']!r:>16} recall={_fmt(rOff)} cn8={off['cn8_candidates'][:4]}")
+        print(f"        form_terms={off['product_form_signal_terms']!r:>16} recall={_fmt(rOff)} cn8={off['cn8_candidates'][:4]}")
         print(f"    ON  hs2={','.join(on['router_chapters'][:4])}")
-        print(f"        food_form={on['food_form']!r:>16} recall={_fmt(rOn)} cn8={on['cn8_candidates'][:4]}"
+        print(f"        form_terms={on['product_form_signal_terms']!r:>16} recall={_fmt(rOn)} cn8={on['cn8_candidates'][:4]}"
               f"{'  llm_err=' + str(on['llm_error']) if on.get('llm_error') else ''}")
         if on.get("normalized_tariff_description"):
             print(f"        EN: {on['normalized_tariff_description']}")
