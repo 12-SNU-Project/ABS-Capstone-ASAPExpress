@@ -110,7 +110,11 @@ _QUANT_OPERATOR_TOKENS = frozenset({
 })
 
 _WHETHER_OR_NOT_RE = re.compile(r"whether\s+or\s+not", re.I)
-_NEGATION_RE = re.compile(r"\b(?:not|excluding|without|other\s+than)\s+([a-z]+(?:\s+[a-z]+)?)", re.I)
+# "containing no common wheat flour" negates wheat/flour — CN wording uses
+# bare "no X" as often as not/without (measured: 19021910 matched wheat
+# products it explicitly excludes, costing the sibling "Other" the win).
+_NEGATION_RE = re.compile(
+    r"\b(?:not|no|excluding|without|other\s+than)\s+([a-z]+(?:\s+[a-z]+){0,2})", re.I)
 
 
 def _negated_tokens(label: str) -> set[str]:
