@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from typing import Callable, Mapping, Sequence
@@ -328,6 +329,7 @@ class PreClassificationDomainRouter:
         chapterRows: Sequence[Mapping[str, object]],
     ) -> PreClassificationRouteHint:
         processed = PROCESSED_SIGNAL_PATTERN.search(searchText) is not None
+        bucketScope = self._BucketScopeEnabled()
         scores: dict[str, float] = {}
         matchedByChapter: dict[str, list[str]] = {}
         blockedHs2: list[str] = []
@@ -378,7 +380,6 @@ class PreClassificationDomainRouter:
                 and (keywordMatches or rawMatches)
                 and not self._is_raw_ingredient_case(searchText)
             ):
-                self._AppendUnique(blockedHs2, chapter)
                 self._AppendUnique(
                     blockedReasons,
                     "processed_product_guardrail_redirect",
@@ -390,7 +391,13 @@ class PreClassificationDomainRouter:
                         matchedByChapter.setdefault(redirectChapter, []).append(
                             "prepared_food_redirect_bonus",
                         )
-                continue
+                if not bucketScope:
+                    self._AppendUnique(blockedHs2, chapter)
+                    continue
+                # Bucket mode: the redirect bonus above stays as ranking
+                # pressure, but the raw chapter keeps its own evidence score —
+                # a "processed" page word must not erase the chapter from the
+                # recall boundary (measured: organic pepper lost ch07 to 20).
 
             score = float(
                 len(keywordMatches) * 4
@@ -420,6 +427,24 @@ class PreClassificationDomainRouter:
             for term in matchedByChapter.get(chapter, []):
                 self._AppendUnique(matchedTerms, term)
 
+        # Domain-bucket expansion: every chapter of the routed bucket(s) joins
+        # the allowed boundary AFTER the scored top-5, so staged/beam keep the
+        # keyword ranking but can no longer lose the answer chapter to it.
+        # Scope source is per-row domain_scope_candidates (DB) with the static
+        # chapter->domain fallback — no chapter list is hardcoded here.
+        method = "cn_chapter_index_keyword_guardrail"
+        if bucketScope and domainScopes:
+            scopeSet = set(domainScopes)
+            expanded = list(candidateHs2)
+            for row in chapterRows:
+                chapter = self._ReadChapter(row)
+                if not chapter or chapter in expanded:
+                    continue
+                if scopeSet & set(self._ReadDomainScopes(row, chapter)):
+                    expanded.append(chapter)
+            candidateHs2 = tuple(expanded)
+            method = "cn_chapter_index_bucket_scope"
+
         candidateChapterDetails = tuple(
             {
                 "chapter": chapter,
@@ -434,7 +459,7 @@ class PreClassificationDomainRouter:
             domainScopes=tuple(domainScopes),
             preGateDomains=tuple(preGateDomains),
             routingBasis=PreClassificationRoutingBasis(
-                method="cn_chapter_index_keyword_guardrail",
+                method=method,
                 matchedTerms=tuple(matchedTerms),
                 blockedReason=";".join(blockedReasons),
                 sourceTable="cn_chapter_index",
@@ -520,6 +545,16 @@ class PreClassificationDomainRouter:
     def _AppendUnique(values: list[str], value: str) -> None:
         if value and value not in values:
             values.append(value)
+
+    @staticmethod
+    def _BucketScopeEnabled() -> bool:
+        """WCO domain-bucket scope: allowed_hs2 = every chapter sharing the
+        routed domain bucket (food/cosmetics/... from cn_chapter_index
+        domain_scope_candidates), not just the keyword top-5. The keyword
+        scores stay as RANKING pressure; the bucket is the recall boundary."""
+        return (os.environ.get("ASAP_HS2_BUCKET_SCOPE", "1") or "").strip().lower() not in (
+            "0", "false", "no", "off",
+        )
 
     @staticmethod
     def _is_raw_ingredient_case(searchText: str) -> bool:

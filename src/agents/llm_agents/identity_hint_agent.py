@@ -51,15 +51,47 @@ Pipeline role (ontology summary):
 - Prepared foods must not route only by raw ingredient/allergen mentions.
 - Never output HS/CN/TARIC codes; code selection happens downstream.
 
+ingredient_class / food_form / processing_state: short lowercase English
+word(s) naming the principal ingredient family, the physical/commercial form,
+and the processing state — ONLY when the supplied evidence supports them;
+otherwise an empty string. Use tariff-register wording found in the chapter
+context, not marketing language.
+
 JSON keys (all required):
 translated_product_name, commercial_identity, normalized_tariff_description,
 identity_terms, product_form_terms, domain_hints,
+ingredient_class, food_form, processing_state,
 chapter_hint_terms, chapter_hint_source_terms, chapter_hint_basis,
 chapter_hint_status, confidence, needs_review.
 """.strip()
 
 _adapter_cache: list[object] = []
 _chapter_context_cache: list[str] = []
+_chapter_vocab_cache: list[frozenset[str]] = []
+
+
+def _chapter_vocab() -> frozenset[str]:
+    """Word vocabulary of the cn_chapter_index context (DB text, cached).
+
+    Typed identity fields are accepted only when grounded in this vocabulary —
+    the same DB-grounding idea as chapter_hint_terms, with no enum in the
+    prompt and no hand-written word list.
+    """
+    if not _chapter_vocab_cache:
+        _chapter_vocab_cache.append(
+            frozenset(re.findall(r"[a-z]{3,}", _chapter_context().lower())),
+        )
+    return _chapter_vocab_cache[0]
+
+
+def _grounded_typed_field(value: object) -> str:
+    text = str(value or "").strip().lower()
+    if not text or len(text) > 40:
+        return ""
+    tokens = re.findall(r"[a-z]+", text)
+    if tokens and any(token in _chapter_vocab() for token in tokens):
+        return text
+    return ""
 
 
 def _get_adapter() -> object:
@@ -266,6 +298,9 @@ def _BuildIdentityFacts(
             ),
             limit=20,
         ),
+        "ingredient_class": _grounded_typed_field(parsed.get("ingredient_class")),
+        "food_form": _grounded_typed_field(parsed.get("food_form")),
+        "processing_state": _grounded_typed_field(parsed.get("processing_state")),
         "domain_hints": tuple(
             term
             for term in _dedup_strings(parsed.get("domain_hints"), limit=6)

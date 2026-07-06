@@ -76,6 +76,11 @@ class ClassificationComponent(BasePipelineComponent):
         else:
             routingContext = None
 
+        # Staged narrowing first; legacy Beam/Stage1 is the explicit fallback
+        # (ASAP_USE_STAGED_CLASSIFIER=0 forces it).
+        if self._maybe_classify_staged(store, pes, routingContext, bb):
+            return
+
         result: ExternalClassificationResult = run_external_classifier(
             pes,
             routing_context=routingContext,
@@ -266,6 +271,206 @@ class ClassificationComponent(BasePipelineComponent):
         self.WriteBlackBoard(ccs_id)
         for c in ccs_candidates:
             self.WriteBlackBoard(c["candidate_id"])
+
+    def _maybe_classify_staged(
+        self,
+        store: BlackboardStore,
+        pes: dict,
+        routingContext,
+        bb: dict,
+    ) -> bool:
+        import os
+
+        # Staged narrowing is the DEFAULT classification path (designer
+        # decision, 2026-07-03); the legacy external classifier is the explicit
+        # exception. Set ASAP_USE_STAGED_CLASSIFIER=0 to force the legacy path.
+        gate = (os.environ.get("ASAP_USE_STAGED_CLASSIFIER", "1") or "").strip().lower()
+        if gate in ("0", "false", "no", "off"):
+            self.reason("Staged classifier disabled by env; using legacy external classifier (explicit).")
+            return False
+        try:
+            product_facts = bb.get("product_understanding") or {}
+            if not product_facts:
+                self.reason("Staged classifier: no product_understanding; using external.")
+                return False
+            routing = routingContext if isinstance(routingContext, dict) else (
+                bb.get("routing_context") or {}
+            )
+
+            from agents.tools.staged_classification import StagedClassificationTool
+
+            stagedTool = StagedClassificationTool()
+            staged = stagedTool.classify(
+                product_facts=product_facts,
+                routing_context=routing,
+            )
+            stages = staged.get("stages") or []
+            candidates = staged.get("candidates") or []
+            if not staged.get("ok") or not candidates:
+                self.reason(
+                    "Staged classifier fell back to external "
+                    f"(error={staged.get('error') or 'no_candidates'})."
+                )
+                return False
+
+            # Final validation (existing recommendation seam): closed-choice
+            # veto over recorded recovery/reroute options. A fired override is
+            # one more classify() pass inside the approved scope; a failed
+            # second pass keeps the original result (deterministic guard).
+            validatorRecord: dict | None = None
+            validatorFlag = (os.environ.get("ASAP_STAGED_VALIDATOR", "1") or "").strip().lower()
+            if validatorFlag in ("1", "true", "yes", "on"):
+                verdict = stagedTool.validate_selection(
+                    staged=staged,
+                    product_facts=product_facts,
+                    routing_context=routing,
+                )
+                if verdict.get("fired"):
+                    validatorRecord = dict(verdict)
+                if verdict.get("verdict") == "promote_candidate" and verdict.get("cn8"):
+                    chosen = str(verdict["cn8"])
+                    reordered = sorted(
+                        candidates,
+                        key=lambda c: 0 if str(c.get("cn8") or "") == chosen else 1,
+                    )
+                    if str((reordered[0] or {}).get("cn8") or "") == chosen:
+                        validatorRecord = {
+                            **verdict,
+                            "applied": True,
+                            "original_top_cn8": str((candidates[0] or {}).get("cn8") or ""),
+                        }
+                        candidates = reordered
+                        self.reason(
+                            f"Validator promoted existing candidate {chosen}: "
+                            f"{verdict.get('reason', '')[:120]}"
+                        )
+                scope = verdict.get("code") or verdict.get("chapter") or verdict.get("heading")
+                if verdict.get("verdict") in ("promote_recovery", "reroute", "narrow") and scope:
+                    rerun = stagedTool.classify(
+                        product_facts=product_facts,
+                        routing_context=routing,
+                        start_parents=[str(scope)],
+                    )
+                    if rerun.get("ok") and rerun.get("candidates"):
+                        validatorRecord = {
+                            **verdict,
+                            "applied": True,
+                            "original_top_cn8": str((candidates[0] or {}).get("cn8") or ""),
+                        }
+                        staged = rerun
+                        stages = stages + (rerun.get("stages") or [])
+                        candidates = rerun.get("candidates") or []
+                        self.reason(
+                            f"Validator override applied ({verdict.get('verdict')} -> {scope}): "
+                            f"{verdict.get('reason', '')[:120]}"
+                        )
+                    else:
+                        validatorRecord = {**verdict, "applied": False, "second_pass_failed": True}
+
+            ccs_id = store.next_id("ccs")
+            ccs_candidates: list[dict] = []
+            for candidate in candidates[:5]:
+                cn8 = str(candidate.get("cn8") or "")[:8]
+                if not cn8.isdigit() or len(cn8) != 8:
+                    continue
+                taric_branches = self._resolve_taric_branches(cn8)
+                selected_branch = self._select_taric_branch(taric_branches)
+                taric10 = selected_branch.get("taric10") or ""
+                rank = len(ccs_candidates) + 1
+                ccs_candidates.append({
+                    "candidate_id": store.next_id("cand"),
+                    "hs6": cn8[:6],
+                    "cn8": cn8,
+                    "hs8": cn8,  # 신 external 계열과 키 호환
+                    "taric10": taric10,
+                    "taric10_branch_candidates": taric_branches,
+                    "taric10_resolution_mode": (
+                        "enumerate_all_under_cn8" if taric_branches else "no_taric_branch_found"
+                    ),
+                    "taric10_is_recommended": False,
+                    "taric10_branch_count": len(taric_branches),
+                    "rank": rank,
+                    "status": "proposed",
+                    "candidate_source": "staged_classifier",
+                    "llm_recommended": rank == 1,
+                    "candidate_static_tree": self._staged_static_tree(candidate),
+                    "hard_conditions": "",
+                    "hard_condition_status": "not_applicable",
+                    "hard_condition_evidence": [],
+                    "classification_basis": [self._staged_basis(candidate)],
+                    "supporting_product_facts": [],
+                    "classification_evidence_refs": [],
+                    "similar_ebti_cases": [],
+                    "classification_citations": list(getattr(self, "_ontology_reads", []) or []),
+                    "required_facts": [],
+                    "unknowns": [],
+                })
+
+            if not ccs_candidates:
+                self.reason("Staged classifier produced no valid CN8; using external.")
+                return False
+
+            store.append("candidate_code_sets", {
+                "object_type": "CandidateCodeSet",
+                "created_by": self.component_name,
+                "created_at": now_iso(),
+                "candidate_set_id": ccs_id,
+                "product_id": pes["product_id"],
+                "classification_trace": {
+                    "mode": "staged_narrowing",
+                    "stages": stages,
+                    "validator": validatorRecord,
+                    "backtracking_recommended": bool(
+                        validatorRecord and validatorRecord.get("applied")
+                    ),
+                },
+                "classification_paths": staged.get("paths") or [],
+                "recovery_candidates": staged.get("recovery_candidates") or [],
+                "route_disagreements": staged.get("route_disagreements") or [],
+                "selected_path": (staged.get("paths") or [{}])[0],
+                "candidates": ccs_candidates,
+            })
+            self.WriteBlackBoard(ccs_id)
+            for c in ccs_candidates:
+                self.WriteBlackBoard(c["candidate_id"])
+            self.reason(
+                f"Staged narrowing emitted {len(ccs_candidates)} candidate(s) "
+                f"(hs4->hs6->cn8, {len(stages)} stages)."
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001 — never break; fall back to external
+            self.reason(f"Staged classifier error ({exc!r}); using external.")
+            return False
+
+
+    def _staged_static_tree(self, candidate: dict) -> dict:
+        nodes: list[dict] = []
+        for level, label in (("hs4", "HS4"), ("hs6", "HS6"), ("cn8", "CN8")):
+            code = str(candidate.get(level) or "").strip()
+            if not code:
+                continue
+            nodes.append({
+                "level": level,
+                "label": label,
+                "code": code,
+                "description": str(candidate.get("description") or "") if level == "cn8" else "",
+                "score": float(candidate.get("score") or 0.0) if level == "cn8" else 0.0,
+                "matched_keywords": [],
+            })
+        return {
+            "total_score": float(candidate.get("score") or 0.0),
+            "retrieval_sources": ["staged_narrowing"],
+            "nodes": nodes,
+        }
+
+    def _staged_basis(self, candidate: dict) -> str:
+        desc = str(candidate.get("description") or "")[:160]
+        verdict = str(candidate.get("quantitative_verdict") or "")
+        base = f"Staged narrowing hs4->hs6->cn8 selected CN8={candidate.get('cn8')}: {desc}"
+        if verdict and verdict != "neutral":
+            base += f" [%-gate: {verdict}]"
+        return base[:600]
+
 
     def _build_candidate_static_tree(self, candidate: object) -> JsonObject:
         codeHierarchy = _read_field(candidate, "codeHierarchy", "code_hierarchy", default={}) or {}

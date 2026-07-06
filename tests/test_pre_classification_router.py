@@ -68,7 +68,9 @@ def test_router_uses_chapter_index_rows_for_raw_seafood_hs2() -> None:
     assert routeHint.routingBasis.sourceTable == "cn_chapter_index"
 
 
-def test_router_uses_chapter_index_guardrail_for_prepared_seafood() -> None:
+def test_router_uses_chapter_index_guardrail_for_prepared_seafood(monkeypatch) -> None:
+    # Legacy (pre-bucket) contract: guardrail hard-blocks the raw chapter.
+    monkeypatch.setenv("ASAP_HS2_BUCKET_SCOPE", "0")
     routeInput = PreClassificationRouteInput(
         productName="낙지 볶음 500g",
         shortDescription="stir-fried octopus",
@@ -97,6 +99,50 @@ def test_router_uses_chapter_index_guardrail_for_prepared_seafood() -> None:
     assert routeHint.candidateHs2[0] == "16"
     assert routeHint.blockedHs2 == ("03",)
     assert routeHint.routingBasis.method == "cn_chapter_index_keyword_guardrail"
+
+
+def test_router_bucket_scope_keeps_guardrailed_chapter(monkeypatch) -> None:
+    # Bucket mode (default): the redirect bonus stays as ranking pressure but
+    # the raw chapter keeps its own evidence and the whole domain bucket joins
+    # the allowed boundary — a usage-text "cooked" word must not erase the
+    # answer chapter (organic pepper lost ch07 to ch20 this way).
+    monkeypatch.setenv("ASAP_HS2_BUCKET_SCOPE", "1")
+    routeInput = PreClassificationRouteInput(
+        productName="유기농 고추",
+        shortDescription="organic pepper",
+        factTexts=("frozen vegetables", "요리나 소스에 활용",),
+    )
+    router = PreClassificationDomainRouter(
+        chapterRowsProvider=lambda: (
+            {
+                "chapter": "07",
+                "chapter_keywords": "vegetables; pepper",
+                "raw_scope_signals": "frozen; fresh",
+                "prepared_food_redirect_chapters": "20",
+                "routing_guardrails": "route prepared products before raw ingredient chapter",
+                "domain_scope_candidates": "food",
+            },
+            {
+                "chapter": "20",
+                "chapter_keywords": "preserved vegetables; jam",
+                "domain_scope_candidates": "food",
+            },
+            {
+                "chapter": "33",
+                "chapter_keywords": "perfume; cosmetic",
+                "domain_scope_candidates": "cosmetics",
+            },
+        ),
+    )
+
+    routeHint = router.Route(routeInput)
+
+    assert "07" in routeHint.candidateHs2
+    assert "33" not in routeHint.candidateHs2  # other bucket stays out
+    assert routeHint.blockedHs2 == ()
+    assert routeHint.routingBasis.method == "cn_chapter_index_bucket_scope"
+    scores = {d["chapter"]: d["score"] for d in routeHint.candidateChapterDetails}
+    assert scores.get("07", 0) > 0  # score-through, not just recall
 
 
 def test_routing_context_builds_hs2_hard_boundary() -> None:

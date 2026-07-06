@@ -340,6 +340,14 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             "llmError": "",
         }
         # Prefer non-empty LLM text/lists; keep the regex value otherwise.
+        # Typed identity fields: vocab-grounded upstream; empty means the
+        # evidence did not support a value, so the DTO default stands.
+        if result.get("ingredient_class"):
+            overlay["ingredientClass"] = result["ingredient_class"]
+        if result.get("food_form"):
+            overlay["foodForm"] = result["food_form"]
+        if result.get("processing_state"):
+            overlay["processingState"] = result["processing_state"]
         if result["commercial_identity"]:
             overlay["commercialIdentity"] = result["commercial_identity"]
         if result["normalized_tariff_description"]:
@@ -384,9 +392,14 @@ class ProductUnderstandingComponent(BasePipelineComponent):
 
         compositionTerms = ProductUnderstandingComponent._DedupStrings(
             [
-                *ProductUnderstandingComponent._FactTexts(productFacts),
-                *factTexts,
-                *coiTexts,
+                term
+                for term in (
+                    *ProductUnderstandingComponent._FactTexts(productFacts),
+                    *factTexts,
+                    *coiTexts,
+                )
+                # Allergen notices and admin label lines are not composition.
+                if not ALLERGEN_RE.search(term) and not ADMIN_LABEL_LINE_RE.search(term)
             ],
             limit=80,
         )
