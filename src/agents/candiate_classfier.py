@@ -617,6 +617,13 @@ class ExternalClassificationResult:
     llm_model: str = ""
     citations: list[JsonObject] = field(default_factory=list)
     error: str | None = None
+    search_text_preview: str = ""
+    route_boundary_summary: JsonObject = field(default_factory=dict)
+    route_boundary_applied: bool = False
+    primary_candidate_count: int = 0
+    fallback_attempted: bool = False
+    fallback_candidate_count: int = 0
+    requested_candidate_limit: int = 0
 
 
 @dataclass
@@ -1215,6 +1222,8 @@ def run_external_classifier(
     productInput = pes_to_input(pes, domain_scope=domain_scope)
     candidateLimit = max(1, min(int(top_k_candidates), 5))
     routeBoundary = _BuildRoutingBoundary(routing_context)
+    routeBoundarySummary = _BuildBoundarySummary(routeBoundary, candidateLimit)
+    searchTextPreview = _BuildSearchTextPreview(productInput)
 
     # 2. Retrieval
     classificationConfig = APP_CONFIG.classification
@@ -1241,11 +1250,15 @@ def run_external_classifier(
         candidateLimit=candidateLimit,
         boundary=routeBoundary,
     )
+    primaryCandidateCount = len(candidates)
+    fallbackAttempted = False
+    fallbackCandidateCount = 0
     if (
         not candidates
         and routeBoundary is not None
         and _RoutingFallbackAllowed(routing_context)
     ):
+        fallbackAttempted = True
         candidates = _FindClassifierCandidates(
             productInput=productInput,
             retriever=retriever,
@@ -1253,10 +1266,18 @@ def run_external_classifier(
             candidateLimit=candidateLimit,
             boundary=None,
         )
+        fallbackCandidateCount = len(candidates)
     if not candidates:
         return ExternalClassificationResult(
             candidates=[],
             error="no_candidates_from_retriever",
+            search_text_preview=searchTextPreview,
+            route_boundary_summary=routeBoundarySummary,
+            route_boundary_applied=routeBoundary is not None,
+            primary_candidate_count=primaryCandidateCount,
+            fallback_attempted=fallbackAttempted,
+            fallback_candidate_count=fallbackCandidateCount,
+            requested_candidate_limit=candidateLimit,
         )
 
     try:
@@ -1266,6 +1287,13 @@ def run_external_classifier(
             candidates=list(candidates),
             citations=_BuildCandidateCitations(candidates),
             error=f"llm_adapter_error: {exception}",
+            search_text_preview=searchTextPreview,
+            route_boundary_summary=routeBoundarySummary,
+            route_boundary_applied=routeBoundary is not None,
+            primary_candidate_count=primaryCandidateCount,
+            fallback_attempted=fallbackAttempted,
+            fallback_candidate_count=fallbackCandidateCount,
+            requested_candidate_limit=candidateLimit,
         )
 
     reviewRound = _RunStage1ReviewRound(
@@ -1278,6 +1306,13 @@ def run_external_classifier(
             candidates=reviewRound.candidates,
             citations=_BuildCandidateCitations(reviewRound.candidates),
             error=reviewRound.error,
+            search_text_preview=searchTextPreview,
+            route_boundary_summary=routeBoundarySummary,
+            route_boundary_applied=routeBoundary is not None,
+            primary_candidate_count=primaryCandidateCount,
+            fallback_attempted=fallbackAttempted,
+            fallback_candidate_count=fallbackCandidateCount,
+            requested_candidate_limit=candidateLimit,
         )
 
     traversalHistory = [
@@ -1331,6 +1366,13 @@ def run_external_classifier(
                 llm_model=reviewRound.modelName,
                 citations=_BuildCandidateCitations(reviewRound.candidates),
                 error="backtracking_scope_exhausted",
+                search_text_preview=searchTextPreview,
+                route_boundary_summary=routeBoundarySummary,
+                route_boundary_applied=routeBoundary is not None,
+                primary_candidate_count=primaryCandidateCount,
+                fallback_attempted=fallbackAttempted,
+                fallback_candidate_count=fallbackCandidateCount,
+                requested_candidate_limit=candidateLimit,
             )
         reviewRound = _RunStage1ReviewRound(
             productInput,
@@ -1354,6 +1396,13 @@ def run_external_classifier(
                 citations=_BuildCandidateCitations(reviewRound.candidates),
                 traversal_history=traversalHistory,
                 error=error,
+                search_text_preview=searchTextPreview,
+                route_boundary_summary=routeBoundarySummary,
+                route_boundary_applied=routeBoundary is not None,
+                primary_candidate_count=primaryCandidateCount,
+                fallback_attempted=fallbackAttempted,
+                fallback_candidate_count=fallbackCandidateCount,
+                requested_candidate_limit=candidateLimit,
             )
         traversalHistory.append(
             _BuildTraversalHistoryEntry(
@@ -1383,4 +1432,40 @@ def run_external_classifier(
         traversal_history=traversalHistory,
         llm_model=reviewRound.modelName,
         citations=_BuildCandidateCitations(reviewRound.candidates),
+        search_text_preview=searchTextPreview,
+        route_boundary_summary=routeBoundarySummary,
+        route_boundary_applied=routeBoundary is not None,
+        primary_candidate_count=primaryCandidateCount,
+        fallback_attempted=fallbackAttempted,
+        fallback_candidate_count=fallbackCandidateCount,
+        requested_candidate_limit=candidateLimit,
     )
+
+
+def _BuildSearchTextPreview(productInput: ProductClassificationInput) -> str:
+    chunks: list[str] = [
+        str(productInput.productName),
+        str(productInput.shortDescription),
+        str(getattr(productInput, "ocrText", "") or ""),
+    ]
+    chunks.extend(
+        str(value).strip()
+        for value in getattr(productInput, "normalizedOcrFactTexts", [])
+        if str(value).strip()
+    )
+    normalized = "\n".join(chunks).replace("\r", " ").strip()
+    return normalized[:1600]
+
+
+def _BuildBoundarySummary(
+    routeBoundary: HierarchySearchBoundary | None,
+    candidateLimit: int,
+) -> JsonObject:
+    if routeBoundary is None:
+        return {"strict": False, "candidate_limit": candidateLimit}
+    return {
+        "strict": bool(routeBoundary.allowedCodesByLevel or routeBoundary.excludedCodesByLevel),
+        "candidate_limit": candidateLimit,
+        "allowed_hs2": sorted(routeBoundary.allowedCodesByLevel.get(HIERARCHY_LEVEL_HS2, ())),
+        "excluded_hs2": sorted(routeBoundary.excludedCodesByLevel.get(HIERARCHY_LEVEL_HS2, ())),
+    }

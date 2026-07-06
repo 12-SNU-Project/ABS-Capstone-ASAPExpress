@@ -98,6 +98,7 @@ class ClassificationComponent(BasePipelineComponent):
                 store,
                 pes,
                 why=result.error,
+                debug=self._build_resolver_debug(result),
             )
             return
 
@@ -108,6 +109,7 @@ class ClassificationComponent(BasePipelineComponent):
                 store,
                 pes,
                 why="no_recommendation",
+                debug=self._build_resolver_debug(result),
             )
             return
 
@@ -189,6 +191,7 @@ class ClassificationComponent(BasePipelineComponent):
                 store,
                 pes,
                 why=why,
+                debug=self._build_resolver_debug(result),
             )
             return
 
@@ -505,6 +508,7 @@ class ClassificationComponent(BasePipelineComponent):
         pes: dict,
         *,
         why: str,
+        debug: JsonObject | None = None,
     ) -> None:
         ccs_id = store.next_id("ccs")
         candidateCodeSet = {
@@ -518,9 +522,24 @@ class ClassificationComponent(BasePipelineComponent):
             "shortlisted_candidates": list(self._ontology_reads),
             "candidates": [],
         }
+        if debug:
+            candidateCodeSet["resolver_debug"] = debug
         store.append("candidate_code_sets", candidateCodeSet)
         self.WriteBlackBoard(ccs_id)
         self.reason(
             f"Classification unresolved ({why}); wrote empty ClassificationCandidateSet "
             "instead of a synthetic 99999999 candidate."
         )
+
+    @staticmethod
+    def _build_resolver_debug(result: ExternalClassificationResult) -> JsonObject:
+        return {
+            "error": result.error or "",
+            "search_text_preview": getattr(result, "search_text_preview", ""),
+            "route_boundary_applied": bool(getattr(result, "route_boundary_applied", False)),
+            "route_boundary_summary": dict(getattr(result, "route_boundary_summary", {})),
+            "primary_candidate_count": int(getattr(result, "primary_candidate_count", 0)),
+            "fallback_attempted": bool(getattr(result, "fallback_attempted", False)),
+            "fallback_candidate_count": int(getattr(result, "fallback_candidate_count", 0)),
+            "requested_candidate_limit": int(getattr(result, "requested_candidate_limit", 0)),
+        }

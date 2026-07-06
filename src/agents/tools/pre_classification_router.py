@@ -121,6 +121,17 @@ PROCESSED_SIGNAL_PATTERN = re.compile(
     r"\b(prepared|processed|cooked|fried|seasoned|sauce)\b|가공|조리|볶음|구이|양념|소스",
     re.I,
 )
+RAW_INGREDIENT_SIGNAL_PATTERN = re.compile(
+    r"\b(raw|uncooked|raw fish|raw seafood|raw material|raw ingredient|raw product|"
+    r"frozen|fresh|diced|minced|fillet|필렛|필레|다진|생|생것|국산|냉동|냉장|"
+    r"원물|원료)\b|대구|새우|오징어|꼬막|주꾸미|새우살|연어",
+    re.I,
+)
+COOKED_SIGNAL_PATTERN = re.compile(
+    r"\b(prepared|processed|cooked|fried|seasoned|sauce|tempura|stewed|roasted|grilled|braised|baked|boiled|"
+    r"볶음|조리|구이|양념|소스|튀김|찜|조림)\b|가공",
+    re.I,
+)
 RAW_ANIMAL_CHAPTER_PATTERN = re.compile(
     r"\b(fish|seafood|mollusc|octopus|squid|shrimp)\b|어류|수산물|연체동물|주꾸미|쭈꾸미|오징어|새우",
     re.I,
@@ -365,6 +376,7 @@ class PreClassificationDomainRouter:
                 and redirects
                 and "before raw ingredient chapter" in guardrailText
                 and (keywordMatches or rawMatches)
+                and not self._is_raw_ingredient_case(searchText)
             ):
                 self._AppendUnique(blockedHs2, chapter)
                 self._AppendUnique(
@@ -508,6 +520,14 @@ class PreClassificationDomainRouter:
     def _AppendUnique(values: list[str], value: str) -> None:
         if value and value not in values:
             values.append(value)
+
+    @staticmethod
+    def _is_raw_ingredient_case(searchText: str) -> bool:
+        if RAW_ANIMAL_CHAPTER_PATTERN.search(searchText) is None:
+            return False
+        if COOKED_SIGNAL_PATTERN.search(searchText) is not None:
+            return False
+        return RAW_INGREDIENT_SIGNAL_PATTERN.search(searchText) is not None
 
 
 def BuildPreClassificationRouteInput(

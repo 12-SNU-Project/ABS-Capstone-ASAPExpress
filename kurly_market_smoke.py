@@ -48,6 +48,9 @@ from bussiness_logic.product.web_parser.kurly_global import KurlyGlobalPageParse
 from bussiness_logic.product.web_parser.kurly_market_collector import (  # noqa: E402
     KurlyPageCollector,
 )
+from bussiness_logic.product.web_parser.kurly_market_schema import (  # noqa: E402
+    KurlyCollectionResult,
+)
 from bussiness_logic.product.web_parser.kurly_page_adapter import (  # noqa: E402
     KurlyPageAdapter,
 )
@@ -187,6 +190,15 @@ def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
         "--check-ui-binding",
         action="store_true",
         help="현재 Dash Reconstruction Drawer 바인딩 가능 여부를 함께 검사합니다.",
+    )
+    parser.add_argument(
+        "--skip-web-scroll-when-source-folder-exists",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "상품별 웹스크롤링 소스 폴더가 있으면 수집 단계를 건너뜁니다. "
+            "기본 동작은 건너뛰기입니다."
+        ),
     )
     parser.add_argument(
         "--classify-reconstruction",
@@ -614,6 +626,7 @@ class KurlyMarketSmokeRunner:
         stage1ReviewMode: str = "compact",
         answerCsvPath: Path | None = None,
         writeSummaryArtifact: bool | None = None,
+        skipWebScrollWhenSourceFolderExists: bool = True,
     ) -> None:
         _LoadDotEnvDefaults(PROJECT_ROOT_PATH / ".env")
         appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
@@ -689,8 +702,12 @@ class KurlyMarketSmokeRunner:
         self._maxLoggedOcrCandidateUrls = smokeConfig.max_logged_ocr_candidate_urls
         self._fieldValuePreviewCharacters = smokeConfig.field_value_preview_characters
         self._ocrTextPreviewCharacters = smokeConfig.ocr_text_preview_characters
+        self._skipWebScrollWhenSourceFolderExists = (
+            skipWebScrollWhenSourceFolderExists
+        )
         self._pipelineOcrEngine: object = None
         self._pipelineRawOcrEngine: object = None
+        self._productSourcePipeline: KurlyProductPipeline | None = None
 
     @staticmethod
     def _LoadAnswerRecords(
@@ -790,12 +807,7 @@ class KurlyMarketSmokeRunner:
             self._RunClassificationPreflight(runLogger)
 
         runLogger.info(
-            "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyPipelineResult action=prepare"
-        )
-        productSourcePipeline = self._BuildProductSourcePipeline()
-
-        runLogger.info(
-            "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyPipelineResult action=run url_count={}",
+            "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyPipelineResult action=run url_count={} pipeline_build=on_cache_miss",
             len(self._productUrls),
         )
         results: List[Dict[str]] = []
@@ -811,7 +823,7 @@ class KurlyMarketSmokeRunner:
                 len(self._productUrls),
                 productUrl,
             )
-            resultData = self._RunOne(productSourcePipeline, productUrl)
+            resultData = self._RunOne(productUrl)
             results.append(resultData)
             self._LogOne(resultData)
 
@@ -984,11 +996,56 @@ class KurlyMarketSmokeRunner:
 
     def _RunOne(
         self,
-        productSourcePipeline: KurlyProductPipeline,
         productUrl: str,
     ) -> Dict[str]:
+        runLogger = self._Logger("_RunOne")
         try:
-            pipelineResult = productSourcePipeline.Run(
+            cachedProductFacts = self._LoadCachedSourceFacts(productUrl)
+            if cachedProductFacts is not None:
+                productId = ExtractProductIdFromUrl(productUrl)
+                cachePath = (
+                    self._artifactRootPath / productId / "product-input.json"
+                )
+                runLogger.info(
+                    "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyCollectionResult source_cache_hit={} cache_path={} next_step=rerun_llm_reconstruction",
+                    productUrl,
+                    cachePath,
+                )
+                cachedProductFacts = self._UpdateCachedFactsWithFreshReconstruction(
+                    productUrl,
+                    cachedProductFacts,
+                )
+                self._WriteCachedSourceFacts(productUrl, cachedProductFacts)
+                cachedRunData = self._BuildResultFromCachedSource(productUrl, cachedProductFacts)
+                uiFacts = (
+                    self._BuildDashFactsFromCachedSource(productUrl, cachedProductFacts)
+                    if (self._checkUiBinding or self._classifyReconstruction)
+                    else {}
+                )
+                if self._checkUiBinding:
+                    cachedRunData["ui_binding_smoke"] = BuildUiBindingSmoke(
+                        uiFacts,
+                        sourceLabel=productUrl,
+                    )
+                if self._classifyReconstruction:
+                    cachedRunData["classification_smoke"] = self._RunClassificationSmoke(
+                        productUrl,
+                        uiFacts,
+                    )
+                if self._compareOcr:
+                    cachedRunData["ocr_comparison"] = self._BuildSkippedOcrComparison(
+                        "collection_skipped_from_cached_source",
+                    )
+                return cachedRunData
+
+            runLogger.info(
+                "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyCollectionResult source_cache_hit={} use_web_scroll={}",
+                productUrl,
+                True,
+            )
+            if self._productSourcePipeline is None:
+                self._productSourcePipeline = self._BuildProductSourcePipeline()
+            pipelineResult = self._productSourcePipeline.Run(
                 KurlyPipelineInput(
                     productPageUrl=productUrl,
                     runOcrFallback=self._runOcrFallback,
@@ -1031,6 +1088,594 @@ class KurlyMarketSmokeRunner:
                     "runtime_error": str(error),
                 },
             }
+
+    def _LoadCachedSourceFacts(self, productUrl: str) -> JsonObject | None:
+        if not self._skipWebScrollWhenSourceFolderExists:
+            return None
+        productId = ExtractProductIdFromUrl(productUrl)
+        if not productId:
+            return None
+        sourceDirectory = self._artifactRootPath / productId
+        if not sourceDirectory.is_dir():
+            return None
+        sourceArtifactPath = sourceDirectory / "product-input.json"
+        if not sourceArtifactPath.exists():
+            return None
+        try:
+            cachedFacts = json.loads(sourceArtifactPath.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        return cachedFacts if isinstance(cachedFacts, dict) else None
+
+    def _WriteCachedSourceFacts(
+        self,
+        productUrl: str,
+        cachedFacts: JsonMapping,
+    ) -> None:
+        productId = ExtractProductIdFromUrl(productUrl)
+        if not productId:
+            return
+        sourceArtifactPath = self._artifactRootPath / productId / "product-input.json"
+        sourceArtifactPath.write_text(
+            json.dumps(dict(cachedFacts), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def _UpdateCachedFactsWithFreshReconstruction(
+        self,
+        productUrl: str,
+        cachedFacts: JsonMapping,
+    ) -> JsonObject:
+        reconstructionService = self._BuildInputReconstructionService()
+        if reconstructionService is None:
+            return dict(cachedFacts)
+
+        collectionResult = self._BuildCachedCollectionResult(productUrl, cachedFacts)
+        combinedOcrText = self._BuildCachedCombinedOcrText(cachedFacts)
+        reconstructionResult = reconstructionService.ReconstructFromPipelineParts(
+            collectionResult=collectionResult,
+            ocrImageResults=[],
+            combinedOcrText=combinedOcrText,
+        )
+        reconstructionData = self._BuildInputReconstructionCachePayload(
+            reconstructionResult,
+        )
+        refreshedFacts = dict(cachedFacts)
+        refreshedFacts["input_reconstruction"] = reconstructionData
+        refreshedFacts["reconstructed_product_facts"] = reconstructionData[
+            "reconstructed_product_facts"
+        ]
+        refreshedFacts["reconstructed_tables"] = reconstructionData[
+            "reconstructed_tables"
+        ]
+        refreshedFacts["unresolved_product_facts"] = reconstructionData[
+            "unresolved_product_facts"
+        ]
+        refreshedFacts["product_fact_conflicts"] = reconstructionData[
+            "product_fact_conflicts"
+        ]
+        refreshedFacts["reconstructed_fact_texts"] = reconstructionData[
+            "reconstructed_fact_texts"
+        ]
+        refreshedFacts["warnings"] = list(
+            dict.fromkeys(
+                [
+                    *list(cachedFacts.get("warnings") or []),
+                    *list(reconstructionData.get("warnings") or []),
+                ]
+            )
+        )
+        refreshedFacts["url_intake"] = self._BuildFreshCachedUrlIntake(
+            cachedFacts,
+            reconstructionData,
+            combinedOcrText,
+        )
+        return refreshedFacts
+
+    def _BuildFreshCachedUrlIntake(
+        self,
+        cachedFacts: JsonMapping,
+        reconstructionData: JsonMapping,
+        combinedOcrText: str,
+    ) -> JsonObject:
+        urlIntake = cachedFacts.get("url_intake")
+        if not isinstance(urlIntake, Mapping):
+            urlIntake = {}
+        refreshedUrlIntake = dict(urlIntake)
+        pipelineSteps = urlIntake.get("pipeline_steps")
+        refreshedUrlIntake["pipeline_steps"] = self._BuildFreshCachedPipelineSteps(
+            pipelineSteps if isinstance(pipelineSteps, list) else [],
+            reconstructionData,
+            combinedOcrText,
+        )
+        return refreshedUrlIntake
+
+    @staticmethod
+    def _BuildFreshCachedPipelineSteps(
+        pipelineSteps: list[object],
+        reconstructionData: JsonMapping,
+        combinedOcrText: str,
+    ) -> list[JsonObject]:
+        refreshedSteps: list[JsonObject] = []
+        replacedReconstructionStep = False
+        replacedClassificationFactStep = False
+        for step in pipelineSteps:
+            if not isinstance(step, Mapping):
+                continue
+            stepName = str(step.get("step_name") or "")
+            if stepName == "reconstruct_product_input":
+                refreshedSteps.append(
+                    KurlyMarketSmokeRunner._BuildFreshReconstructionStep(
+                        reconstructionData,
+                    )
+                )
+                replacedReconstructionStep = True
+                continue
+            if stepName == "build_classification_fact_texts":
+                refreshedSteps.append(
+                    KurlyMarketSmokeRunner._BuildFreshClassificationFactStep(
+                        reconstructionData,
+                        combinedOcrText,
+                    )
+                )
+                replacedClassificationFactStep = True
+                continue
+            cachedStep = dict(step)
+            stepMessage = str(cachedStep.get("message") or "")
+            if "source=" not in stepMessage:
+                cachedStep["message"] = (
+                    f"{stepMessage}, source=cached_collection_ocr"
+                    if stepMessage
+                    else "source=cached_collection_ocr"
+                )
+            refreshedSteps.append(cachedStep)
+        if not replacedReconstructionStep:
+            refreshedSteps.append(
+                KurlyMarketSmokeRunner._BuildFreshReconstructionStep(
+                    reconstructionData,
+                )
+            )
+        if not replacedClassificationFactStep:
+            refreshedSteps.append(
+                KurlyMarketSmokeRunner._BuildFreshClassificationFactStep(
+                    reconstructionData,
+                    combinedOcrText,
+                )
+            )
+        return refreshedSteps
+
+    @staticmethod
+    def _BuildFreshReconstructionStep(
+        reconstructionData: JsonMapping,
+    ) -> JsonObject:
+        return {
+            "step_name": "reconstruct_product_input",
+            "succeeded": True,
+            "message": (
+                "fact_count={0}, unresolved_count={1}, conflict_count={2}, "
+                "dictionary_match_count=0, used_llm={3}, fallback_reason={4}, "
+                "source=cached_collection_ocr"
+            ).format(
+                reconstructionData.get("fact_count", 0),
+                reconstructionData.get("unresolved_count", 0),
+                reconstructionData.get("conflict_count", 0),
+                reconstructionData.get("used_llm_reconstruction", False),
+                reconstructionData.get("fallback_reason"),
+            ),
+        }
+
+    @staticmethod
+    def _BuildFreshClassificationFactStep(
+        reconstructionData: JsonMapping,
+        combinedOcrText: str,
+    ) -> JsonObject:
+        rawLineCount = len(
+            [line for line in combinedOcrText.splitlines() if line.strip()]
+        )
+        return {
+            "step_name": "build_classification_fact_texts",
+            "succeeded": True,
+            "message": (
+                "raw_line_count={0}, classification_fact_text_count={1}, "
+                "source=fresh_reconstruction"
+            ).format(
+                rawLineCount,
+                reconstructionData.get("fact_text_count", 0),
+            ),
+        }
+
+    def _BuildCachedCollectionResult(
+        self,
+        productUrl: str,
+        cachedFacts: JsonMapping,
+    ) -> KurlyCollectionResult:
+        sourceProductPage = cachedFacts.get("source_product_page")
+        if not isinstance(sourceProductPage, Mapping):
+            sourceProductPage = {}
+        urlIntake = cachedFacts.get("url_intake")
+        if not isinstance(urlIntake, Mapping):
+            urlIntake = {}
+        collectionSummary = urlIntake.get("collection")
+        if not isinstance(collectionSummary, Mapping):
+            collectionSummary = {}
+        sourcePagePayload = dict(sourceProductPage)
+        if not sourcePagePayload.get("product_page_url"):
+            sourcePagePayload["product_page_url"] = productUrl
+        return KurlyCollectionResult.model_validate(
+            {
+                "product_page_url": productUrl,
+                "parsed_product_page": sourcePagePayload,
+                "visible_text_line_count": int(
+                    collectionSummary.get("visible_text_line_count")
+                    or collectionSummary.get("visible_text_lines")
+                    or 0,
+                ),
+                "product_notice_text_line_count": int(
+                    sourceProductPage.get("product_notice_text_line_count")
+                    or sourceProductPage.get("raw_product_notice_text_length")
+                    or collectionSummary.get("product_notice_text_line_count")
+                    or 0,
+                ),
+                "product_detail_image_urls": [],
+                "ocr_candidate_image_urls": [],
+                "warnings": list(sourceProductPage.get("warnings") or []),
+            }
+        )
+
+    @staticmethod
+    def _BuildCachedCombinedOcrText(cachedFacts: JsonMapping) -> str:
+        ocrTextList = cachedFacts.get("ocr_text")
+        if not isinstance(ocrTextList, list):
+            return ""
+        return "\n".join(
+            text
+            for text in (str(textItem) for textItem in ocrTextList)
+            if text.strip()
+        )
+
+    @staticmethod
+    def _BuildInputReconstructionCachePayload(
+        reconstructionResult: object,
+    ) -> JsonObject:
+        reconstructionData = reconstructionResult.model_dump(
+            mode="json",
+            by_alias=True,
+            include={
+                "productFacts",
+                "reconstructedTables",
+                "unresolvedFacts",
+                "conflicts",
+                "normalizedFactTexts",
+                "warnings",
+                "usedLlmReconstruction",
+                "fallbackReason",
+                "sourceRefLabels",
+                "sourceEvidencePreview",
+            },
+        )
+        productFacts = list(reconstructionData.get("product_facts", []))
+        reconstructedTables = list(
+            reconstructionData.get("reconstructed_tables", [])
+        )
+        unresolvedFacts = list(reconstructionData.get("unresolved_facts", []))
+        normalizedFactTexts = list(
+            reconstructionData.get("normalized_fact_texts", [])
+        )
+        fallbackReason = reconstructionData.get("fallback_reason")
+        usedLlmReconstruction = bool(
+            reconstructionData.get("used_llm_reconstruction")
+        )
+        return {
+            "mode": (
+                "llm_reconstruction"
+                if usedLlmReconstruction
+                else "fallback_reconstruction"
+                if productFacts or normalizedFactTexts
+                else "unavailable"
+            ),
+            "used_llm_reconstruction": usedLlmReconstruction,
+            "fallback_reason": fallbackReason,
+            "error": (
+                fallbackReason
+                if fallbackReason
+                and fallbackReason != "llm_reconstruction_not_used"
+                else None
+            ),
+            "fact_count": len(productFacts),
+            "reconstructed_table_count": len(reconstructedTables),
+            "unresolved_count": len(unresolvedFacts),
+            "conflict_count": len(reconstructionData.get("conflicts", [])),
+            "fact_text_count": len(normalizedFactTexts),
+            "reconstructed_product_facts": productFacts,
+            "reconstructed_tables": reconstructedTables,
+            "unresolved_product_facts": unresolvedFacts,
+            "product_fact_conflicts": list(reconstructionData.get("conflicts", [])),
+            "reconstructed_fact_texts": normalizedFactTexts,
+            "source_ref_labels": dict(reconstructionData.get("source_ref_labels", {})),
+            "source_evidence_preview": list(
+                reconstructionData.get("source_evidence_preview", []),
+            ),
+            "warnings": list(reconstructionData.get("warnings", [])),
+        }
+
+    def _BuildDashFactsFromCachedSource(
+        self,
+        productUrl: str,
+        cachedFacts: JsonMapping,
+    ) -> Dict[str]:
+        from bussiness_logic.document.document_pipeline import build_raw_input_from_ui
+
+        return build_raw_input_from_ui(
+            query=str(cachedFacts.get("product_name") or productUrl),
+            facts={
+                "url": str(cachedFacts.get("url") or cachedFacts.get("source_urls") or productUrl),
+                "source_urls": cachedFacts.get("source_urls") or [productUrl],
+                **dict(cachedFacts),
+            },
+        )
+
+    @staticmethod
+    def _NormalizeNoticeOptionsFromCache(
+        noticeOptions: object,
+    ) -> list[Dict[str]]:
+        normalizedOptions: list[Dict[str]] = []
+        if not isinstance(noticeOptions, list):
+            return normalizedOptions
+        for optionIndex, option in enumerate(noticeOptions):
+            if not isinstance(option, Mapping):
+                continue
+            fields = option.get("fields") if isinstance(option.get("fields"), list) else []
+            normalizedFields: list[Dict[str]] = []
+            for field in fields:
+                if not isinstance(field, Mapping):
+                    continue
+                normalizedFields.append({
+                    "field_name": (
+                        str(field.get("field_name") or "").strip()
+                    ),
+                    "field_value": (
+                        str(field.get("field_value") or "")
+                    ),
+                    "requires_ocr_fallback": bool(
+                        field.get("requires_ocr_fallback"),
+                    ),
+                })
+            normalizedOptions.append({
+                "option_name": option.get("option_name"),
+                "option_index": optionIndex + 1,
+                "fields": normalizedFields,
+            })
+        return normalizedOptions
+
+    def _BuildResultFromCachedSource(
+        self,
+        productUrl: str,
+        cachedFacts: JsonMapping,
+    ) -> Dict[str]:
+        sourceProductPage = cachedFacts.get("source_product_page")
+        if not isinstance(sourceProductPage, Mapping):
+            sourceProductPage = {}
+        urlIntake = cachedFacts.get("url_intake")
+        if not isinstance(urlIntake, Mapping):
+            urlIntake = {}
+        collectionSummary = dict(urlIntake.get("collection") or {})
+        ocrSummary = dict(urlIntake.get("ocr") or {})
+        pipelineSteps = urlIntake.get("pipeline_steps")
+        if not isinstance(pipelineSteps, list):
+            pipelineSteps = []
+
+        cachedNoticeOptions = self._NormalizeNoticeOptionsFromCache(
+            sourceProductPage.get("product_notice_options"),
+        )
+        if not cachedNoticeOptions:
+            cachedNoticeOptions = []
+
+        parsedProductPage: JsonObject = {
+            "product_page_url": (
+                sourceProductPage.get("product_page_url")
+                or productUrl
+            ),
+            "product_domain": sourceProductPage.get("product_domain") or "unknown",
+            "product_name": sourceProductPage.get("product_name") or "",
+            "short_description": sourceProductPage.get("short_description") or "",
+            "brand_name": sourceProductPage.get("brand_name") or "",
+            "package_type": sourceProductPage.get("package_type") or "",
+            "sale_unit": sourceProductPage.get("sale_unit") or "",
+            "product_notice_option_names": (
+                sourceProductPage.get("product_notice_option_names")
+                or [option.get("option_name") for option in cachedNoticeOptions]
+                if isinstance(sourceProductPage.get("product_notice_option_names"), list)
+                else []
+            ),
+            "product_notice_option_count": (
+                sourceProductPage.get("product_notice_option_count")
+                if isinstance(sourceProductPage.get("product_notice_option_count"), int)
+                else len(cachedNoticeOptions)
+            ),
+            "product_notice_field_count": (
+                sourceProductPage.get("product_notice_field_count")
+                if isinstance(sourceProductPage.get("product_notice_field_count"), int)
+                else sum(len(option.get("fields") or []) for option in cachedNoticeOptions)
+            ),
+            "product_notice_options": cachedNoticeOptions,
+            "requires_ocr_fallback": bool(
+                sourceProductPage.get("requires_ocr_fallback"),
+            ),
+            "image_reference_detected": bool(
+                sourceProductPage.get("image_reference_detected"),
+            ),
+            "raw_product_notice_text_length": collectionSummary.get(
+                "product_notice_text_line_count",
+                0,
+            ),
+            "warnings": sourceProductPage.get("warnings") or [],
+        }
+        collectionResult: JsonObject = {
+            "product_notice_text_line_count": (
+                sourceProductPage.get("product_notice_text_line_count")
+                or sourceProductPage.get("raw_product_notice_text_length")
+                or collectionSummary.get("product_notice_text_line_count", 0)
+            ),
+            "product_detail_image_url_count": (
+                sourceProductPage.get("product_detail_image_url_count")
+                or collectionSummary.get("product_detail_image_count", 0)
+            ),
+            "ocr_candidate_image_url_count": (
+                sourceProductPage.get("ocr_candidate_image_url_count")
+                or collectionSummary.get("ocr_candidate_image_url_count", 0)
+                or collectionSummary.get("ocr_candidate_image_count", 0)
+            ),
+            "visibleTextLineCount": collectionSummary.get(
+                "visible_text_line_count",
+                collectionSummary.get("visible_text_lines", 0),
+            ),
+            "warnings": sourceProductPage.get("warnings", []),
+            "product_notice_options": cachedNoticeOptions,
+            "product_notice_field_count": parsedProductPage.get("product_notice_field_count", 0),
+            "product_notice_option_count": parsedProductPage.get("product_notice_option_count", 0),
+            "product_notice_option_names": parsedProductPage.get("product_notice_option_names", []),
+            "requires_ocr_fallback": parsedProductPage.get("requires_ocr_fallback", False),
+            "image_reference_detected": parsedProductPage.get("image_reference_detected", False),
+        }
+
+        reconstructedFacts = cachedFacts.get("input_reconstruction") or {}
+        if not isinstance(reconstructedFacts, Mapping):
+            reconstructedFacts = {}
+
+        cachedOcrText = ""
+        ocrTextList = cachedFacts.get("ocr_text")
+        if isinstance(ocrTextList, list) and ocrTextList:
+            cachedOcrText = "\n".join(
+                text for text in (
+                    str(textItem) for textItem in ocrTextList
+                )
+                if text.strip()
+            )
+        cachedOcrTextLength = max(
+            len(cachedOcrText),
+            int(urlIntake.get("combined_ocr_text_length", 0)),
+        )
+        reconstructedFactTexts = list(
+            reconstructedFacts.get("reconstructed_fact_texts")
+            if isinstance(reconstructedFacts.get("reconstructed_fact_texts"), list)
+            else cachedFacts.get("reconstructed_fact_texts") or []
+        )
+        reconstructedProductFacts = list(
+            reconstructedFacts.get("reconstructed_product_facts")
+            if isinstance(reconstructedFacts.get("reconstructed_product_facts"), list)
+            else cachedFacts.get("reconstructed_product_facts") or []
+        )
+        unresolvedProductFacts = list(
+            reconstructedFacts.get("unresolved_product_facts")
+            if isinstance(reconstructedFacts.get("unresolved_product_facts"), list)
+            else cachedFacts.get("unresolved_product_facts") or []
+        )
+        conflicts = list(
+            reconstructedFacts.get("product_fact_conflicts")
+            if isinstance(reconstructedFacts.get("product_fact_conflicts"), list)
+            else cachedFacts.get("product_fact_conflicts") or []
+        )
+
+        ocrEvidenceData: JsonObject = {
+            "product_detail_image_url_count": collectionResult.get(
+                "product_detail_image_url_count",
+                0,
+            ),
+            "candidate_image_url_count": collectionResult.get(
+                "ocr_candidate_image_url_count",
+                0,
+            ),
+            "candidate_image_urls_preview": [],
+            "image_result_count": ocrSummary.get("image_result_count", 0),
+            "successful_image_count": ocrSummary.get("successful_image_count", 0),
+            "structured_table_image_count": ocrSummary.get(
+                "structured_table_image_count",
+                0,
+            ),
+            "structured_table_count": ocrSummary.get("structured_table_count", 0),
+            "raw_tile_text_count": ocrSummary.get("raw_tile_text_count", 0),
+            "raw_text_length": ocrSummary.get("raw_text_length", 0),
+            "combined_text_length": ocrSummary.get("combined_text_length", cachedOcrTextLength),
+            "image_artifacts": [],
+            "image_count": 0,
+            "combined_ocr_text": cachedOcrText,
+        }
+        inputReconstruction = {
+            "product_facts": reconstructedProductFacts,
+            "reconstructed_tables": list(
+                reconstructedFacts.get("reconstructed_tables")
+                if isinstance(reconstructedFacts.get("reconstructed_tables"), list)
+                else [],
+            ),
+            "unresolved_facts": unresolvedProductFacts,
+            "conflicts": conflicts,
+            "normalized_fact_texts": reconstructedFactTexts,
+            "warnings": reconstructedFacts.get("warnings", cachedFacts.get("warnings", []))
+            if isinstance(reconstructedFacts.get("warnings", []), list)
+            else list(cachedFacts.get("warnings", [])),
+            "used_llm_reconstruction": bool(
+                reconstructedFacts.get("used_llm_reconstruction"),
+            ),
+            "fallback_reason": reconstructedFacts.get("fallback_reason"),
+            "source_ref_labels": reconstructedFacts.get("source_ref_labels", {}),
+            "source_evidence_preview": reconstructedFacts.get("source_evidence_preview", []),
+        }
+
+        noticeData = {
+            "line_count": collectionResult.get("product_notice_text_line_count", 0),
+            "option_count": len(cachedNoticeOptions),
+            "field_count": parsedProductPage.get("product_notice_field_count", 0),
+            "option_names": parsedProductPage.get("product_notice_option_names", []),
+            "options_preview": self._BuildOptionPreview(cachedNoticeOptions),
+            "requires_ocr_fallback": parsedProductPage.get("requires_ocr_fallback", False),
+            "image_reference_detected": parsedProductPage.get("image_reference_detected", False),
+        }
+        return {
+            "product_page_url": productUrl,
+            "status": {
+                "is_parse_ok": bool(
+                    parsedProductPage.get("product_name")
+                    and collectionResult.get("product_notice_text_line_count", 0) > 0
+                    and parsedProductPage.get("product_notice_field_count", 0) > 0
+                ),
+                "is_ocr_fallback_ok": (
+                    not parsedProductPage.get("requires_ocr_fallback", False)
+                    or (self._runOcrFallback and bool(ocrSummary.get("successful_image_count", 0)))
+                ),
+            },
+            "product": {
+                "product_name": parsedProductPage["product_name"],
+                "product_domain": parsedProductPage["product_domain"],
+                "short_description": parsedProductPage["short_description"],
+                "brand_name": parsedProductPage["brand_name"],
+                "package_type": parsedProductPage["package_type"],
+                "sale_unit": parsedProductPage["sale_unit"],
+            },
+            "raw_collection": {
+                "page_collection": collectionResult,
+                "rendered_page_evidence": collectionResult,
+                "parsed_product_page": parsedProductPage,
+                "notice": noticeData,
+                "ocr_evidence": ocrEvidenceData,
+            },
+            "llm_reconstruction": self._BuildInputReconstructionView(inputReconstruction),
+            "pipeline_steps": [
+                step for step in pipelineSteps
+                if isinstance(step, dict)
+            ],
+            "warnings": list(
+                dict.fromkeys(
+                    [
+                        *list(ocrSummary.get("warnings", [])),
+                        *list(sourceProductPage.get("warnings", [])),
+                        *list(urlIntake.get("warnings", [])),
+                        *list(cachedFacts.get("warnings", [])),
+                    ]
+                )
+            ),
+            "errors": [],
+            "raw_collection_ocr_text": cachedOcrText,
+        }
 
     def _BuildDashFactsFromPipelineResult(
         self,
@@ -1201,6 +1846,7 @@ class KurlyMarketSmokeRunner:
             "candidate_code_set": {
                 "candidate_set_id": candidateCodeSet.get("candidate_set_id"),
                 "product_id": candidateCodeSet.get("product_id"),
+                "resolver_debug": candidateCodeSet.get("resolver_debug") or {},
             },
             "decision": {
                 "classification_status": candidateCodeSet.get("classification_status"),
@@ -2678,4 +3324,7 @@ if __name__ == "__main__":
         stage1ReviewMode=cliArguments.stage1_review_mode,
         answerCsvPath=cliArguments.answer_csv,
         writeSummaryArtifact=cliArguments.write_summary_artifact,
+        skipWebScrollWhenSourceFolderExists=(
+            cliArguments.skip_web_scroll_when_source_folder_exists
+        ),
     ).Run()

@@ -24,6 +24,23 @@ WIKI_REQUEST_HEADERS = {
 TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"\s+")
 HANGUL_RE = re.compile(r"[가-힣]")
+FOOD_RELATED_HINT_RE = re.compile(
+    r"\b("
+    r"food|edible|beverage|juice|rice|seafood|fish|shrimp|prawn|octopus|squid|meat|beef|pork|"
+    r"vegetable|fruit|noodle|noodles|pasta|bread|soup|stew|broth|sauce|seasoning|sauce|fried|frozen|"
+    r"raw|cooked|grocery|ingredient|recipe|korean|chicken|lamb|cheese|milk|egg|dairy|meat|tuna|salmon|"
+    r"만두|떡볶|우동|라면|면|국|국물|조림|조리|냉동|냉장|생선|어류|새우|주꾸미|쭈꾸미"
+    r")\b",
+    re.I,
+)
+OFFTOPIC_RE = re.compile(
+    r"\b("
+    r"tv|television|drama|series|film|movie|anime|cartoon|comic|manhwa|manga|music|album|song|singer|"
+    r"musician|artist|band|character|bus|station|village|city|river|mountain|person|actor|actress|writer|"
+    r"place|company|organization|church|university|school|airport|hotel|restaurant|brand|logo|franchise"
+    r")\b",
+    re.I,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +71,7 @@ def LookupEncyclopediaEvidence(
         )
 
     rows: list[WikipediaSearchResult] = []
+    relevanceRejectedCount = 0
     searchError = ""
     qualityStatus = "raw_entries"
     qualityReasons = ("raw_not_routing_input",)
@@ -66,6 +84,14 @@ def LookupEncyclopediaEvidence(
                 limit=display,
                 timeoutSeconds=timeoutSeconds,
             )
+            filteredRows = []
+            for row in rows:
+                isRelevant, _ = _IsWikipediaRowRelevant(normalizedQuery, row)
+                if isRelevant:
+                    filteredRows.append(row)
+                else:
+                    relevanceRejectedCount += 1
+            rows = filteredRows
         except Exception as exc:  # noqa: BLE001 — keep lookup tolerant
             searchError = f"{type(exc).__name__}: {exc}"
             continue
@@ -86,6 +112,16 @@ def LookupEncyclopediaEvidence(
         )
 
     if not rows:
+        if relevanceRejectedCount > 0:
+            return EncyclopediaEvidenceSet(
+                encyclopediaEvidenceId=encyclopediaEvidenceId,
+                productId=productId,
+                query=normalizedQuery,
+                configured=True,
+                qualityStatus="no_relevant_result",
+                qualityReasons=("relevance_guard_failed",),
+                entries=(),
+            )
         return EncyclopediaEvidenceSet(
             encyclopediaEvidenceId=encyclopediaEvidenceId,
             productId=productId,
@@ -112,6 +148,45 @@ def LookupEncyclopediaEvidence(
         qualityStatus=qualityStatus,
         qualityReasons=qualityReasons,
     )
+
+
+def _IsWikipediaRowRelevant(query: str, row: WikipediaSearchResult) -> tuple[bool, str]:
+    queryText = str(query or "").strip()
+    candidateText = f"{row.title} {row.description} {row.snippet}"
+    if not queryText:
+        return False, "empty_query"
+
+    if OFFTOPIC_RE.search(candidateText) and not FOOD_RELATED_HINT_RE.search(candidateText):
+        return False, "offtopic_pattern"
+
+    if _ContainsHangul(queryText):
+        if _HasKoreanOverlap(queryText, candidateText):
+            return True, "query_overlap"
+        if FOOD_RELATED_HINT_RE.search(queryText) and FOOD_RELATED_HINT_RE.search(candidateText):
+            return True, "food_signal_overlap"
+        return False, "food_signal_mismatch"
+    if _HasOverlap(queryText, candidateText):
+        return True, "token_overlap"
+    if FOOD_RELATED_HINT_RE.search(candidateText):
+        return True, "food_signal_fallback"
+    return False, "generic_non_food"
+
+
+def _HasKoreanOverlap(left: str, right: str) -> bool:
+    leftTokens = _Tokenize(left)
+    rightTokens = _Tokenize(right)
+    return bool(leftTokens.intersection(rightTokens))
+
+
+def _HasOverlap(left: str, right: str) -> bool:
+    leftTokens = _Tokenize(left)
+    rightTokens = _Tokenize(right)
+    return bool(leftTokens.intersection(rightTokens))
+
+
+def _Tokenize(text: str) -> set[str]:
+    normalized = re.sub(r"[^0-9a-zA-Z가-힣]", " ", text.lower())
+    return {token for token in normalized.split() if len(token) >= 2}
 
 
 def CleanEncyclopediaQuery(value: str) -> str:
