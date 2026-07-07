@@ -346,10 +346,19 @@ class ClassificationComponent(BasePipelineComponent):
                         )
                 scope = verdict.get("code") or verdict.get("chapter") or verdict.get("heading")
                 if verdict.get("verdict") in ("promote_recovery", "reroute", "narrow") and scope:
+                    scope = str(scope)
+                    # The validator's authority ends at NAMING the region; the
+                    # final line inside it belongs to deterministic sibling
+                    # ranking. A full 8-digit promote would hard-pick a line
+                    # (measured: 19021910 "no common wheat" chosen over the
+                    # correct sibling 19021990), so step back one level and
+                    # let the ranking decide.
+                    if len(scope) == 8:
+                        scope = scope[:6]
                     rerun = stagedTool.classify(
                         product_facts=product_facts,
                         routing_context=routing,
-                        start_parents=[str(scope)],
+                        start_parents=[scope],
                     )
                     if rerun.get("ok") and rerun.get("candidates"):
                         validatorRecord = {

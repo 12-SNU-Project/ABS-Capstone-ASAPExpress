@@ -291,14 +291,12 @@ class StagedClassificationTool:
         # are chapter-generic by construction, and measured to leak into deep
         # sibling groups (190410 took hs6 on cereal/prepared/product against
         # every noodle product). Deep levels rank on identity/composition only.
-        hint_values = {
-            v.strip().lower()
-            for v in _string_values(_dig(product_facts, "identity_hints.chapter_hint_terms"))
-        }
-        facts_deep = {
-            axis: [v for v in vals if v.strip().lower() not in hint_values]
-            for axis, vals in facts.items()
-        }
+        # PATH-based exclusion (not value-based): a typed field may carry the
+        # same word a hint carries ("molluscs") and must survive the cut.
+        facts_deep = self._read_facts(
+            product_facts,
+            exclude_paths=("identity_hints.chapter_hint_terms",),
+        )
         percentages = _dig(product_facts, "composition_facts.ingredient_percentages")
         percentages = percentages if isinstance(percentages, list) else []
         # start_parents: validator-issued second-pass scope (a chapter or a
@@ -330,10 +328,18 @@ class StagedClassificationTool:
         level_score_maps: dict[str, dict[str, float]] = {}
         recovery_candidates: list[dict[str, Any]] = []
         route_disagreements: list[dict[str, Any]] = []
+        # chapter_hint_terms stay ON at hs4 (default): retiring them was
+        # A/B-measured at staged-only hs4 36% -> 24% — the hints carry live
+        # heading evidence ("noodles", "molluscs") alongside the chapter-
+        # generic tails, and the typed fields alone do not yet replace them.
+        # ASAP_STAGED_HINT_AT_HS4=0 re-runs the retirement experiment.
+        hint_at_hs4 = (os.environ.get("ASAP_STAGED_HINT_AT_HS4", "1") or "").strip().lower() in (
+            "1", "true", "yes", "on",
+        )
         for level, prefix_len in LEVELS:
             if parents and prefix_len <= len(parents[0]):
                 continue  # start_parents가 이 레벨보다 깊은 prefix면 건너뜀
-            level_facts = facts if level == "hs4" else facts_deep
+            level_facts = facts if (level == "hs4" and hint_at_hs4) else facts_deep
             branch_rows = self._load_branch_rows(level, parents) if use_branch_index else ()
             if branch_rows:
                 if len(branch_rows) == 1:  # pass-through branch: no decision to make
@@ -342,10 +348,24 @@ class StagedClassificationTool:
                     parent_scores = {only: max(parent_scores.values(), default=0.0)}
                     parents = [only]
                     continue
+                predicates_by_code = {}
+                if (os.environ.get("ASAP_STAGED_PREDICATES", "1") or "").strip().lower() not in (
+                    "0", "false", "no", "off",
+                ):
+                    try:
+                        from agents.tools.branch_predicate_evaluator import LoadBranchPredicates
+
+                        predicates_by_code = LoadBranchPredicates(
+                            level,
+                            tuple(_digits(r.get("code"), limit=prefix_len) for r in branch_rows),
+                        )
+                    except Exception:  # noqa: BLE001 — sidecar 부재 = 계층 off
+                        predicates_by_code = {}
                 ranked = self._branch_rank(
                     branch_rows, product_facts, level_facts, percentages, prefix_len,
                     parent_order=list(parents),
                     parent_scores=parent_scores,
+                    predicates_by_code=predicates_by_code,
                 )
             else:
                 children = self._load_children(parents, prefix_len)
@@ -448,6 +468,13 @@ class StagedClassificationTool:
             ))
             ranked_scores = {r["code"]: float(r["score"]) for r in ranked}
             parent_scores = {code: ranked_scores.get(code, 0.0) for code in selected}
+            # Elimination promotion must PROPAGATE: a residual selected as
+            # this level's top would otherwise re-lose the next-level merge
+            # to a sibling with a higher raw score (measured: jjokgalbi won
+            # hs4 with 1602 but hs6 followed 1601's children again). The
+            # level's chosen top carries top parent authority downward.
+            if selected:
+                parent_scores[selected[0]] = max(parent_scores.values())
             parents = selected
 
         candidates = self._final_candidates(parents, top_k=top_k)
@@ -490,11 +517,17 @@ class StagedClassificationTool:
     _PATH_STRUCTURE_WORDS = frozenset({"contains", "is", "has", "or", "and"})
 
 
-    def _read_facts(self, product_facts: dict[str, Any]) -> dict[str, list[str]]:
+    def _read_facts(
+        self,
+        product_facts: dict[str, Any],
+        exclude_paths: tuple[str, ...] = (),
+    ) -> dict[str, list[str]]:
         out: dict[str, list[str]] = {}
         for axis, paths in CLASSIFICATION_AXIS_MAP.items():
             vals: list[str] = []
             for path in paths:
+                if path in exclude_paths:
+                    continue
                 raw = _dig(product_facts, path)
                 if isinstance(raw, bool):
                     # A boolean answers the QUESTION its field name asks —
@@ -662,6 +695,7 @@ class StagedClassificationTool:
         prefix_len: int,
         parent_order: list[str],
         parent_scores: dict[str, float] | None = None,
+        predicates_by_code: dict[str, list[dict[str, Any]]] | None = None,
     ) -> list[dict[str, Any]]:
         """Hierarchical branch ranking: children compete ONLY with their own
         siblings; families are merged by PARENT CONFIDENCE first.
@@ -694,6 +728,7 @@ class StagedClassificationTool:
         for parent, items in groups.items():
             ranked_group = self._rank_sibling_group(
                 items, product_facts, fallback_tokens, percentages,
+                predicates_by_code=predicates_by_code or {},
             )
             for round_index, entry in enumerate(ranked_group):
                 entry["_parent_score"] = float(scores_by_parent.get(parent, 0.0))
@@ -710,12 +745,38 @@ class StagedClassificationTool:
             entry.pop("_parent_rank", None)
         return merged
 
+    # Fields whose tokens count as PROOF of a specific sibling's criterion.
+    # chapter_hint_terms (routing signal) and composition_terms (page-text
+    # grab bag, OCR-prone) are deliberately excluded: a stray token from
+    # them must not certify a branch (measured: 1601 "product", 1603 "fish"
+    # kept the correct residual 1602 out for a pork-rib product).
+    _PROOF_FIELD_PATHS = (
+        "identity_hints.identity_terms",
+        "identity_hints.normalized_tariff_description",
+        "identity_hints.translated_product_name",
+        "identity_hints.ingredient_class",
+        "identity_hints.food_form",
+        "identity_hints.processing_state",
+        "identity_hints.product_form_terms",
+        "composition_facts.principal_ingredient",
+        "composition_facts.ingredient_classes",
+    )
+
+    def _proof_tokens(self, product_facts: dict[str, Any]) -> set[str]:
+        out: set[str] = set()
+        for path in self._PROOF_FIELD_PATHS:
+            for value in _string_values(_dig(product_facts, path)):
+                if value.strip().lower() not in self._INTERNAL_LABELS:
+                    out |= _tokens(value)
+        return out
+
     def _rank_sibling_group(
         self,
         items: list[dict[str, Any]],
         product_facts: dict[str, Any],
         fallback_tokens: set[str],
         percentages: list[Any],
+        predicates_by_code: dict[str, list[dict[str, Any]]] | None = None,
     ) -> list[dict[str, Any]]:
         """Rank ONE family of siblings by their own decision criteria.
 
@@ -831,6 +892,17 @@ class StagedClassificationTool:
                 score += QUANT_BOOST
             elif verdict["verdict"] == "violates":
                 score -= QUANT_PENALTY  # legal condition contradicted -> effectively out
+            # Compiled predicates (sidecar): three-valued, ADDITIVE over the
+            # lexical score — true boosts, violated hard-blocks, unknown is 0.
+            predicate_results: list[dict[str, str]] = []
+            group_predicates = (predicates_by_code or {}).get(code)
+            if group_predicates:
+                from agents.tools.branch_predicate_evaluator import EvaluatePredicates
+
+                pred_delta, predicate_results = EvaluatePredicates(
+                    group_predicates, fact_tokens, product_facts,
+                )
+                score += pred_delta
             if residual:
                 score = min(score, 0.0)  # residuals never win on wording
 
@@ -846,6 +918,7 @@ class StagedClassificationTool:
                 "form_hits": len(positive & form_tokens) if sibling_count > 1 else 0,
                 "matched": sorted(positive & fact_tokens)[:6],
                 "neg_matched": sorted(negative & fact_tokens)[:4],
+                "predicate_results": predicate_results,
                 "quantitative_verdict": verdict,
             })
 
@@ -858,6 +931,30 @@ class StagedClassificationTool:
         # order is not.
         specific.sort(key=lambda r: (r["score"], r["form_hits"]), reverse=True)
         residuals.sort(key=lambda r: r["score"], reverse=True)
+        # PROOF-based elimination (tariff logic): a specific line only beats
+        # "Other" when its criterion is PROVEN — a predicate answered true,
+        # or its matched wording comes from the product's semantic identity
+        # fields. A stray pool token is a match, not a proof. When no
+        # sibling proves its criterion, the product belongs to the group's
+        # residual by elimination — that is what "Other" means.
+        proof = self._proof_tokens(product_facts)
+        viable_residuals = [r for r in residuals if r["score"] > -QUANT_PENALTY / 2]
+        if viable_residuals and specific:
+            def _proven(r: dict[str, Any]) -> bool:
+                # Only a FIELD-answered predicate (verdict "true") certifies a
+                # branch. true_pool is a broad-pool match — the same floating-
+                # token risk the proof rule exists to guard against — so it is
+                # not proof on its own; it still needs a semantic-field match.
+                if any(
+                    pr.get("verdict") == "true"
+                    for pr in r.get("predicate_results") or []
+                ):
+                    return True
+                return bool(set(r.get("matched") or []) & proof)
+            if not any(_proven(r) for r in specific if r["score"] > 0):
+                return viable_residuals + specific + [
+                    r for r in residuals if r not in viable_residuals
+                ]
         if specific and specific[0]["score"] > 0:
             return specific + residuals
         return residuals + specific if residuals else specific
@@ -1100,6 +1197,7 @@ class StagedClassificationTool:
                     "score": r["score"],
                     "matched_terms": r.get("matched", []),
                     "negative_matched_terms": r.get("neg_matched", []),
+                    "predicate_results": r.get("predicate_results", []),
                     "quantitative_verdict": (r.get("quantitative_verdict") or {}).get("verdict", "neutral"),
                 }
                 for r in ranked[:8]
