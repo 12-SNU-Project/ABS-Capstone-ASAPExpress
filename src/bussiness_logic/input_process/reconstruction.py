@@ -43,13 +43,14 @@ PRODUCT_FACT_RECONSTRUCTION_SYSTEM_PROMPT = """
 You reconstruct structured product input facts from Korean product summary, Korean product notice, structured table OCR (PaddleOCR-VL/PP-Structure), and raw OCR text.
 Return strict JSON only.
 Return exactly one JSON object. Do not append markdown, commentary, or extra braces after the root object.
-Return only these top-level keys: reconstructed_tables, product_facts, unresolved_facts, conflicts, warnings.
-reconstructed_tables preserves structured table OCR contents for UI review. Do not summarize tables away.
+Return only these top-level keys in this order: product_facts, reconstructed_tables, unresolved_facts, conflicts, warnings.
+product_facts is the authoritative compact classification input. Put every explicit classification-critical value here first.
+reconstructed_tables is optional audit/UI preservation. Use [] when table preservation would only duplicate product_facts or make the response long.
+Keep reconstructed_tables concise; do not let reconstructed_tables crowd out or delay product_facts.
 reconstructed_tables must be an array of objects with exactly these keys: table_name, source_refs, rows.
 Each reconstructed_tables row must have exactly these keys:
 field_name, normalized_value, unit, daily_value_percent, source_refs.
 For nutrition tables, return each nutrient as its own row. For label/specification tables, return each label field as its own row.
-product_facts is only the compact classification input facts derived from the same evidence.
 product_facts and unresolved_facts must be arrays of objects with exactly these keys:
 field_name, normalized_value, source_refs, correction_type, validation_status.
 conflicts and warnings must be arrays of strings.
@@ -63,8 +64,8 @@ Do not expose pre-correction OCR text in any output field.
 If evidence is insufficient for a corrected value, put the fact in unresolved_facts.
 If evidence is insufficient or conflicting, use unresolved_facts or conflicts.
 The application will generate normalized_fact_texts after validation.
-Preserve table rows in reconstructed_tables even when they are not selected as product_facts.
 Prefer concise product_facts for classification: product name, food/cosmetic type, physical form, processing state, preparation/use, storage state, ingredients, composition ratios, net content, and origin/manufacture country when explicit.
+If a long ingredient/composition list appears, include it in product_facts first. Do not duplicate the same long value in reconstructed_tables unless the table shape itself adds useful audit value.
 For food products, product_facts must include explicit ingredient/composition rows when they appear in evidence, including component-specific ingredients for multi-component products such as dumpling plus sauce.
 For raw OCR text, treat section headings strictly. Ingredients/composition facts must come from Ingredient/재료/원재료 sections, not from Process/생산 유통 과정, Recommendation/활용법, or Brand/브랜드 sections.
 Do not put nutrient measurements such as sodium, carbohydrates, fat, protein, kcal, or daily value percentages in product_facts; keep nutrition rows only in reconstructed_tables.
@@ -2002,9 +2003,9 @@ class ProductFactReconstructionAgent:
             userPrompt="\n".join(
                 [
                     "아래 evidence만 사용해 상품 입력 fact JSON을 작성하라.",
-                    "출력 key는 reconstructed_tables, product_facts, unresolved_facts, conflicts, warnings만 사용하라.",
-                    "reconstructed_tables에는 structured table/raw OCR에서 복원 가능한 표 행을 가능한 한 보존하라.",
-                    "product_facts에는 분류 후보 생성에 필요한 핵심 상품 fact만 넣어라.",
+                    "출력 key는 product_facts, reconstructed_tables, unresolved_facts, conflicts, warnings만 사용하라.",
+                    "product_facts가 분류 입력의 기준값이다. 핵심 상품 fact는 반드시 product_facts에 먼저 넣어라.",
+                    "reconstructed_tables는 검토용 보조 출력이다. product_facts와 긴 값을 중복하거나 응답을 길게 만들면 []로 둬라.",
                     "product_summary는 제품 정체성/형태/설명 힌트로만 사용하고 원재료/함량은 OCR 또는 표 증거에서만 만들라.",
                     "raw OCR에서 원재료 섹션과 생산/활용/브랜드 섹션이 나뉘면 원재료 fact는 원재료 섹션 안의 텍스트만 사용하라.",
                     "JSON null을 절대 출력하지 말고, 모르는 값은 빈 문자열/빈 배열 또는 항목 생략으로 표현하라.",
