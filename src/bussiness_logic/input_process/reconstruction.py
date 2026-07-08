@@ -1958,7 +1958,19 @@ class ProductFactReconstructionAgent:
                     "dictionaryMatches": [],
                 }
             )
-            return self._validator.Validate(result, evidencePackage)
+            validatedResult = self._validator.Validate(result, evidencePackage)
+            if not validatedResult.productFacts:
+                return validatedResult.model_copy(
+                    update={
+                        "usedLlmReconstruction": False,
+                        "fallbackReason": "llm_reconstruction_no_product_facts",
+                        "warnings": [
+                            *validatedResult.warnings,
+                            "llm_reconstruction_no_product_facts",
+                        ],
+                    }
+                )
+            return validatedResult
         except (ValueError, ValidationError, RuntimeError) as error:
             self._TryWriteArtifact(
                 evidencePackage,
@@ -2015,31 +2027,23 @@ class ProductFactReconstructionAgent:
         strippedText = generatedText.strip()
         if strippedText == "":
             raise ValueError("empty LLM response")
-        try:
-            payload = json.loads(strippedText)
-        except json.JSONDecodeError as jsonError:
-            decoder = json.JSONDecoder()
-            searchIndex = 0
-            payload = None
-            while searchIndex < len(strippedText):
-                startIndex = strippedText.find("{", searchIndex)
-                if startIndex < 0:
-                    raise jsonError
-                try:
-                    parsedValue, objectEndIndex = decoder.raw_decode(
-                        strippedText[startIndex:],
-                    )
-                except json.JSONDecodeError:
-                    searchIndex = startIndex + 1
-                    continue
-                if isinstance(parsedValue, dict):
-                    payload = parsedValue
-                    break
-                searchIndex = startIndex + objectEndIndex
-            if payload is None:
-                raise jsonError
+        payload = json.loads(strippedText)
         if not isinstance(payload, dict):
             raise ValueError("LLM reconstruction response must be a JSON object.")
+        requiredKeys = {
+            "reconstructed_tables",
+            "product_facts",
+            "unresolved_facts",
+            "conflicts",
+            "warnings",
+        }
+        missingKeys = sorted(requiredKeys - set(payload))
+        if missingKeys:
+            raise ValueError(
+                "LLM reconstruction response missing required key(s): {0}".format(
+                    ", ".join(missingKeys),
+                )
+            )
         return payload
 
     def _TryWriteArtifact(

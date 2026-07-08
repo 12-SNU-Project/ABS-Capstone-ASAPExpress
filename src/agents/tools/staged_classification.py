@@ -49,9 +49,7 @@ CLASSIFICATION_AXIS_MAP: dict[str, list[str]] = {
     ],
     "processing_state": [
         "identity_hints.processing_state",
-        "identity_hints.processing_terms",
         "composition_facts.processing_state",
-        "composition_facts.processing_terms",
         "composition_facts.contains_wrapper_or_dough",
         "composition_facts.contains_sauce_or_broth",
     ],
