@@ -7,6 +7,8 @@ from typing import Dict, List
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from pydantic import BaseModel
+
 from bussiness_logic.bridge.probe import (
     DEFAULT_OPENAI_API_KEY_ENV_NAMES,
     DEFAULT_OPENAI_ENDPOINT_URL,
@@ -62,6 +64,52 @@ def _GenerateWithOpenAiRuntime(
     runtimeConfig: LlmRuntimeConfig,
     request: LlmRequest,
 ) -> LlmResponse:
+    if _ShouldUseOpenAiSdkStructuredOutput(runtimeConfig, request):
+        runtimeAttempts: List[str] = []
+        try:
+            return _GenerateWithOpenAiSdkStructuredOutput(
+                runtimeDescriptor,
+                runtimeConfig,
+                request,
+            )
+        except RuntimeGenerationError as error:
+            runtimeAttempts.append(_FormatRuntimeAttempt("openai_sdk_parse", error))
+            try:
+                return _GenerateWithOpenAiSdkToolChoice(
+                    runtimeDescriptor,
+                    runtimeConfig,
+                    request,
+                    runtimeAttempts,
+                )
+            except RuntimeGenerationError as toolError:
+                runtimeAttempts.append(
+                    _FormatRuntimeAttempt("openai_sdk_tool_choice", toolError)
+                )
+                jsonObjectRequest = request.model_copy(
+                    update={"responseFormat": LlmResponseFormat.JSON_OBJECT}
+                )
+                return _GenerateWithOpenAiRuntimeViaHttp(
+                    runtimeDescriptor,
+                    runtimeConfig,
+                    jsonObjectRequest,
+                    runtimePath="openai_http_json_object_fallback",
+                    runtimeAttempts=runtimeAttempts,
+                )
+
+    return _GenerateWithOpenAiRuntimeViaHttp(
+        runtimeDescriptor,
+        runtimeConfig,
+        request,
+    )
+
+
+def _GenerateWithOpenAiRuntimeViaHttp(
+    runtimeDescriptor: RuntimeDescriptor,
+    runtimeConfig: LlmRuntimeConfig,
+    request: LlmRequest,
+    runtimePath: str = "openai_http_chat_completions",
+    runtimeAttempts: List[str] | None = None,
+) -> LlmResponse:
     endpointUrl = _BuildEndpointUrl(
         runtimeDescriptor.endpointUrl or DEFAULT_OPENAI_ENDPOINT_URL,
         _ReadStringOption(
@@ -100,9 +148,103 @@ def _GenerateWithOpenAiRuntime(
         providerFinishReason=_ExtractOpenAiProviderFinishReason(responseData),
         tokenUsage=_ExtractOpenAiTokenUsage(responseData),
         responseId=_ExtractResponseId(responseData),
+        runtimePath=runtimePath,
+        runtimeAttempts=runtimeAttempts or [],
         rawResponse=responseData,
         limitations=[
             "OpenAI API output is draft reasoning and must not be treated as official determination.",
+        ],
+    )
+
+
+def _GenerateWithOpenAiSdkStructuredOutput(
+    runtimeDescriptor: RuntimeDescriptor,
+    runtimeConfig: LlmRuntimeConfig,
+    request: LlmRequest,
+) -> LlmResponse:
+    responseModel = request.responseModel
+    if responseModel is None:
+        raise RuntimeGenerationError(
+            "JSON_SCHEMA requests require responseModel for SDK parse."
+        )
+
+    client = _BuildOpenAiSdkClient(runtimeDescriptor, runtimeConfig)
+    try:
+        response = client.beta.chat.completions.parse(
+            **_BuildOpenAiSdkChatArgs(runtimeConfig, request),
+            response_format=responseModel,
+        )
+    except Exception as error:  # noqa: BLE001 - external SDK boundary
+        raise RuntimeGenerationError(
+            "OpenAI SDK structured output parse failed: {0}".format(error)
+        ) from error
+
+    responseData = _DumpSdkObject(response)
+    return _BuildOpenAiSdkResponse(
+        runtimeConfig,
+        request,
+        response,
+        responseData,
+        _ExtractOpenAiSdkParsedText(response),
+        "openai_sdk_parse",
+        [],
+        [
+            "OpenAI-compatible SDK structured output is draft reasoning and must not be treated as official determination.",
+        ],
+    )
+
+
+def _GenerateWithOpenAiSdkToolChoice(
+    runtimeDescriptor: RuntimeDescriptor,
+    runtimeConfig: LlmRuntimeConfig,
+    request: LlmRequest,
+    runtimeAttempts: List[str] | None = None,
+) -> LlmResponse:
+    responseSchema = _ReadResponseSchema(request)
+    toolName = _ReadResponseSchemaName(request)
+    client = _BuildOpenAiSdkClient(runtimeDescriptor, runtimeConfig)
+    tool = {
+        "type": "function",
+        "function": {
+            "name": toolName,
+            "description": "Return the requested structured JSON object.",
+            "parameters": responseSchema,
+        },
+    }
+    toolChoice = {
+        "type": "function",
+        "function": {
+            "name": toolName,
+        },
+    }
+    try:
+        response = client.chat.completions.create(
+            **_BuildOpenAiSdkChatArgs(runtimeConfig, request),
+            tools=[tool],
+            tool_choice=toolChoice,
+        )
+    except Exception as error:  # noqa: BLE001 - external SDK boundary
+        raise RuntimeGenerationError(
+            "OpenAI SDK tool_choice structured output failed: {0}".format(error)
+        ) from error
+
+    generatedText = _ExtractOpenAiSdkToolArguments(response)
+    if generatedText == "":
+        raise RuntimeGenerationError(
+            "OpenAI SDK tool_choice response did not include tool arguments."
+        )
+
+    responseData = _DumpSdkObject(response)
+    return _BuildOpenAiSdkResponse(
+        runtimeConfig,
+        request,
+        response,
+        responseData,
+        generatedText,
+        "openai_sdk_tool_choice",
+        runtimeAttempts or [],
+        [
+            "OpenAI-compatible SDK tool_choice output is draft reasoning and must not be treated as official determination.",
         ],
     )
 
@@ -146,6 +288,7 @@ def _GenerateWithOpenAiCompatibleRuntime(
         providerFinishReason=_ExtractOpenAiProviderFinishReason(responseData),
         tokenUsage=_ExtractOpenAiTokenUsage(responseData),
         responseId=_ExtractResponseId(responseData),
+        runtimePath="openai_compatible_http_chat_completions",
         rawResponse=responseData,
         limitations=[
             "LLM output is draft reasoning and must not be treated as official determination.",
@@ -181,6 +324,7 @@ def _GenerateWithOllamaRuntime(
         ),
         providerFinishReason=_ExtractOllamaProviderFinishReason(responseData),
         tokenUsage=_ExtractOllamaTokenUsage(responseData),
+        runtimePath="ollama_http_generate",
         rawResponse=responseData,
         limitations=[
             "LLM output is draft reasoning and must not be treated as official determination.",
@@ -211,11 +355,48 @@ def _BuildOpenAiChatPayload(
         and request.responseFormat == LlmResponseFormat.JSON_OBJECT
     ):
         payload["response_format"] = {"type": "json_object"}
+    if (
+        includeResponseFormat
+        and request.responseFormat == LlmResponseFormat.JSON_SCHEMA
+    ):
+        payload["response_format"] = _BuildJsonSchemaResponseFormat(request)
     reasoningEffort = _ReadReasoningEffort(runtimeConfig)
     if reasoningEffort is not None:
         payload["reasoning_effort"] = reasoningEffort
 
     return payload
+
+
+def _BuildJsonSchemaResponseFormat(request: LlmRequest) -> Dict[str, object]:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": _ReadResponseSchemaName(request),
+            "strict": True,
+            "schema": _ReadResponseSchema(request),
+        },
+    }
+
+
+def _ReadResponseSchemaName(request: LlmRequest) -> str:
+    if (
+        request.responseSchemaName is not None
+        and request.responseSchemaName.strip() != ""
+    ):
+        return request.responseSchemaName.strip()
+    if request.responseModel is not None:
+        return request.responseModel.__name__
+    return "structured_response"
+
+
+def _ReadResponseSchema(request: LlmRequest) -> Dict[str, object]:
+    if isinstance(request.responseSchema, dict) and request.responseSchema:
+        return request.responseSchema
+    if request.responseModel is not None:
+        schema = request.responseModel.model_json_schema(by_alias=True)
+        if isinstance(schema, dict):
+            return schema
+    raise RuntimeGenerationError("JSON_SCHEMA requests require responseSchema.")
 
 
 def _BuildOllamaPayload(
@@ -242,6 +423,8 @@ def _BuildOllamaPayload(
 
     if request.responseFormat == LlmResponseFormat.JSON_OBJECT:
         payload["format"] = "json"
+    if request.responseFormat == LlmResponseFormat.JSON_SCHEMA:
+        payload["format"] = _ReadResponseSchema(request)
 
     return payload
 
@@ -331,6 +514,151 @@ def _PostJson(
         raise RuntimeGenerationError("Runtime response JSON must be an object.")
 
     return responseData
+
+
+def _BuildOpenAiSdkClient(
+    runtimeDescriptor: RuntimeDescriptor,
+    runtimeConfig: LlmRuntimeConfig,
+) -> object:
+    try:
+        from openai import OpenAI
+    except ImportError as error:  # pragma: no cover - depends on environment
+        raise RuntimeGenerationError(
+            "OpenAI SDK is required for structured output generation."
+        ) from error
+
+    apiKey = _ReadApiKey(runtimeConfig, DEFAULT_OPENAI_API_KEY_ENV_NAMES)
+    if apiKey is None:
+        raise RuntimeGenerationError(
+            "Hosted LLM runtime generation requires {0} or "
+            "extraOptions['api_key'].".format(PRIMARY_LLM_API_KEY_ENV_NAME)
+        )
+
+    sdkBaseUrl = _BuildOpenAiSdkBaseUrl(runtimeDescriptor, runtimeConfig)
+    timeoutSeconds = _ReadTimeoutSeconds(runtimeConfig)
+    if sdkBaseUrl is None:
+        return OpenAI(api_key=apiKey, timeout=timeoutSeconds)
+    return OpenAI(api_key=apiKey, base_url=sdkBaseUrl, timeout=timeoutSeconds)
+
+
+def _BuildOpenAiSdkBaseUrl(
+    runtimeDescriptor: RuntimeDescriptor,
+    runtimeConfig: LlmRuntimeConfig,
+) -> str | None:
+    endpointUrl = runtimeDescriptor.endpointUrl or runtimeConfig.endpointUrl
+    providerName = _ReadProviderName(runtimeConfig)
+    if providerName == "openai":
+        if endpointUrl is None or endpointUrl.rstrip("/") == DEFAULT_OPENAI_ENDPOINT_URL:
+            return None
+        return _BuildEndpointUrl(endpointUrl, "/v1")
+    if endpointUrl is None:
+        return None
+    return endpointUrl.rstrip("/")
+
+
+def _BuildOpenAiSdkChatArgs(
+    runtimeConfig: LlmRuntimeConfig,
+    request: LlmRequest,
+) -> Dict[str, object]:
+    args: Dict[str, object] = {
+        "model": _ReadModelName(runtimeConfig),
+        "messages": _BuildChatMessages(request),
+        "temperature": request.generationOptions.temperature,
+    }
+    if request.generationOptions.maxTokens is not None:
+        args["max_tokens"] = request.generationOptions.maxTokens
+    if request.generationOptions.topP is not None:
+        args["top_p"] = request.generationOptions.topP
+    if request.generationOptions.stopSequences:
+        args["stop"] = list(request.generationOptions.stopSequences)
+    reasoningEffort = _ReadReasoningEffort(runtimeConfig)
+    if reasoningEffort is not None:
+        args["reasoning_effort"] = reasoningEffort
+    return args
+
+
+def _BuildOpenAiSdkResponse(
+    runtimeConfig: LlmRuntimeConfig,
+    request: LlmRequest,
+    response: object,
+    responseData: Dict[str, object],
+    generatedText: str,
+    runtimePath: str,
+    runtimeAttempts: List[str],
+    limitations: List[str],
+) -> LlmResponse:
+    return LlmResponse(
+        generatedText=generatedText,
+        runtimeKind=runtimeConfig.runtimeKind,
+        modelName=_ReadSdkStringAttribute(response, "model") or runtimeConfig.modelName,
+        responseFormat=request.responseFormat,
+        finishReason=_NormalizeFinishReason(
+            _ExtractOpenAiProviderFinishReason(responseData),
+        ),
+        providerFinishReason=_ExtractOpenAiProviderFinishReason(responseData),
+        tokenUsage=_ExtractOpenAiTokenUsage(responseData),
+        responseId=_ReadSdkStringAttribute(response, "id"),
+        runtimePath=runtimePath,
+        runtimeAttempts=runtimeAttempts,
+        rawResponse=responseData,
+        limitations=limitations,
+    )
+
+
+def _ExtractOpenAiSdkParsedText(response: object) -> str:
+    message = _ReadOpenAiSdkFirstMessage(response)
+    if message is None:
+        return ""
+
+    parsed = getattr(message, "parsed", None)
+    if isinstance(parsed, BaseModel):
+        return parsed.model_dump_json(by_alias=True)
+    if isinstance(parsed, dict):
+        return json.dumps(parsed, ensure_ascii=False)
+    if parsed is not None:
+        return str(parsed)
+
+    content = getattr(message, "content", None)
+    return str(content) if content is not None else ""
+
+
+def _ExtractOpenAiSdkToolArguments(response: object) -> str:
+    message = _ReadOpenAiSdkFirstMessage(response)
+    if message is None:
+        return ""
+
+    toolCalls = getattr(message, "tool_calls", None)
+    if not isinstance(toolCalls, list) or not toolCalls:
+        return ""
+
+    functionCall = getattr(toolCalls[0], "function", None)
+    arguments = getattr(functionCall, "arguments", None)
+    return str(arguments) if arguments is not None else ""
+
+
+def _ReadOpenAiSdkFirstMessage(response: object) -> object | None:
+    choices = getattr(response, "choices", None)
+    if not isinstance(choices, list) or not choices:
+        return None
+    return getattr(choices[0], "message", None)
+
+
+def _DumpSdkObject(value: object) -> Dict[str, object]:
+    modelDump = getattr(value, "model_dump", None)
+    if callable(modelDump):
+        dumped = modelDump(mode="json")
+        if isinstance(dumped, dict):
+            return dumped
+    return {
+        "sdk_response_type": type(value).__name__,
+    }
+
+
+def _ReadSdkStringAttribute(value: object, attributeName: str) -> str | None:
+    attributeValue = getattr(value, attributeName, None)
+    if isinstance(attributeValue, str) and attributeValue.strip() != "":
+        return attributeValue
+    return None
 
 
 def _ExtractOpenAiChatText(responseData: Dict[str, object]) -> str:
@@ -523,6 +851,35 @@ def _ShouldIncludeOpenAiRuntimeResponseFormat(
         return True
 
     return False
+
+
+def _ShouldUseOpenAiSdkStructuredOutput(
+    runtimeConfig: LlmRuntimeConfig,
+    request: LlmRequest,
+) -> bool:
+    if request.responseFormat != LlmResponseFormat.JSON_SCHEMA:
+        return False
+    if request.responseModel is None:
+        return False
+    return _ReadProviderName(runtimeConfig) in {
+        "openai",
+        "gemini",
+        "google",
+        "google_ai_studio",
+    }
+
+
+def _ReadProviderName(runtimeConfig: LlmRuntimeConfig) -> str:
+    providerName = runtimeConfig.extraOptions.get("provider")
+    if isinstance(providerName, str) and providerName.strip() != "":
+        return providerName.strip().lower()
+    if runtimeConfig.runtimeKind == LlmRuntimeKind.OPENAI:
+        return "openai"
+    return runtimeConfig.runtimeKind.value
+
+
+def _FormatRuntimeAttempt(runtimePath: str, error: Exception) -> str:
+    return "{0}:failed:{1}".format(runtimePath, type(error).__name__)
 
 
 def _ReadStringOption(

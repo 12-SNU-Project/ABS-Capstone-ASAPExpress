@@ -5,6 +5,8 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from bussiness_logic.utils.json_types import JsonObject
+
 
 class OperatingSystemKind(str, Enum):
     """로컬 LLM 런타임 선택에 필요한 OS 구분."""
@@ -28,6 +30,7 @@ class LlmResponseFormat(str, Enum):
 
     TEXT = "text"
     JSON_OBJECT = "json_object"
+    JSON_SCHEMA = "json_schema"
 
 
 class LlmFinishReason(str, Enum):
@@ -106,7 +109,11 @@ class RuntimeDescriptor(BaseModel):
 class LlmRequest(BaseModel):
     """RAG 또는 보고서 생성 단계가 LLM adapter에 전달하는 요청."""
 
-    model_config = ConfigDict(populate_by_name=True, frozen=True)
+    model_config = ConfigDict(
+        populate_by_name=True,
+        frozen=True,
+        arbitrary_types_allowed=True,
+    )
 
     userPrompt: str = Field(alias="user_prompt")
     systemPrompt: Optional[str] = Field(default=None, alias="system_prompt")
@@ -118,6 +125,20 @@ class LlmRequest(BaseModel):
     generationOptions: LlmGenerationOptions = Field(
         default_factory=LlmGenerationOptions,
         alias="generation_options",
+    )
+    responseSchemaName: Optional[str] = Field(
+        default=None,
+        alias="response_schema_name",
+    )
+    responseSchema: Optional[JsonObject] = Field(
+        default=None,
+        alias="response_schema",
+    )
+    responseModel: Optional[type[BaseModel]] = Field(
+        default=None,
+        alias="response_model",
+        exclude=True,
+        repr=False,
     )
 
 
@@ -146,5 +167,10 @@ class LlmResponse(BaseModel):
         alias="token_usage",
     )
     responseId: Optional[str] = Field(default=None, alias="response_id")
+    runtimePath: str = Field(default="unknown", alias="runtime_path")
+    runtimeAttempts: List[str] = Field(
+        default_factory=list,
+        alias="runtime_attempts",
+    )
     rawResponse: Dict[str, object] = Field(default_factory=dict, alias="raw_response")
     limitations: List[str] = Field(default_factory=list)
