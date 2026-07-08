@@ -1,0 +1,161 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #f8fafc;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro", "Apple SD Gothic Neo", sans-serif;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  padding: 18px 28px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+.app-topbar-logo-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+/* 검정 PNG를 mask로 써서 브랜드 액센트(#6d3fd6)로 채색 */
+.app-topbar-logo {
+  display: block;
+  width: clamp(178px, 17vw, 240px);
+  height: 38px;
+  background-color: #6d3fd6;
+  mask-repeat: no-repeat;
+  mask-position: left center;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: left center;
+  -webkit-mask-size: contain;
+}
+
+.app-topbar-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-topbar-tab {
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #475569;
+  text-decoration: none;
+}
+
+.app-topbar-tab:hover,
+.app-topbar-tab.active {
+  color: #111827;
+  background: #f1f5f9;
+}
+
+.app-main {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px 28px;
+  min-width: 0;
+}
+
+/* 서류 추천 페이지 (팀원 데모 렌더러 호스팅) */
+.docpage {
+  display: grid;
+  gap: 14px;
+}
+
+.docpage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.docpage-eyebrow a {
+  color: #6d3fd6;
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.docpage-title {
+  margin: 4px 0 4px;
+  color: #111827;
+  font-size: 24px;
+  font-weight: 950;
+}
+
+.docpage-subtitle {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.docpage-pill {
+  flex: 0 0 auto;
+  border: 1px solid #dbe3ef;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #6d3fd6;
+  font-size: 12px;
+  font-weight: 900;
+  padding: 8px 12px;
+}
+
+.docpage-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.docpage-tab {
+  border: 1px solid #dbe3ef;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 6px 12px;
+  text-decoration: none;
+}
+
+.docpage-tab.active {
+  border-color: #6d3fd6;
+  color: #6d3fd6;
+  background: #f6f1ff;
+}
+
+.docpage-error {
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #7f1d1d;
+  padding: 12px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.docpage-loading {
+  color: #64748b;
+  font-size: 13px;
+}

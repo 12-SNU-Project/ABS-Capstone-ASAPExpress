@@ -29,6 +29,7 @@ from bussiness_logic.app_config import LoadAppConfig
 appConfig = LoadAppConfig(ASAP_ROOT)
 app = CreateBackendApp(
     allowedFrontendOrigins=appConfig.web.allowed_frontend_origins,
+    webappDistDir=ASAP_ROOT / "webapp" / "dist",
 )
 server = app
 

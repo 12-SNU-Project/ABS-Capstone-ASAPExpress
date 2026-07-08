@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.local
+
+# 루트 .gitignore의 전역 *.png 규칙 예외 — 로고는 빌드에 필수
+!src/assets/*.png

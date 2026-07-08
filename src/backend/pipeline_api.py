@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import re
 import time
 import uuid
 from collections import defaultdict, deque
 from math import ceil
+from pathlib import Path
 from threading import Lock
 
 from flask import Flask, Response, jsonify, request as flask_request
@@ -120,6 +123,18 @@ class PipelineApi:
                 ).ToDict()), 404
             return jsonify(packagePayload)
 
+        @server.route("/api/admin/runs/<job_id>/blackboard")
+        def read_admin_blackboard(job_id: str) -> ResponseReturnValue:
+            payload = self.ReadAdminBlackboardView(job_id)
+            if not payload:
+                return jsonify(ApiErrorResponse(
+                    error="run_blackboard_not_found",
+                    message="No blackboard artifact exists for the requested job_id.",
+                    field="job_id",
+                    job_id=job_id,
+                ).ToDict()), 404
+            return jsonify(payload)
+
         @server.route("/api/runs/<job_id>/events")
         def stream_run_events(job_id: str) -> Response:
             lastEventId = flask_request.headers.get("Last-Event-ID")
@@ -139,6 +154,46 @@ class PipelineApi:
                     "X-Accel-Buffering": "no",
                 },
             )
+
+    def ReadAdminBlackboardView(self, jobId: str) -> JsonObject:
+        runDirectory = self._ResolveRunDirectory(jobId)
+        if runDirectory is None:
+            return {}
+        blackboardPath = runDirectory / "blackboard.json"
+        if not blackboardPath.is_file():
+            return {}
+        try:
+            blackboard = json.loads(blackboardPath.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(blackboard, dict):
+            return {}
+        return {
+            "job_id": jobId,
+            "run_id": str(blackboard.get("run_id") or ""),
+            "run_dir": str(runDirectory),
+            "blackboard_keys": sorted(blackboard.keys()),
+            "product_evidence_state": blackboard.get("product_evidence_state") or {},
+            "product_understanding": blackboard.get("product_understanding") or {},
+        }
+
+    def _ResolveRunDirectory(self, jobId: str) -> Path | None:
+        if not re.fullmatch(r"[A-Za-z0-9_\-.]+", jobId or ""):
+            return None
+        snapshotEntry = self._registry.ReadSnapshotByIdentifier(jobId)
+        if snapshotEntry is not None:
+            _, snapshot = snapshotEntry
+            resultData = snapshot.get("result") or snapshot.get("partial_result") or {}
+            if isinstance(resultData, dict):
+                runDirText = str(resultData.get("run_dir") or "")
+                if runDirText and Path(runDirText).is_dir():
+                    return Path(runDirText)
+        from bussiness_logic.document.document_pipeline import PIPELINE_OUTPUTS_ROOT
+
+        for candidate in PIPELINE_OUTPUTS_ROOT.glob(f"*/{jobId}"):
+            if (candidate / "blackboard.json").is_file():
+                return candidate
+        return None
 
     def ReadDocumentPackageCollection(self, jobId: str) -> JsonObject:
         return self._registry.BuildDocumentPackageCollection(jobId)
