@@ -43,12 +43,30 @@ _DB_POOL_LOCK = threading.Lock()
 _DB_POOL = None
 _DB_POOL_KEY = None
 _TABLE_EXISTS_CACHE: dict[str, bool] = {}
+_TABLE_NAME_CACHE: dict[str, str] = {}
+_TABLE_COLUMNS_CACHE: dict[str, set[str]] = {}
+
+TABLE_NAME_ALIASES = {
+    "baseline_document_master": ("baseline_document_master", "baseline_table"),
+    "post_taric_requirement_master": ("post_taric_requirement_master", "post_taric_table"),
+    "pre_taric_requirement_master": ("pre_taric_requirement_master", "pre_taric_table"),
+    "taric_certificate_declaration_guidance": (
+        "taric_certificate_declaration_guidance",
+        "taric_cert_table",
+    ),
+}
+
+
+def _psycopg2_dsn(value: str) -> str:
+    if value.startswith("postgresql+psycopg2://"):
+        return "postgresql://" + value.split("://", 1)[1]
+    return value
 
 def _db_connect_config():
     """Return psycopg2 connection config without exposing secret values."""
     database_url = os.environ.get("ASAP_DATABASE_URL") or os.environ.get("DATABASE_URL")
     if database_url:
-        return ("dsn", database_url)
+        return ("dsn", _psycopg2_dsn(database_url))
 
     host = os.environ.get("PGHOST")
     if host:
@@ -101,10 +119,13 @@ def _get_db_pool():
 @contextmanager
 def _connect_db() -> Iterator[object]:
     if DbSessionManager is not None:
-        manager = DbSessionManager.GetInstance()
-        with manager.OpenRawConnection() as connection:
-            yield connection
-            return
+        try:
+            manager = DbSessionManager.GetInstance()
+            with manager.OpenRawConnection() as connection:
+                yield connection
+                return
+        except Exception:
+            pass
 
     connection = _get_db_pool().getconn()
     try:
@@ -148,26 +169,361 @@ def cert_category(code: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# duty_text 파서 (Cond: X cert: Y-NNN 같은 raw 형식 → 구조화)
+# duty_text 파서 (raw TARIC duty expression -> normalized UI model)
 # ---------------------------------------------------------------------------
-COND_RE = re.compile(r"Cond:\s*([A-Z])\s*cert:\s*([A-Z]-?\d+)\s*\((\d+)\):")
-PERCENT_RE = re.compile(r"^\s*\d+[.,]\d*\s*%\s*$")
+NUMBER_RE = r"\d[\d.,]*"
+PERCENT_RE = re.compile(rf"^\s*{NUMBER_RE}\s*%\s*$")
+PERCENT_TOKEN_RE = re.compile(rf"(?<![\w.])({NUMBER_RE})\s*%")
+MIN_MAX_RE = re.compile(
+    rf"\b(MIN|MAX)\s+({NUMBER_RE})\s+EUR\s*/?\s*([A-Z]{{2,5}}(?:\s+[A-Z])?)\b"
+)
+SPECIFIC_RATE_RE = re.compile(
+    rf"(?<![\w.])({NUMBER_RE})\s*(EUR)?\s*/?\s*"
+    r"(KGM(?:\s+S)?|DTN(?:\s+[A-Z])?|TNE|NAR|NPR|MTK|LTR|HLT|GRM)\b"
+)
+AGRI_COMPONENT_RE = re.compile(r"\+\s*(EA|EAR|ADSZ[R]?|ADFM|AC)\b")
+UNIT_ONLY_RE = re.compile(r"^(KGM(?:\s+S)?|DTN(?:\s+[A-Z])?|TNE|NAR|NPR|MTK|LTR|HLT|GRM)$")
+COND_CERT_RE = re.compile(
+    r"^(?P<condition>[A-Z])\s+cert:\s*(?P<certificate>[A-Z]-?\d+)\s*"
+    r"\((?P<action>\d{2})\):\s*(?P<outcome>.*)$"
+)
+COND_ACTION_RE = re.compile(
+    r"^(?P<condition>[A-Z])(?:\s+(?P<expression>.*?))?\s*"
+    r"\((?P<action>\d{2})\):\s*(?P<outcome>.*)$"
+)
+
+UNIT_EXPLANATIONS_KO = {
+    "EUR": ("유로", "금액 기준 통화입니다."),
+    "KGM": ("킬로그램", "순중량 kg 기준으로 계산하는 단위입니다."),
+    "KGM S": ("킬로그램 표준 단위", "TARIC supplementary unit에서 쓰이는 kg 계열 단위입니다."),
+    "DTN": ("100킬로그램", "100 kg 단위 기준입니다."),
+    "DTN G": ("100킬로그램 gross", "총중량 100 kg 계열 단위입니다."),
+    "TNE": ("미터톤", "1,000 kg 단위 기준입니다."),
+    "NAR": ("개수", "number of articles, 물품 개수 기준입니다."),
+    "NPR": ("켤레 수", "number of pairs, 쌍/켤레 기준입니다."),
+    "MTK": ("제곱미터", "면적 m2 기준입니다."),
+    "LTR": ("리터", "부피 litre 기준입니다."),
+    "HLT": ("헥토리터", "100 litre 기준입니다."),
+    "GRM": ("그램", "중량 gram 기준입니다."),
+    "EA": ("농산물 구성요소", "Meursing/agricultural component 계열 추가 관세 구성요소입니다."),
+    "EAR": ("감액 농산물 구성요소", "reduced agricultural component 계열 추가 관세 구성요소입니다."),
+    "ADSZ": ("추가 설탕 구성요소", "additional duty on sugar 계열 구성요소입니다."),
+    "ADSZR": ("감액 추가 설탕 구성요소", "reduced additional duty on sugar 계열 구성요소입니다."),
+    "ADFM": ("추가 밀가루 구성요소", "additional duty on flour 계열 구성요소입니다."),
+    "AC": ("농산물 구성요소", "agricultural component 계열 추가 관세 구성요소입니다."),
+}
+
+ACTION_CODE_EXPLANATIONS_KO = {
+    "01": "이 조건 분기의 세율 또는 금액을 적용하는 TARIC action code입니다.",
+    "04": "라이선스/허가 조건을 충족하지 못한 경우의 제한 경로로 표시되는 action code입니다.",
+    "06": "조건을 충족하지 못한 대체 경로입니다. 원문 measure의 결과를 함께 확인해야 합니다.",
+    "07": "특정 조건 분기의 비교 또는 전환 경로로 쓰이는 TARIC action code입니다.",
+    "08": "조건부 추가관세에서 대체 세율 경로로 쓰이는 TARIC action code입니다.",
+    "09": "필요한 조건이 충족되지 않은 경우의 제한 또는 통관 보류 가능 경로입니다.",
+    "10": "수량/단가 조건부 분기에서 해당 기준을 적용하는 TARIC action code입니다.",
+    "11": "조건부 금액 계산에서 대체 기준을 적용하는 TARIC action code입니다.",
+    "21": "조건부 수량 기준 분기에서 쓰이는 TARIC action code입니다.",
+    "22": "조건부 수량 기준 분기에서 쓰이는 TARIC action code입니다.",
+    "24": "라이선스/허가 또는 관련 서류 제시로 조건 충족을 신고하는 경로입니다.",
+    "26": "우대관세 또는 원산지 증빙 관련 조건 충족 경로로 쓰이는 action code입니다.",
+    "27": "조건부 금액 계산에서 대체 기준을 적용하는 TARIC action code입니다.",
+    "28": "수량/가격 기준 조건부 분기에서 쓰이는 TARIC action code입니다.",
+    "29": "certificate/declaration 제시로 조건 충족 또는 비대상 선언을 신고하는 경로입니다.",
+}
+
+NORMALIZED_TYPE_LABELS_KO = {
+    "blank": "세율 문구 없음",
+    "simple_percent": "단순 종가세율",
+    "condition_expression": "조건부 세율/통제 문구",
+    "specific_rate": "종량세율",
+    "compound_rate": "복합세율",
+    "min_max_rate": "최소/최대 한도 포함 세율",
+    "agricultural_component": "농산물 구성요소 포함 세율",
+    "supplementary_unit": "보충단위 표시",
+    "nihil": "무세/부과 없음",
+    "unknown": "미분류 duty_text",
+}
+
+
+def _normalize_unit_code(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip().upper())
+
+
+def _normalize_certificate_code(value: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (value or "").strip().upper())
+
+
+def _unit_explanation(unit_code: str) -> dict:
+    code = _normalize_unit_code(unit_code)
+    label, detail = UNIT_EXPLANATIONS_KO.get(
+        code,
+        ("TARIC 단위 코드", "현재 로컬 설명표에 없는 TARIC 단위 코드입니다. 원문 단위를 함께 확인해야 합니다."),
+    )
+    return {"code": code, "label_ko": label, "detail_ko": detail}
+
+
+def _action_explanation(action_code: str) -> str:
+    code = (action_code or "").strip()
+    return ACTION_CODE_EXPLANATIONS_KO.get(
+        code,
+        "TARIC condition action code입니다. 공식 조건 테이블의 결과 코드로, 원문 measure와 함께 확인해야 합니다.",
+    )
+
+
+def _rate_component(kind: str, display: str, **extra) -> dict:
+    item = {"kind": kind, "display": display.strip()}
+    item.update({k: v for k, v in extra.items() if v not in (None, "")})
+    return item
+
+
+def _parse_rate_components(text: str) -> list[dict]:
+    text = (text or "").strip()
+    if not text:
+        return []
+    upper = text.upper()
+    if upper == "NIHIL":
+        return [_rate_component("nihil", "NIHIL", explanation_ko="관세를 부과하지 않는다는 의미입니다.")]
+
+    components: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(component: dict) -> None:
+        key = (component.get("kind") or "", component.get("display") or "")
+        if key not in seen:
+            seen.add(key)
+            components.append(component)
+
+    if UNIT_ONLY_RE.match(upper):
+        add(_rate_component(
+            "supplementary_unit",
+            upper,
+            unit_code=upper,
+            explanation_ko="세율이 아니라 신고 수량에 필요한 supplementary unit입니다.",
+        ))
+
+    for match in MIN_MAX_RE.finditer(upper):
+        boundary, amount, unit = match.groups()
+        unit = _normalize_unit_code(unit)
+        label = "최소" if boundary == "MIN" else "최대"
+        add(_rate_component(
+            "min_max",
+            match.group(0),
+            amount=amount,
+            currency="EUR",
+            unit_code=unit,
+            boundary=boundary.lower(),
+            explanation_ko=f"{label} 관세 한도를 {amount} EUR/{unit} 기준으로 적용합니다.",
+        ))
+
+    for match in PERCENT_TOKEN_RE.finditer(text):
+        add(_rate_component(
+            "percentage",
+            match.group(0),
+            value=match.group(1),
+            unit_code="%",
+            explanation_ko="물품 과세가격에 곱해 계산하는 종가세율입니다.",
+        ))
+
+    for match in SPECIFIC_RATE_RE.finditer(upper):
+        amount, currency, unit = match.groups()
+        unit = _normalize_unit_code(unit)
+        display = match.group(0)
+        kind = "specific_rate" if currency else "quantity_threshold"
+        explanation = (
+            f"{unit} 단위당 {amount} EUR를 적용하는 종량세율입니다."
+            if currency
+            else f"{unit} 단위의 수량/가격 조건 기준값입니다."
+        )
+        add(_rate_component(
+            kind,
+            display,
+            amount=amount,
+            currency="EUR" if currency else None,
+            unit_code=unit,
+            explanation_ko=explanation,
+        ))
+
+    for match in AGRI_COMPONENT_RE.finditer(upper):
+        code = _normalize_unit_code(match.group(1))
+        add(_rate_component(
+            "agricultural_component",
+            match.group(0),
+            unit_code=code,
+            explanation_ko=f"{code} 구성요소를 추가로 계산해야 합니다.",
+        ))
+
+    return components
+
+
+def _parse_condition_segment(segment: str) -> Optional[dict]:
+    raw_segment = (segment or "").strip()
+    if not raw_segment:
+        return None
+
+    match = COND_CERT_RE.match(raw_segment)
+    if match:
+        condition_code = match.group("condition")
+        certificate = match.group("certificate").upper()
+        action_code = match.group("action")
+        outcome = match.group("outcome").strip()
+        condition = {
+            "condition_code": condition_code,
+            "condition_label_ko": "같은 문자 조건끼리 하나의 TARIC 조건 그룹 안에서 대체 경로 또는 결과 경로를 이룹니다.",
+            "certificate": certificate,
+            "certificate_code": _normalize_certificate_code(certificate),
+            "action_code": action_code,
+            "action_explanation_ko": _action_explanation(action_code),
+            "outcome": outcome or None,
+            "outcome_components": _parse_rate_components(outcome),
+            "raw": raw_segment,
+        }
+        condition["explanation_ko"] = (
+            f"{certificate}를 신고하거나 제출하면 action code {action_code} 경로로 조건을 판단합니다."
+        )
+        return condition
+
+    match = COND_ACTION_RE.match(raw_segment)
+    if not match:
+        return {"raw": raw_segment, "explanation_ko": "정규식으로 완전히 분해하지 못한 TARIC 조건 조각입니다."}
+
+    condition_code = match.group("condition")
+    expression = (match.group("expression") or "").strip()
+    action_code = match.group("action")
+    outcome = (match.group("outcome") or "").strip()
+    condition = {
+        "condition_code": condition_code,
+        "condition_label_ko": "같은 문자 조건끼리 하나의 TARIC 조건 그룹 안에서 대체 경로 또는 결과 경로를 이룹니다.",
+        "expression": expression or None,
+        "expression_components": _parse_rate_components(expression),
+        "action_code": action_code,
+        "action_explanation_ko": _action_explanation(action_code),
+        "outcome": outcome or None,
+        "outcome_components": _parse_rate_components(outcome),
+        "raw": raw_segment,
+    }
+    if expression:
+        condition["explanation_ko"] = (
+            f"{expression} 기준에 해당하면 action code {action_code} 경로로 조건을 판단합니다."
+        )
+    else:
+        condition["explanation_ko"] = (
+            f"certificate 없이 action code {action_code} 경로로 이어지는 조건 결과입니다."
+        )
+    return condition
+
+
+def _parse_conditions(raw: str) -> list[dict]:
+    if "Cond:" not in (raw or ""):
+        return []
+    condition_text = raw.split("Cond:", 1)[1]
+    conditions = []
+    for segment in condition_text.split(";"):
+        condition = _parse_condition_segment(segment)
+        if condition:
+            conditions.append(condition)
+    return conditions
+
+
+def _collect_unit_explanations(components: list[dict], conditions: list[dict]) -> list[dict]:
+    units: set[str] = set()
+    for component in components:
+        unit = component.get("unit_code")
+        if unit and unit != "%":
+            units.add(_normalize_unit_code(unit))
+    for condition in conditions:
+        for key in ("expression_components", "outcome_components"):
+            for component in condition.get(key) or []:
+                unit = component.get("unit_code")
+                if unit and unit != "%":
+                    units.add(_normalize_unit_code(unit))
+    return [_unit_explanation(unit) for unit in sorted(units)]
+
+
+def _classify_duty_text(raw: str, components: list[dict], conditions: list[dict]) -> str:
+    stripped = (raw or "").strip()
+    upper = stripped.upper()
+    kinds = {component.get("kind") for component in components}
+    if not stripped:
+        return "blank"
+    if upper == "NIHIL":
+        return "nihil"
+    if conditions:
+        return "condition_expression"
+    if PERCENT_RE.match(stripped):
+        return "simple_percent"
+    if "min_max" in kinds:
+        return "min_max_rate"
+    if "agricultural_component" in kinds:
+        return "agricultural_component"
+    if "percentage" in kinds and "specific_rate" in kinds:
+        return "compound_rate"
+    if "specific_rate" in kinds:
+        return "specific_rate"
+    if "supplementary_unit" in kinds:
+        return "supplementary_unit"
+    return "unknown"
+
+
+def _duty_explanations(normalized_type: str, components: list[dict], conditions: list[dict]) -> list[dict]:
+    explanations = [
+        {
+            "label": "정규화 유형",
+            "detail": NORMALIZED_TYPE_LABELS_KO.get(normalized_type, NORMALIZED_TYPE_LABELS_KO["unknown"]),
+        }
+    ]
+    if conditions:
+        cert_count = sum(1 for condition in conditions if condition.get("certificate"))
+        explanations.append({
+            "label": "조건 구조",
+            "detail": (
+                f"Cond: 안의 {len(conditions)}개 분기를 모두 분리했습니다. "
+                f"certificate/declaration 분기는 {cert_count}개입니다."
+            ),
+        })
+    if any(component.get("kind") == "agricultural_component" for component in components):
+        explanations.append({
+            "label": "농산물 구성요소",
+            "detail": "EA/EAR/ADSZ/ADFM 등은 단순 퍼센트가 아니라 Meursing 또는 농산물 구성요소 계산이 추가로 필요하다는 표시입니다.",
+        })
+    if any(component.get("kind") == "min_max" for component in components):
+        explanations.append({
+            "label": "최소/최대 한도",
+            "detail": "계산된 관세가 MIN/MAX 한도와 비교되어 최종 금액이 달라질 수 있습니다.",
+        })
+    if any(component.get("kind") == "supplementary_unit" for component in components):
+        explanations.append({
+            "label": "보충단위",
+            "detail": "세율이 아니라 신고 수량 단위입니다. 통계/신고 수량 입력에 사용합니다.",
+        })
+    return explanations
 
 
 def parse_duty_text(raw: str) -> dict:
     if not raw:
-        return {"raw": "", "rate": None, "conditions": []}
-    if PERCENT_RE.match(raw):
-        return {"raw": raw.strip(), "rate": raw.strip(), "conditions": []}
-    conds = []
-    for m in COND_RE.finditer(raw):
-        conds.append({
-            "condition_code": m.group(1),
-            "certificate": m.group(2),
-            "action_code": m.group(3),
-        })
-    rate = raw.split("Cond:")[0].strip().rstrip(";") or None
-    return {"raw": raw, "rate": rate, "conditions": conds}
+        return {
+            "raw": "",
+            "rate": None,
+            "conditions": [],
+            "normalized_type": "blank",
+            "components": [],
+            "explanations": _duty_explanations("blank", [], []),
+            "unit_explanations": [],
+        }
+
+    text = raw.strip()
+    conditions = _parse_conditions(text)
+    components = _parse_rate_components(text)
+    normalized_type = _classify_duty_text(text, components, conditions)
+    rate = text if "Cond:" not in text else text.split("Cond:", 1)[0].strip().rstrip(";") or None
+    return {
+        "raw": text,
+        "rate": rate,
+        "conditions": conditions,
+        "normalized_type": normalized_type,
+        "components": components,
+        "explanations": _duty_explanations(normalized_type, components, conditions),
+        "unit_explanations": _collect_unit_explanations(components, conditions),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +619,10 @@ def _truthy(value) -> bool:
     if value is None:
         return False
     return str(value).strip().lower() in {"true", "t", "1", "yes", "y"}
+
+
+def _measure_applies_to_korea(row: dict) -> bool:
+    return _truthy(row.get("applies_to_korea"))
 
 
 def _split_semicolon(value) -> list[str]:
@@ -555,7 +915,8 @@ def _fetch_document_binding_cards(
     if not clauses:
         return []
 
-    cur.Execute(
+    _execute(
+        cur,
         f"""
         SELECT binding_id, document_id, source_layer, source_id, binding_action,
                required_level, field_key, required_fact_key, sort_order
@@ -584,12 +945,14 @@ def _fetch_document_binding_cards(
     if not document_ids:
         return []
 
-    cur.Execute(
+    baseline_table = _resolve_table_name(cur, "baseline_document_master")
+    _execute(
+        cur,
         """
         SELECT *
-        FROM baseline_document_master
+        FROM {baseline_table}
         WHERE document_id = ANY(%s)
-        """,
+        """.format(baseline_table=baseline_table),
         (document_ids,),
     )
     baseline_cols = [d[0] for d in cur.description]
@@ -878,7 +1241,14 @@ def _ancestor_goods_codes(goods_code_10: str) -> list[str]:
     return out
 
 
-def _table_exists(cur, table_name: str) -> bool:
+def _execute(cur, sql: str, params=None):
+    executor = getattr(cur, "Execute", None) or cur.execute
+    if params is None:
+        return executor(sql)
+    return executor(sql, params)
+
+
+def _raw_table_exists(cur, table_name: str) -> bool:
     if DbSessionManager is not None:
         try:
             return DbSessionManager.GetInstance().TableExists(table_name)
@@ -887,53 +1257,106 @@ def _table_exists(cur, table_name: str) -> bool:
     cached = _TABLE_EXISTS_CACHE.get(table_name)
     if cached is not None:
         return cached
-    cur.Execute("SELECT to_regclass(%s)", (f"public.{table_name}",))
+    _execute(cur, "SELECT to_regclass(%s)", (f"public.{table_name}",))
     row = cur.fetchone()
     exists = bool(row and row[0])
     _TABLE_EXISTS_CACHE[table_name] = exists
     return exists
 
 
-def _column_exists(cur, table_name: str, column_name: str) -> bool:
+def _resolve_table_name(cur, table_name: str) -> str:
+    cached = _TABLE_NAME_CACHE.get(table_name)
+    if cached:
+        return cached
+    for candidate in TABLE_NAME_ALIASES.get(table_name, (table_name,)):
+        if _raw_table_exists(cur, candidate):
+            _TABLE_NAME_CACHE[table_name] = candidate
+            return candidate
+    _TABLE_NAME_CACHE[table_name] = table_name
+    return table_name
+
+
+def _table_exists(cur, table_name: str) -> bool:
+    return _raw_table_exists(cur, _resolve_table_name(cur, table_name))
+
+
+def _table_columns(cur, table_name: str) -> set[str]:
+    actual_table = _resolve_table_name(cur, table_name)
+    cached = _TABLE_COLUMNS_CACHE.get(actual_table)
+    if cached is not None:
+        return cached
     if DbSessionManager is not None:
         try:
-            value = DbSessionManager.GetInstance().FetchOne(
+            rows = DbSessionManager.GetInstance().FetchRows(
                 """
-                SELECT 1
+                SELECT column_name
                 FROM information_schema.columns
                 WHERE table_schema = 'public'
                   AND table_name = :table_name
-                  AND column_name = :column_name
-                LIMIT 1
+                ORDER BY ordinal_position
                 """,
-                {"table_name": table_name, "column_name": column_name},
+                {"table_name": actual_table},
             )
-            return bool(value)
+            columns = {str(row.get("column_name") or "") for row in rows}
+            _TABLE_COLUMNS_CACHE[actual_table] = columns
+            return columns
         except Exception:
             pass
-    cur.Execute(
+    _execute(
+        cur,
         """
-        SELECT 1
+        SELECT column_name
         FROM information_schema.columns
         WHERE table_schema = 'public'
           AND table_name = %s
-          AND column_name = %s
-        LIMIT 1
+        ORDER BY ordinal_position
         """,
-        (table_name, column_name),
+        (actual_table,),
     )
-    return bool(cur.fetchone())
+    columns = {str(row[0] or "") for row in cur.fetchall()}
+    _TABLE_COLUMNS_CACHE[actual_table] = columns
+    return columns
+
+
+def _column_exists(cur, table_name: str, column_name: str) -> bool:
+    return column_name in _table_columns(cur, table_name)
+
+
+def _select_fields(
+    cur,
+    table_name: str,
+    fields: list[str],
+    aliases: dict[str, str] | None = None,
+    qualifier: str = "",
+) -> str:
+    actual_table = _resolve_table_name(cur, table_name)
+    columns = _table_columns(cur, actual_table)
+    aliases = aliases or {}
+    prefix = f"{qualifier}." if qualifier else ""
+    expressions = []
+    for field in fields:
+        source = aliases.get(field, field)
+        if source in columns:
+            if source == field and not qualifier:
+                expressions.append(field)
+            else:
+                expressions.append(f"{prefix}{source} AS {field}")
+        else:
+            expressions.append(f"NULL AS {field}")
+    return ", ".join(expressions)
 
 
 def _fetch_certificate_guidance(cur, certificate_codes: list[str]) -> dict[str, dict]:
     if not certificate_codes or not _table_exists(cur, "taric_certificate_declaration_guidance"):
         return {}
-    cur.Execute(
+    cert_table = _resolve_table_name(cur, "taric_certificate_declaration_guidance")
+    _execute(
+        cur,
         """
         SELECT *
-        FROM taric_certificate_declaration_guidance
+        FROM {cert_table}
         WHERE certificate_code = ANY(%s)
-        """,
+        """.format(cert_table=cert_table),
         (certificate_codes,),
     )
     cols = [d[0] for d in cur.description]
@@ -998,6 +1421,7 @@ PRE_REQ_FIELDS = [
 ]
 
 BASELINE_DOC_FIELDS = [
+    "document_id",
     "document_code",
     "document_name",
     "document_name_ko",
@@ -1104,7 +1528,8 @@ def _detail_from_baseline_doc_row(row: dict, reason: str, product_facts: dict) -
     default_level = (row.get("default_required_level") or "").strip().lower()
     required_level = "mandatory" if default_level == "required" else default_level or "conditional"
     document_name = row.get("document_name") or row.get("document_code") or "Baseline document"
-    document_code = row.get("document_code") or ""
+    document_id = row.get("document_id") or ""
+    document_code = row.get("document_code") or str(document_id).upper()
     field_keys = _split_semicolon(row.get("field_keys"))
     linked_pre = _split_semicolon(row.get("linked_pre_requirement_types"))
     linked_post = _split_semicolon(row.get("linked_post_requirement_types"))
@@ -1167,17 +1592,30 @@ def _fetch_baseline_documents(
     chapter = (product_facts.get("chapter") or goods_code_10[:2] or "").zfill(2)
     routed_domains = _baseline_domain_scopes(product_facts, chapter)
 
-    cur.Execute(
-        f"""
-        SELECT {", ".join(BASELINE_DOC_FIELDS)}
-        FROM baseline_document_master
-        WHERE lower(coalesce(stage, '')) = 'baseline'
-        ORDER BY
+    baseline_table = _resolve_table_name(cur, "baseline_document_master")
+    baseline_fields = _select_fields(cur, "baseline_document_master", BASELINE_DOC_FIELDS)
+    baseline_columns = _table_columns(cur, "baseline_document_master")
+    stage_filter = "WHERE lower(coalesce(stage, '')) = 'baseline'" if "stage" in baseline_columns else ""
+    sort_expr = (
+        """
           CASE
             WHEN runtime_sort_order::text ~ '^[0-9]+$' THEN runtime_sort_order::int
             ELSE 9999
           END,
-          document_code
+        """
+        if "runtime_sort_order" in baseline_columns
+        else ""
+    )
+    final_sort = "document_code" if "document_code" in baseline_columns else "document_id, document_name"
+    _execute(
+        cur,
+        f"""
+        SELECT {baseline_fields}
+        FROM {baseline_table}
+        {stage_filter}
+        ORDER BY
+          {sort_expr}
+          {final_sort}
         """
     )
     cols = [d[0] for d in cur.description]
@@ -1229,10 +1667,18 @@ def _fetch_detailed_requirements(
         if celex_map.get(lb, {}).get("celex_id")
     })
 
-    cur.Execute(
+    post_table = _resolve_table_name(cur, "post_taric_requirement_master")
+    post_fields = _select_fields(
+        cur,
+        "post_taric_requirement_master",
+        POST_REQ_FIELDS,
+        {"requirement_master_id": "post_taric_id"},
+    )
+    _execute(
+        cur,
         f"""
-        SELECT {", ".join(POST_REQ_FIELDS)}
-        FROM post_taric_requirement_master
+        SELECT {post_fields}
+        FROM {post_table}
         WHERE source_layer = 'taric_triggered'
           AND (
             NULLIF(trigger_certificate_code, '') = ANY(%s)
@@ -1311,10 +1757,19 @@ def _fetch_product_domain_requirements(
     heading = goods_code_10[:4]
     cn8 = goods_code_10[:8]
     allowed_domains = _allowed_product_domains(product_facts)
-    cur.Execute(
+    post_table = _resolve_table_name(cur, "post_taric_requirement_master")
+    post_fields = _select_fields(
+        cur,
+        "post_taric_requirement_master",
+        POST_REQ_FIELDS,
+        {"requirement_master_id": "post_taric_id"},
+        qualifier="prm",
+    )
+    _execute(
+        cur,
         f"""
-        SELECT {", ".join(POST_REQ_FIELDS)}
-        FROM post_taric_requirement_master AS prm
+        SELECT {post_fields}
+        FROM {post_table} AS prm
         WHERE source_layer IN ('chapter_route_seed', 'product_domain_seed')
           AND (
             'all' = ANY(string_to_array(replace(lower(coalesce(chapter_scope, '')), ' ', ''), ';'))
@@ -1368,10 +1823,13 @@ def _fetch_pre_taric_requirements(
     if not pre_gate_domains:
         pre_gate_domains = ["sanctions"]
 
-    cur.Execute(
+    pre_table = _resolve_table_name(cur, "pre_taric_requirement_master")
+    pre_fields = _select_fields(cur, "pre_taric_requirement_master", PRE_REQ_FIELDS)
+    _execute(
+        cur,
         f"""
-        SELECT {", ".join(PRE_REQ_FIELDS)}
-        FROM pre_taric_requirement_master
+        SELECT {pre_fields}
+        FROM {pre_table}
         WHERE lower(coalesce(runtime_gate::text, '')) = 'true'
           AND (
             upper(coalesce(chapter_scope, '')) = 'ALL'
@@ -1501,14 +1959,26 @@ def _product_fact_tokens(product_facts: dict) -> set[str]:
 
 
 def _lookup_nomenclature_row(cur, goods_code_10: str) -> Optional[dict]:
-    cur.Execute(
-        """
-        SELECT
-            master_id, row_kind, goods_code_10, line_id, parent_line_id,
-            leaf_description_en, nomenclature_path_text
+    fields = _select_fields(
+        cur,
+        "taric_master_table",
+        [
+            "master_id",
+            "row_kind",
+            "goods_code_10",
+            "parent_line_id",
+            "leaf_description_en",
+            "nomenclature_path_text",
+        ],
+    )
+    _execute(
+        cur,
+        f"""
+        SELECT {fields}
         FROM taric_master_table
         WHERE goods_code_10 = %s
-        ORDER BY CASE WHEN row_kind = 'nomenclature_only' THEN 0 ELSE 1 END
+          AND row_kind = 'nomenclature_only'
+        ORDER BY master_id
         LIMIT 1
         """,
         (goods_code_10,),
@@ -1531,12 +2001,12 @@ def _candidate_goods_codes(cur, goods_code_10: str, notes: list[str]) -> list[st
                 f"Code {goods_code_10} is row_kind='nomenclature_only' "
                 f"(leaf_description: {leaf_desc!r}). Parent/ancestor measures are also checked."
             )
-        parent_code = _resolve_parent_goods_code(nom_row)
-        if parent_code and parent_code not in codes:
-            codes.insert(1, parent_code)
-            notes.append(
-                f"Parent goods_code_10 {parent_code!r} added from TARIC nomenclature parent_line_id."
-            )
+            parent_code = _resolve_parent_goods_code(nom_row)
+            if parent_code and parent_code not in codes:
+                codes.insert(1, parent_code)
+                notes.append(
+                    f"Parent goods_code_10 {parent_code!r} added from TARIC nomenclature parent_line_id."
+                )
     return codes
 
 
@@ -1582,31 +2052,53 @@ def get_document_package(
             # A2M inherits measures attached to broader TARIC/CN nodes, e.g. R1227/25
             # attached to 2100000000 appears when querying 2103901000.
             candidate_codes = _candidate_goods_codes(cur, code, notes)
-            cur.Execute(
-                """
-                SELECT
-                    master_id, goods_code_10, cn8, line_id,
-                    measure_type_code, measure_type_description,
-                    duty_text, condition_summary,
-                    certificate_codes, certificate_descriptions,
-                    footnote_codes, footnote_descriptions,
-                    origin_code, origin_description_en, applies_to_korea,
-                    legal_base, official_journal, publication_date,
-                    needs_review
+            measure_fields = _select_fields(
+                cur,
+                "taric_master_table",
+                [
+                    "master_id",
+                    "goods_code_10",
+                    "cn8",
+                    "line_id",
+                    "measure_type_code",
+                    "measure_type_description",
+                    "duty_text",
+                    "condition_summary",
+                    "certificate_codes",
+                    "certificate_descriptions",
+                    "footnote_codes",
+                    "footnote_descriptions",
+                    "origin_code",
+                    "origin_description_en",
+                    "applies_to_korea",
+                    "legal_base",
+                    "official_journal",
+                    "publication_date",
+                    "needs_review",
+                ],
+            )
+            _execute(
+                cur,
+                f"""
+                SELECT {measure_fields}
                 FROM taric_master_table
                 WHERE goods_code_10 = ANY(%s)
                   AND row_kind = 'measure_line'
                   AND is_current = 'true'
+                  AND lower(coalesce(applies_to_korea::text, '')) IN ('true', 't', '1', 'yes', 'y')
                 ORDER BY
                     CASE WHEN goods_code_10 = %s THEN 0 ELSE 1 END,
                     length(regexp_replace(goods_code_10, '0+$', '')) DESC,
-                    CASE WHEN applies_to_korea = 'true' THEN 0 ELSE 1 END,
                     measure_type_code, legal_base, origin_description_en
                 """,
                 (candidate_codes, code),
             )
             cols = [d[0] for d in cur.description]
-            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            rows = []
+            for raw_row in cur.fetchall():
+                row = dict(zip(cols, raw_row))
+                if _measure_applies_to_korea(row):
+                    rows.append(row)
 
             inherited_codes = sorted({r['goods_code_10'] for r in rows if r.get('goods_code_10') != code})
             if inherited_codes:
@@ -1631,8 +2123,9 @@ def get_document_package(
             # 3. legal_base → CELEX 조회
             legal_bases = sorted({r['legal_base'] for r in rows if r['legal_base']})
             celex_map: dict[str, dict] = {}
-            if legal_bases:
-                cur.Execute(
+            if legal_bases and _table_exists(cur, "taric_celex_table"):
+                _execute(
+                    cur,
                     """SELECT legal_base, celex_id, full_description, celex_match_status
                     FROM taric_celex_table WHERE legal_base = ANY(%s)""",
                     (legal_bases,),
@@ -1645,7 +2138,8 @@ def get_document_package(
             if include_celex_excerpt and _table_exists(cur, "taric_celex_source_chunks"):
                 celex_ids = [c["celex_id"] for c in celex_map.values() if c.get("celex_id")]
                 if celex_ids:
-                    cur.Execute(
+                    _execute(
+                        cur,
                         """SELECT celex_id, string_agg(chunk_text, ' ' ORDER BY chunk_index) AS body
                         FROM taric_celex_source_chunks
                         WHERE celex_id = ANY(%s)
@@ -1670,7 +2164,7 @@ def get_document_package(
                 cert_set: dict[str, str] = {}  # code → description
                 for r in group_rows:
                     codes = (r['certificate_codes'] or '').split(';')
-                    descs = (r['certificate_descriptions'] or '').split(';')
+                    descs = (r.get('certificate_descriptions') or '').split(';')
                     for i, c in enumerate(codes):
                         c = c.strip()
                         if not c:
@@ -1689,7 +2183,7 @@ def get_document_package(
                     for f in (r['footnote_codes'] or '').split(';') if f.strip()
                 })
 
-                kr_applicable = any(_truthy(r['applies_to_korea']) for r in group_rows)
+                kr_applicable = any(_measure_applies_to_korea(r) for r in group_rows)
                 origins = sorted({r['origin_description_en'] for r in group_rows if r['origin_description_en']})
                 source_goods_codes = sorted({r['goods_code_10'] for r in group_rows if r.get('goods_code_10')})
 

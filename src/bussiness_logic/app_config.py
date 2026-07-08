@@ -302,6 +302,8 @@ class WebAppConfig(BaseModel):
         default_factory=lambda: [
             "http://127.0.0.1:8050",
             "http://localhost:8050",
+            "http://127.0.0.1:8765",
+            "http://localhost:8765",
         ],
     )
 

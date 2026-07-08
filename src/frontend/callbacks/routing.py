@@ -38,6 +38,7 @@ def RegisterRoutingCallbacks(
                 input_detail_drawer_mode=input_detail_drawer_mode,
                 candidate_tree_drawer_open=bool(candidate_tree_drawer_open),
                 classification_result_drawer_open=classification_result_drawer_open,
+                document_panel=document_panel or "overview",
             )
 
         page = parts[0]
@@ -63,6 +64,7 @@ def RegisterRoutingCallbacks(
             input_detail_drawer_mode=input_detail_drawer_mode,
             candidate_tree_drawer_open=bool(candidate_tree_drawer_open),
             classification_result_drawer_open=classification_result_drawer_open,
+            document_panel=document_panel or "overview",
         )
 
 

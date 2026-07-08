@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from dash import ALL, MATCH, Dash, Input, Output, State, ctx, no_update
-
-from bussiness_logic.utils.json_types import JsonObject
-from frontend.ui import document_package_renderer
+from dash import ALL, Dash, Input, Output, ctx, no_update
 
 
 def RegisterDocumentPackageCallbacks(app: Dash) -> None:
@@ -15,13 +12,6 @@ def RegisterDocumentPackageCallbacks(app: Dash) -> None:
         Input({"type": "drawer-close-btn", "target": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )(_select_document_panel)
-
-    app.callback(
-        Output({"type": "scenario-result", "taric": MATCH}, "children"),
-        Input({"type": "scenario-checks", "taric": MATCH}, "value"),
-        State("package-store", "data"),
-        prevent_initial_call=True,
-    )(_update_document_scenario)
 
 
 def _select_document_panel(
@@ -34,19 +24,3 @@ def _select_document_panel(
     if isinstance(triggered, dict) and triggered.get("type") == "drawer-close-btn":
         return "overview"
     return no_update
-
-
-def _update_document_scenario(
-    selectedValues: list[str] | None,
-    packageData: JsonObject | None,
-) -> object:
-    if not packageData:
-        return no_update
-    cx = document_package_renderer.BuildDocumentPackageContext(packageData)
-    if cx.get("source") == "unresolved":
-        return no_update
-    return document_package_renderer.RenderScenarioDecision(
-        packageData,
-        cx,
-        selectedValues or [],
-    )

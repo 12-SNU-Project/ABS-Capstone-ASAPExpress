@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 import dash_mantine_components as dmc
-from dash import dcc, html
+from dash import html
 
 from bussiness_logic.utils.json_types import JsonObject
 
@@ -33,6 +33,117 @@ def duty_rate(req: JsonObject | None) -> str:
     if not req:
         return "없음"
     return (req.get("duty") or {}).get("rate") or "조건부"
+
+
+DUTY_TYPE_LABELS_KO = {
+    "blank": "세율 문구 없음",
+    "simple_percent": "단순 종가세율",
+    "condition_expression": "조건부 세율/통제 문구",
+    "specific_rate": "종량세율",
+    "compound_rate": "복합세율",
+    "min_max_rate": "최소/최대 한도 포함 세율",
+    "agricultural_component": "농산물 구성요소 포함 세율",
+    "supplementary_unit": "보충단위 표시",
+    "nihil": "무세/부과 없음",
+    "unknown": "미분류 duty_text",
+}
+
+
+def _duty_type_label(duty: JsonObject) -> str:
+    normalized_type = _compact_text(duty.get("normalized_type")) or "unknown"
+    return DUTY_TYPE_LABELS_KO.get(normalized_type, normalized_type)
+
+
+def _duty_explanation_text(item: object) -> tuple[str, str]:
+    if isinstance(item, dict):
+        return _compact_text(item.get("label")), _compact_text(item.get("detail"))
+    return "설명", _compact_text(item)
+
+
+def _duty_component_text(component: JsonObject) -> str:
+    display = _compact_text(component.get("display"))
+    detail = _compact_text(component.get("explanation_ko"))
+    if display and detail:
+        return f"{display} - {detail}"
+    return display or detail
+
+
+def _condition_text(condition: JsonObject) -> str:
+    parts = []
+    code = _compact_text(condition.get("condition_code"))
+    if code:
+        parts.append(f"조건 {code}")
+    cert = _compact_text(condition.get("certificate") or condition.get("certificate_code"))
+    if cert:
+        parts.append(f"cert {cert}")
+    expression = _compact_text(condition.get("expression"))
+    if expression:
+        parts.append(f"기준 {expression}")
+    action = _compact_text(condition.get("action_code"))
+    if action:
+        parts.append(f"action {action}")
+    outcome = _compact_text(condition.get("outcome"))
+    if outcome:
+        parts.append(f"결과 {outcome}")
+    explanation = _first_text(condition.get("explanation_ko"), condition.get("action_explanation_ko"))
+    return " · ".join(parts + ([explanation] if explanation else []))
+
+
+def render_duty_explanation(req: JsonObject | None) -> html.Details | None:
+    duty = (req or {}).get("duty") or {}
+    if not isinstance(duty, dict):
+        return None
+    raw = _compact_text(duty.get("raw"))
+    if not raw and not duty.get("conditions") and not duty.get("components"):
+        return None
+
+    rows: list[object] = [
+        guidance_row("정규화 유형", _duty_type_label(duty)),
+    ]
+    for item in duty.get("explanations") or []:
+        label, detail = _duty_explanation_text(item)
+        if label != "정규화 유형":
+            rows.append(guidance_row(label, detail))
+
+    components = [
+        _duty_component_text(component)
+        for component in (duty.get("components") or [])
+        if isinstance(component, dict) and _duty_component_text(component)
+    ]
+    if components:
+        rows.append(guidance_row("세율 구성", " / ".join(components[:8])))
+
+    units = []
+    for unit in duty.get("unit_explanations") or []:
+        if not isinstance(unit, dict):
+            continue
+        code = _compact_text(unit.get("code"))
+        label = _compact_text(unit.get("label_ko"))
+        detail = _compact_text(unit.get("detail_ko"))
+        units.append(f"{code}: {label} - {detail}" if detail else f"{code}: {label}")
+    if units:
+        rows.append(guidance_row("단위 설명", " / ".join(units[:10])))
+
+    conditions = [
+        _condition_text(condition)
+        for condition in (duty.get("conditions") or [])
+        if isinstance(condition, dict) and _condition_text(condition)
+    ]
+    if conditions:
+        rows.append(guidance_row("조건 분기", " / ".join(conditions[:12])))
+
+    if raw:
+        rows.append(guidance_row("원문", raw))
+
+    rows = [row for row in rows if row is not None]
+    return html.Details(
+        [
+            html.Summary("duty_text 정규화"),
+            html.Div(rows, className="cert-guidance-body"),
+        ],
+        className="scenario-detail",
+        style={"marginTop": "10px"},
+    )
 
 
 def cert_color(category: str) -> str:
@@ -242,6 +353,184 @@ def _find_measure(measures: list[JsonObject], needles: tuple[str, ...]) -> JsonO
     return next((m for m in measures if any(n in (m.get("measure_type") or "") for n in needles)), None)
 
 
+DIRECT_RATE_TYPES = {
+    "simple_percent",
+    "specific_rate",
+    "compound_rate",
+    "min_max_rate",
+    "agricultural_component",
+    "nihil",
+}
+
+
+def _duty_object(req: JsonObject | None) -> JsonObject:
+    duty = (req or {}).get("duty") or {}
+    return duty if isinstance(duty, dict) else {}
+
+
+def _duty_normalized_type(req: JsonObject | None) -> str:
+    return _compact_text(_duty_object(req).get("normalized_type")) or "unknown"
+
+
+def _duty_has_direct_rate(req: JsonObject | None) -> bool:
+    duty = _duty_object(req)
+    normalized_type = _duty_normalized_type(req)
+    rate = _compact_text(duty.get("rate"))
+    return bool(rate and normalized_type in DIRECT_RATE_TYPES)
+
+
+def _duty_requires_condition_review(req: JsonObject | None) -> bool:
+    duty = _duty_object(req)
+    return _duty_normalized_type(req) == "condition_expression" or bool(duty.get("conditions"))
+
+
+def _duty_has_conditional_rate_outcome(req: JsonObject | None) -> bool:
+    duty = _duty_object(req)
+    for condition in duty.get("conditions") or []:
+        if isinstance(condition, dict) and (condition.get("outcome_components") or _compact_text(condition.get("outcome"))):
+            return True
+    return False
+
+
+def _candidate_cert_codes(req: JsonObject | None) -> list[str]:
+    return sorted({
+        _compact_text(cert.get("code"))
+        for cert in ((req or {}).get("certificates") or [])
+        if isinstance(cert, dict) and _compact_text(cert.get("code"))
+    })
+
+
+def _tariff_candidate(req: JsonObject | None, role: str, title: str, reason: str) -> JsonObject | None:
+    if not req:
+        return None
+    duty = _duty_object(req)
+    normalized_type = _duty_normalized_type(req)
+    has_direct_rate = _duty_has_direct_rate(req)
+    requires_condition_review = _duty_requires_condition_review(req)
+    has_conditional_rate_outcome = _duty_has_conditional_rate_outcome(req)
+    return {
+        "role": role,
+        "title": title,
+        "reason_ko": reason,
+        "measure_type": req.get("measure_type") or "",
+        "rate_text": duty.get("rate") or ("조건부 결과 있음" if has_conditional_rate_outcome else "조건부"),
+        "normalized_type": normalized_type,
+        "normalized_label_ko": _duty_type_label(duty),
+        "has_direct_rate": has_direct_rate,
+        "requires_condition_review": requires_condition_review,
+        "has_conditional_rate_outcome": has_conditional_rate_outcome,
+        "source_goods_codes": req.get("source_goods_codes") or [],
+        "origins": req.get("origins") or [],
+        "legal_base": req.get("legal_base") or "",
+        "certificate_codes": _candidate_cert_codes(req),
+        "requirement": req,
+    }
+
+
+def _same_requirement(left: JsonObject | None, right: JsonObject | None) -> bool:
+    if not left or not right:
+        return False
+    left_keys = (
+        left.get("measure_sid"),
+        left.get("measure_type"),
+        left.get("legal_base"),
+        tuple(left.get("source_goods_codes") or []),
+        (_duty_object(left).get("raw") or ""),
+    )
+    right_keys = (
+        right.get("measure_sid"),
+        right.get("measure_type"),
+        right.get("legal_base"),
+        tuple(right.get("source_goods_codes") or []),
+        (_duty_object(right).get("raw") or ""),
+    )
+    return left_keys == right_keys
+
+
+def _build_tariff_decision(
+    third_country: JsonObject | None,
+    fta_pref: JsonObject | None,
+    controls: list[JsonObject],
+    additional_duty: JsonObject | None,
+    duties: list[JsonObject] | None = None,
+) -> JsonObject:
+    blocking_controls = [
+        control
+        for control in controls
+        if control.get("certificates") or control.get("detailed_requirements")
+    ]
+    base_candidate = _tariff_candidate(
+        third_country,
+        "base",
+        "기본세율 후보",
+        "Third country duty 계열 measure의 정규화된 duty_text 값입니다.",
+    )
+    preference_candidate = _tariff_candidate(
+        fta_pref,
+        "preference",
+        "한국 원산지 우대세율 후보",
+        "Tariff preference 또는 Customs Union 계열 measure의 정규화된 duty_text 값입니다.",
+    )
+    additional_candidate = _tariff_candidate(
+        additional_duty,
+        "additional",
+        "추가관세 후보",
+        "Additional duties 계열 measure는 기본/우대세율과 별도로 더해질 수 있어 별도 검토합니다.",
+    )
+
+    primary_candidate = None
+    if preference_candidate and preference_candidate.get("has_direct_rate"):
+        primary_candidate = preference_candidate
+    elif base_candidate and base_candidate.get("has_direct_rate"):
+        primary_candidate = base_candidate
+    elif preference_candidate:
+        primary_candidate = preference_candidate
+    elif base_candidate:
+        primary_candidate = base_candidate
+
+    skipped = [third_country, fta_pref, additional_duty]
+    conditional_candidates = []
+    for duty_req in duties or []:
+        if not isinstance(duty_req, dict) or not _duty_requires_condition_review(duty_req):
+            continue
+        if any(_same_requirement(duty_req, item) for item in skipped if item):
+            continue
+        candidate = _tariff_candidate(
+            duty_req,
+            "conditional",
+            "조건부 세율 후보",
+            "Cond: 분기 안에서 certificate/action/outcome을 확인해야 하는 정규화 후보입니다.",
+        )
+        if candidate:
+            conditional_candidates.append(candidate)
+
+    if preference_candidate and preference_candidate.get("has_direct_rate"):
+        reason = "UI 판단 기준을 체크박스가 아니라 정규화된 duty_text 세율값으로 전환했습니다. 한국 원산지 조회에서 직접 세율값을 가진 우대세율 후보가 있어 이를 1순위 후보로 표시합니다."
+    elif base_candidate and base_candidate.get("has_direct_rate"):
+        reason = "직접 세율값을 가진 우대세율 후보가 없어 정규화된 기본세율 후보를 1순위로 표시합니다."
+    elif primary_candidate:
+        reason = "직접 세율값이 아니라 Cond: 분기 또는 보충단위 형태라 최종 세율 확정 전에 조건 분기 검토가 필요합니다."
+    else:
+        reason = "현재 조회 결과에서 정규화된 기본/우대 세율 후보를 찾지 못했습니다."
+    if blocking_controls:
+        reason += " 단, control measure는 세율 후보가 아니라 통관 허용/보류 조건이므로 별도 서류 충족 여부를 함께 확인해야 합니다."
+    return {
+        "base_duty": third_country,
+        "preferential_duty": fta_pref,
+        "additional_duty": additional_duty,
+        "base_candidate": base_candidate,
+        "preference_candidate": preference_candidate,
+        "additional_candidate": additional_candidate,
+        "conditional_candidates": conditional_candidates,
+        "primary_candidate": primary_candidate,
+        "default_selected_duty": (primary_candidate or {}).get("requirement") if primary_candidate else None,
+        "blocking_controls": blocking_controls,
+        "control_count": len(blocking_controls),
+        "decision_reason_ko": reason,
+        "decision_basis": "normalized_duty_text",
+    }
+
+
 def package_context(pkg: JsonObject) -> JsonObject:
     raw_context = raw_package_context(pkg)
     if raw_context:
@@ -260,6 +549,7 @@ def _unresolved_context(pkg: JsonObject) -> JsonObject:
         "third_country": None,
         "fta_pref": None,
         "additional_duty": None,
+        "tariff_decision": _build_tariff_decision(None, None, [], None),
         "groups": [],
         "counts": {},
         "metrics": {},
@@ -316,13 +606,19 @@ def _document_counts(documents: list[JsonObject], counts: JsonObject | None = No
     out.setdefault("required", sum(1 for doc in documents if _doc_status(doc) == "required"))
     out.setdefault("conditional", sum(1 for doc in documents if _doc_status(doc) == "conditional"))
     out.setdefault("pending", sum(1 for doc in documents if _doc_status(doc) == "pending"))
-    out["with_pre_links"] = sum(1 for doc in documents if doc.get("pre_taric_links") or doc.get("pre_checks"))
     out["with_post_links"] = sum(1 for doc in documents if doc.get("post_taric_links") or doc.get("post_requirements"))
     return out
 
 
 def raw_package_context(pkg: JsonObject) -> JsonObject | None:
     reqs = pkg.get("requirements") or []
+    if not reqs and isinstance(pkg.get("raw_document_package"), dict):
+        raw = dict(pkg.get("raw_document_package") or {})
+        raw.setdefault("taric10", pkg.get("taric10"))
+        raw.setdefault("backtracking_signals", pkg.get("backtracking_signals") or [])
+        raw.setdefault("missing_facts", pkg.get("missing_facts") or [])
+        pkg = raw
+        reqs = pkg.get("requirements") or []
     if not isinstance(reqs, list):
         return None
     checklist = pkg.get("checklist_summary") or {}
@@ -370,6 +666,9 @@ def raw_package_context(pkg: JsonObject) -> JsonObject | None:
 
     base_duty_measures = [r for r in duties if _is_base_duty_measure(r)]
     preferential_measures = [r for r in duties if _is_preferential_measure(r)]
+    third_country = _find_measure(duties, ("Third country duty",))
+    fta_pref = _find_measure(duties, ("Tariff preference", "Customs Union"))
+    additional_duty = _find_measure(duties, ("Additional duties",))
     return {
         "kr": kr,
         "non_kr": non_kr,
@@ -377,9 +676,10 @@ def raw_package_context(pkg: JsonObject) -> JsonObject | None:
         "duties": list(base_duty_measures) + list(preferential_measures),
         "base_duty_measures": base_duty_measures,
         "preferential_measures": preferential_measures,
-        "third_country": _find_measure(duties, ("Third country duty",)),
-        "fta_pref": _find_measure(duties, ("Tariff preference", "Customs Union")),
-        "additional_duty": _find_measure(duties, ("Additional duties",)),
+        "third_country": third_country,
+        "fta_pref": fta_pref,
+        "additional_duty": additional_duty,
+        "tariff_decision": _build_tariff_decision(third_country, fta_pref, controls, additional_duty, duties),
         "groups": groups,
         "document_checklist": checklist,
         "baseline_documents": baseline_docs,
@@ -408,17 +708,15 @@ def raw_package_context(pkg: JsonObject) -> JsonObject | None:
 def render_result(pkg, panel, options):
     if not pkg:
         return "TARIC 코드를 입력하거나 좌측 예제를 선택하세요."
-    if not pkg.get("has_data") and not pkg.get("requirements") and pkg.get("backtracking_signals"):
-        return render_unresolved(pkg, options or [])
-    if not pkg.get("has_data") and not pkg.get("requirements"):
-        return html.Div("이 코드에 대한 현재 적용 measure가 없습니다.", className="empty")
-
     cx = package_context(pkg)
     if cx.get("source") == "unresolved":
-        return render_unresolved(pkg, options or [])
+        if pkg.get("backtracking_signals"):
+            return render_unresolved(pkg, options or [])
+        return html.Div("이 코드에 대한 현재 적용 measure가 없습니다.", className="empty")
     third_country = cx["third_country"]
     fta_pref = cx["fta_pref"]
-    final_duty = fta_pref or third_country
+    tariff_decision = cx.get("tariff_decision") or {}
+    final_duty = tariff_decision.get("default_selected_duty") or fta_pref or third_country
     counts = cx["counts"]
     metricsData = cx.get("metrics") or {}
     groups = cx["groups"]
@@ -426,13 +724,7 @@ def render_result(pkg, panel, options):
     additional_documents = _additional_detail_documents(baseline_documents)
     controls = cx["controls"]
     duties = cx["duties"]
-    product_reqs = cx["product_reqs"]
     selected = panel or OVERVIEW_PANEL_ID
-    product_count = (
-        len(cx.get("product_pre") or [])
-        + len(cx.get("product_post") or [])
-        or sum(len(r.get("detailed_requirements") or []) for r in product_reqs)
-    )
 
     panel_defs = _document_panel_defs(len(baseline_documents) or len(additional_documents) or len(groups))
 
@@ -605,7 +897,7 @@ def render_unresolved(pkg: JsonObject, options: list[str]):
 
 def render_panel(pkg: JsonObject, panel: str, cx: JsonObject, options: list[str]):
     if panel == "scenario":
-        return render_trade_scenario(pkg, cx)
+        return render_trade_scenario(pkg, cx, "drawer")
     if panel == "customs":
         return render_customs(pkg, cx["controls"])
     if panel == "base_duty":
@@ -670,7 +962,6 @@ def _additional_detail_documents(documents: list[JsonObject]) -> list[JsonObject
             continue
         if (
             doc.get("taric_certificates")
-            or doc.get("pre_checks")
             or doc.get("post_requirements")
             or code in {"ORIGIN_PROOF", "PRODUCT_SPEC", "INGREDIENT_LIST", "COA", "SDS", "LABEL_ARTWORK", "HEALTH_CERT_SUPPORT", "ORGANIC_COI", "CITES_SPECIES_EVIDENCE"}
         ):
@@ -722,7 +1013,6 @@ def _scenario_documents(cx: JsonObject, scenario: str) -> list[JsonObject]:
                 doc
                 for doc in docs
                 if doc.get("taric_certificates")
-                or doc.get("pre_checks")
                 or doc.get("post_requirements")
             ]
         )
@@ -748,7 +1038,6 @@ def _scenario_document_window(
     cert_codes = cert_codes or []
     rows = []
     for doc in docs[:8]:
-        pre_count = len(doc.get("pre_checks") or [])
         post_count = len(doc.get("post_requirements") or [])
         fields = doc.get("fields") or []
         field_preview = ", ".join(
@@ -765,7 +1054,7 @@ def _scenario_document_window(
                             html.Div(_doc_name(doc), className="scenario-doc-name"),
                             html.Div(_doc_code(doc), className="scenario-doc-code"),
                             html.Div(
-                                f"사전 {pre_count} · 상세 {post_count} · 추가 확인: {missing}",
+                                f"상세 {post_count} · 추가 확인: {missing}",
                                 className="scenario-doc-meta",
                             ),
                             html.Div(
@@ -831,6 +1120,7 @@ def _scenario_card(
     color_class: str,
     cert_codes: list[str] | None = None,
     document_window: html.Div | None = None,
+    duty_req: JsonObject | None = None,
 ) -> html.Div:
     color = {
         "green": "#166534",
@@ -842,6 +1132,7 @@ def _scenario_card(
             html.Div(title, className="card-title"),
             html.Div(basis or "-", className="card-meta"),
             html.Div(duty or "-", className="scenario-duty", style={"color": color}),
+            render_duty_explanation(duty_req),
             html.Ul([html.Li(action) for action in actions if action], className="scenario-actions"),
             html.Div(
                 f"세부 서류/선언 코드 {len(cert_codes or [])}개",
@@ -857,6 +1148,153 @@ def _scenario_card(
             ) if document_window else None,
         ],
         className=f"scenario-card {color_class}",
+    )
+
+
+def _candidate_basis_lines(candidate: JsonObject) -> list[str]:
+    source_codes = ", ".join((candidate.get("source_goods_codes") or [])[:4]) or "-"
+    origins = ", ".join((candidate.get("origins") or [])[:4]) or "origin 제한 없음/전체"
+    legal = candidate.get("legal_base") or "N/A"
+    lines = [
+        f"정규화 유형: {candidate.get('normalized_label_ko') or candidate.get('normalized_type') or '-'}",
+        f"source goods: {source_codes}",
+        f"origin: {origins}",
+        f"legal: {legal}",
+    ]
+    cert_codes = ", ".join((candidate.get("certificate_codes") or [])[:8])
+    if cert_codes:
+        lines.append(f"certificate/declaration: {cert_codes}")
+    if candidate.get("requires_condition_review"):
+        lines.append("Cond: 분기가 있어 certificate/action/outcome을 확인해야 합니다.")
+    return lines
+
+
+def _candidate_color(candidate: JsonObject | None, *, primary: bool = False) -> str:
+    if primary:
+        return "green"
+    role = (candidate or {}).get("role")
+    if role == "preference":
+        return "green"
+    if role in {"additional", "conditional"}:
+        return "amber"
+    return "amber"
+
+
+def _tariff_candidate_card(candidate: JsonObject, cx: JsonObject, *, primary: bool = False) -> html.Div:
+    req = candidate.get("requirement") or {}
+    role = candidate.get("role") or "candidate"
+    cert_codes = candidate.get("certificate_codes") or []
+    if not cert_codes and role in {"base", "additional", "conditional"}:
+        cert_codes = _scenario_parts(cx)["all_control_codes"]
+    window_kind = "fta" if role == "preference" else ("control" if role == "conditional" else "basic")
+    document_window = _scenario_document_window(cx, window_kind, cert_codes, f"{candidate.get('title') or '세율 후보'} 제출 창")
+    title_prefix = "자동 선택: " if primary else ""
+    state = "직접 세율값" if candidate.get("has_direct_rate") else "조건 검토 필요"
+    return _scenario_card(
+        title_prefix + (candidate.get("title") or "세율 후보"),
+        candidate.get("rate_text") or "조건부",
+        candidate.get("measure_type") or "-",
+        [candidate.get("reason_ko") or "", *_candidate_basis_lines(candidate), f"판단 상태: {state}"],
+        _candidate_color(candidate, primary=primary),
+        cert_codes,
+        document_window,
+        req,
+    )
+
+
+def _control_gate_card(cx: JsonObject) -> html.Div | None:
+    controls = cx.get("controls") or []
+    if not controls:
+        return None
+    all_control_codes = _scenario_parts(cx)["all_control_codes"]
+    return _scenario_card(
+        "통관 조건: Control measure",
+        "세율 아님",
+        f"Control certificate/declaration {len(all_control_codes)}개 · measure {len(controls)}개",
+        [
+            "이 영역은 관세율 후보를 바꾸는 입력값이 아니라 통관 허용/보류 조건입니다.",
+            "정규화된 세율값으로 기본/우대세율을 먼저 구분하고, control 서류는 별도 충족 조건으로 확인합니다.",
+            "필수 certificate/declaration 또는 비대상 근거가 없으면 세율 산정과 별개로 통관이 보류될 수 있습니다.",
+        ],
+        "red",
+        all_control_codes,
+        _scenario_document_window(cx, "control", all_control_codes, "Control 서류 준비 창"),
+    )
+
+
+def render_normalized_tariff_decision(pkg: JsonObject, cx: JsonObject) -> html.Div:
+    decision = cx.get("tariff_decision") or {}
+    primary = decision.get("primary_candidate")
+    base = decision.get("base_candidate")
+    preference = decision.get("preference_candidate")
+    additional = decision.get("additional_candidate")
+    conditional = decision.get("conditional_candidates") or []
+    comparison_candidates = [
+        candidate
+        for candidate in [preference, base, additional, *conditional]
+        if isinstance(candidate, dict) and candidate is not primary
+    ]
+
+    primary_block = (
+        _tariff_candidate_card(primary, cx, primary=True)
+        if isinstance(primary, dict)
+        else html.Div(
+            [
+                html.Div("정규화 세율 후보 없음", className="card-title"),
+                html.Div("현재 조회 결과에서 기본세율/우대세율로 표시할 수 있는 duty_text 값을 찾지 못했습니다.", className="card-meta"),
+            ],
+            className="scenario-card red",
+        )
+    )
+    comparison_block = html.Div(
+        [_tariff_candidate_card(candidate, cx) for candidate in comparison_candidates]
+        or [html.Div("비교할 추가 세율 후보가 없습니다.", className="card-meta")],
+        className="scenario-grid",
+    )
+    control_card = _control_gate_card(cx)
+
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Div("TARIC CODE", className="metric-label"),
+                            html.Div(pkg.get("taric10") or "-", className="metric-value", style={"color": "#6d3fd6", "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"}),
+                            html.Div(f"CN8: {pkg.get('cn8') or '-'}", className="card-meta"),
+                        ],
+                        className="scenario-code",
+                    ),
+                    html.Div(
+                        [
+                            html.Div("정규화 세율 판단", className="card-title"),
+                            html.Div(
+                                "duty_text를 정규화한 rate/components/conditions 기준으로 기본세율, 우대세율, 추가관세, control 조건을 분리합니다.",
+                                className="card-meta",
+                            ),
+                            html.Div(
+                                decision.get("decision_reason_ko") or "",
+                                className="card-meta",
+                                style={"marginTop": "8px", "color": "#334155"},
+                            ),
+                        ]
+                    ),
+                ],
+                className="scenario-head",
+            ),
+            primary_block,
+            html.Details(
+                [
+                    html.Summary("정규화 세율 후보 비교"),
+                    comparison_block,
+                ],
+                className="scenario-detail",
+                style={"marginTop": "12px"},
+                open=True,
+            ),
+            control_card,
+        ],
+        className="scenario-shell",
     )
 
 
@@ -903,6 +1341,7 @@ def _scenario_comparison_cards(cx: JsonObject) -> list[html.Div]:
                 "green",
                 fta_codes + all_control_codes,
                 _scenario_document_window(cx, "fta", fta_codes + all_control_codes, "FTA 우대 시 제출 창"),
+                fta_pref,
             )
         )
     else:
@@ -934,6 +1373,7 @@ def _scenario_comparison_cards(cx: JsonObject) -> list[html.Div]:
             "amber",
             all_control_codes,
             _scenario_document_window(cx, "basic", all_control_codes, "기본관세 시 제출 창"),
+            third_country,
         )
     )
 
@@ -993,6 +1433,7 @@ def render_scenario_decision(pkg: JsonObject, cx: JsonObject, selected_values: l
             "green",
             fta_codes + all_control_codes,
             _scenario_document_window(cx, "fta", fta_codes + all_control_codes, "FTA 우대 시 제출 창"),
+            fta_pref,
         )
     elif origin_is_kr:
         primary = _scenario_card(
@@ -1006,6 +1447,7 @@ def render_scenario_decision(pkg: JsonObject, cx: JsonObject, selected_values: l
             "amber",
             all_control_codes,
             _scenario_document_window(cx, "basic", all_control_codes, "기본관세 시 제출 창"),
+            third_country,
         )
     else:
         primary = _scenario_card(
@@ -1019,6 +1461,7 @@ def render_scenario_decision(pkg: JsonObject, cx: JsonObject, selected_values: l
             "amber",
             all_control_codes,
             _scenario_document_window(cx, "basic", all_control_codes, "비한국 원산지 기본 제출 창"),
+            third_country,
         )
 
     return html.Div(
@@ -1045,55 +1488,11 @@ def _default_scenario_values(cx: JsonObject) -> list[str]:
     return values
 
 
-def render_trade_scenario(pkg: JsonObject, cx: JsonObject) -> html.Div:
-    parts = _scenario_parts(cx)
-    has_control_requirements = parts["has_control_requirements"]
-    fta_pref = parts["fta_pref"]
-    checklist_values = _default_scenario_values(cx)
-    taric_key = CleanCode(str(pkg.get("taric10") or "unknown")) or "unknown"
-
+def render_trade_scenario(pkg: JsonObject, cx: JsonObject, instance_id: str = "overview") -> html.Div:
     return html.Div(
         [
-            html.Div(
-                [
-                    html.Div(
-                        [
-                            html.Div("TARIC CODE", className="metric-label"),
-                            html.Div(pkg.get("taric10") or "-", className="metric-value", style={"color": "#6d3fd6", "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"}),
-                            html.Div(f"CN8: {pkg.get('cn8') or '-'}", className="card-meta"),
-                        ],
-                        className="scenario-code",
-                    ),
-                    html.Div(
-                        [
-                            html.Div("조건 체크", className="card-title"),
-                            dcc.Checklist(
-                                id={"type": "scenario-checks", "taric": taric_key},
-                                options=[
-                                    {"label": "원산지가 한국인가요?", "value": "origin_kr"},
-                                    {"label": "Control 서류 또는 비대상 근거가 준비되었나요?", "value": "controls_ready", "disabled": not has_control_requirements},
-                                    {"label": "FTA 우대세율을 신청하나요?", "value": "fta_requested", "disabled": not bool(fta_pref)},
-                                ],
-                                value=checklist_values,
-                                className="scenario-checks",
-                                inputStyle={"marginRight": "8px"},
-                                labelStyle={"display": "block"},
-                            ),
-                            html.Div(
-                                "체크 상태에 따라 아래 시나리오를 비교하고, 실제 제출물은 각 시나리오의 서류 확인에서 봅니다.",
-                                className="card-meta",
-                            ),
-                        ]
-                    ),
-                ],
-                className="scenario-head",
-            ),
-            html.Div(
-                render_scenario_decision(pkg, cx, checklist_values),
-                id={"type": "scenario-result", "taric": taric_key},
-            ),
+            render_normalized_tariff_decision(pkg, cx),
         ],
-        className="scenario-shell",
     )
 
 def render_overview(cx: JsonObject, options: list[str], pkg: JsonObject):
@@ -1148,7 +1547,7 @@ def render_overview(cx: JsonObject, options: list[str], pkg: JsonObject):
         ],
         className="document-overview-brief",
     )
-    return html.Div([render_trade_scenario(pkg, cx), reviewTable])
+    return html.Div([render_trade_scenario(pkg, cx, "overview"), reviewTable])
 
 
 def render_customs(pkg: JsonObject, controls: list[JsonObject]):
@@ -1195,6 +1594,7 @@ def render_base_duty(reqs: list[JsonObject]):
                     [
                         html.Div(req.get("measure_type"), className="card-title"),
                         html.Div(duty_rate(req), style={"fontSize": "24px", "fontWeight": 950, "color": "#9a3412", "marginTop": "3px"}),
+                        render_duty_explanation(req),
                         html.Div(f"legal: {req.get('legal_base') or 'N/A'} · origin: {', '.join((req.get('origins') or [])[:4])}", className="card-meta"),
                         html.Div(
                             [cert_card(c) for c in (req.get("certificates") or [])]
@@ -1222,6 +1622,7 @@ def render_preferential(reqs: list[JsonObject]):
                     [
                         html.Div(req.get("measure_type"), className="card-title"),
                         html.Div(duty_rate(req), style={"fontSize": "24px", "fontWeight": 950, "color": "#166534", "marginTop": "3px"}),
+                        render_duty_explanation(req),
                         html.Div(f"legal: {req.get('legal_base') or 'N/A'} · origin: {', '.join((req.get('origins') or [])[:4])}", className="card-meta"),
                         html.Div(
                             [cert_card(c) for c in (([c for c in (req.get("certificates") or []) if c.get("category") == "preferential_origin"] or (req.get("certificates") or [])))]
@@ -1300,73 +1701,27 @@ def render_document_checklist(
                         ],
                         className="document-checklist-count",
                     )
-                    for label, value, tone in [
-                        ("전체", counts.get("total", len(documents)), "neutral"),
-                        ("필수", counts.get("required", 0), "required"),
-                        ("조건부", counts.get("conditional", 0), "conditional"),
-                        ("판단보류", counts.get("pending", 0), "pending"),
-                        ("사전 연결", counts.get("with_pre_links", 0), "linked"),
-                        ("상세 연결", counts.get("with_post_links", 0), "linked"),
-                    ]
+                for label, value, tone in [
+                    ("전체", counts.get("total", len(documents)), "neutral"),
+                    ("필수", counts.get("required", 0), "required"),
+                    ("조건부", counts.get("conditional", 0), "conditional"),
+                    ("판단보류", counts.get("pending", 0), "pending"),
+                    ("상세 연결", counts.get("with_post_links", 0), "linked"),
+                ]
                 ],
                 className="document-checklist-summary",
             ),
             html.Div(
-                "상업송장, 포장명세서, 운송서류 같은 기본 제출서류를 먼저 보여주고, 각 문서에 연결된 사전 확인사항과 TARIC 상세 규제를 붙였습니다.",
+                "상업송장, 포장명세서, 운송서류 같은 기본 제출서류를 먼저 보여주고, 각 문서에 연결된 TARIC 상세 규제를 붙였습니다.",
                 className="document-checklist-description",
             ),
         ],
         className="document-checklist-intro",
     )
 
-    preRows: list[object] = []
-    for check in pre_checks[:8]:
-        preRows.append(
-            html.Tr(
-                [
-                    html.Td(
-                        status_badge(check.get("decision_status") or check.get("required_level") or "conditional"),
-                    ),
-                    html.Td(
-                        [
-                            html.Div(check.get("pre_gate_family") or "pre gate", className="document-cell-title"),
-                            html.Div(
-                                f"{check.get('domain') or '-'} · {check.get('requirement_type') or '-'}",
-                                className="document-cell-meta",
-                            ),
-                        ],
-                    ),
-                    html.Td(check.get("required_action") or "-"),
-                    html.Td(
-                        ", ".join((check.get("missing_facts") or [])[:6]) or "없음",
-                        className="document-cell-missing",
-                    ),
-                ],
-            )
-        )
-    pre_block = html.Details(
-        [
-            html.Summary(f"사전 확인사항 {len(pre_checks)}개"),
-            html.Div(
-                html.Table(
-                    [
-                        html.Thead(html.Tr([html.Th("상태"), html.Th("확인사항"), html.Th("조치"), html.Th("추가 확인")])),
-                        html.Tbody(preRows),
-                    ],
-                    className="document-checklist-table document-precheck-table",
-                )
-                if preRows
-                else html.Div("사전 확인사항 없음", className="card-meta"),
-                className="document-table-wrap",
-            ),
-        ],
-        className="document-checklist-details",
-    )
-
     documentRows: list[object] = []
     for doc in documents:
         fields = doc.get("fields") or []
-        pre_count = len(doc.get("pre_checks") or [])
         post_count = len(doc.get("post_requirements") or [])
         certs = ", ".join((doc.get("taric_certificates") or [])[:8]) or "-"
         documentRows.append(
@@ -1394,7 +1749,7 @@ def render_document_checklist(
                     ),
                     html.Td(
                         [
-                            html.Div(f"사전 {pre_count} · 상세 {post_count}", className="document-cell-meta"),
+                            html.Div(f"상세 {post_count}", className="document-cell-meta"),
                             html.Div(f"TARIC {certs}", className="document-cell-link"),
                         ]
                     ),
@@ -1450,7 +1805,7 @@ def render_document_checklist(
         className="document-table-wrap",
     )
     return html.Div(
-        [intro, pre_block, documentTable, legacy],
+        [intro, documentTable, legacy],
         className="document-checklist-layout",
     )
 
@@ -1460,15 +1815,6 @@ def render_product_rules_from_view(
     post: list[JsonObject],
     related_declarations: dict[str, list[str]],
 ):
-    pre_col = html.Div(
-        [
-            html.Div([html.Div("사전 규제 후보", className="card-title"), html.Div(f"CN chapter 기준으로 먼저 확인할 규제 후보 · {len(pre)}개", className="card-meta")], className="card", style={"borderLeft": "4px solid #475569"}),
-            *[
-                detail_card(d, "pre 후보", related_declarations.get(d.get("domain_route") or d.get("domain") or "", []))
-                for d in pre[:16]
-            ],
-        ]
-    )
     post_col = html.Div(
         [
             html.Div([html.Div("TARIC 상세 규제", className="card-title"), html.Div(f"선택된 TARIC 코드에서 실제 준비/누락/보류 판단 항목 · {len(post)}개", className="card-meta")], className="card", style={"borderLeft": "4px solid #166534", "background": "#f0fdf4"}),
@@ -1478,7 +1824,7 @@ def render_product_rules_from_view(
             ],
         ]
     )
-    return html.Div([html.Div("상세 규제/선언 체크리스트", className="section-title"), html.Div([pre_col, post_col], className="two-col")])
+    return html.Div([html.Div("상세 규제/선언 체크리스트", className="section-title"), post_col])
 
 
 

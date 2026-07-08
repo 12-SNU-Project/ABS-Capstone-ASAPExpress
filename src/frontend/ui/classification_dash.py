@@ -2198,6 +2198,7 @@ def _candidate_merged_node(node: JsonObject) -> html.Div:
 def classification_result_drawer(
     result: JsonObject,
     drawerOpened: bool | str | JsonObject | None,
+    document_panel: str | None = None,
 ) -> html.Div | None:
     candidateSet = result.get("candidate_code_set") or {}
     candidates = candidateSet.get("candidates") if isinstance(candidateSet, dict) else []
@@ -2218,6 +2219,7 @@ def classification_result_drawer(
             result,
             selectedTaric10=selectedTaric10,
             selectedKey=selectedKey,
+            document_panel=document_panel,
         )
         if selectedCandidate
         else _classification_result_panel(candidateSet, candidates[:5])
@@ -2309,6 +2311,7 @@ def _taric_candidate_detail_panel(
     *,
     selectedTaric10: str = "",
     selectedKey: str = "",
+    document_panel: str | None = None,
 ) -> html.Div:
     branchPackages = _candidate_branch_document_packages(candidate, result)
     taric10, package = _selected_branch_package(
@@ -2326,7 +2329,7 @@ def _taric_candidate_detail_panel(
                 selectedTaric10=taric10,
                 selectedKey=selectedKey or _candidate_key(candidate, 1),
             ),
-            _embedded_document_package_panel(taric10, package, isConnecting),
+            _embedded_document_package_panel(taric10, package, isConnecting, document_panel=document_panel),
         ],
         className="taric-candidate-detail",
     )
@@ -2441,6 +2444,7 @@ def _embedded_document_package_panel(
     taric10: str,
     package: JsonObject | None,
     isConnecting: bool,
+    document_panel: str | None = None,
 ) -> html.Div:
     if package:
         from frontend.ui.document_package_renderer import RenderDocumentPackageResult
@@ -2458,7 +2462,7 @@ def _embedded_document_package_panel(
                     className="taric-document-embed-heading",
                 ),
                 html.Div(
-                    RenderDocumentPackageResult(package, "overview", []),
+                    RenderDocumentPackageResult(package, document_panel or "overview", []),
                     className="taric-document-embed-content",
                 ),
             ],
@@ -2754,6 +2758,7 @@ def render_page(
     input_detail_drawer_mode: str | bool | None = None,
     candidate_tree_drawer_open: bool = False,
     classification_result_drawer_open: bool | str | JsonObject | None = False,
+    document_panel: str | None = None,
 ) -> html.Div:
     result = result or {}
     inputProcessingSource = result.get("input_processing_view")
@@ -2766,6 +2771,7 @@ def render_page(
     classificationResultDrawer = classification_result_drawer(
         result,
         classification_result_drawer_open,
+        document_panel=document_panel,
     )
     requestFacts = (
         (result.get("request") or {}).get("facts")
