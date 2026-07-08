@@ -250,3 +250,12 @@ tests/.DS_Store
 tests/__pycache__/
 smoke_out.txt
 artifacts/
+
+cn_hierarchy_analysis_grouping_20260702/*
+*.csv
+*.xlsx
+*.pdf
+*.sql
+*.pptx
+*.zip
+문서관련 테이블
