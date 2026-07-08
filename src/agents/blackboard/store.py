@@ -52,6 +52,7 @@ OBJECT_KEY: dict[str, str] = {
     "ProductUnderstandingPackage": "product_understanding",
     "Hs2RoutingDecision": "routing_context",
     "ClassificationCandidateSet": "candidate_code_sets",
+    "TaricBranchSet": "taric_branch_sets",
     "DocumentPackage": "document_packages",
 }
 
@@ -60,6 +61,7 @@ COMPONENT_WRITE_KEYS: dict[str, set[str]] = {
     "Product_Understanding_Component": {"product_understanding"},
     "HS2_Routing_Component": {"routing_context"},
     "Classification_Component": {"candidate_code_sets"},
+    "Taric_Branch_Resolution_Component": {"taric_branch_sets"},
     "Document_Component": {"document_packages"},
 }
 
@@ -147,6 +149,7 @@ class BlackboardStore:
                 "runtime_mode": runtime_mode,
             },
             "candidate_code_sets": [],
+            "taric_branch_sets": [],
             "product_understanding": None,
             "routing_context": None,
             "document_packages": [],

@@ -43,8 +43,11 @@ def _aliases() -> dict[str, list[str]]:
 
             from db.db_session_manager import DbSessionManager
 
+            version = (os.environ.get("ASAP_ALIAS_VERSION", "tree-v1") or "").strip()
             for row in DbSessionManager.GetInstance().FetchRows(
-                text('SELECT token, class_tokens FROM "cn_alias_index"'), {},
+                text('SELECT token, class_tokens FROM "cn_alias_index"'
+                     " WHERE alias_version = :version"),
+                {"version": version},
             ):
                 data = dict(row)
                 try:
@@ -94,6 +97,11 @@ def _dig(obj: Any, path: str) -> Any:
     return cur
 
 
+# 센티널은 '채워짐'이 아니라 '모름'이다 — 토큰으로 흘리면 field_empty가
+# field_no_match로 위장된다 (comp.processing_state='unknown' 22/22 실측).
+_FIELD_SENTINELS = frozenset({"unknown", "other", "none", "n/a", "na"})
+
+
 def _field_tokens(product_facts: Mapping[str, Any] | None, dto_field: str) -> set[str]:
     """Token set of the bound DTO fields (';'-separated paths)."""
     if not product_facts or not dto_field or dto_field == "*tokens*":
@@ -110,9 +118,10 @@ def _field_tokens(product_facts: Mapping[str, Any] | None, dto_field: str) -> se
                 leaf = path.rsplit(".", 1)[-1]
                 parts = [w for w in leaf.split("_") if w not in _PATH_STRUCTURE_WORDS]
         elif isinstance(value, str):
-            parts = [value]
+            parts = [] if value.strip().lower() in _FIELD_SENTINELS else [value]
         elif isinstance(value, list):
-            parts = [str(v) for v in value]
+            parts = [str(v) for v in value
+                     if str(v).strip().lower() not in _FIELD_SENTINELS]
         for part in parts:
             out |= {_stem(t) for t in _TOKEN.findall(part.lower()) if len(t) >= 3}
     return out
@@ -129,10 +138,11 @@ def LoadBranchPredicates(level: str, codes: tuple[str, ...]) -> dict[str, list[d
 
         manager = DbSessionManager.GetInstance()
         # A/B between compiler generations: ASAP_PREDICATE_VERSION selects
-        # which sidecar generation feeds the runtime. Default llm-v1 — the
-        # measured configuration (hs4 73%, staged-only 67%); "all" stacks
-        # generations and is NOT measured.
-        version = (os.environ.get("ASAP_PREDICATE_VERSION", "llm-v1") or "").strip()
+        # which sidecar generation feeds the runtime. Default rule-v2 matches
+        # branch_predicate_compiler.py, so a freshly compiled sidecar is read
+        # without requiring an env override. "all" stacks generations and is
+        # NOT a measured/default configuration.
+        version = (os.environ.get("ASAP_PREDICATE_VERSION", "rule-v2") or "").strip()
         version_clause = " AND predicate_version = :version" if version and version != "all" else ""
         params: dict[str, Any] = {"level": level, "codes": tuple(codes)}
         if version_clause:
@@ -171,6 +181,9 @@ def EvaluatePredicates(
     delta = 0.0
     verdicts: list[dict[str, str]] = []
     pool = set(fact_tokens)
+    # 잔존하는 유일한 broad-pool 지원 경로(true_pool +1)의 A/B 스위치.
+    # 기본 ON(73% 실측 구성). OFF면 has_token은 바인딩 필드로만 답한다.
+    pool_boost_on = (os.environ.get("ASAP_PREDICATE_POOL_BOOST", "1") or "1").strip() != "0"
     for pred in predicates:
         axis = str(pred.get("axis") or "")
         if axis in _SKIP_AXES:
@@ -195,7 +208,7 @@ def EvaluatePredicates(
             if tokens & bound:
                 verdict = "true"
                 delta += _FIELD_BOOST
-            elif axis not in _STRICT_FIELD_AXES and tokens & (
+            elif pool_boost_on and axis not in _STRICT_FIELD_AXES and tokens & (
                 _expand(pool) if axis in _ALIAS_AXES else pool
             ):
                 verdict = "true_pool"
@@ -204,10 +217,15 @@ def EvaluatePredicates(
                 verdict = "unknown"
         else:
             verdict = "unknown"
+        why = ""
+        if op == "has_token" and verdict == "unknown":
+            bound_probe = _field_tokens(product_facts, str(pred.get("dto_field") or ""))
+            why = "field_empty" if not bound_probe else "field_no_match"
         verdicts.append({
             "axis": axis,
             "op": op,
             "value": ",".join(sorted(tokens))[:60],
             "verdict": verdict,
+            "why": why,
         })
     return delta, verdicts

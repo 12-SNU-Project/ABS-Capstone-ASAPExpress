@@ -4,7 +4,9 @@ Architecture (codex 2026-06-08):
 
   Components:
     - Evidence_Intake_Component    PES 생성 (OCR/parser)
-    - Classification_Component     CN8 후보 + TARIC10 branch 추천
+    - Classification_Component     CN8 후보 생성
+    - Taric_Branch_Resolution_Component
+                                  CN8 후보별 모든 TARIC10 branch 열거
                                tools: ASAPExpressClassifierTool,
                                       TaricBranchResolverTool
     - Document_Component           서류/관세/제품규제 추천
@@ -24,6 +26,7 @@ from agents.pipeline_components import (
     EvidenceIntakeComponent,
     Hs2RoutingComponent,
     ProductUnderstandingComponent,
+    TaricBranchResolutionComponent,
 )
 from bussiness_logic.document.document_component import DocumentComponent
 
@@ -34,5 +37,6 @@ __all__ = [
     "ProductUnderstandingComponent",
     "Hs2RoutingComponent",
     "ClassificationComponent",
+    "TaricBranchResolutionComponent",
     "DocumentComponent",
 ]

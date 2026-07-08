@@ -78,6 +78,10 @@ LEVEL_AXIS_WEIGHTS: dict[str, dict[str, float]] = {
 # ingredient_percentages is boosted; one contradicted is effectively dropped.
 QUANT_BOOST = 3.0
 QUANT_PENALTY = 100.0
+# Decision-table semantics: a CONFIRMED code (all its legal conditions
+# answered true by the bound DTO fields) outranks any lexical score;
+# a violated one is out. Undecided falls back to lexical ranking.
+DECISION_CONFIRM = 50.0
 LEVELS = (("hs4", 4), ("hs6", 6), ("cn8", 8))
 _TOKEN = re.compile(r"[a-z0-9]+")
 
@@ -348,6 +352,16 @@ class StagedClassificationTool:
                     parent_scores = {only: max(parent_scores.values(), default=0.0)}
                     parents = [only]
                     continue
+                decisions_by_parent = {}
+                if (os.environ.get("ASAP_STAGED_DECISION_TABLE", "1") or "").strip().lower() not in (
+                    "0", "false", "no", "off",
+                ):
+                    try:
+                        from agents.tools.branch_decision_evaluator import LoadBranchDecisions
+
+                        decisions_by_parent = LoadBranchDecisions(level, tuple(parents))
+                    except Exception:  # noqa: BLE001 — 사이드카 부재 = 계층 off
+                        decisions_by_parent = {}
                 predicates_by_code = {}
                 if (os.environ.get("ASAP_STAGED_PREDICATES", "1") or "").strip().lower() not in (
                     "0", "false", "no", "off",
@@ -366,6 +380,7 @@ class StagedClassificationTool:
                     parent_order=list(parents),
                     parent_scores=parent_scores,
                     predicates_by_code=predicates_by_code,
+                    decisions_by_parent=decisions_by_parent,
                 )
             else:
                 children = self._load_children(parents, prefix_len)
@@ -388,18 +403,25 @@ class StagedClassificationTool:
             if branch_rows and parent_scores:
                 parent_len = prefix_len - 2
                 top_parent = max(parent_scores, key=lambda c: parent_scores.get(c, 0.0))
+                # recovery 판정 기준: 기본은 부스트 포함 점수(hs4 77% 최고기록
+                # 구성). 원점수(score_raw) 판정은 recovery를 폭증시켜 validator
+                # 남발을 유발했던 처방 — ASAP_RECOVERY_RAW=1로만 재실험한다.
+                raw_mode = (os.environ.get("ASAP_RECOVERY_RAW", "0") or "0").strip() == "1"
+                rscore = (lambda r: r.get("score_raw", r["score"])) if raw_mode else (
+                    lambda r: r["score"])
                 best_top_child = max(
-                    (r["score"] for r in full_ranked if r["code"][:parent_len] == top_parent),
+                    (rscore(r) for r in full_ranked
+                     if r["code"][:parent_len] == top_parent),
                     default=0.0,
                 )
                 level_recoveries = sorted(
                     (
                         r for r in full_ranked
                         if r["code"][:parent_len] != top_parent
-                        and r["score"] > 0
-                        and r["score"] >= best_top_child
+                        and rscore(r) > 0
+                        and rscore(r) >= best_top_child
                     ),
-                    key=lambda r: r["score"], reverse=True,
+                    key=rscore, reverse=True,
                 )[:5]
                 for r in level_recoveries:
                     recovery_candidates.append({
@@ -478,6 +500,11 @@ class StagedClassificationTool:
             parents = selected
 
         candidates = self._final_candidates(parents, top_k=top_k)
+        # 최종 DTO의 score는 cn8 스테이지 점수를 그대로 싣는다 — 키가 없으면
+        # 소비측(ClassificationCandidate 조립)이 기본 0.0으로 표시해 버린다.
+        cn8_scores = level_score_maps.get("cn8", {})
+        for cand in candidates:
+            cand["score"] = cn8_scores.get(str(cand.get("cn8")), 0.0)
         paths: list[dict[str, Any]] = []
         for cand in candidates:
             cn8 = _digits(cand.get("cn8"), limit=8)
@@ -696,6 +723,7 @@ class StagedClassificationTool:
         parent_order: list[str],
         parent_scores: dict[str, float] | None = None,
         predicates_by_code: dict[str, list[dict[str, Any]]] | None = None,
+        decisions_by_parent: dict[str, dict[str, list[dict[str, Any]]]] | None = None,
     ) -> list[dict[str, Any]]:
         """Hierarchical branch ranking: children compete ONLY with their own
         siblings; families are merged by PARENT CONFIDENCE first.
@@ -729,6 +757,7 @@ class StagedClassificationTool:
             ranked_group = self._rank_sibling_group(
                 items, product_facts, fallback_tokens, percentages,
                 predicates_by_code=predicates_by_code or {},
+                group_decisions=(decisions_by_parent or {}).get(parent) or {},
             )
             for round_index, entry in enumerate(ranked_group):
                 entry["_parent_score"] = float(scores_by_parent.get(parent, 0.0))
@@ -777,6 +806,7 @@ class StagedClassificationTool:
         fallback_tokens: set[str],
         percentages: list[Any],
         predicates_by_code: dict[str, list[dict[str, Any]]] | None = None,
+        group_decisions: dict[str, list[dict[str, Any]]] | None = None,
     ) -> list[dict[str, Any]]:
         """Rank ONE family of siblings by their own decision criteria.
 
@@ -892,6 +922,11 @@ class StagedClassificationTool:
                 score += QUANT_BOOST
             elif verdict["verdict"] == "violates":
                 score -= QUANT_PENALTY  # legal condition contradicted -> effectively out
+            # Recovery observation compares RAW evidence (lexical + quant)
+            # — a predicate/decision boost on a rival sibling must not
+            # silence the dissent record (measured: 16041991's frozen boost
+            # pushed 0304's recovery below threshold, muting the validator).
+            score_raw = score
             # Compiled predicates (sidecar): three-valued, ADDITIVE over the
             # lexical score — true boosts, violated hard-blocks, unknown is 0.
             predicate_results: list[dict[str, str]] = []
@@ -903,8 +938,23 @@ class StagedClassificationTool:
                     group_predicates, fact_tokens, product_facts,
                 )
                 score += pred_delta
+            decision_status = ""
+            decision_detail: list[dict[str, str]] = []
+            code_conditions = (group_decisions or {}).get(code)
+            if code_conditions:
+                from agents.tools.branch_decision_evaluator import EvaluateCodeDecision
+
+                decision_status, decision_detail = EvaluateCodeDecision(
+                    code_conditions, product_facts, fact_tokens, percentages,
+                    _quantitative_verdict,
+                )
+                if decision_status == "confirmed":
+                    score += DECISION_CONFIRM
+                elif decision_status == "violated":
+                    score -= QUANT_PENALTY
             if residual:
                 score = min(score, 0.0)  # residuals never win on wording
+                score_raw = min(score_raw, 0.0)
 
             scored.append({
                 "code": code,
@@ -913,12 +963,15 @@ class StagedClassificationTool:
                 "excl": str(row.get("negative_terms") or ""),
                 "residual": residual,
                 "score": round(score, 2),
+                "score_raw": round(score_raw, 2),
                 # IDF-filtered positive only: a form word every sibling shares
                 # cannot break their tie either.
                 "form_hits": len(positive & form_tokens) if sibling_count > 1 else 0,
                 "matched": sorted(positive & fact_tokens)[:6],
                 "neg_matched": sorted(negative & fact_tokens)[:4],
                 "predicate_results": predicate_results,
+                "decision": decision_status,
+                "decision_detail": decision_detail,
                 "quantitative_verdict": verdict,
             })
 
@@ -931,6 +984,32 @@ class StagedClassificationTool:
         # order is not.
         specific.sort(key=lambda r: (r["score"], r["form_hits"]), reverse=True)
         residuals.sort(key=lambda r: r["score"], reverse=True)
+        # DECISION short-circuit (designer model): inside a branching point,
+        # an answered condition IS the selection — a confirmed code heads the
+        # group regardless of lexical order; several confirmed codes follow
+        # the LEGAL check order (seq). Parent-vs-parent merging stays
+        # lexicographic outside the group, so a mis-confirmed code in a weak
+        # chapter still cannot hijack the product (measured: 2104 soup).
+        # 결정 단락(그룹 내 confirmed 즉시 선두)은 확정 신호의 정밀도가
+        # 확보돼야 이득이다 — 실측: 정 7/오 33(17%) 상태로 켜면 2103/2104
+        # 오발동이 부모 병합까지 뒤집어 hs2 86→73%. 순도 개선(typed 제한)
+        # 후 ASAP_STAGED_SHORT_CIRCUIT=1로 재도전한다. 기본 OFF일 때도
+        # confirmed는 +50 점수로 계속 싸운다(77% 최고기록 구성).
+        short_circuit = (os.environ.get("ASAP_STAGED_SHORT_CIRCUIT", "0") or "0").strip() == "1"
+        confirmed_entries = [r for r in scored if r.get("decision") == "confirmed"] if short_circuit else []
+        if confirmed_entries:
+            def _legal_seq(entry: dict[str, Any]) -> int:
+                rows_ = (group_decisions or {}).get(entry["code"]) or []
+                return min((int(row.get("seq") or 0) for row in rows_), default=999)
+            confirmed_entries.sort(key=lambda r: (_legal_seq(r), -r["score"]))
+            confirmed_codes = {r["code"] for r in confirmed_entries}
+            rest = [r for r in scored if r["code"] not in confirmed_codes]
+            rest_specific = [r for r in rest if not r["residual"]]
+            rest_residuals = [r for r in rest if r["residual"]]
+            rest_specific.sort(key=lambda r: (r["score"], r["form_hits"]), reverse=True)
+            rest_residuals.sort(key=lambda r: r["score"], reverse=True)
+            return confirmed_entries + rest_specific + rest_residuals
+
         # PROOF-based elimination (tariff logic): a specific line only beats
         # "Other" when its criterion is PROVEN — a predicate answered true,
         # or its matched wording comes from the product's semantic identity
@@ -941,6 +1020,8 @@ class StagedClassificationTool:
         viable_residuals = [r for r in residuals if r["score"] > -QUANT_PENALTY / 2]
         if viable_residuals and specific:
             def _proven(r: dict[str, Any]) -> bool:
+                if r.get("decision") == "confirmed":
+                    return True
                 # Only a FIELD-answered predicate (verdict "true") certifies a
                 # branch. true_pool is a broad-pool match — the same floating-
                 # token risk the proof rule exists to guard against — so it is
@@ -1107,11 +1188,17 @@ class StagedClassificationTool:
             {"cn8": c.get("cn8"), "desc": str(c.get("descr") or c.get("description") or "")[:160]}
             for c in (staged.get("candidates") or [])[:3]
         ]
+        # 기록은 전부 blackboard에 남기되, 판사에게는 강한 이의만 보인다 —
+        # 1점짜리 약한 recovery가 대량으로 제시되면 LLM 편차가 그대로
+        # 결과 분산이 된다 (실측: r9 런에서 override 15건 역대 최다).
+        strongest = sorted(
+            recoveries, key=lambda r: float(r.get("score") or 0.0), reverse=True,
+        )[:3]
         recovery_view = [
             {"level": r.get("level"), "code": r.get("code"),
              "desc": str(r.get("descr") or "")[:160],
              "evidence": r.get("matched_terms") or []}
-            for r in recoveries[:6]
+            for r in strongest
         ]
         prompt_lines = [
             "A staged EU customs classifier proposed candidates for this product.",
@@ -1198,6 +1285,8 @@ class StagedClassificationTool:
                     "matched_terms": r.get("matched", []),
                     "negative_matched_terms": r.get("neg_matched", []),
                     "predicate_results": r.get("predicate_results", []),
+                    "decision": r.get("decision", ""),
+                    "decision_detail": r.get("decision_detail", []),
                     "quantitative_verdict": (r.get("quantitative_verdict") or {}).get("verdict", "neutral"),
                 }
                 for r in ranked[:8]

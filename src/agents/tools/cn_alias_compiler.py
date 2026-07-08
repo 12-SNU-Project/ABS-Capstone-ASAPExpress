@@ -48,6 +48,10 @@ _STOP = frozenset({
     "preparations", "food", "foods", "kind", "kinds", "use", "uses", "put",
     "sale", "retail", "heading", "headings", "subheading", "subheadings",
     "excluding", "except", "packing", "packings", "immediate", "net",
+    # 법조문 보일러플레이트 — 'aid -> [chapter, note, thi]' 오염 실측 후 추가.
+    # _STOP은 stem 기준 대조라 stem형(thi, note, chapter)으로 수록한다.
+    "chapter", "note", "thi", "this", "having", "such", "which", "whether",
+    "individual", "function", "purpose", "described", "referred",
 })
 
 
