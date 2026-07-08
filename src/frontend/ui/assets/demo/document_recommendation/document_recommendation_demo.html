@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ASAP 서류 추천 JS Demo</title>
+    <link rel="stylesheet" href="./document_package.css?v=20260703-control-neutral" />
+    <style>
+      body {
+        background: #f5f7fb;
+      }
+
+      .demo-shell {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 28px 22px 42px;
+      }
+
+      .demo-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: end;
+        margin-bottom: 16px;
+      }
+
+      .demo-title {
+        color: #111827;
+        font-size: 24px;
+        font-weight: 950;
+        margin: 0 0 4px;
+      }
+
+      .demo-subtitle {
+        color: #64748b;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .demo-pill {
+        flex: 0 0 auto;
+        border: 1px solid #dbe3ef;
+        border-radius: 999px;
+        background: #ffffff;
+        color: #6d3fd6;
+        font-size: 12px;
+        font-weight: 900;
+        padding: 8px 12px;
+      }
+
+      .demo-picker {
+        display: grid;
+        grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
+        gap: 10px;
+        align-items: end;
+        background: #ffffff;
+        border: 1px solid #dbe3ef;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 14px;
+      }
+
+      .demo-field-label {
+        color: #475569;
+        font-size: 11px;
+        font-weight: 900;
+        margin-bottom: 5px;
+      }
+
+      .demo-input,
+      .demo-select {
+        width: 100%;
+        border: 1px solid #cbd5e1;
+        border-radius: 7px;
+        color: #111827;
+        background: #ffffff;
+        font-size: 13px;
+        font-weight: 800;
+        padding: 10px 11px;
+      }
+
+      .demo-button {
+        border: 1px solid #6d3fd6;
+        border-radius: 7px;
+        background: #6d3fd6;
+        color: #ffffff;
+        font-size: 13px;
+        font-weight: 950;
+        padding: 10px 14px;
+        cursor: pointer;
+      }
+
+      .demo-source {
+        color: #64748b;
+        font-size: 11px;
+        line-height: 1.45;
+        margin: -4px 0 14px;
+      }
+
+      .demo-error {
+        border: 1px solid #fecaca;
+        border-radius: 8px;
+        background: #fef2f2;
+        color: #7f1d1d;
+        padding: 12px;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .taric-js-detail {
+        display: grid;
+        gap: 14px;
+      }
+
+      .taric-js-tabs {
+        display: flex;
+        gap: 8px;
+        border-bottom: 1px solid #dbe3ef;
+      }
+
+      .taric-js-tab {
+        border: 1px solid transparent;
+        border-bottom: 0;
+        border-radius: 8px 8px 0 0;
+        background: transparent;
+        color: #64748b;
+        font-size: 13px;
+        font-weight: 950;
+        padding: 10px 14px;
+        cursor: pointer;
+      }
+
+      .taric-js-tab.active {
+        background: #ffffff;
+        border-color: #dbe3ef;
+        color: #6d3fd6;
+      }
+
+      .taric-js-panel {
+        min-width: 0;
+      }
+
+      @media (max-width: 760px) {
+        .demo-header {
+          display: block;
+        }
+
+        .demo-pill {
+          display: inline-block;
+          margin-top: 10px;
+        }
+
+        .demo-picker {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="demo-shell">
+      <header class="demo-header">
+        <div>
+          <h1 class="demo-title">TARIC 상세 서류 추천</h1>
+          <div class="demo-subtitle">
+            기존 백엔드 API가 Supabase에서 조회한 document package를 그대로 렌더링하는 HTML 데모입니다.
+          </div>
+        </div>
+        <div id="demo-code" class="demo-pill">TARIC10 -</div>
+      </header>
+
+      <section class="demo-picker" aria-label="Document package 선택">
+        <div>
+          <div class="demo-field-label">Backend API URL</div>
+          <input id="api-base-input" class="demo-input" placeholder="예: http://127.0.0.1:8060" />
+        </div>
+        <div>
+          <div class="demo-field-label">Run ID</div>
+          <input id="run-id-input" class="demo-input" placeholder="pipeline run_id 또는 job_id" />
+        </div>
+        <button id="load-packages" class="demo-button" type="button">목록 조회</button>
+      </section>
+      <section class="demo-picker" aria-label="Document package 조회">
+        <div>
+          <div class="demo-field-label">Package ID 또는 TARIC10 직접 입력</div>
+          <input id="package-input" class="demo-input" placeholder="예: dp_001 또는 1605211050" />
+        </div>
+        <div>
+          <div class="demo-field-label">Run의 document package 선택</div>
+          <select id="package-select" class="demo-select">
+            <option value="">먼저 목록 조회</option>
+          </select>
+        </div>
+        <button id="package-apply" class="demo-button" type="button">서류 조회</button>
+      </section>
+      <div id="demo-source" class="demo-source">기존 API 연결 정보를 입력하세요.</div>
+
+      <div id="document-recommendation-root">
+        <div class="card-meta">서류 추천 데이터를 불러오는 중입니다.</div>
+      </div>
+    </main>
+
+    <script src="./document_recommendation.js?v=20260703-summary-counts"></script>
+    <script>
+      (async function () {
+        const root = document.getElementById("document-recommendation-root");
+        const code = document.getElementById("demo-code");
+        const apiBaseInput = document.getElementById("api-base-input");
+        const runIdInput = document.getElementById("run-id-input");
+        const packageInput = document.getElementById("package-input");
+        const packageSelect = document.getElementById("package-select");
+        const loadPackages = document.getElementById("load-packages");
+        const packageApply = document.getElementById("package-apply");
+        const source = document.getElementById("demo-source");
+        let controlGuidelineLibrary = null;
+
+        const params = new URLSearchParams(window.location.search);
+        apiBaseInput.value = params.get("apiBase") || window.localStorage.getItem("asap_demo_api_base") || "http://127.0.0.1:8060";
+        runIdInput.value = params.get("runId") || params.get("jobId") || window.localStorage.getItem("asap_demo_run_id") || "";
+        packageInput.value = params.get("packageId") || params.get("taric10") || "";
+
+        function normalizeBaseUrl(value) {
+          return String(value || "").trim().replace(/\/+$/, "");
+        }
+
+        async function fetchJson(path) {
+          const apiBase = normalizeBaseUrl(apiBaseInput.value);
+          const response = await fetch(apiBase + path);
+          const payload = await response.json().catch(function () {
+            return {};
+          });
+          if (!response.ok) {
+            throw new Error(payload.message || payload.error || "API request failed: " + response.status);
+          }
+          return payload;
+        }
+
+        async function loadControlGuidelineLibrary() {
+          if (controlGuidelineLibrary) {
+            return controlGuidelineLibrary;
+          }
+          const response = await fetch("./taric_control_guidelines_ko.json?v=20260703-baseline-assets", {
+            cache: "no-store",
+          });
+          if (!response.ok) {
+            throw new Error("control guideline library load failed: " + response.status);
+          }
+          controlGuidelineLibrary = await response.json();
+          return controlGuidelineLibrary;
+        }
+
+        function showError(message) {
+          root.replaceChildren();
+          root.appendChild(
+            Object.assign(document.createElement("div"), {
+              className: "demo-error",
+              textContent: message,
+            }),
+          );
+        }
+
+        async function loadPackageList() {
+          const runId = String(runIdInput.value || "").trim();
+          if (!runId) {
+            showError("Run ID를 입력하세요.");
+            return;
+          }
+          window.localStorage.setItem("asap_demo_api_base", normalizeBaseUrl(apiBaseInput.value));
+          window.localStorage.setItem("asap_demo_run_id", runId);
+          source.textContent = "기존 API에서 document package 목록을 조회하는 중입니다.";
+          const payload = await fetchJson("/api/runs/" + encodeURIComponent(runId) + "/document-packages");
+          const packages = Array.isArray(payload.packages) ? payload.packages : [];
+          packageSelect.replaceChildren();
+          if (!packages.length) {
+            const option = document.createElement("option");
+            option.value = "";
+            option.textContent = "document package 없음";
+            packageSelect.appendChild(option);
+            source.textContent = "이 run에서 document package를 찾지 못했습니다.";
+            return;
+          }
+          packages.forEach(function (pkg) {
+            const packageId = String(pkg.document_package_id || pkg.taric10 || "");
+            const option = document.createElement("option");
+            option.value = packageId;
+            option.textContent = [
+              pkg.taric10 ? "TARIC " + pkg.taric10 : "",
+              pkg.document_package_id || "",
+            ].filter(Boolean).join(" · ") || packageId;
+            packageSelect.appendChild(option);
+          });
+          const preferred = packageInput.value || packageSelect.value;
+          if (preferred) {
+            packageSelect.value = preferred;
+            packageInput.value = preferred;
+          }
+          source.textContent = "기존 API 연결: " + normalizeBaseUrl(apiBaseInput.value) + " · run " + runId + " · packages " + packages.length + "개";
+        }
+
+        async function renderSelected(nextPackageId) {
+          const runId = String(runIdInput.value || "").trim();
+          const packageId = String(nextPackageId || "").trim();
+          if (!runId || !packageId) {
+            showError("Run ID와 package id 또는 TARIC10을 입력하세요.");
+            return;
+          }
+          source.textContent = "기존 API에서 document package를 조회하는 중입니다.";
+          const payload = await fetchJson(
+            "/api/runs/" + encodeURIComponent(runId) + "/document-packages/" + encodeURIComponent(packageId),
+          );
+          const packageData = payload.document_package || payload;
+          window.AsapDocumentRecommendation.applyControlGuidelineLibrary(
+            packageData,
+            await loadControlGuidelineLibrary(),
+          );
+          packageInput.value = packageId;
+          packageSelect.value = packageId;
+          code.textContent = "TARIC10 " + (packageData.taric10 || packageId || "-");
+          source.textContent = "기존 API 응답 사용: " + normalizeBaseUrl(apiBaseInput.value) + " · run " + runId;
+          window.AsapDocumentRecommendation.mount(root, packageData);
+        }
+
+        try {
+          loadPackages.addEventListener("click", function () {
+            loadPackageList().catch(function (error) {
+              showError(String(error && error.message ? error.message : error));
+            });
+          });
+          packageApply.addEventListener("click", function () {
+            renderSelected(packageInput.value || packageSelect.value).catch(function (error) {
+              showError(String(error && error.message ? error.message : error));
+            });
+          });
+          packageInput.addEventListener("keydown", function (event) {
+            if (event.key === "Enter") {
+              renderSelected(packageInput.value).catch(function (error) {
+                showError(String(error && error.message ? error.message : error));
+              });
+            }
+          });
+          packageSelect.addEventListener("change", function () {
+            packageInput.value = packageSelect.value;
+          });
+
+          if (runIdInput.value) {
+            await loadPackageList();
+          }
+          if (runIdInput.value && packageInput.value) {
+            await renderSelected(packageInput.value);
+          }
+        } catch (error) {
+          showError(String(error && error.message ? error.message : error));
+        }
+      })();
+    </script>
+  </body>
+</html>
