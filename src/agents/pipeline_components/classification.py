@@ -329,6 +329,26 @@ class ClassificationComponent(BasePipelineComponent):
                     validatorRecord = dict(verdict)
                 if verdict.get("verdict") == "promote_candidate" and verdict.get("cn8"):
                     chosen = str(verdict["cn8"])
+                    current_top = str((candidates[0] or {}).get("cn8") or "")
+                    # 형제 재론 금지: 같은 hs4 안에서의 top1 교체는 staged가
+                    # 증거(술어·결정·lexical)로 이미 내린 형제 비교를 LLM이
+                    # 근거 없이 뒤집는 것 — 전 이력 489발화 실측에서 hs4 교차
+                    # promote는 개악 0, 같은 hs4 내 promote는 hs6 순 -44
+                    # (개악 77회 전원 190219→190230 단일 편향). keep으로 강등.
+                    # ASAP_VALIDATOR_SIBLING_GUARD=0 으로 이전 동작 복귀.
+                    sibling_guard = (os.environ.get(
+                        "ASAP_VALIDATOR_SIBLING_GUARD", "1") or "1").strip() != "0"
+                    if sibling_guard and chosen[:4] == current_top[:4] and chosen != current_top:
+                        validatorRecord = {
+                            **verdict,
+                            "applied": False,
+                            "blocked": "sibling_relitigation_guard",
+                        }
+                        self.reason(
+                            f"Validator promote_candidate {chosen} blocked: same-hs4 "
+                            f"sibling re-litigation (top={current_top})."
+                        )
+                        chosen = ""
                     reordered = sorted(
                         candidates,
                         key=lambda c: 0 if str(c.get("cn8") or "") == chosen else 1,
@@ -409,7 +429,9 @@ class ClassificationComponent(BasePipelineComponent):
                     "classification_basis": [self._staged_basis(candidate)],
                     "supporting_product_facts": [],
                     "classification_evidence_refs": [],
-                    "similar_ebti_cases": [],
+                    # EBTI 판례는 표시 전용(원용도) — 선택·점수·검증 어디에도
+                    # 관여하지 않는다 (판례의 코드 편향을 선택에 수입 금지).
+                    "similar_ebti_cases": self._ebti_cases(cn8, product_facts),
                     "classification_citations": list(getattr(self, "_ontology_reads", []) or []),
                     "required_facts": [],
                     "unknowns": [],
@@ -471,6 +493,25 @@ class ClassificationComponent(BasePipelineComponent):
             "retrieval_sources": ["staged_narrowing"],
             "nodes": nodes,
         }
+
+    @staticmethod
+    def _ebti_cases(cn8: str, product_facts: dict) -> list[dict]:
+        """유사 EBTI 판례 (표시 전용) — 실패는 빈 목록, 파이프라인 무영향."""
+        try:
+            from agents.tools.ebti_precedent_local import FindSimilarCases
+
+            ih = product_facts.get("identity_hints") or {}
+            identity_text = " ".join(
+                str(part) for part in (
+                    ih.get("normalized_tariff_description") or "",
+                    ih.get("translated_product_name") or "",
+                    " ".join(ih.get("identity_terms") or []),
+                    ih.get("ingredient_class") or "",
+                ) if part
+            )
+            return FindSimilarCases(cn8, identity_text, limit=2)
+        except Exception:  # noqa: BLE001 — 근거 표시 실패가 분류를 깨면 안 된다
+            return []
 
     def _staged_basis(self, candidate: dict) -> str:
         desc = str(candidate.get("description") or "")[:160]

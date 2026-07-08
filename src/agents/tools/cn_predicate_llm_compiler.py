@@ -33,7 +33,19 @@ from typing import Any
 
 _TOKEN = re.compile(r"[a-z]+")
 _COND_CLAUSE = re.compile(r"whether\s+or\s+not[^,;.)]*", re.I)
-_AXES = frozenset({"species", "contains", "form", "processing", "negation", "pct"})
+# llm-v1 축(식품 파일럿에서 쓴 임시 6축) — 측정 자산이라 유지
+_AXES_V1 = frozenset({"species", "contains", "form", "processing", "negation", "pct"})
+# llm-v2 축 = taxonomy CSV의 criterion_type 전체(전품목 술어 분류 기준).
+# residual_other는 소거(else)라 술어를 내지 않는다.
+_TAXONOMY_CSV_PATH = None  # 지연 로드
+def _taxonomy_rows():
+    import csv
+    from pathlib import Path as _P
+    path = _P(__file__).resolve().parents[3] / "data" / "classification_criterion_taxonomy_20260702.csv"
+    return [r for r in csv.DictReader(open(path, encoding="utf-8-sig"))
+            if str(r.get("criterion_type")) != "residual_other"]
+_AXES_V2 = frozenset(r["criterion_type"] for r in _taxonomy_rows())
+_AXES = _AXES_V1 | _AXES_V2  # 검증기 폐쇄집합은 두 세대 합집합
 _OPS = frozenset({"has_token", "not_contains", "quant_gate"})
 
 AXIS_FIELD_BINDING = {
@@ -78,6 +90,39 @@ Return: {"predicates": [{"code": "<sibling code>", "axis": "...", "op": "...",
 "value": ["..."], "confidence": 0.0-1.0}, ...]}"""
 
 
+def _build_v2_prompt() -> str:
+    lines = []
+    for r in _taxonomy_rows():
+        ct = r["criterion_type"]
+        op = ("not_contains" if ct == "exclusion_boundary"
+              else "quant_gate" if ct == "quantitative_threshold" else "has_token")
+        lines.append(f"  {ct} (op={op}): {str(r.get('definition') or '')[:90]}")
+    axis_block = "\n".join(lines)
+    return f"""You translate EU Combined Nomenclature branch labels into structured
+classification predicates for ANY product domain. You are a PARSER, not an
+author: every value word must be copied from the sibling's own label text.
+Output one JSON object only.
+
+For each sibling label, emit zero or more predicates. axis MUST be one of the
+criterion types below (taxonomy of classification criteria):
+{axis_block}
+
+  op: has_token (label asserts the product IS/HAS this)
+      not_contains (label EXCLUDES products having this)
+      quant_gate (a %/weight/size threshold decides — no value needed)
+  value: 1-4 lowercase words copied from THAT label
+
+Rules:
+- "whether or not X" clauses are irrelevance markers: never emit predicates
+  from their words.
+- A state word every sibling shares does not discriminate: skip it.
+- "Other ..." residual lines define themselves by elimination: emit nothing.
+- When a label is a plain noun (a species/thing/article), emit ONE
+  product_identity or species_source predicate with its distinctive noun(s).
+Return: {{"predicates": [{{"code": "<sibling code>", "axis": "...", "op": "...",
+"value": ["..."], "confidence": 0.0-1.0}}, ...]}}"""
+
+
 def _stem(token: str) -> str:
     if len(token) > 4 and token.endswith("ies"):
         return token[:-3] + "y"
@@ -118,7 +163,8 @@ def VerifyPredicate(
             return "V1_grounding"
         if vtoks & cond_tokens:
             return "V3_conditional_clause"
-        if axis in ("form", "processing") and op == "has_token" and vtoks & sibling_tokens:
+        if axis in ("form", "processing", "physical_form", "preservation_state",
+                    "processing_method", "condition_quality") and op == "has_token" and vtoks & sibling_tokens:
             return "V4_sibling_shared"
     return ""
 
@@ -160,12 +206,19 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
     apply_mode = "--apply" in args
     chapters = ("02", "03", "07", "16", "19", "20", "21")
     if "--chapters" in args:
-        chapters = tuple(
-            c.strip().zfill(2) for c in args[args.index("--chapters") + 1].split(",") if c.strip()
+        spec = args[args.index("--chapters") + 1]
+        # 'all' = 전 챕터(01~99) — 필터 없이 cn_table 전량. 비식품 테스트셋
+        # (US_KR 등) 확장용. 그룹 수 = LLM 콜 수이므로 먼저 --limit 없이
+        # 드라이런으로 콜 수를 확인하고 --apply 하라.
+        chapters = () if spec.strip().lower() == "all" else tuple(
+            c.strip().zfill(2) for c in spec.split(",") if c.strip()
         )
     limit = 0
     if "--limit" in args:
         limit = int(args[args.index("--limit") + 1])
+    # --taxonomy: llm-v2 세대 — 축=taxonomy 16유형, dto_field=결정 컴파일러의
+    # CRITERION_FIELD_BINDING, predicate_version='llm-v2'. 전품목 확장용.
+    tax_mode = "--taxonomy" in args
 
     from sqlalchemy import text
 
@@ -188,11 +241,12 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
         "SELECT cn8, coalesce(heading_description,'') AS h4,"
         " coalesce(subheading_description,'') AS h6,"
         " coalesce(cn8_description,'') AS h8 FROM cn_table"), {})]
-    rows = [r for r in rows if str(r.get("cn8") or "")[:2] in set(chapters)]
+    if chapters:
+        rows = [r for r in rows if str(r.get("cn8") or "")[:2] in set(chapters)]
     groups = _build_groups(rows, chapter_label)
     if limit:
         groups = groups[:limit]
-    print(f"챕터 {','.join(chapters)}: 분기 그룹 {len(groups)}개 (LLM 콜 수와 동일)")
+    print(f"챕터 {','.join(chapters) if chapters else '전체(01~99)'}: 분기 그룹 {len(groups)}개 (LLM 콜 수와 동일)")
 
     adapter = build_runtime_adapter()
     accepted: list[dict[str, Any]] = []
@@ -205,9 +259,10 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
             f"Branch parent ({level} group under {parent}):\n{parent_label[:200]}\n"
             f"Sibling lines:\n{json.dumps(member_view, ensure_ascii=False)}"
         )
+        system_prompt = _build_v2_prompt() if tax_mode else _SYSTEM_PROMPT
         try:
             resp = adapter.Generate(LlmRequest(
-                user_prompt=prompt, system_prompt=_SYSTEM_PROMPT,
+                user_prompt=prompt, system_prompt=system_prompt,
                 generation_options=LlmGenerationOptions(temperature=0, max_tokens=1400),
             ))
             raw = str(getattr(resp, "generatedText", ""))
@@ -228,10 +283,21 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
                 reject[fail] += 1
                 continue
             axis = str(pred["axis"])
+            if tax_mode and axis not in _AXES_V2:
+                reject["V2_axis_not_taxonomy"] += 1
+                continue
+            if not tax_mode and axis not in _AXES_V1:
+                reject["V2_axis_not_v1"] += 1
+                continue
+            if tax_mode:
+                from agents.tools.branch_decision_compiler import CRITERION_FIELD_BINDING
+                field_binding = CRITERION_FIELD_BINDING.get(axis, "*tokens*")
+            else:
+                field_binding = AXIS_FIELD_BINDING.get(axis, "*tokens*")
             accepted.append({
                 "level": level, "parent_code": parent, "code": code,
                 "predicate_id": f"llm-{level}-{code}-{stats['accepted']}",
-                "axis": axis, "dto_field": AXIS_FIELD_BINDING.get(axis, "*tokens*"),
+                "axis": axis, "dto_field": field_binding,
                 "op": str(pred["op"]),
                 "value": json.dumps([str(v).lower() for v in (pred.get("value") or [])],
                                     ensure_ascii=False),
@@ -240,7 +306,8 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
                 "source": "llm",
                 "confidence": float(pred.get("confidence") or 0.5),
                 "compile_status": "active",
-                "source_text": label[:120], "predicate_version": "llm-v1",
+                "source_text": label[:120],
+                "predicate_version": "llm-v2" if tax_mode else "llm-v1",
             })
             stats["accepted"] += 1
         if stats["groups"] % 20 == 0:
@@ -251,7 +318,7 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
     if apply_mode and accepted:
         with manager.OpenSession() as session:
             session.execute(text('DELETE FROM "branch_predicate_index" WHERE predicate_version = :v'),
-                            {"v": "llm-v1"})
+                            {"v": "llm-v2" if tax_mode else "llm-v1"})
             for item in accepted:
                 session.execute(text(
                     'INSERT INTO "branch_predicate_index" VALUES ('
@@ -259,7 +326,7 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
                     " :op, :value, :unit, :severity, :source, :confidence,"
                     " :compile_status, :source_text, :predicate_version)"), item)
             session.commit()
-        print(f"-> llm-v1으로 {len(accepted)}개 기록")
+        print(f"-> {'llm-v2' if tax_mode else 'llm-v1'}으로 {len(accepted)}개 기록")
     return 0
 
 

@@ -17,12 +17,15 @@ explain why HS4/HS6/CN8 were chosen. Degrades gracefully (never raises).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from typing import Any
 from sqlalchemy import bindparam, text
 
 from db.db_session_manager import DbSessionManager
+
+_LOGGER = logging.getLogger(__name__)
 
 # AXIS_MAP — decision axis -> baseline ProductUnderstandingFacts field paths.
 # Reads the embedded 2-lane: identity_lane (DistilledIdentityFacts.ToTrace) +
@@ -669,7 +672,9 @@ class StagedClassificationTool:
                         "excl": row.get("excl"),
                     }
                 )
-        except Exception:  # noqa: BLE001 — narrowing must not break the pipeline
+        except Exception as error:  # noqa: BLE001 — narrowing must not break the pipeline
+            # DB 오류가 조용히 '자식 없음'으로 위장되면 no_children_at_hs4로만 보인다.
+            _LOGGER.warning("staged _load_children DB query failed: %s", error)
             return []
         return rows
 
@@ -695,7 +700,8 @@ class StagedClassificationTool:
                 code = _digits(row.get("cn8"), limit=8)
                 if len(code) == 8:
                     out.append({"cn8": code, "hs6": code[:6], "hs4": code[:4], "description": row.get("d")})
-        except Exception:  # noqa: BLE001
+        except Exception as error:  # noqa: BLE001
+            _LOGGER.warning("staged _final_candidates DB query failed: %s", error)
             return []
         # Preserve the staged score order (cn8_prefixes is already ranked by the
         # cn8 stage); the SQL's ORDER BY cn8 would otherwise destroy the ranking

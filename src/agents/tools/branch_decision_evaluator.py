@@ -26,6 +26,17 @@ from typing import Any, Mapping
 from agents.tools.branch_predicate_evaluator import _aliases, _dig, _field_tokens, _stem
 
 _TOKEN = re.compile(r"[a-z]+")
+# 확정(confirmed) 자격을 줄 수 있는 typed 경로(단수·저오염 필드).
+# NTD·identity_terms 같은 자유서술 다토큰 필드는 부수 요소('soup' 등)가
+# 섞여 확정 정밀도 17%(정 7/오 33) 실측 — 이들 '단독' 히트는 확정 불가.
+# ingredient_class는 제외: 'cereal' 같은 류(class) 값은 1901~1905 전부에
+# 해당해 확정 근거로 판별력이 없다 — 오발동 6건 중 5건이 이 경로 실측.
+# 점수 경쟁(+3)에는 계속 참여하고 확정(+50) 자격만 없다.
+_TYPED_LEAVES = frozenset({
+    "food_form", "processing_state",
+    "principal_ingredient", "contains_wrapper_or_dough",
+    "contains_sauce_or_broth",
+})
 _ALIAS_AXES = frozenset({
     "species", "contains",  # 구세대 명칭 호환
     "species_source", "material_composition", "product_identity",
@@ -135,10 +146,28 @@ def EvaluateCodeDecision(
                 why = "field_no_match"    # 필드는 찼는데 값 불일치 (어휘 갭/오답)
         answers.append(verdict)
         detail.append({"cond": cond_type, "op": op, "verdict": verdict,
-                       "field": dto_field.split(";")[0][:40], "why": why})
+                       "field": dto_field.split(";")[0][:40], "why": why,
+                       "value": str(cond.get("value") or "")[:80]})
     if "false" in answers:
         return "violated", detail
     if answers and all(a == "true" for a in answers):
+        # typed 게이트: true의 근거 중 typed 경로 히트(또는 정량 게이트
+        # 충족)가 하나는 있어야 확정. 자유서술 필드 단독 확정은 강등 —
+        # 점수 경쟁(술어 +3)은 유지되고 +50 확정만 잃는다.
+        # ASAP_DECISION_TYPED_GATE=0으로 이전(77% 커밋) 시맨틱 복귀.
+        gate_on = (os.environ.get("ASAP_DECISION_TYPED_GATE", "1") or "1").strip() != "0"
+        typed_ok = any(
+            (d["op"] == "quant_gate" and d["verdict"] == "true")
+            or (d["verdict"] == "true"
+                and any(leaf in _TYPED_LEAVES
+                        for leaf in d["why"].removeprefix("field_hit:").split(",")))
+            for d in detail
+        )
+        if gate_on and not typed_ok:
+            for d in detail:
+                if d["verdict"] == "true":
+                    d["why"] += ";typed_gate_blocked"
+            return "undecided", detail
         return "confirmed", detail
     # 부분 충족(일부 true, 일부 미결)은 확정도 탈락도 아니다 — 법조문상
     # 모든 조건이 맞아야 그 코드다.

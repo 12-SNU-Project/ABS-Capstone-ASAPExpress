@@ -44,8 +44,11 @@ _TAXONOMY_CSV = Path(__file__).resolve().parents[3] / "data" / "classification_c
 # criterion_type -> 질문에 답할 DTO 필드 (없는 유형은 미결로 남는 게 정직)
 CRITERION_FIELD_BINDING = {
     "product_identity": (
+        # food_form 추가: 'noodle/rice cake' 같은 판별형 typed 값이 identity
+        # 질문의 정답 필드인데 빠져 있었다 — 칼국수 1902 확정 불가 실측.
         "identity_hints.normalized_tariff_description;identity_hints.identity_terms;"
-        "identity_hints.ingredient_class;composition_facts.principal_ingredient"
+        "identity_hints.food_form;identity_hints.ingredient_class;"
+        "composition_facts.principal_ingredient"
     ),
     "species_source": (
         "identity_hints.normalized_tariff_description;identity_hints.identity_terms;"
@@ -165,15 +168,19 @@ def CompileGroupDecisions(
                 span_source = window.split(";")[0].split(".")[0]
             else:
                 span_source = match.group(0)
+            # 값 상한 8: 법조문 열거("such as spaghetti, macaroni, noodles,
+            # lasagne, gnocchi, ravioli, cannelloni")가 4에서 잘리면 정작
+            # 판별력 있는 꼬리 단어(noodle)가 소실된다 — 1902 실측.
+            # 배제(not_contains)는 차단 시맨틱이라 4 유지(보수).
             span_tokens = sorted(
                 w for w in _toks(span_source) if not ({w} <= sibling_toks)
-            )[:4]
+            )[:8]
             if span_tokens:
                 add(cond_type, "has_token", span_tokens, match.group(0))
                 emitted_types.add(cond_type)
         # 아무 유형도 안 잡힌 순수 명사 라벨 -> product_identity 폴백
         if not emitted_types:
-            nouns = sorted(w for w in _toks(positive_side) if not ({w} <= sibling_toks))[:4]
+            nouns = sorted(w for w in _toks(positive_side) if not ({w} <= sibling_toks))[:8]
             if nouns:
                 add("product_identity", "has_token", nouns, clean)
     return rows
@@ -238,13 +245,25 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
                 "level text, branch_id text, seq int, then_code text,"
                 "cond_type text, dto_field text, op text, value text,"
                 "source_text text, version text)"))
-            session.execute(text('DELETE FROM "branch_decision_index" WHERE version = :v'),
-                            {"v": "parser-v1"})
-            for item in out:
-                session.execute(text(
-                    'INSERT INTO "branch_decision_index" VALUES ('
-                    ":level, :branch_id, :seq, :then_code, :cond_type,"
-                    " :dto_field, :op, :value, :source_text, :version)"), item)
+            # 반복 재기록으로 테이블이 부풀면 일괄 DELETE가 statement
+            # timeout에 걸린다(실측). 트랜잭션 한정 타임아웃 완화 + ctid
+            # 청크 삭제로 문장 하나하나를 짧게 유지한다.
+            session.execute(text("SET LOCAL statement_timeout = '300s'"))
+            while True:
+                deleted = session.execute(text(
+                    'DELETE FROM "branch_decision_index" WHERE ctid IN ('
+                    'SELECT ctid FROM "branch_decision_index"'
+                    " WHERE version = :v LIMIT 2000)"), {"v": "parser-v1"})
+                if (deleted.rowcount or 0) == 0:
+                    break
+            # 9,296행 개별 INSERT는 원거리 DB에서 순단에 취약(실측 1회 실패)
+            # — executemany 일괄 전송으로 왕복을 청크당 1회로 줄인다.
+            insert_sql = text(
+                'INSERT INTO "branch_decision_index" VALUES ('
+                ":level, :branch_id, :seq, :then_code, :cond_type,"
+                " :dto_field, :op, :value, :source_text, :version)")
+            for start in range(0, len(out), 1000):
+                session.execute(insert_sql, out[start:start + 1000])
             session.commit()
         print(f"-> branch_decision_index에 {len(out)}행 기록")
     audit_dir = Path(__file__).resolve().parents[3] / "artifacts"
