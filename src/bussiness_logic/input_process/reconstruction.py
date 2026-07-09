@@ -40,20 +40,15 @@ from bussiness_logic.utils.json_types import JsonObject
 DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS = 4096
 
 PRODUCT_FACT_RECONSTRUCTION_SYSTEM_PROMPT = """
-You reconstruct structured product input facts from Korean product summary, Korean product notice, structured table OCR (PaddleOCR-VL/PP-Structure), and raw OCR text.
-Return strict JSON only.
-Return exactly one JSON object. Do not append markdown, commentary, or extra braces after the root object.
-Return only these top-level keys in this order: product_facts, reconstructed_tables, unresolved_facts, conflicts, warnings.
+You reconstruct canonical product input facts from Korean product summary, Korean product notice, structured table OCR (PaddleOCR-VL/PP-Structure), and raw OCR text.
+Your job is evidence-backed reconstruction, not classification: recover the product label/specification facts that downstream deterministic classifiers can use.
+Use structured table OCR as the main table skeleton when present, and use raw OCR or product notice text to correct OCR typos, fill missing cells, and resolve split/merged table fragments only when the evidence supports it.
+Return only the schema fields requested by the structured-output contract.
 product_facts is the authoritative compact classification input. Put every explicit classification-critical value here first.
-reconstructed_tables is optional audit/UI preservation. Use [] when table preservation would only duplicate product_facts or make the response long.
-Keep reconstructed_tables concise; do not let reconstructed_tables crowd out or delay product_facts.
-reconstructed_tables must be an array of objects with exactly these keys: table_name, source_refs, rows.
-Each reconstructed_tables row must have exactly these keys:
-field_name, normalized_value, unit, daily_value_percent, source_refs.
-For nutrition tables, return each nutrient as its own row. For label/specification tables, return each label field as its own row.
-product_facts and unresolved_facts must be arrays of objects with exactly these keys:
-field_name, normalized_value, source_refs, correction_type, validation_status.
-conflicts and warnings must be arrays of strings.
+reconstructed_tables preserves structured table OCR contents for audit/evidence review. Do not summarize table-like evidence away.
+When vlm_table or pp_table evidence contains table-like rows, preserve compact rows in reconstructed_tables even when selected values also appear in product_facts.
+Use [] for reconstructed_tables only when no table-like evidence exists, or when the only possible table row would duplicate one long ingredient/composition value without adding row structure.
+For nutrition tables, return each nutrient as its own reconstructed_tables row. For label/specification tables, return each label field as its own row.
 Do not return JSON null. Use an empty string, empty array, or omit the uncertain fact.
 Do not infer HS, CN, TARIC, customs, legal, or regulatory conclusions.
 Do not create product facts that are absent from the provided evidence.
@@ -64,9 +59,12 @@ Do not expose pre-correction OCR text in any output field.
 If evidence is insufficient for a corrected value, put the fact in unresolved_facts.
 If evidence is insufficient or conflicting, use unresolved_facts or conflicts.
 The application will generate normalized_fact_texts after validation.
+Preserve table rows in reconstructed_tables even when they are not selected as product_facts.
 Prefer concise product_facts for classification: product name, food/cosmetic type, physical form, processing state, preparation/use, storage state, ingredients, composition ratios, net content, and origin/manufacture country when explicit.
-If a long ingredient/composition list appears, include it in product_facts first. Do not duplicate the same long value in reconstructed_tables unless the table shape itself adds useful audit value.
+If a long formal ingredient/composition list appears, include it in product_facts first as 원재료명/ingredients. Do not duplicate the same long value in reconstructed_tables unless the table shape itself adds useful audit value.
 For food products, product_facts must include explicit ingredient/composition rows when they appear in evidence, including component-specific ingredients for multi-component products such as dumpling plus sauce.
+For mixed products, preserve explicit component boundaries when evidence provides them, for example dumpling wrapper/filling/sauce or product plus separate sauce.
+If an explicit percentage or ratio appears in an ingredient/composition field, preserve it exactly in product_facts. Do not invent missing percentages.
 For raw OCR text, treat section headings strictly. Ingredients/composition facts must come from Ingredient/재료/원재료 sections, not from Process/생산 유통 과정, Recommendation/활용법, or Brand/브랜드 sections.
 Do not put nutrient measurements such as sodium, carbohydrates, fat, protein, kcal, or daily value percentages in product_facts; keep nutrition rows only in reconstructed_tables.
 Do not include allergen warnings, same-facility/cross-contamination warnings, seller/vendor/manufacturer business-party names, expiry, package material, or marketing copy as product_facts unless they directly change customs classification.
@@ -295,6 +293,152 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
             "warnings": [],
         },
     },
+    {
+        "input": {
+            "evidence": [
+                {
+                    "evidence_id": "evidence-1",
+                    "source_type": "vlm_table",
+                    "text": "영양정보 총 내용량 500g 열량 390kcal 나트륨 3,930mg 197% 탄수화물 48g 15%",
+                },
+                {
+                    "evidence_id": "evidence-2",
+                    "source_type": "raw_ocr_tile",
+                    "text": "영양정보 총내용량 500g 390 kcal 나트륨 3,930 mg 197 % 탄수화물 48 g 15 %",
+                },
+            ],
+        },
+        "output": {
+            "product_facts": [
+                {
+                    "field_name": "내용량",
+                    "normalized_value": "500g",
+                    "source_refs": ["evidence-1", "evidence-2"],
+                    "correction_type": "none",
+                    "validation_status": "accepted",
+                }
+            ],
+            "reconstructed_tables": [
+                {
+                    "table_name": "영양정보",
+                    "source_refs": ["evidence-1", "evidence-2"],
+                    "rows": [
+                        {
+                            "field_name": "열량",
+                            "normalized_value": "390",
+                            "unit": "kcal",
+                            "daily_value_percent": "",
+                            "source_refs": ["evidence-1", "evidence-2"],
+                        },
+                        {
+                            "field_name": "나트륨",
+                            "normalized_value": "3930",
+                            "unit": "mg",
+                            "daily_value_percent": "197",
+                            "source_refs": ["evidence-1", "evidence-2"],
+                        },
+                        {
+                            "field_name": "탄수화물",
+                            "normalized_value": "48",
+                            "unit": "g",
+                            "daily_value_percent": "15",
+                            "source_refs": ["evidence-1", "evidence-2"],
+                        },
+                    ],
+                }
+            ],
+            "unresolved_facts": [],
+            "conflicts": [],
+            "warnings": [],
+        },
+    },
+    {
+        "input": {
+            "evidence": [
+                {
+                    "evidence_id": "evidence-1",
+                    "source_type": "vlm_table",
+                    "text": "총중량 360g 군만두 240g 소스 120g 식품유형 군만두 만두 식품유형 소스 소스",
+                },
+                {
+                    "evidence_id": "evidence-2",
+                    "source_type": "raw_ocr_tile",
+                    "text": "원재료명(군만두) 밀가루, 당면, 대두유 원재료명(소스) 정제수, 물엿, 설탕, 고춧가루",
+                },
+            ],
+        },
+        "output": {
+            "product_facts": [
+                {
+                    "field_name": "총중량",
+                    "normalized_value": "360g (군만두 240g, 소스 120g)",
+                    "source_refs": ["evidence-1"],
+                    "correction_type": "llm_reconstructed",
+                    "validation_status": "accepted",
+                },
+                {
+                    "field_name": "식품유형 (군만두)",
+                    "normalized_value": "만두",
+                    "source_refs": ["evidence-1"],
+                    "correction_type": "none",
+                    "validation_status": "accepted",
+                },
+                {
+                    "field_name": "식품유형 (소스)",
+                    "normalized_value": "소스",
+                    "source_refs": ["evidence-1"],
+                    "correction_type": "none",
+                    "validation_status": "accepted",
+                },
+                {
+                    "field_name": "원재료명 (군만두)",
+                    "normalized_value": "밀가루, 당면, 대두유",
+                    "source_refs": ["evidence-2"],
+                    "correction_type": "none",
+                    "validation_status": "accepted",
+                },
+                {
+                    "field_name": "원재료명 (소스)",
+                    "normalized_value": "정제수, 물엿, 설탕, 고춧가루",
+                    "source_refs": ["evidence-2"],
+                    "correction_type": "none",
+                    "validation_status": "accepted",
+                },
+            ],
+            "reconstructed_tables": [
+                {
+                    "table_name": "제품 정보",
+                    "source_refs": ["evidence-1"],
+                    "rows": [
+                        {
+                            "field_name": "총중량",
+                            "normalized_value": "360g (군만두 240g, 소스 120g)",
+                            "unit": "g",
+                            "daily_value_percent": "",
+                            "source_refs": ["evidence-1"],
+                        },
+                        {
+                            "field_name": "식품유형 (군만두)",
+                            "normalized_value": "만두",
+                            "unit": "",
+                            "daily_value_percent": "",
+                            "source_refs": ["evidence-1"],
+                        },
+                        {
+                            "field_name": "식품유형 (소스)",
+                            "normalized_value": "소스",
+                            "unit": "",
+                            "daily_value_percent": "",
+                            "source_refs": ["evidence-1"],
+                        },
+                    ],
+                }
+            ],
+            "unresolved_facts": [],
+            "conflicts": [],
+            "warnings": [],
+        },
+    },
 ]
 
 
@@ -425,6 +569,58 @@ class ReconstructionTable(BaseModel):
     @classmethod
     def NormalizeRows(cls, value: object) -> List[object]:
         return _NormalizeLlmObjectList(value)
+
+
+class ProductFactReconstructionOutputFact(BaseModel):
+    """LLM structured output fact contract."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True, extra="forbid")
+
+    fieldName: str = Field(alias="field_name")
+    normalizedValue: str = Field(alias="normalized_value")
+    sourceRefs: List[str] = Field(alias="source_refs")
+    correctionType: str = Field(alias="correction_type")
+    validationStatus: str = Field(alias="validation_status")
+
+
+class ProductFactReconstructionOutputTableRow(BaseModel):
+    """LLM structured output table row contract."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True, extra="forbid")
+
+    fieldName: str = Field(alias="field_name")
+    normalizedValue: str = Field(alias="normalized_value")
+    unit: str
+    dailyValuePercent: str = Field(alias="daily_value_percent")
+    sourceRefs: List[str] = Field(alias="source_refs")
+
+
+class ProductFactReconstructionOutputTable(BaseModel):
+    """LLM structured output table contract."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True, extra="forbid")
+
+    tableName: str = Field(alias="table_name")
+    sourceRefs: List[str] = Field(alias="source_refs")
+    rows: List[ProductFactReconstructionOutputTableRow]
+
+
+class ProductFactReconstructionOutput(BaseModel):
+    """LLM structured output contract before internal validation metadata."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True, extra="forbid")
+
+    productFacts: List[ProductFactReconstructionOutputFact] = Field(
+        alias="product_facts"
+    )
+    reconstructedTables: List[ProductFactReconstructionOutputTable] = Field(
+        alias="reconstructed_tables"
+    )
+    unresolvedFacts: List[ProductFactReconstructionOutputFact] = Field(
+        alias="unresolved_facts"
+    )
+    conflicts: List[str]
+    warnings: List[str]
 
 
 def _StripOcrCollectionMarkers(text: str) -> str:
@@ -1944,35 +2140,7 @@ class ProductFactReconstructionAgent:
         )
         try:
             response = self._runtimeAdapter.Generate(request)
-            self._TryWriteArtifact(
-                evidencePackage,
-                "llm-input-reconstruction-response.json",
-                response.model_dump(mode="json", by_alias=True),
-            )
-            payload = self._ParseJsonPayload(response.generatedText)
-            result = InputReconstructionResult.model_validate(payload)
-            result = result.model_copy(
-                update={
-                    "normalizedFactTexts": [],
-                    "usedLlmReconstruction": True,
-                    "fallbackReason": None,
-                    "dictionaryMatches": [],
-                }
-            )
-            validatedResult = self._validator.Validate(result, evidencePackage)
-            if not validatedResult.productFacts:
-                return validatedResult.model_copy(
-                    update={
-                        "usedLlmReconstruction": False,
-                        "fallbackReason": "llm_reconstruction_no_product_facts",
-                        "warnings": [
-                            *validatedResult.warnings,
-                            "llm_reconstruction_no_product_facts",
-                        ],
-                    }
-                )
-            return validatedResult
-        except (ValueError, ValidationError, RuntimeError) as error:
+        except RuntimeError as error:
             self._TryWriteArtifact(
                 evidencePackage,
                 "llm-input-reconstruction-error.json",
@@ -1987,16 +2155,133 @@ class ProductFactReconstructionAgent:
                 fallbackReason="llm_reconstruction_failed",
             )
 
+        self._TryWriteArtifact(
+            evidencePackage,
+            "llm-input-reconstruction-response.json",
+            response.model_dump(mode="json", by_alias=True),
+        )
+        try:
+            return self._BuildValidatedResult(
+                response.generatedText,
+                evidencePackage,
+            )
+        except (ValueError, ValidationError) as error:
+            repairedResult = self._TryRepairResponse(
+                evidencePackage,
+                response.generatedText,
+                error,
+            )
+            if repairedResult is not None:
+                return repairedResult
+            self._TryWriteArtifact(
+                evidencePackage,
+                "llm-input-reconstruction-error.json",
+                {
+                    "product_page_url": evidencePackage.productPageUrl,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                },
+            )
+            return InputReconstructionResult(
+                warnings=["llm_reconstruction_failed: {0}".format(error)],
+                fallbackReason="llm_reconstruction_failed",
+            )
+        except RuntimeError as error:
+            self._TryWriteArtifact(
+                evidencePackage,
+                "llm-input-reconstruction-error.json",
+                {
+                    "product_page_url": evidencePackage.productPageUrl,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                },
+            )
+            return InputReconstructionResult(
+                warnings=["llm_reconstruction_failed: {0}".format(error)],
+                fallbackReason="llm_reconstruction_failed",
+            )
+
+    def _BuildValidatedResult(
+        self,
+        generatedText: str,
+        evidencePackage: InputEvidencePackage,
+    ) -> InputReconstructionResult:
+        payload = self._ParseJsonPayload(generatedText)
+        result = InputReconstructionResult.model_validate(payload)
+        result = result.model_copy(
+            update={
+                "normalizedFactTexts": [],
+                "usedLlmReconstruction": True,
+                "fallbackReason": None,
+                "dictionaryMatches": [],
+            }
+        )
+        validatedResult = self._validator.Validate(result, evidencePackage)
+        if not validatedResult.productFacts:
+            return validatedResult.model_copy(
+                update={
+                    "usedLlmReconstruction": False,
+                    "fallbackReason": "llm_reconstruction_no_product_facts",
+                    "warnings": [
+                        *validatedResult.warnings,
+                        "llm_reconstruction_no_product_facts",
+                    ],
+                }
+            )
+        return validatedResult
+
+    def _TryRepairResponse(
+        self,
+        evidencePackage: InputEvidencePackage,
+        generatedText: str,
+        originalError: Exception,
+    ) -> InputReconstructionResult | None:
+        if self._runtimeAdapter is None:
+            return None
+
+        repairRequest = self._BuildRepairRequest(generatedText, originalError)
+        self._TryWriteArtifact(
+            evidencePackage,
+            "llm-input-reconstruction-repair-request.json",
+            {
+                "product_page_url": evidencePackage.productPageUrl,
+                "request": repairRequest.model_dump(mode="json", by_alias=True),
+            },
+        )
+        try:
+            response = self._runtimeAdapter.Generate(repairRequest)
+            self._TryWriteArtifact(
+                evidencePackage,
+                "llm-input-reconstruction-repair-response.json",
+                response.model_dump(mode="json", by_alias=True),
+            )
+            return self._BuildValidatedResult(response.generatedText, evidencePackage)
+        except (ValueError, ValidationError, RuntimeError) as error:
+            self._TryWriteArtifact(
+                evidencePackage,
+                "llm-input-reconstruction-repair-error.json",
+                {
+                    "product_page_url": evidencePackage.productPageUrl,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                    "original_error_type": type(originalError).__name__,
+                    "original_error_message": str(originalError),
+                },
+            )
+            return None
+
     def _BuildRequest(
         self,
         evidencePackage: InputEvidencePackage,
     ) -> LlmRequest:
-        contextPayload = {
+        evidencePayload = {
             "evidence": [
                 evidenceRecord.model_dump(mode="json", by_alias=True)
                 for evidenceRecord in evidencePackage.records
             ],
-            "few_shot_examples": PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES,
+        }
+        fewShotPayload = {
+            "examples": PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES,
         }
         return LlmRequest(
             systemPrompt=PRODUCT_FACT_RECONSTRUCTION_SYSTEM_PROMPT,
@@ -2005,7 +2290,8 @@ class ProductFactReconstructionAgent:
                     "아래 evidence만 사용해 상품 입력 fact JSON을 작성하라.",
                     "출력 key는 product_facts, reconstructed_tables, unresolved_facts, conflicts, warnings만 사용하라.",
                     "product_facts가 분류 입력의 기준값이다. 핵심 상품 fact는 반드시 product_facts에 먼저 넣어라.",
-                    "reconstructed_tables는 검토용 보조 출력이다. product_facts와 긴 값을 중복하거나 응답을 길게 만들면 []로 둬라.",
+                    "vlm_table/pp_table에 표 형태 정보가 있으면 reconstructed_tables에 compact row로 보존하라.",
+                    "reconstructed_tables는 product_facts로 선택되지 않은 표 행도 보존하되, 긴 원재료 전문만 중복하지 마라.",
                     "product_summary는 제품 정체성/형태/설명 힌트로만 사용하고 원재료/함량은 OCR 또는 표 증거에서만 만들라.",
                     "raw OCR에서 원재료 섹션과 생산/활용/브랜드 섹션이 나뉘면 원재료 fact는 원재료 섹션 안의 텍스트만 사용하라.",
                     "JSON null을 절대 출력하지 말고, 모르는 값은 빈 문자열/빈 배열 또는 항목 생략으로 표현하라.",
@@ -2014,10 +2300,50 @@ class ProductFactReconstructionAgent:
                     "정규화된 값을 뒷받침할 evidence가 부족하면 해당 항목은 unresolved_facts로 보내라.",
                     "normalized_fact_texts, dictionary_matches, used_llm_reconstruction, fallback_reason은 출력하지 마라.",
                     "source_refs에는 evidence_id만 사용하라.",
-                    json.dumps(contextPayload, ensure_ascii=False, separators=(",", ":")),
+                    "다음 examples는 형식 참고용이며 evidence가 아니다.",
+                    json.dumps(fewShotPayload, ensure_ascii=False, separators=(",", ":")),
+                    "다음 JSON만 실제 evidence다.",
+                    json.dumps(evidencePayload, ensure_ascii=False, separators=(",", ":")),
                 ]
             ),
-            responseFormat=LlmResponseFormat.JSON_OBJECT,
+            responseFormat=LlmResponseFormat.JSON_SCHEMA,
+            responseSchemaName="ProductFactReconstructionOutput",
+            responseSchema=ProductFactReconstructionOutput.model_json_schema(
+                by_alias=True
+            ),
+            responseModel=ProductFactReconstructionOutput,
+            generationOptions=LlmGenerationOptions(
+                temperature=0.0,
+                maxTokens=self._maxTokens,
+            ),
+        )
+
+    def _BuildRepairRequest(
+        self,
+        generatedText: str,
+        originalError: Exception,
+    ) -> LlmRequest:
+        return LlmRequest(
+            systemPrompt=PRODUCT_FACT_RECONSTRUCTION_SYSTEM_PROMPT,
+            userPrompt="\n".join(
+                [
+                    "이전 응답은 JSON parse 또는 schema validation에 실패했다.",
+                    "같은 의미의 결과를 valid JSON object로만 다시 출력하라.",
+                    "설명, markdown, code fence를 출력하지 마라.",
+                    "오류: {0}: {1}".format(
+                        type(originalError).__name__,
+                        originalError,
+                    ),
+                    "깨진 이전 응답:",
+                    generatedText,
+                ]
+            ),
+            responseFormat=LlmResponseFormat.JSON_SCHEMA,
+            responseSchemaName="ProductFactReconstructionOutput",
+            responseSchema=ProductFactReconstructionOutput.model_json_schema(
+                by_alias=True
+            ),
+            responseModel=ProductFactReconstructionOutput,
             generationOptions=LlmGenerationOptions(
                 temperature=0.0,
                 maxTokens=self._maxTokens,

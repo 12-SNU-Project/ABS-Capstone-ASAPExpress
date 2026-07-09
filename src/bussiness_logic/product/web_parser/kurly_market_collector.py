@@ -606,19 +606,41 @@ class KurlyPageCollector:
         if not isinstance(values, list):
             return []
 
-        imageUrls: List[str] = []
+        imageRecords: List[tuple[int, int, str]] = []
         seenUrls: set[str] = set()
+        seenImageKeys: set[str] = set()
+        imageOrder = 0
         for value in values:
             if not isinstance(value, str):
                 continue
             for imageUrl in self._ExpandImageUrlValue(page.url, value):
                 if imageUrl in seenUrls:
                     continue
-                if not self._LooksProductDetailImageUrl(imageUrl):
+                if not self._LooksProductDetailImageUrl(page.url, imageUrl):
+                    continue
+                imageKey = self._BuildProductDetailImageKey(
+                    page.url,
+                    imageUrl,
+                )
+                if imageKey in seenImageKeys:
                     continue
                 seenUrls.add(imageUrl)
-                imageUrls.append(imageUrl)
-        return imageUrls
+                seenImageKeys.add(imageKey)
+                imageOrder += 1
+                imageRecords.append(
+                    (
+                        self._BuildProductDetailImagePriority(
+                            page.url,
+                            imageUrl,
+                        ),
+                        imageOrder,
+                        imageUrl,
+                    )
+                )
+        return [
+            imageUrl
+            for _, _, imageUrl in sorted(imageRecords)
+        ]
 
     @staticmethod
     def _ExpandImageUrlValue(baseUrl: str, value: str) -> List[str]:
@@ -630,14 +652,59 @@ class KurlyPageCollector:
             imageUrls.append(urljoin(baseUrl, candidate))
         return imageUrls
 
-    def _LooksProductDetailImageUrl(self, imageUrl: str) -> bool:
+    def _BuildProductDetailImageKey(
+        self,
+        productPageUrl: str,
+        imageUrl: str,
+    ) -> str:
+        buildProductDetailImageKey = getattr(
+            self._parser,
+            "BuildProductDetailImageKey",
+            None,
+        )
+        if callable(buildProductDetailImageKey):
+            try:
+                value = buildProductDetailImageKey(imageUrl, productPageUrl)
+            except TypeError:
+                value = buildProductDetailImageKey(imageUrl)
+            if isinstance(value, str) and value.strip():
+                return value
+        return imageUrl
+
+    def _BuildProductDetailImagePriority(
+        self,
+        productPageUrl: str,
+        imageUrl: str,
+    ) -> int:
+        buildProductDetailImagePriority = getattr(
+            self._parser,
+            "BuildProductDetailImagePriority",
+            None,
+        )
+        if callable(buildProductDetailImagePriority):
+            try:
+                value = buildProductDetailImagePriority(imageUrl, productPageUrl)
+            except TypeError:
+                value = buildProductDetailImagePriority(imageUrl)
+            if isinstance(value, int):
+                return value
+        return 10
+
+    def _LooksProductDetailImageUrl(
+        self,
+        productPageUrl: str,
+        imageUrl: str,
+    ) -> bool:
         looksProductDetailImageUrl = getattr(
             self._parser,
             "LooksProductDetailImageUrl",
             None,
         )
         if callable(looksProductDetailImageUrl):
-            value = looksProductDetailImageUrl(imageUrl)
+            try:
+                value = looksProductDetailImageUrl(imageUrl, productPageUrl)
+            except TypeError:
+                value = looksProductDetailImageUrl(imageUrl)
             if isinstance(value, bool):
                 return value
 

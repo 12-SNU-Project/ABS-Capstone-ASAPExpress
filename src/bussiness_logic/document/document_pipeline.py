@@ -117,6 +117,7 @@ def build_kurly_url_facts_from_pipeline_result(
     *,
     artifact_root: Path,
     warnings: list[str] | None = None,
+    write_product_input_artifact: bool = True,
 ) -> JsonObject:
     """Project a Kurly pipeline result into the exact Dash Product facts shape."""
 
@@ -190,15 +191,16 @@ def build_kurly_url_facts_from_pipeline_result(
         },
         "input_reconstruction": input_reconstruction,
     }
-    productArtifactDirectory.mkdir(parents=True, exist_ok=True)
     productInputArtifactPath = productArtifactDirectory / "product-input.json"
-    facts["url_intake"]["product_input_artifact"] = str(productInputArtifactPath)
-    temporaryArtifactPath = productInputArtifactPath.with_suffix(".json.tmp")
-    temporaryArtifactPath.write_text(
-        json.dumps(facts, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    temporaryArtifactPath.replace(productInputArtifactPath)
+    if write_product_input_artifact:
+        productArtifactDirectory.mkdir(parents=True, exist_ok=True)
+        facts["url_intake"]["product_input_artifact"] = str(productInputArtifactPath)
+        temporaryArtifactPath = productInputArtifactPath.with_suffix(".json.tmp")
+        temporaryArtifactPath.write_text(
+            json.dumps(facts, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporaryArtifactPath.replace(productInputArtifactPath)
     return facts
 
 

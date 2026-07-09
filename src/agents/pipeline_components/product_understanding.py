@@ -27,6 +27,14 @@ from agents.tools.identity_distiller import IdentityDistillerService
 PERCENT_RE = re.compile(
     r"(?P<term>[A-Za-z가-힣][A-Za-z가-힣 /·._-]{0,39}?)\s*(?P<percent>\d+(?:[.,]\d+)?)\s*%",
 )
+COMPOSITION_PERCENT_FIELD_MARKERS = (
+    "원재료",
+    "원료",
+    "배합",
+    "성분",
+    "ingredients",
+    "composition",
+)
 WRAPPER_RE = re.compile(r"피|만두피|도우|반죽|wrapper|dough|pastry", re.I)
 SAUCE_BROTH_RE = re.compile(r"소스|국물|육수|스프|sauce|broth|soup|stock", re.I)
 ALLERGEN_RE = re.compile(
@@ -65,10 +73,6 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             or observedFacts.get("composition")
             or [],
         )
-        # §13(b): OCR composition lines, selectively. Full raw-OCR re-injection is
-        # forbidden (designer rule); only ingredient/percentage lines, capped, so
-        # detail-page composition tables still reach the understanding stage.
-        factTexts = (*factTexts, *self._OcrCompositionLines(observedFacts, factTexts))
         productFacts = self._ReadFactTuple(
             observedFacts.get("reconstructed_product_facts") or [],
         )
@@ -186,37 +190,6 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             matchedTexts=(evidence.text,),
             matchScores=(evidence.matchedScore,),
         )
-
-    _OCR_COMPOSITION_LINE_RE = re.compile(
-        r"원재료|원료|성분|함량|배합|재료명|\d+(?:[.,]\d+)?\s*%",
-    )
-
-    @classmethod
-    def _OcrCompositionLines(
-        cls,
-        observedFacts: dict[str, JsonValue],
-        existingFactTexts: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        """Composition-looking lines from observed ocr_text (capped, dedup)."""
-        raw = observedFacts.get("ocr_text")
-        if isinstance(raw, list):
-            text = "\n".join(str(item) for item in raw)
-        else:
-            text = str(raw or "")
-        if not text.strip():
-            return ()
-        existing = {line.strip() for line in existingFactTexts}
-        out: list[str] = []
-        for line in text.splitlines():
-            line = line.strip()
-            if not line or len(line) < 4 or line in existing:
-                continue
-            if not cls._OCR_COMPOSITION_LINE_RE.search(line):
-                continue
-            out.append(line[:200])
-            if len(out) >= 8:
-                break
-        return tuple(out)
 
     @staticmethod
     def _ReadTextTuple(value: object) -> tuple[str, ...]:
@@ -367,9 +340,17 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         # not the identity lane. Feed its matched texts into %-parsing and terms.
         coiTexts = tuple(coiEvidence.matchedTexts)
         text = "\n".join([*factTexts, *ProductUnderstandingComponent._FactTexts(productFacts), *coiTexts])
+        percentageText = "\n".join(
+            ProductUnderstandingComponent._CompositionPercentageTexts(productFacts)
+        )
         percentages: list[dict[str, JsonValue]] = []
         seenPercentages: set[tuple[str, str]] = set()
-        for match in PERCENT_RE.finditer(text):
+        for match in PERCENT_RE.finditer(percentageText):
+            if ProductUnderstandingComponent._IsNestedPercentage(
+                percentageText,
+                match.start("percent"),
+            ):
+                continue
             term = " ".join((match.group("term") or "").split())[-40:].strip(" ,:/")
             percentRaw = (match.group("percent") or "").replace(",", ".")
             try:
@@ -419,6 +400,46 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             allergenTermsExcluded=tuple(allergenTexts[:20]),
             missingCompositionFacts=tuple(missing),
         )
+
+    @staticmethod
+    def _CompositionPercentageTexts(
+        productFacts: tuple[dict[str, JsonValue], ...],
+    ) -> tuple[str, ...]:
+        texts: list[str] = []
+        for fact in productFacts:
+            field = str(
+                fact.get("field_name")
+                or fact.get("field")
+                or fact.get("name")
+                or ""
+            ).strip()
+            value = str(
+                fact.get("normalized_value")
+                or fact.get("value")
+                or fact.get("text")
+                or ""
+            ).strip()
+            if field and value and ProductUnderstandingComponent._IsCompositionFieldName(field):
+                texts.append(value)
+        return tuple(texts)
+
+    @staticmethod
+    def _IsCompositionFieldName(fieldName: str) -> bool:
+        compactFieldName = fieldName.replace(" ", "").lower()
+        return any(
+            marker.lower() in compactFieldName
+            for marker in COMPOSITION_PERCENT_FIELD_MARKERS
+        )
+
+    @staticmethod
+    def _IsNestedPercentage(text: str, index: int) -> bool:
+        depth = 0
+        for character in text[:index]:
+            if character in "([{":
+                depth += 1
+            elif character in ")]}":
+                depth = max(0, depth - 1)
+        return depth > 0
 
     @staticmethod
     def _DedupStrings(values: list[str] | tuple[str, ...], *, limit: int) -> tuple[str, ...]:

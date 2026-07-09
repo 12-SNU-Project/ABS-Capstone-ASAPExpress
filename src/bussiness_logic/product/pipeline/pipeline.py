@@ -225,6 +225,7 @@ class KurlyProductPipeline:
             productPageUrl=collectionResult.productPageUrl,
             maxImageCount=pipelineInput.maxOcrImageCount,
             downloadTimeoutSeconds=pipelineInput.downloadTimeoutSeconds,
+            reuseArtifactImages=pipelineInput.reuseOcrImageArtifacts,
         )
         errors.extend(
             imageResult.error
@@ -250,13 +251,18 @@ class KurlyProductPipeline:
                 message=(
                     "candidate_image_count={0}, selected_image_count={1}, "
                     "ocr_image_count={2}, structured_ocr_image_count={3}, "
-                    "screened_raw_image_count={4}, error_count={5}"
+                    "screened_raw_image_count={4}, reused_image_count={5}, "
+                    "error_count={6}"
                 ).format(
                     candidateImageCount,
                     selectedImageCount,
                     len(imageResults),
                     structuredOcrImageCount,
                     screenedRawImageCount,
+                    sum(
+                        "cached_image_read" in imageResult.processingTimes
+                        for imageResult in imageResults
+                    ),
                     len(errors),
                 ),
             )

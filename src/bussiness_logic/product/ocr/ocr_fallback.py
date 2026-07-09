@@ -166,6 +166,7 @@ class ProductOcrArtifactStore:
         self,
         artifactRootPath: Path,
         productPageUrl: str,
+        preserveInputImages: bool = False,
     ) -> Path:
         artifactDirectory = self._BuildArtifactDirectory(
             artifactRootPath,
@@ -173,9 +174,45 @@ class ProductOcrArtifactStore:
         )
         artifactDirectory.mkdir(parents=True, exist_ok=True)
         for artifactPath in artifactDirectory.glob("ocr-fallback-image-*"):
+            if preserveInputImages:
+                continue
             if artifactPath.is_file():
                 artifactPath.unlink(missing_ok=True)
         return artifactDirectory
+
+    def ReadReusableImage(
+        self,
+        artifactDirectory: Path,
+        imageIndex: int,
+    ) -> Optional[Tuple[Path, bytes]]:
+        imageStem = "ocr-fallback-image-{0:02d}".format(imageIndex)
+        for artifactPath in sorted(artifactDirectory.glob(f"{imageStem}.*")):
+            if artifactPath.stem == imageStem and artifactPath.is_file():
+                return artifactPath, artifactPath.read_bytes()
+        for artifactPath in sorted(artifactDirectory.glob(f"{imageStem}-tile-*")):
+            if artifactPath.is_file():
+                return artifactPath, artifactPath.read_bytes()
+        return None
+
+    def PruneUnretainedArtifacts(
+        self,
+        artifactDirectory: Path,
+        retainedArtifactPaths: Sequence[Path],
+    ) -> int:
+        retainedPaths = {
+            artifactPath.resolve()
+            for artifactPath in retainedArtifactPaths
+            if artifactPath.exists()
+        }
+        deletedCount = 0
+        for artifactPath in artifactDirectory.glob("ocr-fallback-image-*"):
+            if (
+                artifactPath.is_file()
+                and artifactPath.resolve() not in retainedPaths
+            ):
+                artifactPath.unlink(missing_ok=True)
+                deletedCount += 1
+        return deletedCount
 
     def WriteImage(
         self,
@@ -300,10 +337,12 @@ class ProductOcrFallbackRunner:
         productPageUrl: str,
         maxImageCount: int,
         downloadTimeoutSeconds: int,
+        reuseArtifactImages: bool = False,
     ) -> List[ProductOcrImageResult]:
         artifactDirectory = self._artifactStore.PrepareArtifactDirectory(
             artifactRootPath=artifactRootPath,
             productPageUrl=productPageUrl,
+            preserveInputImages=reuseArtifactImages,
         )
 
         imageResults: List[ProductOcrImageResult] = []
@@ -314,10 +353,26 @@ class ProductOcrFallbackRunner:
                 imageUrl=imageUrl,
                 artifactDirectory=artifactDirectory,
                 downloadTimeoutSeconds=downloadTimeoutSeconds,
+                reuseArtifactImages=reuseArtifactImages,
             )
             if imageResult is not None:
                 imageResults.append(imageResult)
 
+        self._artifactStore.PruneUnretainedArtifacts(
+            artifactDirectory,
+            [
+                Path(imagePath)
+                for imageResult in imageResults
+                for imagePath in (
+                    imageResult.imagePaths
+                    or (
+                        [imageResult.imagePath]
+                        if imageResult.imagePath is not None
+                        else []
+                    )
+                )
+            ],
+        )
         return imageResults
 
     @staticmethod
@@ -334,22 +389,35 @@ class ProductOcrFallbackRunner:
         imageUrl: str,
         artifactDirectory: Path,
         downloadTimeoutSeconds: int,
+        reuseArtifactImages: bool,
     ) -> Optional[ProductOcrImageResult]:
         artifactPath: Optional[Path] = None
         processingTimes: Dict[str, float] = {}
         try:
-            startedAt = perf_counter()
-            imageBytes = self._imageDownloader.Download(
-                imageUrl,
-                downloadTimeoutSeconds,
+            reusableImage = (
+                self._artifactStore.ReadReusableImage(
+                    artifactDirectory,
+                    imageIndex,
+                )
+                if reuseArtifactImages
+                else None
             )
-            processingTimes["download"] = perf_counter() - startedAt
-            artifactPath = self._artifactStore.WriteImage(
-                artifactDirectory=artifactDirectory,
-                imageIndex=imageIndex,
-                imageUrl=imageUrl,
-                imageBytes=imageBytes,
-            )
+            if reusableImage is None:
+                startedAt = perf_counter()
+                imageBytes = self._imageDownloader.Download(
+                    imageUrl,
+                    downloadTimeoutSeconds,
+                )
+                processingTimes["download"] = perf_counter() - startedAt
+                artifactPath = self._artifactStore.WriteImage(
+                    artifactDirectory=artifactDirectory,
+                    imageIndex=imageIndex,
+                    imageUrl=imageUrl,
+                    imageBytes=imageBytes,
+                )
+            else:
+                artifactPath, imageBytes = reusableImage
+                processingTimes["cached_image_read"] = 0.0
             screeningResult: Optional[ProductStructuredOcrResult] = None
             screeningRegions: List[ProductOcrTextRegion] = []
             if self._screeningEngine is not None:
@@ -539,6 +607,10 @@ class ProductOcrFallbackRunner:
                 nutritionMatchCount >= 2
                 and foodDetailMatchCount >= 3
                 and quantityMatchCount >= 4
+            )
+            or (
+                foodDetailMatchCount >= 5
+                and quantityMatchCount >= 3
             )
         )
         return isCandidate, (

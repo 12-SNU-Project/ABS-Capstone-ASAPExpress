@@ -32,6 +32,10 @@ class KurlyPipelineInput(BaseModel):
         description="Maximum number of OCR candidate images processed per product.",
     )
     downloadTimeoutSeconds: int = DEFAULT_PRODUCT_OCR_IMAGE_DOWNLOAD_TIMEOUT_SECONDS
+    reuseOcrImageArtifacts: bool = Field(
+        default=False,
+        alias="reuse_ocr_image_artifacts",
+    )
 
 
 class PipelineStep(BaseModel):

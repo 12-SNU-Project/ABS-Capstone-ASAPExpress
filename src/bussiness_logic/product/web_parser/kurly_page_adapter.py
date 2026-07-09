@@ -72,8 +72,44 @@ class KurlyPageAdapter:
             return None
         return self._globalParser.ReadProductNoticeText(page)
 
+    def LooksProductDetailImageUrl(
+        self,
+        imageUrl: str,
+        productPageUrl: Optional[str] = None,
+    ) -> bool:
+        if (
+            productPageUrl is not None
+            and self._globalParser.IsSupportedProductPageUrl(productPageUrl)
+        ):
+            return self._globalParser.LooksProductDetailImageUrl(imageUrl)
+        return self._LooksDomesticProductDetailImageUrl(imageUrl)
+
+    def BuildProductDetailImageKey(
+        self,
+        imageUrl: str,
+        productPageUrl: Optional[str] = None,
+    ) -> str:
+        if (
+            productPageUrl is not None
+            and self._globalParser.IsSupportedProductPageUrl(productPageUrl)
+        ):
+            return self._globalParser.BuildProductDetailImageKey(imageUrl)
+        return imageUrl
+
+    def BuildProductDetailImagePriority(
+        self,
+        imageUrl: str,
+        productPageUrl: Optional[str] = None,
+    ) -> int:
+        if (
+            productPageUrl is not None
+            and self._globalParser.IsSupportedProductPageUrl(productPageUrl)
+        ):
+            return self._globalParser.BuildProductDetailImagePriority(imageUrl)
+        return 10
+
     @staticmethod
-    def LooksProductDetailImageUrl(imageUrl: str) -> bool:
+    def _LooksDomesticProductDetailImageUrl(imageUrl: str) -> bool:
         parsedUrl = urlparse(imageUrl)
         hostName = parsedUrl.netloc.lower()
         path = parsedUrl.path.lower()

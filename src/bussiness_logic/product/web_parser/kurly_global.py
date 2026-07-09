@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import List, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from bussiness_logic.product.web_parser.kurly_parser import (
     KurlyBasePageParser,
@@ -119,7 +119,49 @@ class KurlyGlobalPageParser(KurlyBasePageParser):
         path = parsedUrl.path.lower()
         if hostName == "img-cf.kurly.com" and "/goodsview/" in path:
             return True
+        if (
+            hostName == "cdn.shopify.com"
+            and path.startswith("/s/files/")
+            and "/files/" in path
+            and path.endswith((".jpg", ".jpeg", ".webp"))
+        ):
+            return True
         return False
+
+    def BuildProductDetailImageKey(self, imageUrl: str) -> str:
+        parsedUrl = urlparse(imageUrl)
+        hostName = parsedUrl.netloc.lower()
+        path = parsedUrl.path
+        lowerPath = path.lower()
+        if hostName == "img-cf.kurly.com" and "/goodsview/" in lowerPath:
+            goodsviewPath = path[lowerPath.index("/goodsview/"):]
+            return "{0}:{1}".format(hostName, goodsviewPath)
+        if hostName == "cdn.shopify.com" and "/files/" in lowerPath:
+            return urlunparse(
+                (
+                    parsedUrl.scheme,
+                    parsedUrl.netloc,
+                    parsedUrl.path,
+                    "",
+                    "",
+                    "",
+                )
+            )
+        return imageUrl
+
+    def BuildProductDetailImagePriority(self, imageUrl: str) -> int:
+        parsedUrl = urlparse(imageUrl)
+        hostName = parsedUrl.netloc.lower()
+        path = parsedUrl.path.lower()
+        if (
+            hostName == "img-cf.kurly.com"
+            and "/src/hdims/resize/" in path
+            and "/goodsview/" in path
+        ):
+            return 0
+        if hostName == "cdn.shopify.com" and "/files/" in path:
+            return 1
+        return 10
 
     def ParseCollectedTextLines(
         self,
