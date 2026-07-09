@@ -2,7 +2,7 @@
 
 This module is intentionally thin. It does not classify or recommend documents
 itself; it only runs the existing Blackboard components in order and returns the
-Document_Component output that the Dash UI can render.
+Document_Component output that the web UI can render.
 """
 from __future__ import annotations
 
@@ -119,7 +119,7 @@ def build_kurly_url_facts_from_pipeline_result(
     warnings: list[str] | None = None,
     write_product_input_artifact: bool = True,
 ) -> JsonObject:
-    """Project a Kurly pipeline result into the exact Dash Product facts shape."""
+    """Project a Kurly pipeline result into the shared product facts shape."""
 
     from bussiness_logic.input_process.product_input_adapter import ProductInputAdapter
 
@@ -215,7 +215,7 @@ def collect_kurly_url_facts(
 ) -> JsonObject:
     """Collect product facts from a Kurly product URL.
 
-    This keeps URL/OCR intake outside the Dash callback and before
+    This keeps URL/OCR intake outside the web request handler and before
     Evidence_Intake_Component, so the Blackboard still starts from normalized
     product facts.
     """
@@ -505,7 +505,7 @@ def build_raw_input_from_ui(
     query: str,
     facts: JsonObject,
 ) -> JsonObject:
-    """Map Dash text + Product facts JSON into EvidenceIntakeComponent input."""
+    """Map UI/API text + product facts JSON into EvidenceIntakeComponent input."""
     facts = _normalize_product_facts(facts or {})
     url = str(facts.get("url") or "").strip()
     if facts.get("use_cached_product_input"):
@@ -722,7 +722,7 @@ def run_document_pipeline(
     productArtifactId = _ResolveProductArtifactId(query, facts)
     runDirectory = PIPELINE_OUTPUTS_ROOT / productArtifactId / effectiveJobId
     store = BlackboardStore.create(
-        runtime_mode="dash",
+        runtime_mode="webapp",
         run_id=_BuildInternalRunId(effectiveJobId),
         run_dir=runDirectory,
     )

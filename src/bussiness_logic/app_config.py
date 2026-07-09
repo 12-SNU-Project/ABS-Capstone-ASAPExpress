@@ -288,46 +288,27 @@ class ClassificationAppConfig(BaseModel):
 
 
 class WebAppConfig(BaseModel):
-    """Dash frontend와 pipeline backend 실행 경계 설정."""
+    """React webapp와 pipeline backend 실행 경계 설정."""
 
     model_config = ConfigDict(extra="ignore")
 
-    frontend_host: StrictStr = "127.0.0.1"
-    frontend_port: StrictInt = 8050
     backend_host: StrictStr = "127.0.0.1"
     backend_port: StrictInt = 8060
-    backend_api_base_url: StrictStr = "http://127.0.0.1:8060"
-    backend_request_timeout_seconds: StrictInt = 15
     allowed_frontend_origins: list[StrictStr] = Field(
         default_factory=lambda: [
-            "http://127.0.0.1:8050",
-            "http://localhost:8050",
-            "http://127.0.0.1:8765",
-            "http://localhost:8765",
+            "http://127.0.0.1:5173",
+            "http://localhost:5173",
+            "http://127.0.0.1:4173",
+            "http://localhost:4173",
         ],
     )
 
-    @field_validator("frontend_port", "backend_port")
+    @field_validator("backend_port")
     @classmethod
     def ValidatePort(cls, value: int) -> int:
         if not 1 <= value <= 65535:
             raise ValueError("web port must be between 1 and 65535.")
         return value
-
-    @field_validator("backend_request_timeout_seconds")
-    @classmethod
-    def ValidateRequestTimeout(cls, value: int) -> int:
-        if value <= 0:
-            raise ValueError("backend_request_timeout_seconds must be positive.")
-        return value
-
-    @field_validator("backend_api_base_url")
-    @classmethod
-    def NormalizeBackendApiBaseUrl(cls, value: str) -> str:
-        normalizedValue = value.strip().rstrip("/")
-        if not normalizedValue.startswith(("http://", "https://")):
-            raise ValueError("backend_api_base_url must be an HTTP(S) URL.")
-        return normalizedValue
 
     @field_validator("allowed_frontend_origins")
     @classmethod
@@ -337,7 +318,6 @@ class WebAppConfig(BaseModel):
             for origin in value
             if origin.strip().startswith(("http://", "https://"))
         ))
-
 
 class AppConfig(BaseModel):
     """비밀값이 아닌 프로젝트 실행 설정."""

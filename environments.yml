@@ -13,10 +13,6 @@ dependencies:
   - requests
   - pytest
   - pip:
-      # UI
-      - dash>=4.1.0
-      - dash-mantine-components
-
       # Runtime validation / optional admin tooling
       - jsonschema
       - psycopg2-binary
