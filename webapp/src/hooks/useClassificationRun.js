@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getJson, openRunEventSource, postJson } from "../lib/api";
-import { clean } from "../lib/format";
+import { getJson, openRunEventSource, postJson } from "../lib/api.js";
+import { clean } from "../lib/format.js";
 
 export const JOB_STORAGE_KEY = "asap-cjs-job-id";
 

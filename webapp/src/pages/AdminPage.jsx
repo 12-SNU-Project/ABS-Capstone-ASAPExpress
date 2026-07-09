@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { getJson } from "../lib/api";
+import { getJson } from "../lib/api.js";
 import { JOB_STORAGE_KEY } from "../hooks/useClassificationRun";
-import { asList, asObject, clean, isFilled, previewValue } from "../lib/format";
+import { asList, asObject, clean, isFilled, previewValue } from "../lib/format.js";
 
 const RECONSTRUCTION_STATUS_LABELS = {
   mode: "복원 방식",

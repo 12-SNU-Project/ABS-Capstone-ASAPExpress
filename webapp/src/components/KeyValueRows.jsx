@@ -1,4 +1,4 @@
-import { asObject, formatValue, labelFor } from "../lib/format";
+import { asObject, formatValue, labelFor } from "../lib/format.js";
 
 export default function KeyValueRows({ data, keys, limit = 12 }) {
   const source = asObject(data);

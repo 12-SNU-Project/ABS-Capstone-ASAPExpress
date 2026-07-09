@@ -1,14 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getJson } from "../lib/api";
-import { asList, clean } from "../lib/format";
-// 팀원이 관리하는 서류 추천 렌더러 원본 (window.AsapDocumentRecommendation 등록)
-import "@docreco/document_package.css";
-import "@docreco/document_recommendation.js";
+import DocumentPackageDetail from "../components/DocumentPackageDetail";
+import { getJson } from "../lib/api.js";
+import { asList, clean } from "../lib/format.js";
 
 export default function DocumentPage() {
   const { jobId, taric10 } = useParams();
-  const rootRef = useRef(null);
   const [packages, setPackages] = useState([]);
   const [packageData, setPackageData] = useState(null);
   const [error, setError] = useState("");
@@ -24,10 +21,9 @@ export default function DocumentPage() {
         const detail = await getJson(
           `/api/runs/${encodeURIComponent(jobId)}/document-packages/${encodeURIComponent(taric10)}`,
         );
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          setPackageData(detail.document_package || detail);
         }
-        setPackageData(detail.document_package || detail);
       } catch (loadError) {
         if (!cancelled) {
           setError(String(loadError?.message || loadError));
@@ -53,12 +49,6 @@ export default function DocumentPage() {
     };
   }, [jobId, taric10]);
 
-  useEffect(() => {
-    if (packageData && rootRef.current && window.AsapDocumentRecommendation) {
-      window.AsapDocumentRecommendation.mount(rootRef.current, packageData);
-    }
-  }, [packageData]);
-
   return (
     <div className="docpage">
       <header className="docpage-header">
@@ -68,7 +58,7 @@ export default function DocumentPage() {
           </div>
           <h1 className="docpage-title">TARIC 상세 서류 추천</h1>
           <div className="docpage-subtitle">
-            run {jobId} · 백엔드 document package를 렌더링합니다.
+            run {jobId} · backend document package DTO를 React 컴포넌트로 직접 렌더링합니다.
           </div>
         </div>
         <div className="docpage-pill">TARIC10 {clean(packageData?.taric10) || taric10}</div>
@@ -96,7 +86,10 @@ export default function DocumentPage() {
       {loading && !packageData ? (
         <div className="docpage-loading">서류 추천 데이터를 불러오는 중입니다.</div>
       ) : null}
-      <div id="document-recommendation-root" ref={rootRef} />
+      {!loading && !error && !packageData ? (
+        <div className="docpage-loading">표시할 document package가 없습니다.</div>
+      ) : null}
+      {packageData ? <DocumentPackageDetail packageData={packageData} /> : null}
     </div>
   );
 }

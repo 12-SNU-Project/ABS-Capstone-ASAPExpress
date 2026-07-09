@@ -9,7 +9,7 @@ import {
   ROUTE_KEYS,
   STAGES,
   UNDERSTANDING_KEYS,
-} from "../lib/labels";
+} from "../lib/labels.js";
 import {
   asList,
   asObject,
@@ -17,7 +17,7 @@ import {
   clean,
   sourceLabel,
   statusLabel,
-} from "../lib/format";
+} from "../lib/format.js";
 
 const THEME_STORAGE_KEY = "asap-classification-theme";
 

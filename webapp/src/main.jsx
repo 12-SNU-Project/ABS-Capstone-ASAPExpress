@@ -8,6 +8,7 @@ import WorkbenchPage from "./pages/WorkbenchPage";
 import "./styles/base.css";
 import "./styles/workbench.css";
 import "./styles/admin.css";
+import "./styles/document.css";
 
 function App() {
   return (
