@@ -256,6 +256,14 @@ class RunSnapshotResponse(ApiContractModel):
         default=None,
         alias="input_processing_view",
     )
+    productUnderstandingView: JsonObject | None = Field(
+        default=None,
+        alias="product_understanding_view",
+    )
+    routingView: JsonObject | None = Field(
+        default=None,
+        alias="routing_view",
+    )
     candidateCodeSet: ClassificationCandidateSetView | None = Field(
         default=None,
         alias="candidate_code_set",

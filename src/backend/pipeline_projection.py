@@ -455,6 +455,129 @@ class InputProcessingViewProjector:
         return compactTables
 
 
+class UnderstandingViewProjector:
+    """현행 blackboard DTO(ProductUnderstandingPackage/Hs2RoutingDecision)를
+    필드명 그대로 UI에 노출하는 컴팩트 뷰."""
+
+    _IDENTITY_HINT_KEYS = (
+        "translated_product_name",
+        "commercial_identity",
+        "normalized_tariff_description",
+        "ingredient_class",
+        "food_form",
+        "processing_state",
+        "identity_terms",
+        "product_form_terms",
+        "chapter_hint_terms",
+        "chapter_hint_status",
+        "domain_hints",
+        "confidence",
+        "needs_review",
+        "understanding_mode",
+        "llm_error",
+    )
+
+    _ROUTING_KEYS = (
+        "allowed_hs2",
+        "blocked_hs2",
+        "enforce_hs2_boundary",
+        "fallback_allowed",
+        "domain_scopes",
+        "pre_gate_domains",
+        "missing_facts",
+        "routing_basis",
+    )
+
+    def BuildProductUnderstandingView(
+        self,
+        blackboard: JsonMapping,
+    ) -> JsonObject:
+        productUnderstanding = blackboard.get("product_understanding")
+        if not isinstance(productUnderstanding, Mapping):
+            return {}
+        view: JsonObject = {
+            "understanding_id": productUnderstanding.get("understanding_id"),
+            "product_id": productUnderstanding.get("product_id"),
+            "product_name": productUnderstanding.get("product_name"),
+            "short_description": str(
+                productUnderstanding.get("short_description") or ""
+            )[:500],
+            "routing_terms": self._TextList(
+                productUnderstanding.get("routing_terms"), limit=24,
+            ),
+            "blocked_routing_terms": self._TextList(
+                productUnderstanding.get("blocked_routing_terms"), limit=24,
+            ),
+            "excluded_from_routing_terms": self._TextList(
+                productUnderstanding.get("excluded_from_routing_terms"), limit=24,
+            ),
+            "unknowns": self._TextList(
+                productUnderstanding.get("unknowns"), limit=12,
+            ),
+            "reconstructed_fact_text_count": len(
+                productUnderstanding.get("reconstructed_fact_texts") or [],
+            ),
+            "reconstructed_product_fact_count": len(
+                productUnderstanding.get("reconstructed_product_facts") or [],
+            ),
+        }
+        identityHints = productUnderstanding.get("identity_hints")
+        if isinstance(identityHints, Mapping):
+            view["identity_hints"] = {
+                key: identityHints.get(key)
+                for key in self._IDENTITY_HINT_KEYS
+                if identityHints.get(key) not in (None, "", [], ())
+            }
+        distilledIdentity = productUnderstanding.get("distilled_identity")
+        if isinstance(distilledIdentity, Mapping):
+            view["distilled_identity"] = {
+                key: distilledIdentity.get(key)
+                for key in (
+                    "commercial_identity",
+                    "normalized_description",
+                    "identity_terms",
+                    "product_form_signal_terms",
+                    "processing_signal_terms",
+                )
+                if distilledIdentity.get(key) not in (None, "", [], ())
+            }
+        compositionFacts = productUnderstanding.get("composition_facts")
+        if isinstance(compositionFacts, Mapping):
+            view["composition_facts"] = dict(compositionFacts)
+        encyclopediaEvidence = productUnderstanding.get("encyclopedia_evidence")
+        if isinstance(encyclopediaEvidence, Mapping):
+            view["encyclopedia_evidence"] = {
+                key: encyclopediaEvidence.get(key)
+                for key in ("quality_status", "source_title", "source_url")
+                if encyclopediaEvidence.get(key) not in (None, "", [], ())
+            }
+        return view
+
+    def BuildRoutingView(self, blackboard: JsonMapping) -> JsonObject:
+        routingContext = blackboard.get("routing_context")
+        if not isinstance(routingContext, Mapping):
+            return {}
+        view: JsonObject = {
+            key: routingContext.get(key)
+            for key in self._ROUTING_KEYS
+            if routingContext.get(key) is not None
+        }
+        chapterDetails = routingContext.get("candidate_chapter_details")
+        if isinstance(chapterDetails, list) and chapterDetails:
+            view["candidate_chapter_details"] = [
+                dict(detail)
+                for detail in chapterDetails[:8]
+                if isinstance(detail, Mapping)
+            ]
+        return view
+
+    @staticmethod
+    def _TextList(records: object, *, limit: int) -> list[str]:
+        if not isinstance(records, (list, tuple)):
+            return []
+        return [str(item) for item in list(records)[:limit] if str(item).strip()]
+
+
 class PipelineOutputProjector:
     def __init__(
         self,
@@ -463,6 +586,7 @@ class PipelineOutputProjector:
     ) -> None:
         self._inputProcessingProjector = inputProcessingProjector
         self._documentPackageProjector = documentPackageProjector
+        self._understandingProjector = UnderstandingViewProjector()
 
     def BuildPipelineResultProjection(
         self,
@@ -499,6 +623,14 @@ class PipelineOutputProjector:
             )
             if inputProcessingView:
                 compact["input_processing_view"] = inputProcessingView
+            productUnderstandingView = (
+                self._understandingProjector.BuildProductUnderstandingView(blackboard)
+            )
+            if productUnderstandingView:
+                compact["product_understanding_view"] = productUnderstandingView
+            routingView = self._understandingProjector.BuildRoutingView(blackboard)
+            if routingView:
+                compact["routing_view"] = routingView
         documentPackage = compact.get("document_package")
         if isinstance(documentPackage, Mapping):
             compact["document_package"] = (
@@ -569,6 +701,8 @@ class PipelineSnapshotProjector:
             "component_results",
             "input_processing_summary",
             "input_processing_view",
+            "product_understanding_view",
+            "routing_view",
         }
         return {
             key: value

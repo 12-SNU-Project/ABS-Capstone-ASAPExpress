@@ -1200,7 +1200,7 @@
 
     return el("div", { className: "document-recommend-layout", dataset: { taric10 } }, [
       el("div", { className: "document-checklist-intro" }, [
-        el("div", { className: "section-title" }, "서류 추천"),
+        el("div", { className: "section-title" }, "제출 서류"),
         el(
           "div",
           { className: "document-checklist-description" },
@@ -1250,7 +1250,7 @@
       renderDocumentRecommendation(packageData || {}),
     );
     const overviewButton = el("button", { type: "button", className: "taric-js-tab active", dataset: { panel: "overview" } }, "전체 결론");
-    const recommendationButton = el("button", { type: "button", className: "taric-js-tab", dataset: { panel: "recommendation" } }, "서류 추천");
+    const recommendationButton = el("button", { type: "button", className: "taric-js-tab", dataset: { panel: "recommendation" } }, "제출 서류");
     const shell = el("div", { className: "taric-js-detail" }, [
       el("div", { className: "taric-js-tabs" }, [overviewButton, recommendationButton]),
       overviewPanel,
