@@ -232,6 +232,16 @@ PRODUCT_FORM_TO_HS2: tuple[tuple[re.Pattern[str], str, str], ...] = (
     ),
 )
 
+CONDIMENT_PRODUCT_NAME_PATTERN = re.compile(
+    r"\b(condiment|seasoning sauce|sauce)\b|비빔장|양념장|소스|[가-힣]{1,16}장(?:\s|$)",
+    re.I,
+)
+CONDIMENT_CONTEXT_PATTERN = re.compile(
+    r"\b(condiment|seasoning|sauce)\b|비빔|양념|소스|조미",
+    re.I,
+)
+CONDIMENT_PRODUCT_FORM_BONUS = 80.0
+
 GENERIC_CHAPTER_KEYWORD_STOPLIST = {
     "animal",
     "edible",
@@ -363,6 +373,7 @@ class PreClassificationDomainRouter:
             processed = processedOverride
         bucketScope = self._BucketScopeEnabled()
         scores: dict[str, float] = {}
+        scoreBreakdownByChapter: dict[str, dict[str, float]] = {}
         matchedByChapter: dict[str, list[str]] = {}
         blockedHs2: list[str] = []
         blockedReasons: list[str] = []
@@ -419,7 +430,13 @@ class PreClassificationDomainRouter:
                 for redirect in redirects:
                     redirectChapter = re.sub(r"\D", "", redirect)[:2].zfill(2)
                     if redirectChapter:
-                        scores[redirectChapter] = scores.get(redirectChapter, 0.0) + 5.0
+                        self._AddScore(
+                            scores,
+                            scoreBreakdownByChapter,
+                            chapter=redirectChapter,
+                            amount=5.0,
+                            source="guardrail_redirect",
+                        )
                         matchedByChapter.setdefault(redirectChapter, []).append(
                             "prepared_food_redirect_bonus",
                         )
@@ -431,16 +448,58 @@ class PreClassificationDomainRouter:
                 # a "processed" page word must not erase the chapter from the
                 # recall boundary (measured: organic pepper lost ch07 to 20).
 
-            score = float(
-                len(keywordMatches) * 4
-                + len(rawMatches) * (1 if processed else 4)
-                + len(formMatches) * 8
-            )
+            keywordScore = float(len(keywordMatches) * 4)
+            rawScore = float(len(rawMatches) * (1 if processed else 4))
+            formScore = float(len(formMatches) * 8)
+            score = keywordScore + rawScore + formScore
             if processed:
-                score += len(preparedMatches) * 2
+                preparedScore = float(len(preparedMatches) * 2)
+                score += preparedScore
+            else:
+                preparedScore = 0.0
+            if chapter == "21" and self._HasCondimentProductForm(searchText):
+                score += CONDIMENT_PRODUCT_FORM_BONUS
+                self._AppendUnique(
+                    matchedByChapter.setdefault(chapter, []),
+                    "condiment_product_form_bonus",
+                )
+                self._AddScore(
+                    scores,
+                    scoreBreakdownByChapter,
+                    chapter=chapter,
+                    amount=CONDIMENT_PRODUCT_FORM_BONUS,
+                    source="product_form_bonus",
+                )
             if score <= 0:
                 continue
-            scores[chapter] = scores.get(chapter, 0.0) + score
+            self._AddScore(
+                scores,
+                scoreBreakdownByChapter,
+                chapter=chapter,
+                amount=keywordScore,
+                source="chapter_keywords",
+            )
+            self._AddScore(
+                scores,
+                scoreBreakdownByChapter,
+                chapter=chapter,
+                amount=rawScore,
+                source="raw_scope",
+            )
+            self._AddScore(
+                scores,
+                scoreBreakdownByChapter,
+                chapter=chapter,
+                amount=preparedScore,
+                source="prepared_scope",
+            )
+            self._AddScore(
+                scores,
+                scoreBreakdownByChapter,
+                chapter=chapter,
+                amount=formScore,
+                source="product_form",
+            )
             matchedByChapter.setdefault(chapter, []).extend(
                 keywordMatches + rawMatches + preparedMatches + formMatches,
             )
@@ -482,6 +541,11 @@ class PreClassificationDomainRouter:
                 "chapter": chapter,
                 "score": round(scores.get(chapter, 0.0), 2),
                 "matched_terms": list(dict.fromkeys(matchedByChapter.get(chapter, [])))[:8],
+                "score_breakdown": {
+                    source: round(amount, 2)
+                    for source, amount in scoreBreakdownByChapter.get(chapter, {}).items()
+                    if amount
+                },
             }
             for chapter in candidateHs2
         )
@@ -577,6 +641,29 @@ class PreClassificationDomainRouter:
     def _AppendUnique(values: list[str], value: str) -> None:
         if value and value not in values:
             values.append(value)
+
+    @staticmethod
+    def _AddScore(
+        scores: dict[str, float],
+        scoreBreakdownByChapter: dict[str, dict[str, float]],
+        *,
+        chapter: str,
+        amount: float,
+        source: str,
+    ) -> None:
+        if amount <= 0:
+            return
+        scores[chapter] = scores.get(chapter, 0.0) + amount
+        breakdown = scoreBreakdownByChapter.setdefault(chapter, {})
+        breakdown[source] = breakdown.get(source, 0.0) + amount
+
+    @staticmethod
+    def _HasCondimentProductForm(searchText: str) -> bool:
+        productName = (searchText.splitlines() or [""])[0]
+        return (
+            CONDIMENT_PRODUCT_NAME_PATTERN.search(productName) is not None
+            and CONDIMENT_CONTEXT_PATTERN.search(searchText) is not None
+        )
 
     @staticmethod
     def _BucketScopeEnabled() -> bool:

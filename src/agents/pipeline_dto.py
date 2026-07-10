@@ -161,9 +161,13 @@ class IdentityHintSet:
 @dataclass(frozen=True, slots=True)
 class CompositionFactSet:
     processingState: str = field(default="unknown", metadata=_desc("가공 상태"))
-    principalIngredient: str = field(default="", metadata=_desc("주성분 후보"))
+    principalIngredient: str = field(default="", metadata=_desc("확정된 주성분 후보"))
+    principalIngredientStatus: str = field(default="unknown", metadata=_desc("주성분 판정 상태"))
+    principalIngredientCandidates: tuple[dict[str, JsonValue], ...] = field(default=(), metadata=_desc("주성분 후보 목록"))
     ingredientClasses: tuple[str, ...] = field(default=(), metadata=_desc("성분 계열 목록"))
+    ingredientEntries: tuple[dict[str, JsonValue], ...] = field(default=(), metadata=_desc("원재료 단위 projection"))
     ingredientPercentages: tuple[dict[str, JsonValue], ...] = field(default=(), metadata=_desc("성분 함량 정보"))
+    componentCompositions: tuple[dict[str, JsonValue], ...] = field(default=(), metadata=_desc("구성품 단위 성분 projection"))
     compositionTerms: tuple[str, ...] = field(default=(), metadata=_desc("성분/함량 분류 토큰"))
     compositionBasis: str = field(default="label", metadata=_desc("성분 정보 출처"))
     containsWrapperOrDough: bool = field(default=False, metadata=_desc("피/도우 포함 여부"))
@@ -175,8 +179,12 @@ class CompositionFactSet:
         return {
             "processing_state": self.processingState,
             "principal_ingredient": self.principalIngredient,
+            "principal_ingredient_status": self.principalIngredientStatus,
+            "principal_ingredient_candidates": list(self.principalIngredientCandidates),
             "ingredient_classes": list(self.ingredientClasses),
+            "ingredient_entries": list(self.ingredientEntries),
             "ingredient_percentages": list(self.ingredientPercentages),
+            "component_compositions": list(self.componentCompositions),
             "composition_terms": list(self.compositionTerms),
             "composition_basis": self.compositionBasis,
             "contains_wrapper_or_dough": self.containsWrapperOrDough,

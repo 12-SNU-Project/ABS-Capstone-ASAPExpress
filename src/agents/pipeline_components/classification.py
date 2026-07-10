@@ -428,6 +428,14 @@ class ClassificationComponent(BasePipelineComponent):
 
             ccs_id = store.next_id("ccs")
             ccs_candidates: list[dict] = []
+            classificationPaths = [
+                path for path in (staged.get("paths") or []) if isinstance(path, dict)
+            ]
+            pathByCn8 = {
+                str(path.get("cn8") or "")[:8]: path
+                for path in classificationPaths
+                if str(path.get("cn8") or "")[:8]
+            }
             for candidate in candidates[:5]:
                 cn8 = str(candidate.get("cn8") or "")[:8]
                 if not cn8.isdigit() or len(cn8) != 8:
@@ -452,7 +460,10 @@ class ClassificationComponent(BasePipelineComponent):
                     "status": "proposed",
                     "candidate_source": "staged_classifier",
                     "llm_recommended": rank == 1,
-                    "candidate_static_tree": self._staged_static_tree(candidate),
+                    "candidate_static_tree": self._staged_static_tree(
+                        candidate,
+                        pathByCn8.get(cn8),
+                    ),
                     "hard_conditions": "",
                     "hard_condition_status": "not_applicable",
                     "hard_condition_evidence": [],
@@ -485,10 +496,10 @@ class ClassificationComponent(BasePipelineComponent):
                         validatorRecord and validatorRecord.get("applied")
                     ),
                 },
-                "classification_paths": staged.get("paths") or [],
+                "classification_paths": classificationPaths,
                 "recovery_candidates": staged.get("recovery_candidates") or [],
                 "route_disagreements": staged.get("route_disagreements") or [],
-                "selected_path": (staged.get("paths") or [{}])[0],
+                "selected_path": classificationPaths[0] if classificationPaths else {},
                 "candidates": ccs_candidates,
             })
             self.WriteBlackBoard(ccs_id)
@@ -504,7 +515,18 @@ class ClassificationComponent(BasePipelineComponent):
             return False
 
 
-    def _staged_static_tree(self, candidate: dict) -> dict:
+    def _staged_static_tree(
+        self,
+        candidate: dict,
+        classificationPath: dict | None = None,
+    ) -> dict:
+        levelScoresValue = (
+            classificationPath.get("level_scores")
+            if isinstance(classificationPath, dict)
+            else {}
+        )
+        levelScores = levelScoresValue if isinstance(levelScoresValue, dict) else {}
+        candidateScore = self._read_float(candidate.get("score"), fallback=0.0)
         nodes: list[dict] = []
         for level, label in (("hs4", "HS4"), ("hs6", "HS6"), ("cn8", "CN8")):
             code = str(candidate.get(level) or "").strip()
@@ -515,14 +537,33 @@ class ClassificationComponent(BasePipelineComponent):
                 "label": label,
                 "code": code,
                 "description": str(candidate.get("description") or "") if level == "cn8" else "",
-                "score": float(candidate.get("score") or 0.0) if level == "cn8" else 0.0,
+                "score": self._read_float(
+                    levelScores.get(level),
+                    fallback=candidateScore if level == "cn8" else 0.0,
+                ),
                 "matched_keywords": [],
             })
         return {
-            "total_score": float(candidate.get("score") or 0.0),
+            "total_score": candidateScore,
+            "level_scores": {
+                level: self._read_float(levelScores.get(level), fallback=0.0)
+                for level in ("hs4", "hs6", "cn8")
+                if level in levelScores
+            },
             "retrieval_sources": ["staged_narrowing"],
             "nodes": nodes,
         }
+
+    @staticmethod
+    def _read_float(value: object, *, fallback: float) -> float:
+        if isinstance(value, bool):
+            return fallback
+        if isinstance(value, (int, float)):
+            return float(value)
+        try:
+            return float(str(value))
+        except (TypeError, ValueError):
+            return fallback
 
     @staticmethod
     def _ebti_cases(cn8: str, product_facts: dict) -> list[dict]:

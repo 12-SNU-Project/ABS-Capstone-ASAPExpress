@@ -145,6 +145,81 @@ def test_router_bucket_scope_keeps_guardrailed_chapter(monkeypatch) -> None:
     assert scores.get("07", 0) > 0  # score-through, not just recall
 
 
+def test_router_condiment_product_form_can_rank_over_seafood_ingredient(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ASAP_HS2_BUCKET_SCOPE", "1")
+    routeInput = PreClassificationRouteInput(
+        productName="[연안식당] 부추 꼬막 비빔장",
+        shortDescription="",
+        factTexts=(
+            "prepared sauce seasoned with cockle",
+            "원재료명: 새꼬막살, 부추, 혼합간장, 소스",
+        ),
+    )
+    router = PreClassificationDomainRouter(
+        chapterRowsProvider=lambda: (
+            {
+                "chapter": "16",
+                "chapter_keywords": (
+                    "meat fish; fish crustaceans; molluscs aquatic; "
+                    "aquatic invertebrates; prepared"
+                ),
+                "prepared_scope_signals": "prepared; sauce; seasoned",
+                "domain_scope_candidates": "food; animal_origin",
+            },
+            {
+                "chapter": "21",
+                "chapter_keywords": "prepared; preparations; sauce",
+                "domain_scope_candidates": "food",
+            },
+        ),
+    )
+
+    routeHint = router.Route(routeInput)
+
+    assert routeHint.candidateHs2[0] == "21"
+    details = {d["chapter"]: d for d in routeHint.candidateChapterDetails}
+    assert details["21"]["score"] > details["16"]["score"]
+    assert "condiment_product_form_bonus" in details["21"]["matched_terms"]
+    assert details["21"]["score_breakdown"]["product_form_bonus"] > 0
+
+
+def test_router_plain_seafood_dish_does_not_get_condiment_bonus(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ASAP_HS2_BUCKET_SCOPE", "1")
+    routeInput = PreClassificationRouteInput(
+        productName="[압구정낙지] 낙지 볶음 500g",
+        shortDescription="",
+        factTexts=(
+            "prepared stir-fried octopus",
+            "원재료명: 낙지, 소스, 고춧가루",
+        ),
+    )
+    router = PreClassificationDomainRouter(
+        chapterRowsProvider=lambda: (
+            {
+                "chapter": "16",
+                "chapter_keywords": "molluscs aquatic; prepared seafood",
+                "prepared_scope_signals": "prepared; sauce",
+                "domain_scope_candidates": "food; animal_origin",
+            },
+            {
+                "chapter": "21",
+                "chapter_keywords": "prepared; sauce",
+                "domain_scope_candidates": "food",
+            },
+        ),
+    )
+
+    routeHint = router.Route(routeInput)
+
+    assert routeHint.candidateHs2[0] == "16"
+    details = {d["chapter"]: d for d in routeHint.candidateChapterDetails}
+    assert "condiment_product_form_bonus" not in details["21"]["matched_terms"]
+
+
 def test_routing_context_builds_hs2_hard_boundary() -> None:
     boundary = _BuildRoutingBoundary({
         "allowed_hs2": ["19"],

@@ -58,7 +58,7 @@ def LoadBranchDecisions(
 
         rows = DbSessionManager.GetInstance().FetchRows(
             text(
-                'SELECT branch_id, seq, then_code, cond_type, dto_field, op, value'
+                'SELECT branch_id, seq, then_code, cond_type, dto_field, op, value, source_text'
                 ' FROM "branch_decision_index"'
                 " WHERE level = :level AND branch_id IN :parents AND version = :version"
                 " ORDER BY branch_id, seq"

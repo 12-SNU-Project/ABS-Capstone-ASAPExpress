@@ -3,6 +3,7 @@ from pytest import MonkeyPatch
 from agents.llm_agents import identity_hint_agent
 from agents.pipeline_components import product_understanding
 from agents.pipeline_dto import (
+    CoiEvidenceSet,
     DistilledIdentityFacts,
     EncyclopediaEvidenceSet,
     IdentityHintSet,
@@ -41,8 +42,9 @@ class FakeIdentityHintAgent:
         productName: str,
         distilledIdentity: DistilledIdentityFacts,
         encyclopediaEvidence: EncyclopediaEvidenceSet,
+        factTexts: tuple[str, ...] = (),
     ) -> dict[str, object]:
-        del productName, distilledIdentity, encyclopediaEvidence
+        del productName, distilledIdentity, encyclopediaEvidence, factTexts
         type(self).calls += 1
         return {
             "understanding_mode": "llm_json",
@@ -108,7 +110,6 @@ def test_identity_hint_agent_runs_by_default(monkeypatch: MonkeyPatch) -> None:
     assert identity.chapterHintTerms == ("prepared fish",)
     assert identity.translatedProductName == "prepared seafood sauce"
     assert identity.compositionTerms == ()
-    assert identity.processingTerms == ()
 
 
 def test_identity_hint_agent_does_not_reference_missing_short_description(
@@ -157,3 +158,151 @@ def test_identity_hint_agent_can_be_disabled(monkeypatch: MonkeyPatch) -> None:
 
     assert FakeIdentityHintAgent.calls == 0
     assert identity is seedIdentity
+
+
+def test_composition_lane_ignores_nested_subingredient_percentage() -> None:
+    composition = product_understanding.ProductUnderstandingComponent._BuildCompositionLane(
+        factTexts=(),
+        productFacts=(
+            {
+                "field_name": "원재료명",
+                "normalized_value": (
+                    "곡류가공품[밀가루(밀:호주산), "
+                    "옥수수전분(옥수수100%)], 당면"
+                ),
+            },
+        ),
+        coiEvidence=CoiEvidenceSet(
+            coiEvidenceId="coi_001",
+            productId="prod_001",
+        ),
+    )
+
+    assert composition.ingredientPercentages == ()
+    assert composition.principalIngredient == ""
+    assert "ingredient_percentages" in composition.missingCompositionFacts
+
+
+def test_composition_lane_keeps_top_level_ingredient_percentages() -> None:
+    composition = product_understanding.ProductUnderstandingComponent._BuildCompositionLane(
+        factTexts=(),
+        productFacts=(
+            {
+                "field_name": "원재료명",
+                "normalized_value": "돼지고기 25%, 밀가루 20%, 소스",
+            },
+        ),
+        coiEvidence=CoiEvidenceSet(
+            coiEvidenceId="coi_001",
+            productId="prod_001",
+        ),
+    )
+
+    assert list(composition.ingredientPercentages) == [
+        {"term": "돼지고기", "percent": 25.0},
+        {"term": "밀가루", "percent": 20.0},
+    ]
+    assert composition.principalIngredient == "돼지고기"
+    assert composition.principalIngredientStatus == "confirmed"
+    assert composition.principalIngredientCandidates[0]["ingredient_name"] == "돼지고기"
+    assert composition.missingCompositionFacts == ()
+
+
+def test_composition_lane_does_not_promote_component_percentage_to_principal() -> None:
+    composition = product_understanding.ProductUnderstandingComponent._BuildCompositionLane(
+        factTexts=(),
+        productFacts=(
+            {
+                "field_name": "원재료명 (카덴 우동면)",
+                "normalized_value": "밀가루(밀:호주산, 미국산), 정제소금",
+            },
+            {
+                "field_name": "원재료명 (가쓰오팩)",
+                "normalized_value": "가다랑어 100%(인도네시아산)",
+            },
+        ),
+        coiEvidence=CoiEvidenceSet(
+            coiEvidenceId="coi_001",
+            productId="prod_001",
+        ),
+    )
+
+    assert list(composition.ingredientPercentages) == [
+        {"term": "가다랑어", "percent": 100.0},
+    ]
+    assert composition.principalIngredient == ""
+    assert composition.principalIngredientStatus == "unknown"
+    katsuoEntries = [
+        entry
+        for entry in composition.ingredientEntries
+        if entry["ingredient_name"] == "가다랑어"
+    ]
+    assert katsuoEntries[0]["scope"] == "component"
+    assert katsuoEntries[0]["component_name"] == "가쓰오팩"
+    assert {
+        component["component_name"]
+        for component in composition.componentCompositions
+    } == {"가쓰오팩", "카덴 우동면"}
+    assert composition.missingCompositionFacts == ()
+
+
+def test_composition_lane_uses_reconstructed_tables_for_component_weights() -> None:
+    composition = product_understanding.ProductUnderstandingComponent._BuildCompositionLane(
+        factTexts=(),
+        productFacts=(
+            {
+                "field_name": "원재료명 (카덴 우동면)",
+                "normalized_value": "밀가루, 정제소금",
+                "source_refs": ["evidence-10"],
+            },
+        ),
+        reconstructedTables=(
+            {
+                "table_name": "제품 구성 정보",
+                "source_refs": ["evidence-20"],
+                "rows": [
+                    {
+                        "field_name": "카덴 우동면 내용량",
+                        "normalized_value": "180",
+                        "unit": "g",
+                        "source_refs": ["evidence-20"],
+                    }
+                ],
+            },
+        ),
+        coiEvidence=CoiEvidenceSet(
+            coiEvidenceId="coi_001",
+            productId="prod_001",
+        ),
+    )
+
+    assert composition.ingredientEntries[0]["ingredient_name"] == "밀가루"
+    assert composition.componentCompositions[0]["content_weight"] == 180
+    assert composition.componentCompositions[0]["content_weight_unit"] == "g"
+
+
+def test_composition_lane_keeps_minor_percent_out_of_confirmed_principal() -> None:
+    composition = product_understanding.ProductUnderstandingComponent._BuildCompositionLane(
+        factTexts=(),
+        productFacts=(
+            {
+                "field_name": "원재료명",
+                "normalized_value": (
+                    "연육[외국산/어육살], 변성전분, 대파 6%(국산), "
+                    "양파 6%(국산)"
+                ),
+            },
+        ),
+        coiEvidence=CoiEvidenceSet(
+            coiEvidenceId="coi_001",
+            productId="prod_001",
+        ),
+    )
+
+    assert composition.principalIngredient == ""
+    assert composition.principalIngredientStatus == "ambiguous"
+    assert composition.principalIngredientCandidates[0]["ingredient_name"] == "연육"
+    assert list(composition.ingredientPercentages) == [
+        {"term": "대파", "percent": 6.0},
+        {"term": "양파", "percent": 6.0},
+    ]

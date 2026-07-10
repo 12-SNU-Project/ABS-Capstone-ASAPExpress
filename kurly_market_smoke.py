@@ -1152,6 +1152,12 @@ class KurlyMarketSmokeRunner:
         llmValidationRecommendation = self._BuildLlmValidationRecommendationSmoke(
             candidates,
         )
+        classificationPaths = candidateCodeSet.get("classification_paths") or []
+        if not isinstance(classificationPaths, list):
+            classificationPaths = []
+        stageTrace = trace.get("stages") or []
+        if not isinstance(stageTrace, list):
+            stageTrace = []
         return {
             "source": productUrl,
             "dash_equivalence": {
@@ -1223,6 +1229,13 @@ class KurlyMarketSmokeRunner:
                 "candidate_set_id": candidateCodeSet.get("candidate_set_id"),
                 "product_id": candidateCodeSet.get("product_id"),
                 "resolver_debug": candidateCodeSet.get("resolver_debug") or {},
+                "classification_paths": classificationPaths,
+                "selected_path": candidateCodeSet.get("selected_path") or {},
+                "staged_trace": {
+                    "mode": trace.get("mode"),
+                    "stage_count": len(stageTrace),
+                    "stages": stageTrace,
+                },
             },
             "decision": {
                 "classification_status": candidateCodeSet.get("classification_status"),
@@ -1463,9 +1476,27 @@ class KurlyMarketSmokeRunner:
             "composition": {
                 "processing_state": compositionFacts.get("processing_state"),
                 "principal_ingredient": compositionFacts.get("principal_ingredient"),
+                "principal_ingredient_status": compositionFacts.get(
+                    "principal_ingredient_status",
+                ),
+                "principal_ingredient_candidates": (
+                    compositionFacts.get("principal_ingredient_candidates") or []
+                )[:10],
                 "ingredient_classes": compositionFacts.get("ingredient_classes") or [],
+                "ingredient_entries": (
+                    compositionFacts.get("ingredient_entries") or []
+                )[:20],
+                "ingredient_entry_count": len(
+                    compositionFacts.get("ingredient_entries") or [],
+                ),
                 "ingredient_percentages": ingredientPercentages,
                 "ingredient_percentage_count": len(ingredientPercentages),
+                "component_compositions": (
+                    compositionFacts.get("component_compositions") or []
+                )[:10],
+                "component_composition_count": len(
+                    compositionFacts.get("component_compositions") or [],
+                ),
                 "composition_terms": [
                     _ShortText(text) for text in compositionTerms
                 ],
@@ -1527,6 +1558,9 @@ class KurlyMarketSmokeRunner:
         candidates = candidateCodeSet.get("candidates") or []
         if not isinstance(candidates, list):
             return out
+        stageScoresByCn8 = (
+            KurlyMarketSmokeRunner._BuildStageScoresByCn8(candidateCodeSet)
+        )
         for candidate in candidates:
             if not isinstance(candidate, Mapping):
                 continue
@@ -1536,6 +1570,11 @@ class KurlyMarketSmokeRunner:
             hierarchy = KurlyMarketSmokeRunner._BuildCandidateHierarchySmoke(
                 candidate,
             )
+            stageScores = staticTree.get("level_scores") or {}
+            if not isinstance(stageScores, Mapping):
+                stageScores = {}
+            if not stageScores:
+                stageScores = stageScoresByCn8.get(hierarchy.get("cn8") or "") or {}
             out.append({
                 "rank": candidate.get("rank"),
                 "cn8": hierarchy.get("cn8") or candidate.get("cn8"),
@@ -1543,6 +1582,7 @@ class KurlyMarketSmokeRunner:
                 "hierarchy": hierarchy,
                 "taric10": candidate.get("taric10"),
                 "score": staticTree.get("total_score"),
+                "stage_scores": dict(stageScores),
                 "llm_recommended": candidate.get("llm_recommended"),
                 "hard_condition_status": candidate.get("hard_condition_status"),
                 "taric10_branch_count": candidate.get("taric10_branch_count"),
@@ -1558,6 +1598,21 @@ class KurlyMarketSmokeRunner:
                 ),
                 "similar_ebti_cases": candidate.get("similar_ebti_cases") or [],
             })
+        return out
+
+    @staticmethod
+    def _BuildStageScoresByCn8(candidateCodeSet: JsonMapping) -> Dict[str, Dict[str, object]]:
+        out: Dict[str, Dict[str, object]] = {}
+        paths = candidateCodeSet.get("classification_paths") or []
+        if not isinstance(paths, list):
+            return out
+        for path in paths:
+            if not isinstance(path, Mapping):
+                continue
+            cn8 = re.sub(r"\D", "", str(path.get("cn8") or ""))[:8]
+            scores = path.get("level_scores") or {}
+            if cn8 and isinstance(scores, Mapping):
+                out[cn8] = dict(scores)
         return out
 
     @staticmethod
@@ -2333,13 +2388,14 @@ class KurlyMarketSmokeRunner:
             classificationData.get("llm_validation_recommendation") or {}
         )
         answerRecall = classificationData.get("answer_recall") or {}
-        for componentResult in classificationData.get("component_results") or []:
-            classificationLogger.info(
-                "pipeline_step=component_run component={} output_dto=BlackboardWriteSet success={} error={} outputs={}",
-                componentResult.get("component_name"),
-                componentResult.get("success"),
-                componentResult.get("error"),
-                componentResult.get("outputs_written"),
+        candidateCodeSet = classificationData.get("candidate_code_set") or {}
+        if not isinstance(candidateCodeSet, Mapping):
+            candidateCodeSet = {}
+        classificationLogger.info(
+            "pipeline_step=component_run component=PipelineWrapper output_dto=BlackboardWriteSet components={}",
+            self._CompactComponentResults(
+                classificationData.get("component_results") or [],
+            ),
         )
         classificationLogger.info(
             (
@@ -2353,8 +2409,12 @@ class KurlyMarketSmokeRunner:
             productUnderstanding.get("fact_count"),
             productUnderstanding.get("fact_text_count"),
             (productUnderstanding.get("identity") or {}).get("understanding_mode"),
-            (productUnderstanding.get("identity") or {}).get("product_form_terms"),
-            (productUnderstanding.get("identity") or {}).get("chapter_hint_terms"),
+            self._CompactTextList(
+                (productUnderstanding.get("identity") or {}).get("product_form_terms"),
+            ),
+            self._CompactTextList(
+                (productUnderstanding.get("identity") or {}).get("chapter_hint_terms"),
+            ),
             len((productUnderstanding.get("coi") or {}).get("matched_documents") or []),
             (productUnderstanding.get("encyclopedia") or {}).get("quality_status"),
         )
@@ -2364,7 +2424,8 @@ class KurlyMarketSmokeRunner:
                 "output_dto=ProductUnderstandingPackage projected_reconstruction_facts={} "
                 "projected_reconstruction_texts={} composition_terms={} "
                 "ingredient_percentages={} composition_basis={} wrapper={} sauce={} "
-                "missing_composition_facts={}"
+                "principal_status={} principal_candidates={} ingredient_entries={} "
+                "component_compositions={} missing_composition_facts={}"
             ),
             len(reconstructionProjection.get("facts") or []),
             len(reconstructionProjection.get("fact_texts") or []),
@@ -2373,6 +2434,10 @@ class KurlyMarketSmokeRunner:
             composition.get("composition_basis"),
             composition.get("contains_wrapper_or_dough"),
             composition.get("contains_sauce_or_broth"),
+            composition.get("principal_ingredient_status"),
+            len(composition.get("principal_ingredient_candidates") or []),
+            composition.get("ingredient_entry_count"),
+            composition.get("component_composition_count"),
             composition.get("missing_composition_facts"),
         )
         classificationLogger.info(
@@ -2380,7 +2445,7 @@ class KurlyMarketSmokeRunner:
                 "pipeline_step=domain_routing component=Hs2RoutingComponent "
                 "output_dto=Hs2RoutingDecision routing_context_id={} allowed_hs2={} "
                 "blocked_hs2={} enforce_hs2_boundary={} fallback_allowed={} "
-                "candidate_chapter_details={} boundary_applied={} fallback_used={} "
+                "candidate_chapter_top={} boundary_applied={} fallback_used={} "
                 "missing_facts={}"
             ),
             domainRouting.get("routing_context_id"),
@@ -2388,7 +2453,9 @@ class KurlyMarketSmokeRunner:
             domainRouting.get("blocked_hs2"),
             domainRouting.get("enforce_hs2_boundary"),
             domainRouting.get("fallback_allowed"),
-            domainRouting.get("candidate_chapter_details"),
+            self._CompactChapterDetails(
+                domainRouting.get("candidate_chapter_details"),
+            ),
             (domainRouting.get("classification_boundary") or {}).get(
                 "boundary_applied",
             ),
@@ -2399,12 +2466,15 @@ class KurlyMarketSmokeRunner:
             (
                 "pipeline_step=beam_classification component=ClassificationComponent "
                 "output_dto=CandidateCodeSet error={} candidates={} zero_score={} "
-                "decision={} backtracking={} traversal={} raw_input_match={} "
-                "answer_found={}"
+                "stage_count={} selected_path={} level_scores={} decision={} backtracking={} "
+                "traversal={} raw_input_match={} answer_found={}"
             ),
             status.get("error"),
             status.get("candidate_count"),
             status.get("zero_score_candidate_codes"),
+            (candidateCodeSet.get("staged_trace") or {}).get("stage_count"),
+            self._CompactSelectedPath(candidateCodeSet.get("selected_path")),
+            self._SelectedPathScores(candidateCodeSet.get("selected_path")),
             decision.get("decision_status"),
             decision.get("backtracking_recommended"),
             traversal.get("traversal_status"),
@@ -2439,18 +2509,80 @@ class KurlyMarketSmokeRunner:
                 (
                     "pipeline_step=beam_classification component=ClassificationComponent "
                     "output_dto=ClassificationCandidate rank={} cn8={} hs6={} "
-                    "score={} llm_recommended={} taric_branches={} "
+                    "score={} stage_scores={} recommended={} taric_branches={} "
                     "evidence_refs={} ebti_cases={}"
                 ),
                 candidate.get("rank"),
                 candidate.get("cn8"),
                 candidate.get("hs6"),
                 candidate.get("score"),
+                candidate.get("stage_scores"),
                 candidate.get("llm_recommended"),
                 candidate.get("taric10_branch_count"),
                 len(candidate.get("classification_evidence_refs") or []),
                 len(candidate.get("similar_ebti_cases") or []),
             )
+
+    @staticmethod
+    def _CompactComponentResults(componentResults: Sequence[object]) -> List[str]:
+        out: List[str] = []
+        for componentResult in componentResults:
+            if not isinstance(componentResult, Mapping):
+                continue
+            name = str(componentResult.get("component_name") or "unknown")
+            status = "ok" if componentResult.get("success") else "fail"
+            outputs = componentResult.get("outputs_written") or []
+            outputCount = len(outputs) if isinstance(outputs, list) else 0
+            error = str(componentResult.get("error") or "")
+            text = f"{name}:{status}:outputs={outputCount}"
+            if error:
+                text = f"{text}:error={error[:80]}"
+            out.append(text)
+        return out
+
+    @staticmethod
+    def _CompactTextList(value: object, *, limit: int = 5) -> List[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item)[:60] for item in value[:limit] if str(item).strip()]
+
+    @staticmethod
+    def _CompactChapterDetails(value: object, *, limit: int = 5) -> List[Dict[str, object]]:
+        if not isinstance(value, list):
+            return []
+        out: List[Dict[str, object]] = []
+        for item in value[:limit]:
+            if not isinstance(item, Mapping):
+                continue
+            matchedTerms = item.get("matched_terms") or []
+            out.append({
+                "chapter": item.get("chapter"),
+                "score": item.get("score"),
+                "matched_terms": (
+                    [str(term)[:40] for term in matchedTerms[:3]]
+                    if isinstance(matchedTerms, list)
+                    else []
+                ),
+            })
+        return out
+
+    @staticmethod
+    def _CompactSelectedPath(value: object) -> str:
+        if not isinstance(value, Mapping):
+            return ""
+        parts = [
+            str(value.get(level) or "")
+            for level in ("hs2", "hs4", "hs6", "cn8")
+            if str(value.get(level) or "")
+        ]
+        return "/".join(parts)
+
+    @staticmethod
+    def _SelectedPathScores(value: object) -> Dict[str, object]:
+        if not isinstance(value, Mapping):
+            return {}
+        levelScores = value.get("level_scores") or {}
+        return dict(levelScores) if isinstance(levelScores, Mapping) else {}
 
     def _LogAnswerRecall(
         self,

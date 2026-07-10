@@ -27,6 +27,12 @@ from agents.tools.identity_distiller import IdentityDistillerService
 PERCENT_RE = re.compile(
     r"(?P<term>[A-Za-z가-힣][A-Za-z가-힣 /·._-]{0,39}?)\s*(?P<percent>\d+(?:[.,]\d+)?)\s*%",
 )
+COMPONENT_NAME_RE = re.compile(r"[\(\[（［](?P<component>[^)\]）］]+)[)\]）］]")
+CONTENT_WEIGHT_RE = re.compile(
+    r"(?P<component>[A-Za-z가-힣0-9][A-Za-z가-힣0-9 /·._-]{0,40}?)"
+    r"\s*(?P<amount>\d+(?:[.,]\d+)?)\s*(?P<unit>g|kg|ml|l|개)",
+    re.I,
+)
 COMPOSITION_PERCENT_FIELD_MARKERS = (
     "원재료",
     "원료",
@@ -76,6 +82,12 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         productFacts = self._ReadFactTuple(
             observedFacts.get("reconstructed_product_facts") or [],
         )
+        inputReconstruction = observedFacts.get("input_reconstruction") or {}
+        if not isinstance(inputReconstruction, dict):
+            inputReconstruction = {}
+        reconstructedTables = self._ReadFactTuple(
+            inputReconstruction.get("reconstructed_tables") or [],
+        )
         classificationText = "\n".join(
             text
             for text in (
@@ -117,6 +129,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         composition = self._BuildCompositionLane(
             factTexts=factTexts,
             productFacts=productFacts,
+            reconstructedTables=reconstructedTables,
             coiEvidence=coiEvidence,
         )
         understandingId = store.next_id("under")
@@ -338,32 +351,39 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         factTexts: tuple[str, ...],
         productFacts: tuple[dict[str, JsonValue], ...],
         coiEvidence: CoiEvidenceSet,
+        reconstructedTables: tuple[dict[str, JsonValue], ...] = (),
     ) -> CompositionFactSet:
         # COI (식품원재료풀이) is composition evidence — it belongs to this lane,
         # not the identity lane. Feed its matched texts into %-parsing and terms.
         coiTexts = tuple(coiEvidence.matchedTexts)
-        text = "\n".join([*factTexts, *ProductUnderstandingComponent._FactTexts(productFacts), *coiTexts])
-        percentageText = "\n".join(
-            ProductUnderstandingComponent._CompositionPercentageTexts(productFacts)
+        tableTexts = ProductUnderstandingComponent._ReconstructedTableTexts(
+            reconstructedTables,
         )
-        percentages: list[dict[str, JsonValue]] = []
-        seenPercentages: set[tuple[str, str]] = set()
-        for match in PERCENT_RE.finditer(percentageText):
-            if ProductUnderstandingComponent._IsNestedPercentage(
-                percentageText,
-                match.start("percent"),
-            ):
-                continue
-            term = " ".join((match.group("term") or "").split())[-40:].strip(" ,:/")
-            percentRaw = (match.group("percent") or "").replace(",", ".")
-            try:
-                percent: JsonValue = float(percentRaw)
-            except ValueError:
-                percent = percentRaw
-            key = (term.lower(), str(percent))
-            if term and key not in seenPercentages and not ORIGIN_TERM_RE.search(term):
-                percentages.append({"term": term, "percent": percent})
-                seenPercentages.add(key)
+        factTextValues = ProductUnderstandingComponent._FactTexts(productFacts)
+        text = "\n".join([*factTexts, *factTextValues, *tableTexts, *coiTexts])
+        ingredientEntries = ProductUnderstandingComponent._BuildIngredientEntries(
+            productFacts=productFacts,
+            reconstructedTables=reconstructedTables,
+        )
+        percentages = ProductUnderstandingComponent._IngredientPercentagesFromEntries(
+            ingredientEntries,
+        )
+        componentCompositions = ProductUnderstandingComponent._BuildComponentCompositions(
+            productFacts=productFacts,
+            reconstructedTables=reconstructedTables,
+            ingredientEntries=ingredientEntries,
+        )
+        principalCandidates = ProductUnderstandingComponent._BuildPrincipalCandidates(
+            ingredientEntries,
+        )
+        principalStatus = ProductUnderstandingComponent._PrincipalStatus(
+            principalCandidates,
+        )
+        principalIngredient = (
+            str(principalCandidates[0].get("ingredient_name") or "")
+            if principalStatus == "confirmed" and principalCandidates
+            else ""
+        )
 
         allergenTexts = [
             item
@@ -378,7 +398,8 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             [
                 term
                 for term in (
-                    *ProductUnderstandingComponent._FactTexts(productFacts),
+                    *factTextValues,
+                    *tableTexts,
                     *factTexts,
                     *coiTexts,
                 )
@@ -389,13 +410,13 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         )
         return CompositionFactSet(
             processingState="unknown",
-            principalIngredient=(
-                str(percentages[0].get("term") or "")
-                if percentages
-                else ""
-            ),
+            principalIngredient=principalIngredient,
+            principalIngredientStatus=principalStatus,
+            principalIngredientCandidates=tuple(principalCandidates[:10]),
             ingredientClasses=(),
+            ingredientEntries=tuple(ingredientEntries[:80]),
             ingredientPercentages=tuple(percentages[:20]),
+            componentCompositions=tuple(componentCompositions[:20]),
             compositionTerms=compositionTerms,
             compositionBasis="label" if percentages else ("coi_text" if coiTexts else "label_text_no_percent"),
             containsWrapperOrDough=bool(WRAPPER_RE.search(text)),
@@ -407,6 +428,8 @@ class ProductUnderstandingComponent(BasePipelineComponent):
     @staticmethod
     def _CompositionPercentageTexts(
         productFacts: tuple[dict[str, JsonValue], ...],
+        *,
+        productLevelOnly: bool = False,
     ) -> tuple[str, ...]:
         texts: list[str] = []
         for fact in productFacts:
@@ -422,9 +445,536 @@ class ProductUnderstandingComponent(BasePipelineComponent):
                 or fact.get("text")
                 or ""
             ).strip()
-            if field and value and ProductUnderstandingComponent._IsCompositionFieldName(field):
-                texts.append(value)
+            if not field or not value:
+                continue
+            if not ProductUnderstandingComponent._IsCompositionFieldName(field):
+                continue
+            if (
+                productLevelOnly
+                and not ProductUnderstandingComponent._IsProductLevelCompositionFieldName(field)
+            ):
+                continue
+            texts.append(value)
         return tuple(texts)
+
+    @staticmethod
+    def _ReconstructedTableTexts(
+        reconstructedTables: tuple[dict[str, JsonValue], ...],
+    ) -> tuple[str, ...]:
+        texts: list[str] = []
+        for table in reconstructedTables:
+            tableName = str(table.get("table_name") or "").strip()
+            rows = table.get("rows")
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                field = str(row.get("field_name") or "").strip()
+                value = str(row.get("normalized_value") or "").strip()
+                if not field or not value:
+                    continue
+                prefix = f"{tableName} / " if tableName else ""
+                texts.append(f"{prefix}{field}: {value}")
+        return tuple(texts)
+
+    @staticmethod
+    def _BuildIngredientEntries(
+        *,
+        productFacts: tuple[dict[str, JsonValue], ...],
+        reconstructedTables: tuple[dict[str, JsonValue], ...],
+    ) -> list[dict[str, JsonValue]]:
+        entries: list[dict[str, JsonValue]] = []
+        for fact in productFacts:
+            field = ProductUnderstandingComponent._ReadTextField(fact, "field_name")
+            value = ProductUnderstandingComponent._ReadTextField(fact, "normalized_value")
+            ProductUnderstandingComponent._ExtendIngredientEntries(
+                entries,
+                fieldName=field,
+                value=value,
+                sourceRefs=ProductUnderstandingComponent._ReadSourceRefs(fact),
+                sourceKind="product_fact",
+            )
+
+        for table in reconstructedTables:
+            rows = table.get("rows")
+            tableRefs = ProductUnderstandingComponent._ReadSourceRefs(table)
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                field = ProductUnderstandingComponent._ReadTextField(row, "field_name")
+                value = ProductUnderstandingComponent._ReadTextField(
+                    row,
+                    "normalized_value",
+                )
+                sourceRefs = ProductUnderstandingComponent._ReadSourceRefs(row) or tableRefs
+                ProductUnderstandingComponent._ExtendIngredientEntries(
+                    entries,
+                    fieldName=field,
+                    value=value,
+                    sourceRefs=sourceRefs,
+                    sourceKind="reconstructed_table",
+                )
+        return ProductUnderstandingComponent._DedupIngredientEntries(entries)
+
+    @staticmethod
+    def _ExtendIngredientEntries(
+        entries: list[dict[str, JsonValue]],
+        *,
+        fieldName: str,
+        value: str,
+        sourceRefs: tuple[str, ...],
+        sourceKind: str,
+    ) -> None:
+        if not fieldName or not value:
+            return
+        if not ProductUnderstandingComponent._IsCompositionFieldName(fieldName):
+            return
+        componentName = ProductUnderstandingComponent._ReadComponentName(fieldName)
+        scope = "component" if componentName else "product"
+        for orderIndex, segment in enumerate(
+            ProductUnderstandingComponent._SplitTopLevelIngredients(value),
+            start=1,
+        ):
+            ingredientName = ProductUnderstandingComponent._ReadIngredientName(segment)
+            if not ingredientName:
+                continue
+            percentage = ProductUnderstandingComponent._ReadTopLevelPercentage(segment)
+            entry: dict[str, JsonValue] = {
+                "ingredient_name": ingredientName,
+                "order_index": orderIndex,
+                "scope": scope,
+                "component_name": componentName,
+                "source_field_name": fieldName,
+                "source_refs": list(sourceRefs),
+                "source_kind": sourceKind,
+            }
+            if percentage is not None:
+                entry["percent"] = percentage
+            entries.append(entry)
+
+    @staticmethod
+    def _SplitTopLevelIngredients(text: str) -> tuple[str, ...]:
+        parts: list[str] = []
+        current: list[str] = []
+        depth = 0
+        for character in text:
+            if character in "([{":
+                depth += 1
+            elif character in ")]}":
+                depth = max(0, depth - 1)
+            if character in ",，、" and depth == 0:
+                part = "".join(current).strip()
+                if part:
+                    parts.append(part)
+                current = []
+                continue
+            current.append(character)
+        part = "".join(current).strip()
+        if part:
+            parts.append(part)
+        return tuple(parts)
+
+    @staticmethod
+    def _ReadIngredientName(segment: str) -> str:
+        percentage = ProductUnderstandingComponent._ReadTopLevelPercentageEntry(segment)
+        if percentage is not None:
+            return str(percentage.get("term") or "").strip()
+        name = re.split(r"[\(\[\{（［]", segment, maxsplit=1)[0]
+        name = re.sub(r"\d+(?:[.,]\d+)?\s*%", "", name)
+        return " ".join(name.strip(" ,:/·-").split())
+
+    @staticmethod
+    def _ReadTopLevelPercentage(segment: str) -> JsonValue | None:
+        percentage = ProductUnderstandingComponent._ReadTopLevelPercentageEntry(segment)
+        if percentage is None:
+            return None
+        return percentage.get("percent")
+
+    @staticmethod
+    def _ReadTopLevelPercentageEntry(segment: str) -> dict[str, JsonValue] | None:
+        percentages = ProductUnderstandingComponent._ExtractIngredientPercentages(segment)
+        return percentages[0] if percentages else None
+
+    @staticmethod
+    def _DedupIngredientEntries(
+        entries: list[dict[str, JsonValue]],
+    ) -> list[dict[str, JsonValue]]:
+        out: list[dict[str, JsonValue]] = []
+        seen: set[tuple[str, str, str, str, str]] = set()
+        for entry in entries:
+            key = (
+                str(entry.get("ingredient_name") or "").lower(),
+                str(entry.get("scope") or ""),
+                str(entry.get("component_name") or ""),
+                str(entry.get("order_index") or ""),
+                str(entry.get("percent") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(entry)
+        return out
+
+    @staticmethod
+    def _IngredientPercentagesFromEntries(
+        ingredientEntries: list[dict[str, JsonValue]],
+    ) -> list[dict[str, JsonValue]]:
+        percentages: list[dict[str, JsonValue]] = []
+        seen: set[tuple[str, str]] = set()
+        for entry in ingredientEntries:
+            percent = entry.get("percent")
+            if percent is None:
+                continue
+            term = str(entry.get("ingredient_name") or "").strip()
+            key = (term.lower(), str(percent))
+            if term and key not in seen:
+                percentages.append({"term": term, "percent": percent})
+                seen.add(key)
+        return percentages
+
+    @staticmethod
+    def _BuildComponentCompositions(
+        *,
+        productFacts: tuple[dict[str, JsonValue], ...],
+        reconstructedTables: tuple[dict[str, JsonValue], ...],
+        ingredientEntries: list[dict[str, JsonValue]],
+    ) -> list[dict[str, JsonValue]]:
+        components: dict[str, dict[str, JsonValue]] = {}
+        for entry in ingredientEntries:
+            componentName = str(entry.get("component_name") or "").strip()
+            if not componentName:
+                continue
+            component = components.setdefault(
+                componentName,
+                {
+                    "component_name": componentName,
+                    "ingredient_names": [],
+                    "source_refs": [],
+                },
+            )
+            ingredientNames = component.setdefault("ingredient_names", [])
+            if isinstance(ingredientNames, list):
+                ingredientName = str(entry.get("ingredient_name") or "").strip()
+                if ingredientName and ingredientName not in ingredientNames:
+                    ingredientNames.append(ingredientName)
+            ProductUnderstandingComponent._MergeSourceRefs(
+                component,
+                ProductUnderstandingComponent._ReadEntrySourceRefs(entry),
+            )
+
+        ProductUnderstandingComponent._ApplyComponentFacts(
+            components,
+            productFacts,
+        )
+        ProductUnderstandingComponent._ApplyComponentTableRows(
+            components,
+            reconstructedTables,
+        )
+        return [
+            components[key]
+            for key in sorted(components)
+        ]
+
+    @staticmethod
+    def _ApplyComponentFacts(
+        components: dict[str, dict[str, JsonValue]],
+        productFacts: tuple[dict[str, JsonValue], ...],
+    ) -> None:
+        for fact in productFacts:
+            field = ProductUnderstandingComponent._ReadTextField(fact, "field_name")
+            value = ProductUnderstandingComponent._ReadTextField(fact, "normalized_value")
+            sourceRefs = ProductUnderstandingComponent._ReadSourceRefs(fact)
+            componentName = ProductUnderstandingComponent._ReadComponentName(field)
+            if componentName:
+                component = components.setdefault(
+                    componentName,
+                    {"component_name": componentName, "ingredient_names": [], "source_refs": []},
+                )
+                ProductUnderstandingComponent._MergeSourceRefs(component, sourceRefs)
+                compactField = field.replace(" ", "")
+                if "식품유형" in compactField or "식품의유형" in compactField:
+                    component["food_type"] = value
+                if "내용량" in compactField or "중량" in compactField:
+                    ProductUnderstandingComponent._SetComponentWeight(
+                        component,
+                        value,
+                        "",
+                    )
+            ProductUnderstandingComponent._ApplyComponentWeightsFromText(
+                components,
+                value,
+                sourceRefs,
+            )
+
+    @staticmethod
+    def _ApplyComponentTableRows(
+        components: dict[str, dict[str, JsonValue]],
+        reconstructedTables: tuple[dict[str, JsonValue], ...],
+    ) -> None:
+        for table in reconstructedTables:
+            rows = table.get("rows")
+            tableRefs = ProductUnderstandingComponent._ReadSourceRefs(table)
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                field = ProductUnderstandingComponent._ReadTextField(row, "field_name")
+                value = ProductUnderstandingComponent._ReadTextField(
+                    row,
+                    "normalized_value",
+                )
+                unit = ProductUnderstandingComponent._ReadTextField(row, "unit")
+                sourceRefs = ProductUnderstandingComponent._ReadSourceRefs(row) or tableRefs
+                componentName = ProductUnderstandingComponent._ReadComponentFromContentField(
+                    field,
+                )
+                if componentName:
+                    component = components.setdefault(
+                        componentName,
+                        {
+                            "component_name": componentName,
+                            "ingredient_names": [],
+                            "source_refs": [],
+                        },
+                    )
+                    ProductUnderstandingComponent._SetComponentWeight(
+                        component,
+                        value,
+                        unit,
+                    )
+                    ProductUnderstandingComponent._MergeSourceRefs(
+                        component,
+                        sourceRefs,
+                    )
+                ProductUnderstandingComponent._ApplyComponentWeightsFromText(
+                    components,
+                    f"{field} {value} {unit}",
+                    sourceRefs,
+                )
+
+    @staticmethod
+    def _ApplyComponentWeightsFromText(
+        components: dict[str, dict[str, JsonValue]],
+        text: str,
+        sourceRefs: tuple[str, ...],
+    ) -> None:
+        for match in CONTENT_WEIGHT_RE.finditer(text):
+            componentName = " ".join((match.group("component") or "").split()).strip(" ,:/")
+            amount = ProductUnderstandingComponent._ReadNumericValue(
+                match.group("amount"),
+            )
+            unit = (match.group("unit") or "").lower()
+            if not componentName or amount is None:
+                continue
+            if (
+                re.search(r"[A-Za-z가-힣]", componentName) is None
+                or componentName.lower() in {"g", "kg", "ml", "l"}
+            ):
+                continue
+            component = components.setdefault(
+                componentName,
+                {"component_name": componentName, "ingredient_names": [], "source_refs": []},
+            )
+            component["content_weight"] = amount
+            component["content_weight_unit"] = unit
+            ProductUnderstandingComponent._MergeSourceRefs(component, sourceRefs)
+
+    @staticmethod
+    def _SetComponentWeight(
+        component: dict[str, JsonValue],
+        value: str,
+        unit: str,
+    ) -> None:
+        amount = ProductUnderstandingComponent._ReadNumericValue(value)
+        if amount is None:
+            return
+        component["content_weight"] = amount
+        if unit:
+            component["content_weight_unit"] = unit
+
+    @staticmethod
+    def _BuildPrincipalCandidates(
+        ingredientEntries: list[dict[str, JsonValue]],
+    ) -> list[dict[str, JsonValue]]:
+        productEntries = [
+            entry
+            for entry in ingredientEntries
+            if entry.get("scope") == "product"
+            and str(entry.get("ingredient_name") or "").strip()
+        ]
+        candidatesByName: dict[str, dict[str, JsonValue]] = {}
+        if productEntries:
+            firstEntry = min(
+                productEntries,
+                key=lambda entry: int(entry.get("order_index") or 9999),
+            )
+            ProductUnderstandingComponent._AddPrincipalCandidate(
+                candidatesByName,
+                firstEntry,
+                basis="ingredient_order_first",
+                confidence=0.65,
+            )
+        for entry in productEntries:
+            percent = entry.get("percent")
+            if not isinstance(percent, (int, float)):
+                continue
+            confidence = 0.9 if percent >= 15 else 0.35
+            ProductUnderstandingComponent._AddPrincipalCandidate(
+                candidatesByName,
+                entry,
+                basis="explicit_percent",
+                confidence=confidence,
+                percent=percent,
+                role="minor_ingredient" if percent < 10 else "major_ingredient",
+            )
+        return sorted(
+            candidatesByName.values(),
+            key=lambda item: (
+                -float(item.get("confidence") or 0.0),
+                -float(item.get("percent") or 0.0),
+                int(item.get("order_index") or 9999),
+                str(item.get("ingredient_name") or ""),
+            ),
+        )
+
+    @staticmethod
+    def _AddPrincipalCandidate(
+        candidatesByName: dict[str, dict[str, JsonValue]],
+        entry: dict[str, JsonValue],
+        *,
+        basis: str,
+        confidence: float,
+        percent: float | None = None,
+        role: str = "",
+    ) -> None:
+        ingredientName = str(entry.get("ingredient_name") or "").strip()
+        if not ingredientName:
+            return
+        key = ingredientName.lower()
+        candidate = candidatesByName.setdefault(
+            key,
+            {
+                "ingredient_name": ingredientName,
+                "confidence": confidence,
+                "basis": basis,
+                "order_index": entry.get("order_index") or 9999,
+                "source_refs": [],
+            },
+        )
+        candidate["confidence"] = max(
+            float(candidate.get("confidence") or 0.0),
+            confidence,
+        )
+        basisText = str(candidate.get("basis") or "")
+        if basis not in basisText.split("+"):
+            candidate["basis"] = "+".join(filter(None, [basisText, basis]))
+        if percent is not None:
+            candidate["percent"] = percent
+        if role:
+            candidate["role"] = role
+        ProductUnderstandingComponent._MergeSourceRefs(
+            candidate,
+            ProductUnderstandingComponent._ReadEntrySourceRefs(entry),
+        )
+
+    @staticmethod
+    def _PrincipalStatus(candidates: list[dict[str, JsonValue]]) -> str:
+        if not candidates:
+            return "unknown"
+        topConfidence = float(candidates[0].get("confidence") or 0.0)
+        return "confirmed" if topConfidence >= 0.8 else "ambiguous"
+
+    @staticmethod
+    def _ReadTextField(value: Mapping[str, JsonValue], key: str) -> str:
+        item = value.get(key)
+        return str(item or "").strip()
+
+    @staticmethod
+    def _ReadSourceRefs(value: Mapping[str, JsonValue]) -> tuple[str, ...]:
+        refs = value.get("source_refs")
+        if not isinstance(refs, list):
+            return ()
+        return tuple(str(ref).strip() for ref in refs if str(ref).strip())
+
+    @staticmethod
+    def _ReadEntrySourceRefs(entry: Mapping[str, JsonValue]) -> tuple[str, ...]:
+        return ProductUnderstandingComponent._ReadSourceRefs(entry)
+
+    @staticmethod
+    def _ReadComponentName(fieldName: str) -> str:
+        match = COMPONENT_NAME_RE.search(fieldName)
+        if match is None:
+            return ""
+        return " ".join((match.group("component") or "").strip().split())
+
+    @staticmethod
+    def _ReadComponentFromContentField(fieldName: str) -> str:
+        normalizedFieldName = " ".join(fieldName.split())
+        for marker in ("내용량", "중량", "용량"):
+            if marker not in normalizedFieldName:
+                continue
+            componentName = normalizedFieldName.split(marker, 1)[0].strip(" :：-/")
+            if componentName:
+                return componentName
+        return ProductUnderstandingComponent._ReadComponentName(fieldName)
+
+    @staticmethod
+    def _ReadNumericValue(value: str) -> JsonValue | None:
+        match = re.search(r"\d+(?:[.,]\d+)?", value or "")
+        if match is None:
+            return None
+        numberText = match.group(0).replace(",", ".")
+        try:
+            number = float(numberText)
+        except ValueError:
+            return numberText
+        return int(number) if number.is_integer() else number
+
+    @staticmethod
+    def _MergeSourceRefs(
+        target: dict[str, JsonValue],
+        sourceRefs: tuple[str, ...],
+    ) -> None:
+        current = target.get("source_refs")
+        refs = [str(ref) for ref in current] if isinstance(current, list) else []
+        for sourceRef in sourceRefs:
+            if sourceRef not in refs:
+                refs.append(sourceRef)
+        target["source_refs"] = refs
+
+    @staticmethod
+    def _ExtractIngredientPercentages(text: str) -> list[dict[str, JsonValue]]:
+        percentages: list[dict[str, JsonValue]] = []
+        seenPercentages: set[tuple[str, str]] = set()
+        for match in PERCENT_RE.finditer(text):
+            if ProductUnderstandingComponent._IsNestedPercentage(
+                text,
+                match.start("percent"),
+            ):
+                continue
+            term = " ".join((match.group("term") or "").split())[-40:].strip(" ,:/")
+            percentRaw = (match.group("percent") or "").replace(",", ".")
+            try:
+                percent: JsonValue = float(percentRaw)
+            except ValueError:
+                percent = percentRaw
+            key = (term.lower(), str(percent))
+            if term and key not in seenPercentages and not ORIGIN_TERM_RE.search(term):
+                percentages.append({"term": term, "percent": percent})
+                seenPercentages.add(key)
+        return percentages
+
+    @staticmethod
+    def _IsProductLevelCompositionFieldName(fieldName: str) -> bool:
+        if not ProductUnderstandingComponent._IsCompositionFieldName(fieldName):
+            return False
+        # 괄호가 붙은 원재료 필드는 구성품 scoped fact다. 함량은 보존하되
+        # 전체 상품의 주성분으로 승격하지 않는다.
+        return not re.search(r"[\(\[（［].+[\)\]）］]", fieldName)
 
     @staticmethod
     def _IsCompositionFieldName(fieldName: str) -> bool:
