@@ -112,6 +112,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             productName=productName,
             distilledIdentity=distilledIdentity,
             encyclopediaEvidence=encyclopediaEvidence,
+            factTexts=factTexts,
         )
         composition = self._BuildCompositionLane(
             factTexts=factTexts,
@@ -277,6 +278,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         productName: str,
         distilledIdentity: DistilledIdentityFacts,
         encyclopediaEvidence: EncyclopediaEvidenceSet,
+        factTexts: tuple[str, ...] = (),
     ) -> IdentityHintSet:
         """Overlay bounded LLM identity fields unless explicitly disabled.
 
@@ -292,6 +294,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             productName=productName,
             distilledIdentity=distilledIdentity,
             encyclopediaEvidence=encyclopediaEvidence,
+            factTexts=factTexts,
         )
         if result.get("understanding_mode") != "llm_json":
             return dataclasses.replace(

@@ -47,6 +47,9 @@ class Hs2RoutingComponent(BasePipelineComponent):
         chapterHintSources = self._StringTuple(
             identityLane.get("chapter_hint_source_terms") or [],
         )
+        compositionFacts = productUnderstanding.get("composition_facts") or {}
+        if not isinstance(compositionFacts, dict):
+            compositionFacts = {}
         routeInput = BuildPreClassificationRouteInput(
             productName=str(productUnderstanding.get("product_name") or ""),
             shortDescription="",
@@ -63,6 +66,11 @@ class Hs2RoutingComponent(BasePipelineComponent):
                 *chapterHintSources,
             ),
             structuredProductFacts=[],
+            processingState=str(identityLane.get("processing_state") or ""),
+            containsSauceOrBroth=(
+                bool(compositionFacts.get("contains_sauce_or_broth"))
+                if "contains_sauce_or_broth" in compositionFacts else None
+            ),
         )
         routeHint = PreClassificationDomainRouter(
             chapterRowsProvider=LoadPreClassificationChapterRows,

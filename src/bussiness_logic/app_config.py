@@ -158,7 +158,7 @@ class KurlySmokeAppConfig(BaseModel):
     structured_ocr_vl_rec_server_url: Optional[StrictStr] = None
     structured_ocr_vl_rec_api_model_name: Optional[StrictStr] = None
     use_input_reconstruction: StrictBool = True
-    use_llm_input_reconstruction: StrictBool = False
+    use_llm_input_reconstruction: StrictBool = True
     llm_input_reconstruction_max_tokens: StrictInt = 4096
     input_dictionary_path: Optional[Path] = None
     input_dictionary_fuzzy_min_ratio: StrictFloat = 0.86

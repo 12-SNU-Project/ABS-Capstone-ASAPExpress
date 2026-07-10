@@ -12,6 +12,20 @@ from agents.pipeline_dto import JsonValue
 
 ChapterIndexRowsProvider = Callable[[], Sequence[Mapping[str, object]]]
 
+# typed processing_state 판정 어휘 — CN 상태어(관세 레지스터)의 폐쇄 집합.
+# 제품/챕터 하드코딩이 아니라 상태 축의 어휘 사전이다.
+_RAW_STATE_WORDS = frozenset({
+    "raw", "fresh", "frozen", "chilled", "minced", "dried", "live", "whole",
+})
+_PREPARED_STATE_WORDS = frozenset({
+    "prepared", "cooked", "seasoned", "smoked", "roasted", "boiled", "fried",
+    "steamed", "preserved", "processed", "instant",
+})
+
+
+def _stem_token(token: str) -> str:
+    return token[:-1] if len(token) > 3 and token.endswith("s") and not token.endswith("ss") else token
+
 
 @dataclass(frozen=True, slots=True)
 class PreClassificationRouteInput:
@@ -19,6 +33,10 @@ class PreClassificationRouteInput:
     shortDescription: str = ""
     factTexts: tuple[str, ...] = ()
     structuredFactTexts: tuple[str, ...] = ()
+    # 지각층(PU)의 typed 상태 필드 — raw/prepared 판정에서 광역 텍스트
+    # 정규식보다 우선한다(DTO field precedence). 빈 값 = DTO 침묵 = 폴백.
+    processingState: str = ""
+    containsSauceOrBroth: bool | None = None
 
     def BuildSearchText(self) -> str:
         return "\n".join(
@@ -249,7 +267,14 @@ class PreClassificationDomainRouter:
 
         chapterRows = self._LoadChapterRows()
         if chapterRows:
-            routeHint = self._RouteWithChapterIndex(searchText, chapterRows)
+            routeHint = self._RouteWithChapterIndex(
+                searchText,
+                chapterRows,
+                processedOverride=self._dto_processed_override(
+                    routeInput.processingState,
+                    routeInput.containsSauceOrBroth,
+                ),
+            )
             if routeHint.candidateHs2:
                 return routeHint
 
@@ -327,8 +352,15 @@ class PreClassificationDomainRouter:
         self,
         searchText: str,
         chapterRows: Sequence[Mapping[str, object]],
+        processedOverride: bool | None = None,
     ) -> PreClassificationRouteHint:
         processed = PROCESSED_SIGNAL_PATTERN.search(searchText) is not None
+        # DTO 필드 우선순위(ASAP_ROUTER_RAW_PRECEDENCE, 기본 ON):
+        # typed 상태가 raw/prepared를 명시하면 정규식 판정을 대체한다.
+        if processedOverride is not None and (
+            os.environ.get("ASAP_ROUTER_RAW_PRECEDENCE", "1") or "1"
+        ).strip() != "0":
+            processed = processedOverride
         bucketScope = self._BucketScopeEnabled()
         scores: dict[str, float] = {}
         matchedByChapter: dict[str, list[str]] = {}
@@ -557,6 +589,27 @@ class PreClassificationDomainRouter:
         )
 
     @staticmethod
+    def _dto_processed_override(
+        processingState: str,
+        containsSauceOrBroth: bool | None,
+    ) -> bool | None:
+        """DTO 필드 우선순위 일반 규칙: typed 상태가 말하면 그걸 따른다.
+
+        True=prepared 확정, False=raw 확정, None=DTO 침묵(정규식 폴백).
+        '다진/냉동 대구살'이 마케팅 문구('건강 이유식')의 PROCESSED 정규식
+        오발동으로 prepared 취급되던 것의 구조적 처방 — 제품별 분기 없음.
+        """
+        tokens = {
+            _stem_token(w)
+            for w in re.findall(r"[a-z]+", str(processingState or "").lower())
+        }
+        if tokens & _PREPARED_STATE_WORDS or containsSauceOrBroth is True:
+            return True
+        if tokens and tokens & _RAW_STATE_WORDS:
+            return False
+        return None
+
+    @staticmethod
     def _is_raw_ingredient_case(searchText: str) -> bool:
         if RAW_ANIMAL_CHAPTER_PATTERN.search(searchText) is None:
             return False
@@ -571,8 +624,12 @@ def BuildPreClassificationRouteInput(
     shortDescription: str,
     factTexts: Sequence[str],
     structuredProductFacts: Sequence[Mapping[str, object]],
+    processingState: str = "",
+    containsSauceOrBroth: bool | None = None,
 ) -> PreClassificationRouteInput:
     return PreClassificationRouteInput(
+        processingState=processingState.strip(),
+        containsSauceOrBroth=containsSauceOrBroth,
         productName=productName.strip(),
         shortDescription=shortDescription.strip(),
         factTexts=tuple(text.strip() for text in factTexts if text.strip()),

@@ -27,11 +27,16 @@ _FIELD_BOOST = 3.0   # the bound DTO field answers the question directly
 _POOL_BOOST = 1.0    # only the broad token pool answers — weak support
 _PREDICATE_BLOCK = 100.0  # mirrors QUANT_PENALTY: a violated condition is out
 
-_SKIP_AXES = frozenset({"pct", "residual"})
+# pct/quantitative_threshold는 quant 게이트가 원문 기준으로 별도 처리,
+# residual은 소거 정책 소관 — 술어 평가에서 제외 (v1/v2 세대 공통)
+_SKIP_AXES = frozenset({"pct", "residual", "quantitative_threshold", "residual_other"})
 # IS-A alias (cn_alias_index, compiled offline from the CN tree itself):
 # product token "octopus" answers a class question "molluscs". Applied to
 # species/contains only — physical-state axes have no IS-A structure.
-_ALIAS_AXES = frozenset({"species", "contains"})
+_ALIAS_AXES = frozenset({
+    "species", "contains",  # llm-v1 명칭
+    "species_source", "material_composition", "product_identity",  # llm-v2(taxonomy)
+})
 _alias_cache: list[dict[str, list[str]]] = []
 
 
@@ -72,7 +77,11 @@ def _expand(tokens: set[str]) -> set[str]:
 # may answer them — a stray OCR word in the broad pool must not satisfy a
 # form predicate (designer decision). species/contains keep the graded pool
 # fallback because ingredient words legitimately live in many fields.
-_STRICT_FIELD_AXES = frozenset({"form", "processing"})
+_STRICT_FIELD_AXES = frozenset({
+    "form", "processing",  # llm-v1 명칭
+    "physical_form", "preservation_state", "processing_method",  # llm-v2(taxonomy)
+    "condition_quality",
+})
 _PATH_STRUCTURE_WORDS = frozenset({"contains", "is", "has", "or", "and"})
 _TOKEN = re.compile(r"[a-z]+")
 
