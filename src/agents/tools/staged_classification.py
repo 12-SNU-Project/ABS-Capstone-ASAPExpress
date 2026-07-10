@@ -83,6 +83,11 @@ QUANT_PENALTY = 100.0
 # answered true by the bound DTO fields) outranks any lexical score;
 # a violated one is out. Undecided falls back to lexical ranking.
 DECISION_CONFIRM = 50.0
+# 답한 조건의 부분 지지 — 확정(typed 필수)이 막혀도 "법조문 조건에 true로
+# 답했다"는 증거는 술어 true(+3)와 동급 가산. all-or-nothing이던 결정층이
+# lexical 1점 잡음에 정답을 내주던 구멍의 처방 (칼국수 1902 실측: 두 런
+# 모두 조건 true인데 지각 잡음 1점 차로 승패가 갈림). ASAP_DECISION_TRUE_SUPPORT=0 복귀.
+DECISION_TRUE_SUPPORT = 3.0
 LEVELS = (("hs4", 4), ("hs6", 6), ("cn8", 8))
 _TOKEN = re.compile(r"[a-z0-9]+")
 
@@ -956,6 +961,12 @@ class StagedClassificationTool:
                     score += DECISION_CONFIRM
                 elif decision_status == "violated":
                     score -= QUANT_PENALTY
+                elif decision_status == "undecided" and (
+                    os.environ.get("ASAP_DECISION_TRUE_SUPPORT", "1") or "1"
+                ).strip() != "0":
+                    # 부분 충족 가산: true 조건당 +3, 상한 2개(과대 라벨 방지)
+                    n_true = sum(1 for d in decision_detail if d.get("verdict") == "true")
+                    score += DECISION_TRUE_SUPPORT * min(n_true, 2)
             if residual:
                 score = min(score, 0.0)  # residuals never win on wording
                 score_raw = min(score_raw, 0.0)
@@ -1282,6 +1293,13 @@ class StagedClassificationTool:
             "status": status,
             "engine": engine,
             "decision_axes": [{"axis": a, "values": facts.get(a, [])[:8]} for a in LEVEL_AXES[level]],
+            # 전 형제 점수·결정 요약 — top8 밖으로 밀린 코드(예: 정답)의
+            # 패배 원인을 사후 판독하기 위한 전수 맵. 디테일은 top8 유지.
+            "scores_all": {
+                str(r.get("code")): [round(float(r.get("score") or 0.0), 1),
+                                     str(r.get("decision") or "")]
+                for r in ranked
+            },
             "candidates_considered": [
                 {
                     "code": r["code"],

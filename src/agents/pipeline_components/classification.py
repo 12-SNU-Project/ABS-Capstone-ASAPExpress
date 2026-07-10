@@ -365,6 +365,36 @@ class ClassificationComponent(BasePipelineComponent):
                             f"{verdict.get('reason', '')[:120]}"
                         )
                 scope = verdict.get("code") or verdict.get("chapter") or verdict.get("heading")
+                if verdict.get("verdict") == "reroute" and scope:
+                    # reroute = 라우터 의견 '복원' 전용: 대상 챕터가 라우터
+                    # 자체 순위에서 staged 최종 챕터보다 높을 때만 허용.
+                    # staged가 강해진 뒤 reroute는 구제 풀이 말라 개악만 남았다
+                    # (최종 기준런 실측: 개악 3 — 쪽갈비 16→02, 떡볶이·산채
+                    # 19→21 — vs 구제 1). validator가 제3의 챕터를 발명하는
+                    # 것을 구조로 금지한다. ASAP_VALIDATOR_REROUTE_RESTORE_ONLY=0 복귀.
+                    restore_only = (os.environ.get(
+                        "ASAP_VALIDATOR_REROUTE_RESTORE_ONLY", "1") or "1").strip() != "0"
+                    if restore_only:
+                        order = [
+                            str(d.get("chapter"))
+                            for d in ((routing or {}).get("candidate_chapter_details") or [])
+                            if isinstance(d, dict)
+                        ]
+                        target_ch = str(scope)[:2].zfill(2)
+                        current_ch = str((candidates[0] or {}).get("cn8") or "")[:2]
+                        t_rank = order.index(target_ch) if target_ch in order else 999
+                        c_rank = order.index(current_ch) if current_ch in order else 999
+                        if t_rank >= c_rank:
+                            validatorRecord = {
+                                **verdict,
+                                "applied": False,
+                                "blocked": "reroute_restore_only",
+                            }
+                            self.reason(
+                                f"Validator reroute->{target_ch} blocked: not a router-"
+                                f"restore (router rank {t_rank} vs current {c_rank})."
+                            )
+                            scope = None
                 if verdict.get("verdict") in ("promote_recovery", "reroute", "narrow") and scope:
                     scope = str(scope)
                     # The validator's authority ends at NAMING the region; the
