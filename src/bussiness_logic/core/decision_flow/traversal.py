@@ -4,7 +4,7 @@ from typing import List, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from bussiness_logic.core.classification import (
+from bussiness_logic.core.classification.stage1 import (
     CnCandidate,
     CnCandidateRetriever,
     DEFAULT_CN_CANDIDATE_TOP_K,

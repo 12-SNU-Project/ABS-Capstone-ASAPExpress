@@ -1,3 +1,3 @@
-"""Stage 1 product classification and CN candidate generation."""
+"""Reference-only legacy Stage 1 product classification package."""
 
-from bussiness_logic.core.classification.stage1 import *  # noqa: F401,F403
+__all__: list[str] = []

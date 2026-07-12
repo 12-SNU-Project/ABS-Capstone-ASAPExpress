@@ -1,5 +1,5 @@
 """
-agents.candiate_classfier — adapter for the vendored Stage 1 classifier.
+agents.candiate_classfier — reference adapter for the vendored Stage 1 classifier.
 
 The classifier runtime code lives in ``src/bussiness_logic``. It reads our core
 data from ``docs/ASAP_Ontology_v1`` and orchestrates
@@ -14,8 +14,8 @@ its 7-step Stage 1 pipeline:
   7. Stage1ResponseValidator + Stage1DecisionPolicy + Stage1TraversalController
      + Stage1RecommendationReportBuilder
 
-Outputs collected into ExternalClassificationResult so ClassificationComponent
-can stamp citations / reasoning / candidates onto the Blackboard.
+This module is no longer linked from the active pipeline. Keep it as reference
+code for the previous Stage 1 classifier/backtracking design.
 """
 from __future__ import annotations
 
