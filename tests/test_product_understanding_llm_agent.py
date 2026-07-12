@@ -200,8 +200,15 @@ def test_composition_lane_keeps_top_level_ingredient_percentages() -> None:
 
     assert list(composition.ingredientPercentages) == [
         {"term": "돼지고기", "percent": 25.0},
-        {"term": "밀가루", "percent": 20.0},
+        {
+            "term": "밀가루",
+            "percent": 20.0,
+            "term_aliases": ["wheat flour", "flour", "wheat"],
+        },
     ]
+    assert "meat" in composition.ingredientClasses
+    assert "cereal" in composition.ingredientClasses
+    assert "seasoning_sauce" in composition.ingredientClasses
     assert composition.principalIngredient == "돼지고기"
     assert composition.principalIngredientStatus == "confirmed"
     assert composition.principalIngredientCandidates[0]["ingredient_name"] == "돼지고기"
@@ -232,6 +239,9 @@ def test_composition_lane_does_not_promote_component_percentage_to_principal() -
     ]
     assert composition.principalIngredient == ""
     assert composition.principalIngredientStatus == "unknown"
+    assert composition.principalIngredientCandidates[0]["ingredient_name"] == "가다랑어"
+    assert composition.principalIngredientCandidates[0]["scope"] == "component"
+    assert composition.principalIngredientCandidates[0]["component_name"] == "가쓰오팩"
     katsuoEntries = [
         entry
         for entry in composition.ingredientEntries
@@ -306,3 +316,179 @@ def test_composition_lane_keeps_minor_percent_out_of_confirmed_principal() -> No
         {"term": "대파", "percent": 6.0},
         {"term": "양파", "percent": 6.0},
     ]
+
+
+def test_composition_lane_parses_percent_after_origin_parentheses() -> None:
+    composition = product_understanding.ProductUnderstandingComponent._BuildCompositionLane(
+        factTexts=(),
+        productFacts=(
+            {
+                "field_name": "원재료명",
+                "normalized_value": (
+                    "찹쌀(국내산) 70.75 %, "
+                    "서리태(검정콩/국내산) 20.28 %, 정백당"
+                ),
+            },
+        ),
+        coiEvidence=CoiEvidenceSet(
+            coiEvidenceId="coi_001",
+            productId="prod_001",
+        ),
+    )
+
+    assert list(composition.ingredientPercentages) == [
+        {
+            "term": "찹쌀",
+            "percent": 70.75,
+            "term_aliases": ["glutinous rice", "rice"],
+        },
+        {
+            "term": "서리태",
+            "percent": 20.28,
+            "term_aliases": ["black soybean", "soybean", "bean"],
+        },
+    ]
+    assert "cereal" in composition.ingredientClasses
+    assert "soy_legume" in composition.ingredientClasses
+    assert composition.principalIngredient == "찹쌀"
+    assert composition.principalIngredientStatus == "confirmed"
+    assert composition.compositionBasis == "label"
+
+
+def test_composition_lane_keeps_nested_origin_percentages_out() -> None:
+    composition = product_understanding.ProductUnderstandingComponent._BuildCompositionLane(
+        factTexts=(),
+        productFacts=(
+            {
+                "field_name": "원재료명",
+                "normalized_value": "마늘(국산 50%, 중국산 50%), 소스",
+            },
+        ),
+        coiEvidence=CoiEvidenceSet(
+            coiEvidenceId="coi_001",
+            productId="prod_001",
+        ),
+    )
+
+    assert composition.ingredientPercentages == ()
+    assert composition.principalIngredient == ""
+    assert composition.principalIngredientStatus == "ambiguous"
+
+
+def test_composition_lane_excludes_nutrition_from_component_projection() -> None:
+    composition = product_understanding.ProductUnderstandingComponent._BuildCompositionLane(
+        factTexts=(),
+        productFacts=(
+            {
+                "field_name": "원재료명",
+                "normalized_value": "낙지(베트남산), 소스",
+            },
+            {
+                "field_name": "내용량",
+                "normalized_value": "500g",
+            },
+        ),
+        reconstructedTables=(
+            {
+                "table_name": "영양정보",
+                "rows": [
+                    {"field_name": "단백질", "normalized_value": "36", "unit": "g"},
+                    {"field_name": "당류", "normalized_value": "47", "unit": "g"},
+                ],
+            },
+            {
+                "table_name": "제품 정보",
+                "rows": [
+                    {"field_name": "제품명", "normalized_value": "압구정낙지볶음"},
+                    {"field_name": "원재료명", "normalized_value": "낙지, 소스"},
+                ],
+            },
+        ),
+        coiEvidence=CoiEvidenceSet(
+            coiEvidenceId="coi_001",
+            productId="prod_001",
+        ),
+    )
+
+    componentNames = {
+        str(component.get("component_name") or "")
+        for component in composition.componentCompositions
+    }
+    assert "단백질" not in componentNames
+    assert "당류" not in componentNames
+    assert "내용량" not in componentNames
+    assert all("영양정보" not in term for term in composition.compositionTerms)
+    assert all("제품명" not in term for term in composition.compositionTerms)
+    assert list(composition.compositionTerms) == [
+        "원재료명: 낙지(베트남산), 소스",
+        "제품 정보 / 원재료명: 낙지, 소스",
+    ]
+
+
+def test_composition_lane_projects_label_processing_state_and_classes() -> None:
+    composition = product_understanding.ProductUnderstandingComponent._BuildCompositionLane(
+        factTexts=(),
+        productFacts=(
+            {
+                "field_name": "식품유형",
+                "normalized_value": "기타 수산물가공품(가열하여 섭취하는 냉동식품)",
+            },
+            {
+                "field_name": "원재료명",
+                "normalized_value": "재첩국물(국산) 86%, 재첩살(국산) 12%, 천일염(국산) 2%",
+            },
+        ),
+        coiEvidence=CoiEvidenceSet(
+            coiEvidenceId="coi_001",
+            productId="prod_001",
+        ),
+    )
+
+    assert composition.processingState == "frozen cooked prepared"
+    assert "mollusc" in composition.ingredientClasses
+    assert "seasoning_sauce" not in composition.ingredientClasses
+    assert list(composition.ingredientPercentages) == [
+        {
+            "term": "재첩국물",
+            "percent": 86.0,
+            "term_aliases": ["clam", "corbicula", "mollusc"],
+        },
+        {
+            "term": "재첩살",
+            "percent": 12.0,
+            "term_aliases": ["clam", "corbicula", "mollusc"],
+        },
+        {"term": "천일염", "percent": 2.0},
+    ]
+
+
+def test_composition_lane_wrapper_detection_avoids_single_character_noise() -> None:
+    starchComposition = product_understanding.ProductUnderstandingComponent._BuildCompositionLane(
+        factTexts=(),
+        productFacts=(
+            {
+                "field_name": "원재료명",
+                "normalized_value": "타피오카전분, 파프리카, 소스",
+            },
+        ),
+        coiEvidence=CoiEvidenceSet(
+            coiEvidenceId="coi_001",
+            productId="prod_001",
+        ),
+    )
+    dumplingComposition = product_understanding.ProductUnderstandingComponent._BuildCompositionLane(
+        factTexts=(),
+        productFacts=(
+            {
+                "field_name": "원재료명",
+                "normalized_value": "만두피[밀가루], 돼지고기",
+            },
+        ),
+        coiEvidence=CoiEvidenceSet(
+            coiEvidenceId="coi_002",
+            productId="prod_002",
+        ),
+    )
+
+    assert starchComposition.containsWrapperOrDough is False
+    assert dumplingComposition.containsWrapperOrDough is True

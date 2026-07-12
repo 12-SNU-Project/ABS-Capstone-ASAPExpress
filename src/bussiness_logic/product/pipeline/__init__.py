@@ -1,15 +1,17 @@
-"""Product collection pipeline and pipeline result schemas."""
+"""Kurly URL intake pipeline and result schemas."""
 
-from bussiness_logic.product.pipeline.pipeline import KurlyProductPipeline
-from bussiness_logic.product.pipeline.pipeline_schema import (
-    KurlyPipelineInput,
-    KurlyPipelineResult,
-    PipelineStep,
+from bussiness_logic.product.pipeline.kurly_url_intake_pipeline import (
+    KurlyUrlIntakePipeline,
+)
+from bussiness_logic.product.pipeline.kurly_url_intake_schema import (
+    KurlyUrlIntakeInput,
+    KurlyUrlIntakeResult,
+    KurlyUrlIntakeStep,
 )
 
 __all__ = [
-    "KurlyPipelineInput",
-    "KurlyPipelineResult",
-    "KurlyProductPipeline",
-    "PipelineStep",
+    "KurlyUrlIntakeInput",
+    "KurlyUrlIntakePipeline",
+    "KurlyUrlIntakeResult",
+    "KurlyUrlIntakeStep",
 ]

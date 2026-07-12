@@ -84,7 +84,7 @@ class DutyTextRateRow:
         return out
 
 
-def split_duty_text_to_rate_rows(master_id: str, duty_text: str | None) -> list[DutyTextRateRow]:
+def SplitDutyTextToRateRows(master_id: str, duty_text: str | None) -> list[DutyTextRateRow]:
     text = (duty_text or "").strip()
     if not text:
         return []

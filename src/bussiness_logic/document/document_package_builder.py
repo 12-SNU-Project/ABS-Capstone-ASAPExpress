@@ -14,34 +14,17 @@ Document Package Resolver — TARIC10 코드 → EU 수입 시 요구 서류 패
 """
 from __future__ import annotations
 
-import os
 import re
-import sys
-import threading
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Optional
 
-try:
-    import psycopg2
-    from psycopg2 import pool as psycopg2_pool
-except ImportError:
-    sys.exit("[fatal] psycopg2 missing. pip install psycopg2-binary")
-
-try:
-    from db.db_session_manager import DbSessionManager
-except Exception:
-    DbSessionManager = None
+from db.db_session_manager import DbSessionManager
 
 
-DEFAULT_DB_NAME = "postgres"
-DB_SOURCE_NAME = os.environ.get("ASAP_DB_SOURCE_NAME", "supabase")
-DB_POOL_MAX_CONNECTIONS = int(os.environ.get("ASAP_DB_POOL_MAX_CONNECTIONS", "4"))
-_DB_POOL_LOCK = threading.Lock()
-_DB_POOL = None
-_DB_POOL_KEY = None
+DB_SOURCE_NAME = "DbSessionManager"
 _TABLE_EXISTS_CACHE: dict[str, bool] = {}
 _TABLE_NAME_CACHE: dict[str, str] = {}
 _TABLE_COLUMNS_CACHE: dict[str, set[str]] = {}
@@ -57,90 +40,10 @@ TABLE_NAME_ALIASES = {
 }
 
 
-def _psycopg2_dsn(value: str) -> str:
-    if value.startswith("postgresql+psycopg2://"):
-        return "postgresql://" + value.split("://", 1)[1]
-    return value
-
-def _db_connect_config():
-    """Return psycopg2 connection config without exposing secret values."""
-    database_url = os.environ.get("ASAP_DATABASE_URL") or os.environ.get("DATABASE_URL")
-    if database_url:
-        return ("dsn", _psycopg2_dsn(database_url))
-
-    host = os.environ.get("PGHOST")
-    if host:
-        conn_kwargs = {
-            "host": host,
-            "dbname": os.environ.get("PGDATABASE", DEFAULT_DB_NAME),
-            "user": os.environ.get("PGUSER"),
-            "password": os.environ.get("PGPASSWORD"),
-            "port": os.environ.get("PGPORT", "5432"),
-        }
-        sslmode = os.environ.get("PGSSLMODE")
-        if sslmode:
-            conn_kwargs["sslmode"] = sslmode
-        return ("kwargs", {k: v for k, v in conn_kwargs.items() if v})
-
-    raise RuntimeError(
-        "Database connection is not configured. Set ASAP_DATABASE_URL "
-        "(preferred) or DATABASE_URL, or set PGHOST/PGDATABASE/PGUSER/"
-        "PGPASSWORD/PGPORT. For Supabase, include sslmode=require."
-    )
-
-
-def _get_db_pool():
-    """Return a process-local connection pool.
-
-    Production/default usage is Supabase via ASAP_DATABASE_URL or DATABASE_URL.
-    Standard libpq PG* variables are also supported for local development.
-    """
-    global _DB_POOL, _DB_POOL_KEY
-    config_kind, config_value = _db_connect_config()
-    key = (config_kind, repr(config_value), DB_POOL_MAX_CONNECTIONS)
-    with _DB_POOL_LOCK:
-        if _DB_POOL is not None and _DB_POOL_KEY == key:
-            return _DB_POOL
-        if _DB_POOL is not None:
-            _DB_POOL.closeall()
-        _TABLE_EXISTS_CACHE.clear()
-        if config_kind == "dsn":
-            _DB_POOL = psycopg2_pool.ThreadedConnectionPool(
-                1, DB_POOL_MAX_CONNECTIONS, config_value
-            )
-        else:
-            _DB_POOL = psycopg2_pool.ThreadedConnectionPool(
-                1, DB_POOL_MAX_CONNECTIONS, **config_value
-            )
-        _DB_POOL_KEY = key
-        return _DB_POOL
-
-
 @contextmanager
 def _connect_db() -> Iterator[object]:
-    if DbSessionManager is not None:
-        try:
-            manager = DbSessionManager.GetInstance()
-            with manager.OpenRawConnection() as connection:
-                yield connection
-                return
-        except Exception:
-            pass
-
-    connection = _get_db_pool().getconn()
-    try:
+    with DbSessionManager.GetInstance().OpenRawConnection() as connection:
         yield connection
-    finally:
-        _release_db(connection)
-
-
-def _release_db(conn) -> None:
-    if conn is None:
-        return
-    if _DB_POOL is None:
-        conn.close()
-        return
-    _DB_POOL.putconn(conn)
 
 # ---------------------------------------------------------------------------
 # Certificate code 분류
@@ -151,7 +54,7 @@ def _release_db(conn) -> None:
 #   U-xxx : 우대 관세 적용 서류 (preferential origin)
 #   Y-xxx : 면제 사유 선언 (declaration of exemption / waiver)
 #   L-xxx : 라이센스 (license)
-def cert_category(code: str) -> str:
+def ClassifyCertificateCategory(code: str) -> str:
     if not code:
         return "unknown"
     code = code.strip().upper()
@@ -498,7 +401,7 @@ def _duty_explanations(normalized_type: str, components: list[dict], conditions:
     return explanations
 
 
-def parse_duty_text(raw: str) -> dict:
+def ParseDutyText(raw: str) -> dict:
     if not raw:
         return {
             "raw": "",
@@ -1249,11 +1152,6 @@ def _execute(cur, sql: str, params=None):
 
 
 def _raw_table_exists(cur, table_name: str) -> bool:
-    if DbSessionManager is not None:
-        try:
-            return DbSessionManager.GetInstance().TableExists(table_name)
-        except Exception:
-            pass
     cached = _TABLE_EXISTS_CACHE.get(table_name)
     if cached is not None:
         return cached
@@ -1285,23 +1183,6 @@ def _table_columns(cur, table_name: str) -> set[str]:
     cached = _TABLE_COLUMNS_CACHE.get(actual_table)
     if cached is not None:
         return cached
-    if DbSessionManager is not None:
-        try:
-            rows = DbSessionManager.GetInstance().FetchRows(
-                """
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_schema = 'public'
-                  AND table_name = :table_name
-                ORDER BY ordinal_position
-                """,
-                {"table_name": actual_table},
-            )
-            columns = {str(row.get("column_name") or "") for row in rows}
-            _TABLE_COLUMNS_CACHE[actual_table] = columns
-            return columns
-        except Exception:
-            pass
     _execute(
         cur,
         """
@@ -2013,7 +1894,7 @@ def _candidate_goods_codes(cur, goods_code_10: str, notes: list[str]) -> list[st
 # ---------------------------------------------------------------------------
 # 핵심 함수
 # ---------------------------------------------------------------------------
-def get_document_package(
+def BuildDocumentPackage(
     taric10: str,
     include_celex_excerpt: bool = False,
     celex_excerpt_chars: int = 600,
@@ -2174,7 +2055,7 @@ def get_document_package(
                             cert_set[c] = d
 
                 certs = [
-                    Certificate(code=c, description=d, category=cert_category(c), guidance=certificate_guidance.get(c, {}))
+                    Certificate(code=c, description=d, category=ClassifyCertificateCategory(c), guidance=certificate_guidance.get(c, {}))
                     for c, d in sorted(cert_set.items())
                 ]
 
@@ -2189,7 +2070,7 @@ def get_document_package(
 
                 # 첫 measure 의 duty_text 를 대표로 (같은 measure_type+legal_base 그룹은 보통 같은 duty)
                 duty_raw = next((r['duty_text'] for r in group_rows if r['duty_text']), '')
-                duty_parsed = parse_duty_text(duty_raw)
+                duty_parsed = ParseDutyText(duty_raw)
 
                 celex_info = celex_map.get(lb)
                 celex_ref = None

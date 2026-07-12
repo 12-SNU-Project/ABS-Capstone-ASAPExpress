@@ -1,7 +1,7 @@
 """URL-driven pipeline smoke for the restored LLM ProductUnderstanding combiner.
 
 Reuses the classification-smoke wiring from ``kurly_market_smoke.py`` (commit
-668cf10) — ``build_raw_input_from_ui`` (which scrapes the Kurly URL) + the
+668cf10) — ``BuildRawInputFromUi`` (which scrapes the Kurly URL) + the
 current component chain (EvidenceIntake -> ProductUnderstanding -> DomainRouter ->
 Classification). For every URL in ``tests/EU_HS_test.csv`` it runs the chain
 twice (``ASAP_USE_LLM_UNDERSTANDING`` off vs on) against the *same* scraped raw
@@ -171,7 +171,7 @@ def _recall(answer: str, cn8_candidates: list[str]) -> dict[str, bool]:
 
 
 def main(arguments: list[str] | None = None) -> int:
-    from bussiness_logic.document.document_pipeline import build_raw_input_from_ui
+    from bussiness_logic.pipeline.export_requirement_pipeline import BuildRawInputFromUi
 
     args = ParseArguments(arguments)
     rows = LoadRows(args.csv_path, offset=args.offset, limit=args.limit)
@@ -186,7 +186,7 @@ def main(arguments: list[str] | None = None) -> int:
         productId = f"row{args.offset + index}"
         print(f"\n### [{productId}] {url}\n    answer={answer}")
         try:
-            rawInput = build_raw_input_from_ui(query=url, facts={"url": url})
+            rawInput = BuildRawInputFromUi(query=url, facts={"url": url})
         except Exception as exc:  # noqa: BLE001
             print(f"    ! scrape_failed: {type(exc).__name__}: {exc}")
             continue

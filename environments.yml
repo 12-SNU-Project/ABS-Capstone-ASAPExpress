@@ -15,6 +15,7 @@ dependencies:
   - pip:
       # Runtime validation / optional admin tooling
       - jsonschema
+      - openai>=2.30.0
       - psycopg2-binary
 
       # Product page rendering and OCR

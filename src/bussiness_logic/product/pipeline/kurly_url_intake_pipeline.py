@@ -1,4 +1,4 @@
-"""상품 정보 수집 단계의 KurlyMarket wrapper."""
+"""KurlyMarket URL intake pipeline."""
 
 from typing import List, Optional
 
@@ -17,15 +17,15 @@ from bussiness_logic.input_process.reconstruction import (
     InputReconstructionResult,
     ProductInputReconstructionService,
 )
-from bussiness_logic.product.pipeline.pipeline_schema import (
-    KurlyPipelineInput,
-    KurlyPipelineResult,
-    PipelineStep,
+from bussiness_logic.product.pipeline.kurly_url_intake_schema import (
+    KurlyUrlIntakeInput,
+    KurlyUrlIntakeResult,
+    KurlyUrlIntakeStep,
 )
 
 
-class KurlyProductPipeline:
-    """KurlyMarket parser와 PaddleOCR fallback을 단계적으로 연결하는 wrapper."""
+class KurlyUrlIntakePipeline:
+    """KurlyMarket URL parsing, OCR fallback, input reconstruction을 연결한다."""
 
     def __init__(
         self,
@@ -43,20 +43,20 @@ class KurlyProductPipeline:
 
     def Run(
         self,
-        pipelineInput: KurlyPipelineInput,
-    ) -> KurlyPipelineResult:
+        pipelineInput: KurlyUrlIntakeInput,
+    ) -> KurlyUrlIntakeResult:
         return self.Collect(pipelineInput)
 
     def Collect(
         self,
-        pipelineInput: KurlyPipelineInput,
-    ) -> KurlyPipelineResult:
-        steps: List[PipelineStep] = []
+        pipelineInput: KurlyUrlIntakeInput,
+    ) -> KurlyUrlIntakeResult:
+        steps: List[KurlyUrlIntakeStep] = []
         errors: List[str] = []
 
         self._collector.ValidateProductPageUrl(pipelineInput.productPageUrl)
         steps.append(
-            PipelineStep(
+            KurlyUrlIntakeStep(
                 stepName="validate_product_page_url",
                 message="supported KurlyMarket product page URL",
             )
@@ -66,7 +66,7 @@ class KurlyProductPipeline:
             pipelineInput.productPageUrl,
         )
         steps.append(
-            PipelineStep(
+            KurlyUrlIntakeStep(
                 stepName="collect_rendered_page_evidence",
                 message=(
                     "visible_text_length={0}, product_notice_text_length={1}, "
@@ -81,7 +81,7 @@ class KurlyProductPipeline:
 
         collectionResult = self._collector.BuildCollectionResult(renderedPageEvidence)
         steps.append(
-            PipelineStep(
+            KurlyUrlIntakeStep(
                 stepName="parse_product_page_evidence",
                 message=(
                     "product_notice_field_count={0}, "
@@ -105,7 +105,7 @@ class KurlyProductPipeline:
             )
         else:
             steps.append(
-                PipelineStep(
+                KurlyUrlIntakeStep(
                     stepName="ocr_fallback",
                     message="skipped because runOcrFallback=False",
                 )
@@ -142,7 +142,7 @@ class KurlyProductPipeline:
                 }
             )
             steps.append(
-                PipelineStep(
+                KurlyUrlIntakeStep(
                     stepName="reconstruct_product_input",
                     message=(
                         "fact_count={0}, unresolved_count={1}, conflict_count={2}, "
@@ -159,13 +159,13 @@ class KurlyProductPipeline:
             )
         else:
             steps.append(
-                PipelineStep(
+                KurlyUrlIntakeStep(
                     stepName="reconstruct_product_input",
                     message="skipped because input reconstruction is not configured",
                 )
             )
         steps.append(
-            PipelineStep(
+            KurlyUrlIntakeStep(
                 stepName="build_classification_fact_texts",
                 message="raw_line_count={0}, classification_fact_text_count={1}".format(
                     ocrNormalizationResult.rawLineCount,
@@ -174,7 +174,7 @@ class KurlyProductPipeline:
             )
         )
 
-        return KurlyPipelineResult(
+        return KurlyUrlIntakeResult(
             collectionResult=collectionResult,
             renderedPageEvidence=renderedPageEvidence,
             ocrImageResults=ocrImageResults,
@@ -190,13 +190,13 @@ class KurlyProductPipeline:
     def _RunOcrFallback(
         self,
         collectionResult: KurlyCollectionResult,
-        pipelineInput: KurlyPipelineInput,
-        steps: List[PipelineStep],
+        pipelineInput: KurlyUrlIntakeInput,
+        steps: List[KurlyUrlIntakeStep],
         errors: List[str],
     ) -> List[ProductOcrImageResult]:
         if not collectionResult.parsedProductPage.requiresOcrFallback:
             steps.append(
-                PipelineStep(
+                KurlyUrlIntakeStep(
                     stepName="ocr_fallback",
                     message="skipped because structured notice is sufficient",
                 )
@@ -207,7 +207,7 @@ class KurlyProductPipeline:
             message = "OCR fallback requested but ProductOcrEngine is not configured"
             errors.append(message)
             steps.append(
-                PipelineStep(
+                KurlyUrlIntakeStep(
                     stepName="ocr_fallback",
                     succeeded=False,
                     message=message,
@@ -245,7 +245,7 @@ class KurlyProductPipeline:
         )
 
         steps.append(
-            PipelineStep(
+            KurlyUrlIntakeStep(
                 stepName="ocr_fallback",
                 succeeded=not errors,
                 message=(
