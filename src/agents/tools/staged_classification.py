@@ -415,8 +415,22 @@ class StagedClassificationTool:
                 raw_mode = (os.environ.get("ASAP_RECOVERY_RAW", "0") or "0").strip() == "1"
                 rscore = (lambda r: r.get("score_raw", r["score"])) if raw_mode else (
                     lambda r: r["score"])
+                # 문턱에서 확정(+50) 성분 제외: confirm은 '그룹 내' 판정이라
+                # 부모 간 이견 문턱에 포함되면 확정 1건이 recovery 기록을
+                # 원천 봉쇄한다 (실측: 확정 대량 발화 런에서 recovery 0건 —
+                # 재첩국·달래 구제 경로 질식). 이견 후보 자격은 그대로 둔다.
+                # ASAP_RECOVERY_BAR_FULL=1 이전 동작 복귀.
+                bar_full = (os.environ.get(
+                    "ASAP_RECOVERY_BAR_FULL", "0") or "0").strip() == "1"
+
+                def _bar_score(r: dict[str, Any]) -> float:
+                    s = rscore(r)
+                    if not bar_full and r.get("decision") == "confirmed":
+                        s -= DECISION_CONFIRM
+                    return s
+
                 best_top_child = max(
-                    (rscore(r) for r in full_ranked
+                    (_bar_score(r) for r in full_ranked
                      if r["code"][:parent_len] == top_parent),
                     default=0.0,
                 )

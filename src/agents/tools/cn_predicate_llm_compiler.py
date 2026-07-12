@@ -169,6 +169,30 @@ def VerifyPredicate(
     return ""
 
 
+def EnrichSubheadingLabels(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """h6 라벨을 combined_description의 중간(dash) 계층 포함으로 교체.
+
+    cn_table.subheading_description은 leaf 문구만 담아서 190219의 라벨이
+    'Other'가 된다 — 정작 분기를 정의하는 "Uncooked pasta, not stuffed or
+    otherwise prepared"는 combined 경로에 살아있는데 안 읽히고 있었다
+    (실측: 1902 hs6 그룹에 uncooked/stuffed 조건 부재 → 짬뽕 0:0).
+    경로 세그먼트 [2:-1](heading 다음 ~ leaf 이전) + leaf를 합쳐 h6 원문으로
+    쓴다. combined가 없거나 짧으면 기존 h6 유지 (무손실 폴백).
+    """
+    for r in rows:
+        combined = str(r.get("combined") or "")
+        if ">" not in combined:
+            continue
+        segments = [s.strip() for s in combined.split(">")]
+        middle = [s for s in segments[2:-1] if s]
+        if middle:
+            # ';' 구분자: 부정 캡처 창([a-z ,\-]{2,60})이 세그먼트 경계를
+            # 넘지 못하게 차단 — 무구분 병합은 "not stuffed ... Containing
+            # eggs"를 한 부정으로 삼켜 190211을 '계란 배제'로 반전시켰다(실측).
+            r["h6"] = " ; ".join([*middle, str(r.get("h6") or "")]).strip()
+    return rows
+
+
 def _build_groups(rows: list[dict[str, Any]], chapter_label: dict[str, str]):
     """(level, parent_code, parent_label, {code: label}) branch groups."""
     h4: dict[str, dict[str, str]] = defaultdict(dict)
@@ -240,7 +264,10 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
     rows = [dict(r) for r in manager.FetchRows(text(
         "SELECT cn8, coalesce(heading_description,'') AS h4,"
         " coalesce(subheading_description,'') AS h6,"
-        " coalesce(cn8_description,'') AS h8 FROM cn_table"), {})]
+        " coalesce(cn8_description,'') AS h8,"
+        " coalesce(combined_description,'') AS combined FROM cn_table"), {})]
+    if "--enrich-h6" in args:
+        rows = EnrichSubheadingLabels(rows)
     if chapters:
         rows = [r for r in rows if str(r.get("cn8") or "")[:2] in set(chapters)]
     groups = _build_groups(rows, chapter_label)

@@ -333,6 +333,10 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         # evidence did not support a value, so the DTO default stands.
         if result.get("ingredient_class"):
             overlay["ingredientClass"] = result["ingredient_class"]
+        if result.get("principal_ingredient_guess"):
+            overlay["principalIngredientGuess"] = result["principal_ingredient_guess"]
+        if result.get("accessory_ingredients"):
+            overlay["accessoryIngredients"] = tuple(result["accessory_ingredients"])
         if result.get("food_form"):
             overlay["foodForm"] = result["food_form"]
         if result.get("processing_state"):

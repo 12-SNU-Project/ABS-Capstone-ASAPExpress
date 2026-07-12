@@ -156,6 +156,21 @@ def EvaluateCodeDecision(
         # 점수 경쟁(술어 +3)은 유지되고 +50 확정만 잃는다.
         # ASAP_DECISION_TYPED_GATE=0으로 이전(77% 커밋) 시맨틱 복귀.
         gate_on = (os.environ.get("ASAP_DECISION_TYPED_GATE", "1") or "1").strip() != "0"
+        # 상태형 단독 확정 금지(동족 원칙 3호 — ingredient_class·NTD 제한과
+        # 같은 계보): 'prepared' 같은 상태값은 조리식품 전부가 가져서 단독
+        # 확정 자격이 없다 (실측: 오발동 21건 중 2102 효모 등 다수가 상태
+        # 단독). 상태는 정체(identity/species/material) true를 전제로만
+        # 확정을 가른다. ASAP_DECISION_STATE_ALONE=1 복귀.
+        state_types = {"processing_method", "preservation_state",
+                       "physical_form", "condition_quality"}
+        if gate_on and (os.environ.get(
+                "ASAP_DECISION_STATE_ALONE", "0") or "0").strip() != "1":
+            true_types = {d["cond"] for d in detail if d["verdict"] == "true"}
+            if true_types and true_types <= state_types:
+                for d in detail:
+                    if d["verdict"] == "true":
+                        d["why"] += ";state_alone_blocked"
+                return "undecided", detail
         typed_ok = any(
             (d["op"] == "quant_gate" and d["verdict"] == "true")
             or (d["verdict"] == "true"
