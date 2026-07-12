@@ -99,9 +99,9 @@ def _grounded_typed_field(value: object) -> str:
 
 def _get_adapter() -> object:
     if not _adapter_cache:
-        from agents.candiate_classfier import build_runtime_adapter
+        from agents.runtime_adapter import BuildPipelineRuntimeAdapter
 
-        _adapter_cache.append(build_runtime_adapter())
+        _adapter_cache.append(BuildPipelineRuntimeAdapter())
     return _adapter_cache[0]
 
 

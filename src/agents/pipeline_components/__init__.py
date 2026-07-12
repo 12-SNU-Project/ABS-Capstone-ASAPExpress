@@ -4,7 +4,7 @@ Modules are grouped by pipeline stage for import clarity:
 - Evidence intake
 - Product understanding (identity + composition)
 - HS2 pre-routing
-- Stage-1/beam-like classification
+- Staged HS4 -> HS6 -> CN8 classification
 - TARIC branch resolution
 """
 

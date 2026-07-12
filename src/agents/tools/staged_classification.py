@@ -7,8 +7,7 @@ chapters.
 
 Baseline building blocks (no dependency on the removed ``llm_classifier``):
   - cn_table children  : managed session-based query via ``DbSessionManager``
-  - LLM stage-select   : ``_external_classifier.build_runtime_adapter`` +
-                         ``bussiness_logic.bridge.schema.LlmRequest`` (RuntimeAdapter.Generate)
+  - LLM validation     : shared ``agents.runtime_adapter`` RuntimeAdapter
 
 Reads baseline ProductUnderstandingFacts / RoutingContext shaped blackboard dicts. Returns compact
 per-stage payloads so ``classification_stage_results`` on the blackboard can
@@ -261,7 +260,11 @@ def _quantitative_verdict(descr: str, percentages: list[Any]) -> dict[str, Any]:
             continue
         pct = _to_float(p.get("percent"))
         term = str(p.get("term") or "").strip()
-        if pct is not None and term and (_tokens(term) & node_tokens):
+        aliases = p.get("term_aliases")
+        term_candidates = [term]
+        if isinstance(aliases, list):
+            term_candidates.extend(str(alias) for alias in aliases if str(alias).strip())
+        if pct is not None and any(_tokens(candidate) & node_tokens for candidate in term_candidates):
             matched = (term, pct)
             break
     if matched is None:
@@ -1117,8 +1120,8 @@ class StagedClassificationTool:
     # ---- LLM select (bridge) ---------------------------------------------
     def _get_adapter(self):
         if self._adapter is None:
-            from agents.candiate_classfier import build_runtime_adapter
-            self._adapter = build_runtime_adapter()
+            from agents.runtime_adapter import BuildPipelineRuntimeAdapter
+            self._adapter = BuildPipelineRuntimeAdapter()
         return self._adapter
 
     def _llm_select(self, ranked: list[dict[str, Any]], facts: dict[str, list[str]], level: str) -> list[str]:

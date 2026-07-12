@@ -25,7 +25,9 @@ from agents.tools.identity_distiller import IdentityDistillerService
 
 
 PERCENT_RE = re.compile(
-    r"(?P<term>[A-Za-z가-힣][A-Za-z가-힣 /·._-]{0,39}?)\s*(?P<percent>\d+(?:[.,]\d+)?)\s*%",
+    r"(?P<term>[A-Za-z가-힣][A-Za-z가-힣 /·._-]{0,39}?)"
+    r"(?:\s*[\(\[（［][^)\]）］]{0,80}[\)\]）］])?"
+    r"\s*(?P<percent>\d+(?:[.,]\d+)?)\s*%",
 )
 COMPONENT_NAME_RE = re.compile(r"[\(\[（［](?P<component>[^)\]）］]+)[)\]）］]")
 CONTENT_WEIGHT_RE = re.compile(
@@ -41,7 +43,7 @@ COMPOSITION_PERCENT_FIELD_MARKERS = (
     "ingredients",
     "composition",
 )
-WRAPPER_RE = re.compile(r"피|만두피|도우|반죽|wrapper|dough|pastry", re.I)
+WRAPPER_RE = re.compile(r"만두피|도우|반죽|wrapper|dough|pastry", re.I)
 SAUCE_BROTH_RE = re.compile(r"소스|국물|육수|스프|sauce|broth|soup|stock", re.I)
 ALLERGEN_RE = re.compile(
     r"알레르|알러지|알레르겐|같은\s*제조시설|동일\s*제조시설|교차|allergen|may contain|cross[- ]?contact",
@@ -53,6 +55,64 @@ ALLERGEN_RE = re.compile(
 ORIGIN_TERM_RE = re.compile(r"원산지|^[가-힣]{1,4}산$")
 ADMIN_LABEL_LINE_RE = re.compile(
     r"^(?:포장타입|중량/?용량|판매단위|소비기한|유통기한|보관\s*방법|배송|교환|반품|고객|원산지)",
+)
+NUTRITION_FIELD_RE = re.compile(
+    r"영양|nutrition|열량|나트륨|탄수화물|당류|지방|콜레스테롤|단백질",
+    re.I,
+)
+COMPONENT_WEIGHT_NOISE_NAMES = frozenset({
+    "내",
+    "내용량",
+    "총내용량",
+    "열량",
+    "나트륨",
+    "탄수화물",
+    "당류",
+    "지방",
+    "트랜스지방",
+    "포화지방",
+    "콜레스테롤",
+    "단백질",
+})
+INGREDIENT_CLASS_RULES = (
+    ("mollusc", ("낙지", "주꾸미", "문어", "오징어", "꼬막", "새꼬막", "재첩", "조개", "mollusc", "octopus", "squid", "clam", "cockle")),
+    ("crustacean", ("새우", "게", "crab", "shrimp", "prawn", "lobster", "crustacean")),
+    ("fish", ("어묵", "연육", "어육", "대구", "가다랑어", "참치", "fish", "cod", "surimi", "tuna")),
+    ("meat", ("돼지고기", "소고기", "닭고기", "pork", "beef", "chicken", "meat")),
+    ("cereal", ("밀가루", "밀", "찹쌀", "쌀", "통밀", "메밀", "떡", "면", "우동", "flour", "wheat", "rice", "cereal", "noodle")),
+    ("soy_legume", ("서리태", "대두", "콩", "두부", "soy", "soybean", "bean", "tofu")),
+    ("vegetable", ("고추", "대파", "양파", "무", "김치", "배추", "부추", "마늘", "나물", "vegetable", "pepper", "radish", "cabbage", "garlic")),
+    ("seasoning_sauce", ("소스", "간장", "고추장", "된장", "조미", "양념", "sauce", "broth", "seasoning")),
+)
+INGREDIENT_TERM_ALIASES = (
+    ("찹쌀", ("glutinous rice", "rice")),
+    ("쌀", ("rice",)),
+    ("밀가루", ("wheat flour", "flour", "wheat")),
+    ("통밀", ("whole wheat", "wheat")),
+    ("메밀", ("buckwheat",)),
+    ("서리태", ("black soybean", "soybean", "bean")),
+    ("대두", ("soybean", "soy")),
+    ("재첩", ("clam", "corbicula", "mollusc")),
+    ("꼬막", ("cockle", "clam", "mollusc")),
+    ("새꼬막", ("cockle", "clam", "mollusc")),
+    ("낙지", ("octopus", "mollusc")),
+    ("주꾸미", ("webfoot octopus", "octopus", "mollusc")),
+    ("오징어", ("squid", "mollusc")),
+    ("새우", ("shrimp", "prawn", "crustacean")),
+    ("대구", ("cod", "fish")),
+    ("연육", ("surimi", "fish paste", "fish")),
+    ("어육", ("fish",)),
+    ("어묵", ("fish cake", "fish")),
+)
+PROCESSING_STATE_RULES = (
+    ("frozen", ("냉동", "-18", "frozen")),
+    ("cooked", ("가열하여 섭취", "유탕", "볶음", "조리", "cooked", "boiled", "fried", "roasted", "steamed")),
+    ("fermented", ("발효", "김치", "fermented")),
+    ("dried", ("건조", "dried")),
+    ("chilled", ("냉장", "chilled")),
+    ("fresh", ("신선", "fresh")),
+    ("uncooked", ("비가열", "uncooked", "raw")),
+    ("prepared", ("가공품", "가열하지 않고 섭취", "즉석", "소스", "양념", "prepared")),
 )
 
 
@@ -394,26 +454,30 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         if not percentages:
             missing.append("ingredient_percentages")
 
-        compositionTerms = ProductUnderstandingComponent._DedupStrings(
-            [
-                term
-                for term in (
-                    *factTextValues,
-                    *tableTexts,
-                    *factTexts,
-                    *coiTexts,
-                )
-                # Allergen notices and admin label lines are not composition.
-                if not ALLERGEN_RE.search(term) and not ADMIN_LABEL_LINE_RE.search(term)
-            ],
-            limit=80,
+        compositionTerms = ProductUnderstandingComponent._CompositionTerms(
+            productFacts=productFacts,
+            reconstructedTables=reconstructedTables,
+            factTexts=factTexts,
+            coiTexts=coiTexts,
+        )
+        ingredientClasses = ProductUnderstandingComponent._BuildIngredientClasses(
+            ingredientEntries=ingredientEntries,
+            compositionTerms=compositionTerms,
+        )
+        processingState = ProductUnderstandingComponent._BuildProcessingState(
+            factTexts=(
+                *factTextValues,
+                *tableTexts,
+                *factTexts,
+                *coiTexts,
+            ),
         )
         return CompositionFactSet(
-            processingState="unknown",
+            processingState=processingState,
             principalIngredient=principalIngredient,
             principalIngredientStatus=principalStatus,
             principalIngredientCandidates=tuple(principalCandidates[:10]),
-            ingredientClasses=(),
+            ingredientClasses=ingredientClasses,
             ingredientEntries=tuple(ingredientEntries[:80]),
             ingredientPercentages=tuple(percentages[:20]),
             componentCompositions=tuple(componentCompositions[:20]),
@@ -477,6 +541,101 @@ class ProductUnderstandingComponent(BasePipelineComponent):
                 prefix = f"{tableName} / " if tableName else ""
                 texts.append(f"{prefix}{field}: {value}")
         return tuple(texts)
+
+    @staticmethod
+    def _CompositionTerms(
+        *,
+        productFacts: tuple[dict[str, JsonValue], ...],
+        reconstructedTables: tuple[dict[str, JsonValue], ...],
+        factTexts: tuple[str, ...],
+        coiTexts: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        terms: list[str] = []
+        for fact in productFacts:
+            field = ProductUnderstandingComponent._ReadTextField(fact, "field_name")
+            value = ProductUnderstandingComponent._ReadTextField(fact, "normalized_value")
+            if field and value and ProductUnderstandingComponent._IsCompositionFieldName(field):
+                terms.append(f"{field}: {value}")
+
+        for table in reconstructedTables:
+            tableName = str(table.get("table_name") or "").strip()
+            rows = table.get("rows")
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                field = ProductUnderstandingComponent._ReadTextField(row, "field_name")
+                value = ProductUnderstandingComponent._ReadTextField(row, "normalized_value")
+                if not field or not value:
+                    continue
+                if not ProductUnderstandingComponent._IsCompositionFieldName(field):
+                    continue
+                prefix = f"{tableName} / " if tableName else ""
+                terms.append(f"{prefix}{field}: {value}")
+
+        for text in factTexts:
+            if ProductUnderstandingComponent._LooksLikeCompositionText(text):
+                terms.append(text)
+        terms.extend(coiTexts)
+        return ProductUnderstandingComponent._DedupStrings(terms, limit=80)
+
+    @staticmethod
+    def _LooksLikeCompositionText(text: str) -> bool:
+        value = str(text or "").strip()
+        if not value or ALLERGEN_RE.search(value) or ADMIN_LABEL_LINE_RE.search(value):
+            return False
+        fieldName = value.split(":", 1)[0].strip() if ":" in value else value
+        return ProductUnderstandingComponent._IsCompositionFieldName(fieldName)
+
+    @staticmethod
+    def _BuildIngredientClasses(
+        *,
+        ingredientEntries: list[dict[str, JsonValue]],
+        compositionTerms: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        evidenceTexts = [
+            str(entry.get("ingredient_name") or "")
+            for entry in ingredientEntries
+            if str(entry.get("ingredient_name") or "").strip()
+        ]
+        if not evidenceTexts:
+            evidenceTexts.extend(compositionTerms)
+        classes: list[str] = []
+        for className, terms in INGREDIENT_CLASS_RULES:
+            if any(
+                ProductUnderstandingComponent._ContainsTerm(text, term)
+                for text in evidenceTexts
+                for term in terms
+            ):
+                classes.append(className)
+        return tuple(classes)
+
+    @staticmethod
+    def _BuildProcessingState(*, factTexts: tuple[str, ...]) -> str:
+        states: list[str] = []
+        for stateName, terms in PROCESSING_STATE_RULES:
+            if any(
+                ProductUnderstandingComponent._ContainsTerm(text, term)
+                for text in factTexts
+                for term in terms
+            ):
+                states.append(stateName)
+        return " ".join(states[:4]) if states else "unknown"
+
+    @staticmethod
+    def _IngredientTermAliases(term: str) -> tuple[str, ...]:
+        aliases: list[str] = []
+        for marker, values in INGREDIENT_TERM_ALIASES:
+            if ProductUnderstandingComponent._ContainsTerm(term, marker):
+                for value in values:
+                    if value not in aliases:
+                        aliases.append(value)
+        return tuple(aliases)
+
+    @staticmethod
+    def _ContainsTerm(text: str, term: str) -> bool:
+        return str(term).lower() in str(text).lower()
 
     @staticmethod
     def _BuildIngredientEntries(
@@ -631,7 +790,11 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             term = str(entry.get("ingredient_name") or "").strip()
             key = (term.lower(), str(percent))
             if term and key not in seen:
-                percentages.append({"term": term, "percent": percent})
+                item: dict[str, JsonValue] = {"term": term, "percent": percent}
+                aliases = ProductUnderstandingComponent._IngredientTermAliases(term)
+                if aliases:
+                    item["term_aliases"] = list(aliases)
+                percentages.append(item)
                 seen.add(key)
         return percentages
 
@@ -773,6 +936,10 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             if (
                 re.search(r"[A-Za-z가-힣]", componentName) is None
                 or componentName.lower() in {"g", "kg", "ml", "l"}
+                or ProductUnderstandingComponent._IsComponentWeightNoise(
+                    componentName,
+                    text,
+                )
             ):
                 continue
             component = components.setdefault(
@@ -782,6 +949,13 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             component["content_weight"] = amount
             component["content_weight_unit"] = unit
             ProductUnderstandingComponent._MergeSourceRefs(component, sourceRefs)
+
+    @staticmethod
+    def _IsComponentWeightNoise(componentName: str, text: str) -> bool:
+        normalizedName = componentName.replace(" ", "")
+        if normalizedName in COMPONENT_WEIGHT_NOISE_NAMES:
+            return True
+        return bool(NUTRITION_FIELD_RE.search(text))
 
     @staticmethod
     def _SetComponentWeight(
@@ -831,6 +1005,21 @@ class ProductUnderstandingComponent(BasePipelineComponent):
                 percent=percent,
                 role="minor_ingredient" if percent < 10 else "major_ingredient",
             )
+        if not productEntries:
+            for entry in ingredientEntries:
+                if entry.get("scope") != "component":
+                    continue
+                percent = entry.get("percent")
+                if not isinstance(percent, (int, float)):
+                    continue
+                ProductUnderstandingComponent._AddPrincipalCandidate(
+                    candidatesByName,
+                    entry,
+                    basis="component_explicit_percent",
+                    confidence=0.45,
+                    percent=percent,
+                    role="component_ingredient",
+                )
         return sorted(
             candidatesByName.values(),
             key=lambda item: (
@@ -862,6 +1051,8 @@ class ProductUnderstandingComponent(BasePipelineComponent):
                 "confidence": confidence,
                 "basis": basis,
                 "order_index": entry.get("order_index") or 9999,
+                "scope": str(entry.get("scope") or "product"),
+                "component_name": str(entry.get("component_name") or ""),
                 "source_refs": [],
             },
         )
@@ -885,7 +1076,14 @@ class ProductUnderstandingComponent(BasePipelineComponent):
     def _PrincipalStatus(candidates: list[dict[str, JsonValue]]) -> str:
         if not candidates:
             return "unknown"
-        topConfidence = float(candidates[0].get("confidence") or 0.0)
+        productCandidates = [
+            candidate
+            for candidate in candidates
+            if str(candidate.get("scope") or "product") == "product"
+        ]
+        if not productCandidates:
+            return "unknown"
+        topConfidence = float(productCandidates[0].get("confidence") or 0.0)
         return "confirmed" if topConfidence >= 0.8 else "ambiguous"
 
     @staticmethod
@@ -979,6 +1177,8 @@ class ProductUnderstandingComponent(BasePipelineComponent):
     @staticmethod
     def _IsCompositionFieldName(fieldName: str) -> bool:
         compactFieldName = fieldName.replace(" ", "").lower()
+        if NUTRITION_FIELD_RE.search(compactFieldName):
+            return False
         return any(
             marker.lower() in compactFieldName
             for marker in COMPOSITION_PERCENT_FIELD_MARKERS

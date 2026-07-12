@@ -222,7 +222,7 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
 
     from sqlalchemy import text
 
-    from agents.candiate_classfier import build_runtime_adapter
+    from agents.runtime_adapter import BuildPipelineRuntimeAdapter
     from bussiness_logic.bridge.schema import LlmGenerationOptions, LlmRequest
     from db.db_session_manager import DbSessionManager
 
@@ -248,7 +248,7 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
         groups = groups[:limit]
     print(f"챕터 {','.join(chapters) if chapters else '전체(01~99)'}: 분기 그룹 {len(groups)}개 (LLM 콜 수와 동일)")
 
-    adapter = build_runtime_adapter()
+    adapter = BuildPipelineRuntimeAdapter()
     accepted: list[dict[str, Any]] = []
     stats = {"groups": 0, "raw": 0, "accepted": 0}
     reject = defaultdict(int)

@@ -14,7 +14,7 @@ from pydantic import (
     field_validator,
 )
 
-from bussiness_logic.core.classification import (
+from bussiness_logic.core.classification.stage1 import (
     PRODUCT_DOMAIN_SCOPE_MAP,
     ProductClassificationInput,
 )

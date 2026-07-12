@@ -4,7 +4,7 @@ from typing import Dict, List, Mapping, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from bussiness_logic.core.classification import (
+from bussiness_logic.core.classification.stage1 import (
     CnCandidate,
     Stage1ResponseValidationReport,
 )
