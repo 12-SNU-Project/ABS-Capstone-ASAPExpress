@@ -297,6 +297,9 @@ def _search_korean_wikipedia_as_english(
         koreanTitle = _StripMarkup(str(rawItem.get("title") or "")).strip()
         if not koreanTitle:
             continue
+        koreanDescription = _StripMarkup(
+            str(rawItem.get("description") or rawItem.get("excerpt") or ""),
+        ).strip()
         englishTitle = _fetch_english_langlink(
             koreanTitle,
             timeoutSeconds=timeoutSeconds,
@@ -312,7 +315,11 @@ def _search_korean_wikipedia_as_english(
         rows.append(
             WikipediaSearchResult(
                 title=englishTitle,
-                description="",
+                description=" ".join(
+                    text
+                    for text in (koreanTitle, koreanDescription)
+                    if text
+                ),
                 snippet=snippet or englishTitle,
                 link=link,
             ),
