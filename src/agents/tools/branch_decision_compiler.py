@@ -123,6 +123,12 @@ def CompileGroupDecisions(
     """
     rows: list[dict[str, Any]] = []
     ordered = sorted(members.items())
+    _VALUE_STOP = frozenset({
+        "and", "for", "the", "its", "with", "from", "this", "thi", "that",
+        "heading", "subheading", "chapter", "note", "other", "otherwise",
+        "including", "included", "containing", "mixture", "weigh", "whether",
+        "kind", "use", "used",
+    })
     for seq, (code, label) in enumerate(ordered):
         clean = _COND_CLAUSE.sub(" ", str(label or ""))
         if _RESIDUAL_RX is not None and _RESIDUAL_RX.search(clean.lower()):
@@ -173,8 +179,7 @@ def CompileGroupDecisions(
             cond_type = entry["criterion_type"]
             if cond_type in ("residual_other", "exclusion_boundary"):
                 continue
-            search_text = (positive_side if cond_type in _STATE_TYPES
-                           else leaf_positive)
+            search_text = positive_side
             match = entry["pattern"].search(search_text)
             if not match:
                 continue
@@ -204,9 +209,46 @@ def CompileGroupDecisions(
                 emitted_types.add(cond_type)
         # 아무 유형도 안 잡힌 순수 명사 라벨 -> product_identity 폴백
         if not emitted_types:
-            nouns = sorted(w for w in _toks(leaf_positive) if _discriminative(w))[:8]
+            nouns = sorted(w for w in _toks(positive_side) if _discriminative(w))[:8]
             if nouns:
                 add("product_identity", "has_token", nouns, clean)
+    # ── 그룹 수준 값 정화 (post-pass) ──
+    # "형제 과반이 값으로 공유하는 토큰"은 판별 자격이 없다 — 류 정의어
+    # (mollusc 7/14), 법조 관용구(containing 10/10), 문법 잡토큰(and 9/9)이
+    # 모두 이 한 규칙으로 죽는다 (전수 스캔 547건 실측). 코드별 고유 값
+    # (stuffed: 190220 단독)은 살아남는다. 빈 조건은 행 자체를 제거.
+    if rows:
+        value_share: dict[str, set] = {}
+        for r in rows:
+            if r["op"] != "has_token":
+                continue
+            try:
+                for v in json.loads(r["value"]) or []:
+                    value_share.setdefault(str(v).lower(), set()).add(r["then_code"])
+            except Exception:
+                continue
+        n_codes = len({r["then_code"] for r in rows}) or 1
+        limit_share = max(2, n_codes / 2)
+        cleaned: list[dict[str, Any]] = []
+        for r in rows:
+            if r["op"] != "has_token":
+                cleaned.append(r)
+                continue
+            try:
+                vals = json.loads(r["value"]) or []
+            except Exception:
+                cleaned.append(r)
+                continue
+            kept = [
+                v for v in vals
+                if str(v).lower() not in _VALUE_STOP
+                and len(value_share.get(str(v).lower(), ())) < limit_share
+            ]
+            if kept:
+                r = dict(r)
+                r["value"] = json.dumps(kept, ensure_ascii=False)
+                cleaned.append(r)
+        rows = cleaned
     return rows
 
 

@@ -426,6 +426,10 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         # ASAP_COI_FLAT_TEXT=1 로 이전 동작 복귀.
         _coi_flat_allowed = (os.environ.get(
             "ASAP_COI_FLAT_TEXT", "0") or "0").strip() == "1"
+        if not _coi_flat_allowed:
+            # 전면 차단: 파싱 실패 파일의 평탄 텍스트도 잡음 우세 실측
+            # (밀면 'starch'→1903, 산채→2009). 정보는 구조화 entries로만.
+            coiTexts = ()
         tableTexts = ProductUnderstandingComponent._ReconstructedTableTexts(
             reconstructedTables,
         )
@@ -458,8 +462,6 @@ class ProductUnderstandingComponent(BasePipelineComponent):
                         })
                 if coi_entries:
                     ingredientEntries = [*ingredientEntries, *coi_entries]
-                    if not _coi_flat_allowed:
-                        coiTexts = ()  # 구조화 성립 → 평탄 유입 차단
             except Exception:  # noqa: BLE001 — COI 실패는 무증거일 뿐
                 pass
         percentages = ProductUnderstandingComponent._IngredientPercentagesFromEntries(

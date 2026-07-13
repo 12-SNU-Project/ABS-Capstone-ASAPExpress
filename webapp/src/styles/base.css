@@ -35,18 +35,29 @@ body {
   text-decoration: none;
 }
 
-/* 검정 PNG를 mask로 써서 브랜드 액센트(#6d3fd6)로 채색 */
+/* 검정 PNG를 mask로 써서 브랜드 그라디언트로 채색 — 은은한 sheen이 흐른다 */
 .app-topbar-logo {
   display: block;
   width: clamp(178px, 17vw, 240px);
   height: 38px;
-  background-color: #6d3fd6;
+  background: linear-gradient(115deg, #5b2fc4, #6d3fd6 35%, #a855f7 55%, #c084fc 70%, #6d3fd6 90%);
+  background-size: 220% 100%;
+  animation: logo-sheen 7s ease-in-out infinite;
   mask-repeat: no-repeat;
   mask-position: left center;
   mask-size: contain;
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-position: left center;
   -webkit-mask-size: contain;
+}
+
+@keyframes logo-sheen {
+  0%, 100% {
+    background-position: 0% 0;
+  }
+  50% {
+    background-position: 100% 0;
+  }
 }
 
 .app-topbar-tabs {
