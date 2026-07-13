@@ -1,0 +1,6682 @@
+{
+  "version": 1,
+  "source": "ASAP local guideline library; API document_package certificate codes are merged in browser",
+  "generated_from": {
+    "groups_csv": "taric_control_guidelines_ko_groups.csv",
+    "certificates_csv": "taric_control_guidelines_ko_certificates.csv",
+    "note": "Synchronized from CSV files; UI reads this JSON file."
+  },
+  "groups": {
+    "AUTHENTICITY_QUALITY_CERTIFICATES": {
+      "title": "진정성·품질 증명서 확인자료",
+      "summary": "특정 농수축산물, 섬유, 담배, 쌀, 주스 등 품목에 TARIC 진정성 또는 품질 증명서 코드가 붙은 경우 해당 품목·쿼터·원산지 조건에 맞는 증명서를 확인합니다.",
+      "certificate_codes": [
+        "A001",
+        "A004",
+        "A007",
+        "A010",
+        "A014",
+        "A015",
+        "A016",
+        "A017",
+        "A019",
+        "A022",
+        "A030"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "TARIC measure에 진정성 또는 품질 증명서 코드가 붙어 있고, 제품이 해당 품목·원산지·쿼터 조건에 들어가는지 확인합니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "해당 코드에 맞는 진정성 증명서, 품질 증명서 또는 원산지 관할기관 발급 증빙을 수입자와 확인해 준비합니다."
+        },
+        {
+          "title": "근거",
+          "body": "연결 TARIC measure와 각 코드의 certificate description 및 관련 EU 시행규정입니다."
+        },
+        {
+          "title": "비대상 시 확인자료",
+          "body": "해당 품목·원산지·쿼터 조건이 아니라면 제품 규격서, 원산지 자료, 거래 조건으로 비대상 근거를 확인합니다."
+        }
+      ]
+    },
+    "CITES_SPECIES_EVIDENCE": {
+      "title": "CITES 대상종 확인 가이드라인",
+      "summary": "상품 또는 원료가 CITES/워싱턴협약 대상 종인지 확인합니다. 대상이면 C400 증명서를, 비대상이면 Y900 선언을 검토합니다.",
+      "certificate_codes": [
+        "C400",
+        "Y900"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "원재료의 생물종, 학명, 동식물 유래 원료, 추출물, 가죽/모피/뼈/조개/산호 등 생물 유래 부품이 있는지 확인합니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "C400 - CITES 대상 종이면 관련 CITES 증명서 또는 허가서를 준비합니다."
+        },
+        {
+          "title": "비대상 시 준비 자료",
+          "body": "Y900 - 상품 또는 원료가 CITES 대상이 아니라는 선언입니다. 학명, 원재료명세서, 공급자 확인서 등으로 비대상 근거를 설명합니다."
+        },
+        {
+          "title": "근거",
+          "body": "Regulation (EU) 2023/966; Council Regulation (EEC) No 3254/91"
+        }
+      ]
+    },
+    "END_USE_STATEMENT": {
+      "title": "제재·제한 품목 비대상/최종용도 확인 가이드라인",
+      "summary": "수출입 제한, 제재, 최종용도 제한 또는 수입허가 measure가 붙은 경우 제한 대상인지 확인합니다. 대상이면 허가서/최종용도 자료를, 비대상 또는 면제 조건이면 Y-code 선언을 검토합니다.",
+      "certificate_codes": [
+        "L100",
+        "Y750",
+        "Y920",
+        "Y921"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "제품의 물성, 사양, 최종용도, 사용자, 거래상대방, 원산국/목적지, 제재대상 관련 여부를 확인합니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "L100 등 수입허가 코드가 연결되면 제한 품목 또는 허가 대상인지 수입자와 확인하고 필요한 허가서를 준비합니다."
+        },
+        {
+          "title": "근거",
+          "body": "연결 TARIC measure, Regulation (EU) No 267/2012, Regulation (EU) 2017/1509, Regulation (EU) 2016/44 등"
+        },
+        {
+          "title": "비대상/면제 시 준비 자료",
+          "body": "Y750/Y920/Y921 - 특정 제재/제한 품목 범위에 해당하지 않거나 면제 조건에 해당한다는 선언입니다. 기술사양서, 최종용도 확인서, 거래상대방 확인 자료로 근거를 설명합니다."
+        }
+      ]
+    },
+    "FISHERY_STATISTICAL_CATCH_DOCUMENTS": {
+      "title": "수산 통계·어획 문서 확인자료",
+      "summary": "참치, 황새치 등 특정 수산물에 ICCAT/IOTC/IATTC 통계문서, 재수출증명서, 어획문서가 필요한지 확인합니다.",
+      "certificate_codes": [
+        "C039",
+        "C040",
+        "C041",
+        "C042",
+        "C043",
+        "C047",
+        "C092",
+        "C641"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "원재료 어종, 가공상태, 어획국, 재수출 여부, 수산물 관리기구 적용 대상인지 확인합니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "ICCAT/IOTC/IATTC 통계문서, 재수출증명서, 어획문서 등 해당 수산물 코드에 맞는 문서를 준비합니다."
+        },
+        {
+          "title": "근거",
+          "body": "연결 TARIC fishery statistical document measure 및 수산물 관리기구 관련 규정입니다."
+        },
+        {
+          "title": "비대상 시 확인자료",
+          "body": "해당 어종이나 관리기구 대상이 아니라면 어종명, 학명, 원산지, 제조공정, 성분표로 비대상 근거를 확인합니다."
+        }
+      ]
+    },
+    "FLEGT_TIMBER_EVIDENCE": {
+      "title": "FLEGT 목재제품 확인 가이드라인",
+      "summary": "제품 또는 원재료가 FLEGT 대상 목재 제품인지 확인합니다. 대상이면 C690 수입허가서를, 비대상/재활용 원료이면 C631 확인서를 검토합니다.",
+      "certificate_codes": [
+        "C631",
+        "C690"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "목재, 목재펄프, 목재가공품, 종이류 등 FLEGT 대상 가능성이 있는 원재료가 있는지 확인합니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "C690 - FLEGT 대상 목재 제품이면 FLEGT 수입허가서를 준비합니다."
+        },
+        {
+          "title": "근거",
+          "body": "Council Regulation (EC) No 2173/2005; Decision 2014/284/EU; Decision 2010/151/EU"
+        },
+        {
+          "title": "비대상/재활용 원료 시 준비 자료",
+          "body": "C631 - FLEGT 대상 종이 아닌 원료 또는 재활용 원료 확인서입니다. 공급자 자료로 근거를 설명합니다."
+        }
+      ]
+    },
+    "FOOD_CONTACT_MATERIAL_COMPLIANCE": {
+      "title": "식품접촉재료 적합성 확인자료",
+      "summary": "식품과 접촉하는 플라스틱, 주방용품, 포장재 등에 적합성 선언이나 시험·적합성 자료가 필요한지 확인합니다.",
+      "certificate_codes": [
+        "C055",
+        "C057",
+        "C060"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "제품이 식품용 용기, 주방용품, 포장재, 플라스틱 재질 등 식품접촉재료인지 확인합니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "적합성 선언서, 시험성적서, 재질 정보, 제조자 적합성 자료를 준비합니다."
+        },
+        {
+          "title": "근거",
+          "body": "Regulation (EU) No 10/2011 및 관련 식품접촉재료 TARIC measure입니다."
+        },
+        {
+          "title": "비대상 시 확인자료",
+          "body": "식품접촉 용도가 아니라면 제품 용도, 재질, 라벨, 판매 페이지 설명으로 비대상 근거를 확인합니다."
+        }
+      ]
+    },
+    "HEALTH_CERT_SUPPORT": {
+      "title": "EU 검역·공식통제 서류 가이드라인",
+      "summary": "동물, 동물성 제품, 식물·식물제품, 고위험 식품·사료 등 공식통제 대상인지 확인합니다. 동물성 제품 또는 복합식품이 Regulation (EU) 2021/632 대상이면 CHED-P 또는 관련 위생증명 준비가 필요하고, 대상이 아니면 Y930 등 비대상 선언 근거를 제품 자료로 설명합니다.",
+      "certificate_codes": [
+        "C084",
+        "C085",
+        "C640",
+        "C678",
+        "N853",
+        "Y058",
+        "Y931",
+        "Y979",
+        "Y980"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "원재료와 가공상태를 기준으로 동물성 제품, 식물성 검역 대상, 고위험 비동물성 식품·사료, 복합식품인지 확인합니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "N853 - 동물성 제품 또는 대상 복합식품이면 CHED-P를 준비합니다. C640은 살아있는 동물 CHED-A, C085는 식물·식물제품 CHED-PP, C678은 고위험 비동물성 식품·사료 CHED-D에 해당합니다."
+        },
+        {
+          "title": "근거",
+          "body": "Regulation (EU) 2021/632; Regulation (EU) 2019/1715 Annex II Part 2 Section B; Regulation (EU) 2019/2072; Regulation (EU) 2019/1793; Regulation (EU) 2024/256; Implementing Decision 2011/884/EU"
+        },
+        {
+          "title": "CHED-P 대상 판단",
+          "body": "1. TARIC control measure에 Veterinary control 또는 N853/CHED-P가 붙어 있는지 확인합니다. 2. 제품이 육류, 수산물, 유제품, 알, 꿀, 젤라틴, 콜라겐, 동물성 부산물 등 동물성 제품인지 확인합니다. 3. 복합식품이면 동물성 원료의 종류, 함량, 가공상태, 상온보관 가능 여부를 확인합니다. 4. 해당 CN/TARIC 코드와 제품군이 Regulation (EU) 2021/632의 border control post 공식통제 대상 리스트에 들어가면 CHED-P 대상입니다."
+        },
+        {
+          "title": "CHED-P 대상 시 확인 자료",
+          "body": "제품군, 동물성 원료 종류, 원재료 함량, 가공방법, 생산국, 원산국, 제조시설 EU 승인 여부, 승인 작업장 번호, 위생증명서 모델, 로트번호, 보관/운송 온도, 수입자 TRACES 등록 및 CHED-P 생성 여부를 확인합니다."
+        },
+        {
+          "title": "비대상 시 증빙 방법",
+          "body": "Y930 등 비대상 선언을 쓰려면 동물성 원료가 없거나, Regulation (EU) 2021/632 공식통제 대상 제품군이 아니거나, 예외 조건에 해당한다는 근거를 제품 자료로 보여줘야 합니다. 성분표, 제조공정도, 원재료 명세서, 라벨, 제품 규격서, 보관조건, 동물성 원료 미사용 확인서, 복합식품 판단 자료를 함께 확인합니다."
+        },
+        {
+          "title": "비대상/예외 시 준비 자료",
+          "body": "Y930 - Regulation (EU) 2021/632 대상이 아닌 경우의 비대상 선언입니다. Y058/Y931/Y979/Y980은 개인수하물, 개인소비 소량화물, 수의검역 예외, 식물제품 개인수하물 등 예외 조건에 해당할 때 검토합니다."
+        },
+        {
+          "title": "확인할 상품 정보",
+          "body": "원재료 전체 목록, 동물성/식물성 원료 여부, 가공상태, 용도, 상업판매 여부, 중량/수량, 제조공정도, 라벨"
+        }
+      ]
+    },
+    "IMPORT_LICENCE_PERMIT": {
+      "title": "수입허가·허가서 확인자료",
+      "summary": "TARIC에 L-code 또는 허가서 코드가 붙은 경우 수입허가, 관할기관 허가, 특정 제한 품목 허가가 필요한지 확인합니다.",
+      "certificate_codes": [
+        "L001",
+        "L049",
+        "L050",
+        "L065",
+        "L079",
+        "L081",
+        "L082",
+        "L128",
+        "L129",
+        "L135",
+        "L137",
+        "L139",
+        "L142",
+        "L143",
+        "L146",
+        "L147",
+        "L148",
+        "L149",
+        "L150",
+        "L151",
+        "L152",
+        "L153",
+        "L156",
+        "L838",
+        "C006",
+        "C064",
+        "C067"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "TARIC measure에 수입허가 또는 제한 품목 허가 코드가 붙어 있고, 제품의 물성·용도·거래상대방·목적지가 해당 제한 범위에 들어가는지 확인합니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "수입자가 EU 관할기관 허가서 또는 수입허가서를 확보해야 하는지 확인하고, 수출자는 제품 사양서와 최종용도 자료를 제공합니다."
+        },
+        {
+          "title": "근거",
+          "body": "연결 TARIC import licence 또는 restriction measure와 관련 EU 제한 규정입니다."
+        },
+        {
+          "title": "비대상 시 확인자료",
+          "body": "제한 품목이나 허가 대상이 아니라면 제품 사양서, 용도확인서, 거래상대방 확인자료로 비대상 근거를 정리합니다."
+        }
+      ]
+    },
+    "IUU_FISHERY_CONTROL": {
+      "title": "IUU 어업 규제 가이드라인",
+      "summary": "이 TARIC 코드에는 IUU 어업 규제 서류가 연결되어 있습니다. 사용자는 제품이 제외품목에 해당되는지 먼저 확인하고, 제외품목이 아니면 C673 증빙, 제외품목 또는 비대상 근거가 있으면 Y927 선언을 검토합니다.",
+      "certificate_codes": [
+        "C673",
+        "Y927"
+      ],
+      "blocks": [
+        {
+          "title": "확인할 상품 정보",
+          "body": "원재료 어종, 어획/양식 여부, 어획국, 기국, 가공국, 선박명/등록번호, 어획지역/일자, 중량, 제조공정도, 성분표, HS/CN 판단 근거, Annex I 제외품목 해당 여부"
+        },
+        {
+          "title": "사용자 확인 순서",
+          "body": "1. 이 TARIC 코드에 IUU control이 붙어 있음을 전제로 봅니다. 2. 제품이 Annex I 제외품목 리스트에 해당하는지 확인합니다. 3. 제외품목이 아니면 C673 경로를, 제외품목 또는 비대상 근거가 있으면 Y927 경로를 검토합니다."
+        }
+      ]
+    },
+    "KIMBERLEY_PROCESS_CERT": {
+      "title": "킴벌리 프로세스 다이아몬드 확인 가이드라인",
+      "summary": "다이아몬드 원석 또는 관련 품목이면 Kimberley Process Certificate 등 관련 증명서를 확인합니다. 대상이면 L116 증명서를, 비대상 조건이면 Y705 선언을 검토합니다.",
+      "certificate_codes": [
+        "L116",
+        "Y705"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "제품이 다이아몬드 원석인지, 가공 다이아몬드인지, 중량 및 포장상태가 어떤지 확인합니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "L116 - Kimberley Process Certificate입니다. 다이아몬드 원석 등 대상이면 수출국 발급 증명서와 수입자 측 제출 절차를 확인합니다."
+        },
+        {
+          "title": "비대상 시 준비 자료",
+          "body": "Y705 - 다이아몬드 중량 기준 등에 따른 비해당 선언입니다. 비대상 판단 근거를 제품 사양과 중량 자료로 설명합니다."
+        },
+        {
+          "title": "근거",
+          "body": "Council Regulation (EC) No 2368/2002; Regulation (EU) No 833/2014"
+        }
+      ]
+    },
+    "OFFICIAL_CONTROL_CHED_EVIDENCE": {
+      "title": "동물성 식품·복합식품 공식통제 비대상 가이드라인",
+      "summary": "해당 물품이 EU 공식통제 대상 동물성 제품, 복합식품, 동물 부산물 등에 해당하는지 확인하고, 대상이 아니면 Y930 선언을 검토합니다.",
+      "certificate_codes": [
+        "Y930"
+      ],
+      "blocks": [
+        {
+          "title": "비대상 시 준비 자료",
+          "body": "Y930 - 공식통제 대상 동물성 제품, 복합식품, 동물 부산물 등에 해당하지 않는다는 선언입니다. 성분표와 제조공정도로 비대상 근거를 설명합니다."
+        },
+        {
+          "title": "근거",
+          "body": "Regulation (EU) 2021/632"
+        },
+        {
+          "title": "비대상 여부 판단",
+          "body": "원재료에 동물성 성분이 있는지, 복합식품인지, 동물 부산물 또는 동물 유래 성분이 포함되는지 확인합니다."
+        },
+        {
+          "title": "대상일 때",
+          "body": "대상으로 확인되면 Y930이 아니라 해당 품목에 맞는 공식통제 서류 또는 CHED 계열 증빙을 별도로 확인합니다."
+        }
+      ]
+    },
+    "ORGANIC_COI": {
+      "title": "EU 유기농 수입관리 가이드라인",
+      "summary": "유기농 표시, organic claim, EU organic 로고 또는 유기농 원료 표시가 있으면 C644 COI 대상입니다. 유기농 표시나 organic claim이 없고 EU 유기농 규정 대상이 아니면 Y929 선언을 검토합니다.",
+      "certificate_codes": [
+        "C644",
+        "Y929"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "제품명, 라벨, 상세페이지, 성분표, 인증표시에서 organic, bio, eco, 유기농 등 유기농 표시가 있으면 C644 COI 대상입니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "C644 - 유기농 검사증명서(Certificate of Inspection, COI)입니다. 유기농 수입관리 대상이면 수입자/인증기관과 TRACES 절차를 확인합니다."
+        },
+        {
+          "title": "비대상 시 준비 자료",
+          "body": "Y929 - EU 유기농 규정 대상이 아니라는 선언입니다. 유기농 표시나 organic claim이 없거나 대상이 아님을 제품 자료로 설명합니다."
+        },
+        {
+          "title": "근거",
+          "body": "Regulation (EU) 2018/848; Regulation (EU) 2021/2306"
+        },
+        {
+          "title": "확인할 상품 정보",
+          "body": "제품명, 라벨 문구, organic/bio/eco 표시 여부, 유기농 인증서, 원재료 유기농 여부, EU 판매 표시 계획, 성분표"
+        }
+      ]
+    },
+    "PERSONAL_EFFECTS_EXEMPTION": {
+      "title": "개인물품 면제 확인 가이드라인",
+      "summary": "상업판매용이 아니라 개인물품으로 반입되는 경우 일부 수입허가 또는 ODS 관련 예외가 적용될 수 있습니다. 개인물품 조건이면 Y162 또는 Y793 선언을 검토합니다.",
+      "certificate_codes": [
+        "Y162",
+        "Y793"
+      ],
+      "blocks": [
+        {
+          "title": "근거",
+          "body": "Regulation (EU) 2024/573; Regulation (EU) 2024/590"
+        },
+        {
+          "title": "비대상/면제 시 준비 자료",
+          "body": "Y162/Y793 - 개인물품으로 수입/수출되는 제품·장비에 대한 면제 선언입니다. 개인 사용 목적, 수량, 거래 형태를 설명할 수 있어야 합니다."
+        },
+        {
+          "title": "면제 여부 판단",
+          "body": "수출 목적이 상업판매인지 개인 사용인지, 수량과 포장형태가 개인물품 범위에 맞는지 확인합니다."
+        },
+        {
+          "title": "주의 사항",
+          "body": "일반 B2B/B2C 상업 수출에는 신중하게 적용해야 합니다."
+        }
+      ]
+    },
+    "PREFERENTIAL_ORIGIN_PROOF": {
+      "title": "특혜 원산지 증빙 확인자료",
+      "summary": "FTA 또는 특혜관세를 신청하는 경우 원산지 신고, EUR.1, ATR 등 특혜 원산지 증빙 코드가 필요한지 확인합니다.",
+      "certificate_codes": [
+        "N018",
+        "N864",
+        "N954",
+        "U004",
+        "U005",
+        "U045",
+        "U059",
+        "U062",
+        "U067",
+        "U068",
+        "U069",
+        "U071",
+        "U074",
+        "U078",
+        "U079",
+        "U084",
+        "U088",
+        "U090",
+        "U091",
+        "U099",
+        "U119",
+        "U120",
+        "U121",
+        "U177",
+        "U178"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "수입자가 특혜관세 또는 FTA 우대세율을 신청하는지, 원산지가 협정상 특혜 원산지 기준을 충족하는지 확인합니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "원산지 신고문안, EUR.1 이동증명서, ATR 증명서 등 해당 코드가 요구하는 특혜 원산지 증빙을 준비합니다."
+        },
+        {
+          "title": "근거",
+          "body": "연결 TARIC preference measure, 협정별 원산지 규정, 각 certificate code 설명입니다."
+        },
+        {
+          "title": "비대상 시 확인자료",
+          "body": "특혜세율을 신청하지 않거나 원산지 요건을 충족하지 않는 경우 일반 세율 적용을 전제로 상업송장과 원산지 표시 자료를 확인합니다."
+        }
+      ]
+    },
+    "SEAL_PRODUCT_EVIDENCE": {
+      "title": "Seal product 규제 가이드라인",
+      "summary": "제품 또는 원재료가 seal product인지 확인합니다. 해당하면 C679/C680/C683 증빙을 검토하고, 비해당이면 Y032 선언을 검토합니다.",
+      "certificate_codes": [
+        "C679",
+        "C680",
+        "C683",
+        "Y032"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "제품명, 원재료, 동물성 원료, 가죽/모피/오일/추출물 여부를 확인하여 물개류(seal) 유래 성분 또는 부품이 있는지 판단합니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "C679/C680/C683 - seal product 인정기관 증명서, 수입통지 및 취득증빙, Inuit 또는 원주민 사냥 유래 증명서 등 조건별 증빙을 준비합니다."
+        },
+        {
+          "title": "비대상 시 준비 자료",
+          "body": "Y032 - 상품이 Regulation (EU) 2015/1850의 seal product가 아니라는 선언입니다. 원재료명세서, 성분표, 제조공정도 등으로 비해당 근거를 설명합니다."
+        },
+        {
+          "title": "근거",
+          "body": "Regulation (EU) 2015/1850"
+        },
+        {
+          "title": "확인할 상품 정보",
+          "body": "원재료 전체 목록, 동물성 원료 여부, 가죽/모피/오일/추출물 여부, 원료 동물종, 제조공정도, 공급자 원료 확인서"
+        }
+      ]
+    },
+    "SPECIAL_TRANSIT_RETURN_EVIDENCE": {
+      "title": "특수 경유·재반입 원산지 확인 가이드라인",
+      "summary": "일반 한국 직수출에는 보통 필요하지 않습니다. Andorra, Switzerland, Faroe Islands, Greenland, Iceland, Liechtenstein, Norway, San Marino 등을 거치거나 EU 원산품 재반입 구조이면 Y170~Y177 선언을 검토합니다.",
+      "certificate_codes": [
+        "Y170",
+        "Y171",
+        "Y172",
+        "Y173",
+        "Y174",
+        "Y175",
+        "Y176",
+        "Y177"
+      ],
+      "blocks": [
+        {
+          "title": "적용 구조 판단",
+          "body": "한국에서 EU로 직접 수출되는 일반 구조인지, EU 원산품이 특정 지역을 거쳐 재반입되는 구조인지 확인합니다."
+        },
+        {
+          "title": "특수 구조 시 준비 자료",
+          "body": "해당 경유/재반입 지역에 맞는 Y170~Y177 선언을 검토합니다. 운송서류와 원산지 자료가 일치해야 합니다."
+        },
+        {
+          "title": "일반 한국 직수출",
+          "body": "일반 한국 직수출이고 EU 원산품 재반입 또는 특수 경유 구조가 아니라면 통상 해당 선언은 사용하지 않습니다."
+        },
+        {
+          "title": "확인할 정보",
+          "body": "원산국, 선적국, 운송경로, 경유국, 재반입 여부, 이전 EU 반출 이력, 인보이스, 패킹리스트, 선하증권/AWB"
+        }
+      ]
+    },
+    "TARIFF_QUOTA_REQUEST": {
+      "title": "관세할당 신청·잔여 확인자료",
+      "summary": "관세할당 코드가 붙은 경우 수입자가 해당 order number의 관세할당을 신청하고 잔여 물량이 있는지 확인합니다.",
+      "certificate_codes": [
+        "K020",
+        "K022",
+        "K025",
+        "K027",
+        "K028",
+        "K029",
+        "K030",
+        "K031",
+        "K032",
+        "K520",
+        "K521",
+        "K522",
+        "K523",
+        "K524",
+        "K525",
+        "K526",
+        "K527",
+        "C093",
+        "C094",
+        "C095",
+        "C098",
+        "C102",
+        "C103",
+        "C104",
+        "Y179"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "수입자가 관세할당 세율을 신청하는지, 해당 order number의 대상 품목·원산지·기간·잔여 물량 조건을 충족하는지 확인합니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "관세할당 신청 정보, order number, 원산지 증빙, 수입자 신청 자료를 확인합니다."
+        },
+        {
+          "title": "근거",
+          "body": "연결 TARIC quota measure, order number별 관세할당 규정 및 수입자 신청 자료입니다."
+        },
+        {
+          "title": "비대상 시 확인자료",
+          "body": "관세할당을 신청하지 않거나 잔여 물량이 없으면 일반 세율 또는 다른 적용 가능 세율을 기준으로 진행합니다."
+        }
+      ]
+    },
+    "TRADE_REMEDY_INVOICE_DOCUMENTS": {
+      "title": "반덤핑·상계관세 송장 및 가격확인 자료",
+      "summary": "반덤핑·상계관세 또는 undertaking 조건이 붙은 경우 지정 문구가 있는 상업송장, mill certificate, undertaking certificate 등을 확인합니다.",
+      "certificate_codes": [
+        "D008",
+        "D017",
+        "D018",
+        "D019",
+        "D020",
+        "D023",
+        "D024",
+        "D025",
+        "D027",
+        "D028",
+        "D029"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "제품이 반덤핑·상계관세 measure 대상이고 생산자, 수출자, 가격조건, 원산지 조건이 해당되는지 확인합니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "지정 문구가 포함된 상업송장, mill certificate, undertaking certificate 등 해당 코드가 요구하는 거래 증빙을 준비합니다."
+        },
+        {
+          "title": "근거",
+          "body": "연결 TARIC trade remedy measure 및 각 반덤핑·상계관세 시행규정입니다."
+        },
+        {
+          "title": "비대상 시 확인자료",
+          "body": "해당 생산자·수출자·가격조건이 아니라면 생산자 정보, 거래가격, 원산지, 제품 규격으로 비대상 근거를 확인합니다."
+        }
+      ]
+    },
+    "WASTE_SHIPMENT_DOCUMENTS": {
+      "title": "폐기물 운송·재활용 관련 증빙",
+      "summary": "제품이 폐기물 운송 규정 또는 end-of-waste 기준 대상인지 확인하고, 대상이면 통지서·이동서류·Annex VII 정보문서 등을 검토합니다.",
+      "certificate_codes": [
+        "C058",
+        "C669",
+        "C670",
+        "C672",
+        "Y923"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "제품이 폐기물, 재활용 원료, 중고 물품, end-of-waste 기준 대상인지 확인합니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "통지서, 이동서류, Annex VII 정보문서, end-of-waste 적합성 진술서 등 해당 코드가 요구하는 문서를 확인합니다."
+        },
+        {
+          "title": "근거",
+          "body": "Regulation (EC) No 1013/2006 및 연결 TARIC 폐기물 운송 measure입니다."
+        },
+        {
+          "title": "비대상 시 확인자료",
+          "body": "폐기물 운송 규정 대상이 아니라면 제품 규격서, 새 제품/재활용 원료 여부, 용도 자료로 비대상 근거를 설명합니다."
+        }
+      ]
+    },
+    "WINE_VI_DOCUMENTS": {
+      "title": "와인 VI 문서 확인자료",
+      "summary": "와인 또는 포도주 제품에 VI-1 문서, VI-2 extract 등 와인 수입 증빙이 필요한지 확인합니다.",
+      "certificate_codes": [
+        "C014",
+        "C015",
+        "C017",
+        "C018"
+      ],
+      "blocks": [
+        {
+          "title": "대상 여부 판단",
+          "body": "제품이 와인 또는 와인 관련 제품이고 TARIC에 VI 문서 코드가 붙었는지 확인합니다."
+        },
+        {
+          "title": "대상 시 준비 서류",
+          "body": "VI-1 문서, VI-2 extract 또는 관련 주석이 포함된 와인 수입 증빙을 준비합니다."
+        },
+        {
+          "title": "근거",
+          "body": "Regulation (EU) 2018/273 및 와인 수입 관련 TARIC measure입니다."
+        },
+        {
+          "title": "비대상 시 확인자료",
+          "body": "와인 제품이 아니거나 해당 조건이 아니라면 제품 유형, 원재료, 알코올 함량, 제조공정 자료로 비대상 근거를 확인합니다."
+        }
+      ]
+    }
+  },
+  "certificates": {
+    "A001": {
+      "title": "A001 진정성 증명서",
+      "description": "A001 진정성 증명서",
+      "group_id": "AUTHENTICITY_QUALITY_CERTIFICATES",
+      "group_name_ko": "진정성·품질 증명서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "A001 진정성 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "진정성·품질 증명서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "A004": {
+      "title": "A004 진정성 증명서",
+      "description": "A004 진정성 증명서",
+      "group_id": "AUTHENTICITY_QUALITY_CERTIFICATES",
+      "group_name_ko": "진정성·품질 증명서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "A004 진정성 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "진정성·품질 증명서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "A007": {
+      "title": "A007 진정성 증명서",
+      "description": "A007 진정성 증명서",
+      "group_id": "AUTHENTICITY_QUALITY_CERTIFICATES",
+      "group_name_ko": "진정성·품질 증명서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "A007 진정성 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "진정성·품질 증명서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "A010": {
+      "title": "A010 진정성 증명서",
+      "description": "A010 진정성 증명서",
+      "group_id": "AUTHENTICITY_QUALITY_CERTIFICATES",
+      "group_name_ko": "진정성·품질 증명서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "A010 진정성 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "진정성·품질 증명서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "A014": {
+      "title": "A014 진정성 증명서",
+      "description": "A014 진정성 증명서",
+      "group_id": "AUTHENTICITY_QUALITY_CERTIFICATES",
+      "group_name_ko": "진정성·품질 증명서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "A014 진정성 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "진정성·품질 증명서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "A015": {
+      "title": "A015 진정성 증명서",
+      "description": "A015 진정성 증명서",
+      "group_id": "AUTHENTICITY_QUALITY_CERTIFICATES",
+      "group_name_ko": "진정성·품질 증명서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "A015 진정성 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "진정성·품질 증명서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "A016": {
+      "title": "A016 진정성 증명서",
+      "description": "A016 진정성 증명서",
+      "group_id": "AUTHENTICITY_QUALITY_CERTIFICATES",
+      "group_name_ko": "진정성·품질 증명서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "A016 진정성 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "진정성·품질 증명서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "A017": {
+      "title": "A017 진정성 증명서",
+      "description": "A017 진정성 증명서",
+      "group_id": "AUTHENTICITY_QUALITY_CERTIFICATES",
+      "group_name_ko": "진정성·품질 증명서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "A017 진정성 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "진정성·품질 증명서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "A019": {
+      "title": "A019 품질 증명서",
+      "description": "A019 품질 증명서",
+      "group_id": "AUTHENTICITY_QUALITY_CERTIFICATES",
+      "group_name_ko": "진정성·품질 증명서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "A019 품질 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "진정성·품질 증명서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "A022": {
+      "title": "A022 진정성 증명서",
+      "description": "A022 진정성 증명서",
+      "group_id": "AUTHENTICITY_QUALITY_CERTIFICATES",
+      "group_name_ko": "진정성·품질 증명서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "A022 진정성 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "진정성·품질 증명서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "A030": {
+      "title": "A030 진정성 증명서",
+      "description": "A030 진정성 증명서",
+      "group_id": "AUTHENTICITY_QUALITY_CERTIFICATES",
+      "group_name_ko": "진정성·품질 증명서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "A030 진정성 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "진정성·품질 증명서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C001": {
+      "title": "C001 TARIC 수입 통제 관련 증빙 코드",
+      "description": "C001 TARIC 수입 통제 관련 증빙 코드",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C001 TARIC 수입 통제 관련 증빙 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C006": {
+      "title": "C006 허가서 또는 승인서",
+      "description": "C006 허가서 또는 승인서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C006 허가서 또는 승인서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C008": {
+      "title": "C008 증빙 문서",
+      "description": "C008 증빙 문서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C008 증빙 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C013": {
+      "title": "C013 증명서",
+      "description": "C013 증명서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C013 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C014": {
+      "title": "C014 와인 VI-1 문서",
+      "description": "C014 와인 VI-1 문서",
+      "group_id": "WINE_VI_DOCUMENTS",
+      "group_name_ko": "와인 VI 문서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C014 와인 VI-1 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "와인 VI 문서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C015": {
+      "title": "C015 와인 VI-2 추출문서",
+      "description": "C015 와인 VI-2 추출문서",
+      "group_id": "WINE_VI_DOCUMENTS",
+      "group_name_ko": "와인 VI 문서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C015 와인 VI-2 추출문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "와인 VI 문서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C017": {
+      "title": "C017 와인 VI-1 문서",
+      "description": "C017 와인 VI-1 문서",
+      "group_id": "WINE_VI_DOCUMENTS",
+      "group_name_ko": "와인 VI 문서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C017 와인 VI-1 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "와인 VI 문서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C018": {
+      "title": "C018 와인 VI-2 추출문서",
+      "description": "C018 와인 VI-2 추출문서",
+      "group_id": "WINE_VI_DOCUMENTS",
+      "group_name_ko": "와인 VI 문서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C018 와인 VI-2 추출문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "와인 VI 문서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C039": {
+      "title": "C039 수산 통계·어획 관련 문서",
+      "description": "C039 수산 통계·어획 관련 문서",
+      "group_id": "FISHERY_STATISTICAL_CATCH_DOCUMENTS",
+      "group_name_ko": "수산 통계·어획 문서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C039 수산 통계·어획 관련 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수산 통계·어획 문서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C040": {
+      "title": "C040 수산 통계·어획 관련 문서",
+      "description": "C040 수산 통계·어획 관련 문서",
+      "group_id": "FISHERY_STATISTICAL_CATCH_DOCUMENTS",
+      "group_name_ko": "수산 통계·어획 문서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C040 수산 통계·어획 관련 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수산 통계·어획 문서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C041": {
+      "title": "C041 수산 통계·어획 관련 문서",
+      "description": "C041 수산 통계·어획 관련 문서",
+      "group_id": "FISHERY_STATISTICAL_CATCH_DOCUMENTS",
+      "group_name_ko": "수산 통계·어획 문서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C041 수산 통계·어획 관련 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수산 통계·어획 문서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C042": {
+      "title": "C042 수산 통계·어획 관련 문서",
+      "description": "C042 수산 통계·어획 관련 문서",
+      "group_id": "FISHERY_STATISTICAL_CATCH_DOCUMENTS",
+      "group_name_ko": "수산 통계·어획 문서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C042 수산 통계·어획 관련 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수산 통계·어획 문서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C043": {
+      "title": "C043 수산 통계·어획 관련 문서",
+      "description": "C043 수산 통계·어획 관련 문서",
+      "group_id": "FISHERY_STATISTICAL_CATCH_DOCUMENTS",
+      "group_name_ko": "수산 통계·어획 문서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C043 수산 통계·어획 관련 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수산 통계·어획 문서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C045": {
+      "title": "C045 적합성 선언서",
+      "description": "C045 적합성 선언서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C045 적합성 선언서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C046": {
+      "title": "C046 증명서",
+      "description": "C046 증명서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C046 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C047": {
+      "title": "C047 수산 통계·어획 관련 문서",
+      "description": "C047 수산 통계·어획 관련 문서",
+      "group_id": "FISHERY_STATISTICAL_CATCH_DOCUMENTS",
+      "group_name_ko": "수산 통계·어획 문서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C047 수산 통계·어획 관련 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수산 통계·어획 문서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C050": {
+      "title": "C050 증명서",
+      "description": "C050 증명서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C050 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C055": {
+      "title": "C055 적합성 선언서",
+      "description": "C055 적합성 선언서",
+      "group_id": "FOOD_CONTACT_MATERIAL_COMPLIANCE",
+      "group_name_ko": "식품접촉재료 적합성 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C055 적합성 선언서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "식품접촉재료 적합성 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C056": {
+      "title": "C056 증명서",
+      "description": "C056 증명서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C056 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C057": {
+      "title": "C057 적합성 선언서",
+      "description": "C057 적합성 선언서",
+      "group_id": "FOOD_CONTACT_MATERIAL_COMPLIANCE",
+      "group_name_ko": "식품접촉재료 적합성 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C057 적합성 선언서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "식품접촉재료 적합성 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C058": {
+      "title": "C058 폐기물 운송 또는 재활용 관련 증빙",
+      "description": "C058 폐기물 운송 또는 재활용 관련 증빙",
+      "group_id": "WASTE_SHIPMENT_DOCUMENTS",
+      "group_name_ko": "폐기물 운송·재활용 관련 증빙",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C058 폐기물 운송 또는 재활용 관련 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "폐기물 운송·재활용 관련 증빙에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C060": {
+      "title": "C060 신고서 또는 선언서",
+      "description": "C060 신고서 또는 선언서",
+      "group_id": "FOOD_CONTACT_MATERIAL_COMPLIANCE",
+      "group_name_ko": "식품접촉재료 적합성 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C060 신고서 또는 선언서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "식품접촉재료 적합성 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C064": {
+      "title": "C064 허가서 또는 승인서",
+      "description": "C064 허가서 또는 승인서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C064 허가서 또는 승인서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C065": {
+      "title": "C065 허가서 또는 승인서",
+      "description": "C065 허가서 또는 승인서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C065 허가서 또는 승인서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C067": {
+      "title": "C067 허가서 또는 승인서",
+      "description": "C067 허가서 또는 승인서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C067 허가서 또는 승인서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C071": {
+      "title": "C071 TARIC 수입 통제 관련 증빙 코드",
+      "description": "C071 TARIC 수입 통제 관련 증빙 코드",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C071 TARIC 수입 통제 관련 증빙 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C072": {
+      "title": "C072 증명서",
+      "description": "C072 증명서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C072 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C073": {
+      "title": "C073 허가서 또는 승인서",
+      "description": "C073 허가서 또는 승인서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C073 허가서 또는 승인서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C074": {
+      "title": "C074 증명서",
+      "description": "C074 증명서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C074 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C075": {
+      "title": "C075 증빙 문서",
+      "description": "C075 증빙 문서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C075 증빙 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C078": {
+      "title": "C078 증빙 문서",
+      "description": "C078 증빙 문서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C078 증빙 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C079": {
+      "title": "C079 적합성 선언서",
+      "description": "C079 적합성 선언서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C079 적합성 선언서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C080": {
+      "title": "C080 와인 VI-1 문서",
+      "description": "C080 와인 VI-1 문서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C080 와인 VI-1 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C081": {
+      "title": "C081 와인 VI-1 문서",
+      "description": "C081 와인 VI-1 문서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C081 와인 VI-1 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C082": {
+      "title": "C082 적합성 선언서",
+      "description": "C082 적합성 선언서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C082 적합성 선언서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C083": {
+      "title": "C083 증명서",
+      "description": "C083 증명서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C083 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C084": {
+      "title": "검역/공식통제 면제 증빙",
+      "description": "검역/공식통제 면제 증빙",
+      "group_id": "HEALTH_CERT_SUPPORT",
+      "group_name_ko": "EU 검역·공식통제 서류 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "검역/공식통제 면제 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "EU 검역·공식통제 서류 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C085": {
+      "title": "식물·식물제품 CHED-PP",
+      "description": "식물·식물제품 CHED-PP",
+      "group_id": "HEALTH_CERT_SUPPORT",
+      "group_name_ko": "EU 검역·공식통제 서류 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "식물·식물제품 CHED-PP"
+        },
+        {
+          "title": "준비 방향",
+          "body": "EU 검역·공식통제 서류 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C091": {
+      "title": "C091 TARIC 수입 통제 관련 증빙 코드",
+      "description": "C091 TARIC 수입 통제 관련 증빙 코드",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C091 TARIC 수입 통제 관련 증빙 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C092": {
+      "title": "C092 수산 통계·어획 관련 문서",
+      "description": "C092 수산 통계·어획 관련 문서",
+      "group_id": "FISHERY_STATISTICAL_CATCH_DOCUMENTS",
+      "group_name_ko": "수산 통계·어획 문서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C092 수산 통계·어획 관련 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수산 통계·어획 문서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C093": {
+      "title": "C093 관세할당 신청 및 잔여 확인 코드",
+      "description": "C093 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C093 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C094": {
+      "title": "C094 관세할당 신청 및 잔여 확인 코드",
+      "description": "C094 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C094 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C095": {
+      "title": "C095 관세할당 신청 및 잔여 확인 코드",
+      "description": "C095 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C095 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C098": {
+      "title": "C098 관세할당 신청 및 잔여 확인 코드",
+      "description": "C098 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C098 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C101": {
+      "title": "C101 증명서",
+      "description": "C101 증명서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C101 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C102": {
+      "title": "C102 관세할당 신청 및 잔여 확인 코드",
+      "description": "C102 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C102 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C103": {
+      "title": "C103 관세할당 신청 및 잔여 확인 코드",
+      "description": "C103 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C103 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C104": {
+      "title": "C104 관세할당 신청 및 잔여 확인 코드",
+      "description": "C104 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C104 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C119": {
+      "title": "C119 증명서",
+      "description": "C119 증명서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C119 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C121": {
+      "title": "C121 증명서",
+      "description": "C121 증명서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C121 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C126": {
+      "title": "C126 허가서 또는 승인서",
+      "description": "C126 허가서 또는 승인서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C126 허가서 또는 승인서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C400": {
+      "title": "CITES 증명서",
+      "description": "CITES 증명서",
+      "group_id": "CITES_SPECIES_EVIDENCE",
+      "group_name_ko": "CITES 대상종 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "CITES 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "CITES 대상종 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C631": {
+      "title": "FLEGT 비목재/재활용 원료 확인서",
+      "description": "FLEGT 비목재/재활용 원료 확인서",
+      "group_id": "FLEGT_TIMBER_EVIDENCE",
+      "group_name_ko": "FLEGT 목재제품 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "FLEGT 비목재/재활용 원료 확인서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "FLEGT 목재제품 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C640": {
+      "title": "동물 CHED-A",
+      "description": "동물 CHED-A",
+      "group_id": "HEALTH_CERT_SUPPORT",
+      "group_name_ko": "EU 검역·공식통제 서류 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "동물 CHED-A"
+        },
+        {
+          "title": "준비 방향",
+          "body": "EU 검역·공식통제 서류 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C641": {
+      "title": "C641 증빙 문서",
+      "description": "C641 증빙 문서",
+      "group_id": "FISHERY_STATISTICAL_CATCH_DOCUMENTS",
+      "group_name_ko": "수산 통계·어획 문서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C641 증빙 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수산 통계·어획 문서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C644": {
+      "title": "유기농 검사증명서 COI",
+      "description": "유기농 검사증명서 COI",
+      "group_id": "ORGANIC_COI",
+      "group_name_ko": "EU 유기농 수입관리 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "유기농 검사증명서 COI"
+        },
+        {
+          "title": "준비 방향",
+          "body": "EU 유기농 수입관리 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C652": {
+      "title": "C652 증빙 문서",
+      "description": "C652 증빙 문서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C652 증빙 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C666": {
+      "title": "C666 증명서",
+      "description": "C666 증명서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C666 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C667": {
+      "title": "C667 TARIC 수입 통제 관련 증빙 코드",
+      "description": "C667 TARIC 수입 통제 관련 증빙 코드",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C667 TARIC 수입 통제 관련 증빙 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C668": {
+      "title": "C668 증명서",
+      "description": "C668 증명서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C668 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C669": {
+      "title": "C669 증빙 문서",
+      "description": "C669 증빙 문서",
+      "group_id": "WASTE_SHIPMENT_DOCUMENTS",
+      "group_name_ko": "폐기물 운송·재활용 관련 증빙",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C669 증빙 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "폐기물 운송·재활용 관련 증빙에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C670": {
+      "title": "C670 증빙 문서",
+      "description": "C670 증빙 문서",
+      "group_id": "WASTE_SHIPMENT_DOCUMENTS",
+      "group_name_ko": "폐기물 운송·재활용 관련 증빙",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C670 증빙 문서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "폐기물 운송·재활용 관련 증빙에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C672": {
+      "title": "C672 폐기물 운송 또는 재활용 관련 증빙",
+      "description": "C672 폐기물 운송 또는 재활용 관련 증빙",
+      "group_id": "WASTE_SHIPMENT_DOCUMENTS",
+      "group_name_ko": "폐기물 운송·재활용 관련 증빙",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C672 폐기물 운송 또는 재활용 관련 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "폐기물 운송·재활용 관련 증빙에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C673": {
+      "title": "IUU 어획 관련 수입자 신고서 또는 재수출 증명서",
+      "description": "IUU 어획 관련 수입자 신고서 또는 재수출 증명서",
+      "group_id": "IUU_FISHERY_CONTROL",
+      "group_name_ko": "IUU 어업 규제 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "IUU 어획 관련 수입자 신고서 또는 재수출 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "IUU 어업 규제 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C676": {
+      "title": "C676 허가서 또는 승인서",
+      "description": "C676 허가서 또는 승인서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C676 허가서 또는 승인서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C678": {
+      "title": "비동물성 고위험 식품·사료 CHED-D",
+      "description": "비동물성 고위험 식품·사료 CHED-D",
+      "group_id": "HEALTH_CERT_SUPPORT",
+      "group_name_ko": "EU 검역·공식통제 서류 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "비동물성 고위험 식품·사료 CHED-D"
+        },
+        {
+          "title": "준비 방향",
+          "body": "EU 검역·공식통제 서류 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C679": {
+      "title": "Seal product 인정기관 증명서",
+      "description": "Seal product 인정기관 증명서",
+      "group_id": "SEAL_PRODUCT_EVIDENCE",
+      "group_name_ko": "Seal product 규제 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Seal product 인정기관 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "Seal product 규제 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C680": {
+      "title": "Seal product 수입통지 및 취득증빙",
+      "description": "Seal product 수입통지 및 취득증빙",
+      "group_id": "SEAL_PRODUCT_EVIDENCE",
+      "group_name_ko": "Seal product 규제 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Seal product 수입통지 및 취득증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "Seal product 규제 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C683": {
+      "title": "Seal product 원주민 사냥 유래 증명서",
+      "description": "Seal product 원주민 사냥 유래 증명서",
+      "group_id": "SEAL_PRODUCT_EVIDENCE",
+      "group_name_ko": "Seal product 규제 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Seal product 원주민 사냥 유래 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "Seal product 규제 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C690": {
+      "title": "FLEGT 목재 수입허가서",
+      "description": "FLEGT 목재 수입허가서",
+      "group_id": "FLEGT_TIMBER_EVIDENCE",
+      "group_name_ko": "FLEGT 목재제품 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "FLEGT 목재 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "FLEGT 목재제품 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "C701": {
+      "title": "C701 적합성 선언서",
+      "description": "C701 적합성 선언서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C701 적합성 선언서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C809": {
+      "title": "C809 허가서 또는 승인서",
+      "description": "C809 허가서 또는 승인서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C809 허가서 또는 승인서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "C990": {
+      "title": "C990 허가서 또는 승인서",
+      "description": "C990 허가서 또는 승인서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "C990 허가서 또는 승인서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "D008": {
+      "title": "D008 신고서 또는 선언서",
+      "description": "D008 신고서 또는 선언서",
+      "group_id": "TRADE_REMEDY_INVOICE_DOCUMENTS",
+      "group_name_ko": "반덤핑·상계관세 송장 및 가격확인 자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "D008 신고서 또는 선언서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "반덤핑·상계관세 송장 및 가격확인 자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "D017": {
+      "title": "D017 상업송장 또는 거래 증빙",
+      "description": "D017 상업송장 또는 거래 증빙",
+      "group_id": "TRADE_REMEDY_INVOICE_DOCUMENTS",
+      "group_name_ko": "반덤핑·상계관세 송장 및 가격확인 자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "D017 상업송장 또는 거래 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "반덤핑·상계관세 송장 및 가격확인 자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "D018": {
+      "title": "D018 TARIC 수입 통제 관련 증빙 코드",
+      "description": "D018 TARIC 수입 통제 관련 증빙 코드",
+      "group_id": "TRADE_REMEDY_INVOICE_DOCUMENTS",
+      "group_name_ko": "반덤핑·상계관세 송장 및 가격확인 자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "D018 TARIC 수입 통제 관련 증빙 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "반덤핑·상계관세 송장 및 가격확인 자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "D019": {
+      "title": "D019 허가서 또는 승인서",
+      "description": "D019 허가서 또는 승인서",
+      "group_id": "TRADE_REMEDY_INVOICE_DOCUMENTS",
+      "group_name_ko": "반덤핑·상계관세 송장 및 가격확인 자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "D019 허가서 또는 승인서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "반덤핑·상계관세 송장 및 가격확인 자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "D020": {
+      "title": "D020 상업송장 또는 거래 증빙",
+      "description": "D020 상업송장 또는 거래 증빙",
+      "group_id": "TRADE_REMEDY_INVOICE_DOCUMENTS",
+      "group_name_ko": "반덤핑·상계관세 송장 및 가격확인 자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "D020 상업송장 또는 거래 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "반덤핑·상계관세 송장 및 가격확인 자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "D023": {
+      "title": "D023 상업송장 또는 거래 증빙",
+      "description": "D023 상업송장 또는 거래 증빙",
+      "group_id": "TRADE_REMEDY_INVOICE_DOCUMENTS",
+      "group_name_ko": "반덤핑·상계관세 송장 및 가격확인 자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "D023 상업송장 또는 거래 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "반덤핑·상계관세 송장 및 가격확인 자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "D024": {
+      "title": "D024 상업송장 또는 거래 증빙",
+      "description": "D024 상업송장 또는 거래 증빙",
+      "group_id": "TRADE_REMEDY_INVOICE_DOCUMENTS",
+      "group_name_ko": "반덤핑·상계관세 송장 및 가격확인 자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "D024 상업송장 또는 거래 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "반덤핑·상계관세 송장 및 가격확인 자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "D025": {
+      "title": "D025 TARIC 수입 통제 관련 증빙 코드",
+      "description": "D025 TARIC 수입 통제 관련 증빙 코드",
+      "group_id": "TRADE_REMEDY_INVOICE_DOCUMENTS",
+      "group_name_ko": "반덤핑·상계관세 송장 및 가격확인 자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "D025 TARIC 수입 통제 관련 증빙 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "반덤핑·상계관세 송장 및 가격확인 자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "D027": {
+      "title": "D027 TARIC 수입 통제 관련 증빙 코드",
+      "description": "D027 TARIC 수입 통제 관련 증빙 코드",
+      "group_id": "TRADE_REMEDY_INVOICE_DOCUMENTS",
+      "group_name_ko": "반덤핑·상계관세 송장 및 가격확인 자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "D027 TARIC 수입 통제 관련 증빙 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "반덤핑·상계관세 송장 및 가격확인 자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "D028": {
+      "title": "D028 신고서 또는 선언서",
+      "description": "D028 신고서 또는 선언서",
+      "group_id": "TRADE_REMEDY_INVOICE_DOCUMENTS",
+      "group_name_ko": "반덤핑·상계관세 송장 및 가격확인 자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "D028 신고서 또는 선언서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "반덤핑·상계관세 송장 및 가격확인 자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "D029": {
+      "title": "D029 상업송장 또는 거래 증빙",
+      "description": "D029 상업송장 또는 거래 증빙",
+      "group_id": "TRADE_REMEDY_INVOICE_DOCUMENTS",
+      "group_name_ko": "반덤핑·상계관세 송장 및 가격확인 자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "D029 상업송장 또는 거래 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "반덤핑·상계관세 송장 및 가격확인 자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "E017": {
+      "title": "E017 증명서",
+      "description": "E017 증명서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "E017 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "TARIC measure가 실제 거래에 적용되는지 수입자와 확인하고, 해당 코드가 요구하는 증빙을 준비합니다."
+        }
+      ]
+    },
+    "K020": {
+      "title": "K020 관세할당 신청 및 잔여 확인 코드",
+      "description": "K020 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K020 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K022": {
+      "title": "K022 관세할당 신청 및 잔여 확인 코드",
+      "description": "K022 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K022 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K025": {
+      "title": "K025 관세할당 신청 및 잔여 확인 코드",
+      "description": "K025 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K025 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K027": {
+      "title": "K027 관세할당 신청 및 잔여 확인 코드",
+      "description": "K027 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K027 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K028": {
+      "title": "K028 관세할당 신청 및 잔여 확인 코드",
+      "description": "K028 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K028 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K029": {
+      "title": "K029 관세할당 신청 및 잔여 확인 코드",
+      "description": "K029 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K029 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K030": {
+      "title": "K030 관세할당 신청 및 잔여 확인 코드",
+      "description": "K030 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K030 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K031": {
+      "title": "K031 관세할당 신청 및 잔여 확인 코드",
+      "description": "K031 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K031 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K032": {
+      "title": "K032 관세할당 신청 및 잔여 확인 코드",
+      "description": "K032 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K032 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K520": {
+      "title": "K520 관세할당 신청 및 잔여 확인 코드",
+      "description": "K520 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K520 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K521": {
+      "title": "K521 관세할당 신청 및 잔여 확인 코드",
+      "description": "K521 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K521 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K522": {
+      "title": "K522 관세할당 신청 및 잔여 확인 코드",
+      "description": "K522 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K522 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K523": {
+      "title": "K523 관세할당 신청 및 잔여 확인 코드",
+      "description": "K523 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K523 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K524": {
+      "title": "K524 관세할당 신청 및 잔여 확인 코드",
+      "description": "K524 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K524 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K525": {
+      "title": "K525 관세할당 신청 및 잔여 확인 코드",
+      "description": "K525 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K525 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K526": {
+      "title": "K526 관세할당 신청 및 잔여 확인 코드",
+      "description": "K526 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K526 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "K527": {
+      "title": "K527 관세할당 신청 및 잔여 확인 코드",
+      "description": "K527 관세할당 신청 및 잔여 확인 코드",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "K527 관세할당 신청 및 잔여 확인 코드"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L001": {
+      "title": "L001 수입허가서",
+      "description": "L001 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L001 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L049": {
+      "title": "L049 수입허가서",
+      "description": "L049 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L049 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L050": {
+      "title": "L050 수입허가서",
+      "description": "L050 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L050 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L065": {
+      "title": "L065 수입허가서",
+      "description": "L065 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L065 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L079": {
+      "title": "L079 수입허가서",
+      "description": "L079 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L079 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L081": {
+      "title": "L081 수입허가서",
+      "description": "L081 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L081 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L082": {
+      "title": "L082 수입허가서",
+      "description": "L082 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L082 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L100": {
+      "title": "수입허가서",
+      "description": "수입허가서",
+      "group_id": "END_USE_STATEMENT",
+      "group_name_ko": "제재·제한 품목 비대상/최종용도 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "제재·제한 품목 비대상/최종용도 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L116": {
+      "title": "킴벌리 프로세스 증명서",
+      "description": "킴벌리 프로세스 증명서",
+      "group_id": "KIMBERLEY_PROCESS_CERT",
+      "group_name_ko": "킴벌리 프로세스 다이아몬드 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "킴벌리 프로세스 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "킴벌리 프로세스 다이아몬드 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L128": {
+      "title": "L128 수입허가서",
+      "description": "L128 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L128 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L129": {
+      "title": "L129 수입허가서",
+      "description": "L129 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L129 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L135": {
+      "title": "L135 수입허가서",
+      "description": "L135 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L135 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L137": {
+      "title": "L137 수입허가서",
+      "description": "L137 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L137 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L139": {
+      "title": "L139 수입허가서",
+      "description": "L139 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L139 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L142": {
+      "title": "L142 수입허가서",
+      "description": "L142 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L142 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L143": {
+      "title": "L143 수입허가서",
+      "description": "L143 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L143 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L146": {
+      "title": "L146 수입허가서",
+      "description": "L146 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L146 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L147": {
+      "title": "L147 수입허가서",
+      "description": "L147 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L147 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L148": {
+      "title": "L148 수입허가서",
+      "description": "L148 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L148 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L149": {
+      "title": "L149 수입허가서",
+      "description": "L149 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L149 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L150": {
+      "title": "L150 수입허가서",
+      "description": "L150 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L150 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L151": {
+      "title": "L151 수입허가서",
+      "description": "L151 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L151 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L152": {
+      "title": "L152 수입허가서",
+      "description": "L152 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L152 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L153": {
+      "title": "L153 수입허가서",
+      "description": "L153 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L153 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L156": {
+      "title": "L156 수입허가서",
+      "description": "L156 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L156 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "L838": {
+      "title": "L838 수입허가서",
+      "description": "L838 수입허가서",
+      "group_id": "IMPORT_LICENCE_PERMIT",
+      "group_name_ko": "수입허가·허가서 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "L838 수입허가서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "수입허가·허가서 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "N018": {
+      "title": "N018 ATR 증명서",
+      "description": "N018 ATR 증명서",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "N018 ATR 증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "N853": {
+      "title": "동물성 제품 CHED-P",
+      "description": "동물성 제품 CHED-P",
+      "group_id": "HEALTH_CERT_SUPPORT",
+      "group_name_ko": "EU 검역·공식통제 서류 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "동물성 제품 CHED-P"
+        },
+        {
+          "title": "준비 방향",
+          "body": "EU 검역·공식통제 서류 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "N864": {
+      "title": "N864 송장 원산지 신고 또는 원산지 신고",
+      "description": "N864 송장 원산지 신고 또는 원산지 신고",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "N864 송장 원산지 신고 또는 원산지 신고"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "N954": {
+      "title": "N954 EUR.1 이동증명서",
+      "description": "N954 EUR.1 이동증명서",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "N954 EUR.1 이동증명서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "N990": {
+      "title": "N990 허가서 또는 승인서",
+      "description": "N990 허가서 또는 승인서",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "N990 허가서 또는 승인서"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 또는 관련 증명 요건을 수입자와 확인하고 필요한 원산지 증빙을 준비합니다."
+        }
+      ]
+    },
+    "U004": {
+      "title": "U004 특혜 원산지 증빙",
+      "description": "U004 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U004 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U005": {
+      "title": "U005 특혜 원산지 증빙",
+      "description": "U005 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U005 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U045": {
+      "title": "U045 특혜 원산지 증빙",
+      "description": "U045 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U045 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U059": {
+      "title": "U059 특혜 원산지 증빙",
+      "description": "U059 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U059 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U062": {
+      "title": "U062 특혜 원산지 증빙",
+      "description": "U062 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U062 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U067": {
+      "title": "U067 특혜 원산지 증빙",
+      "description": "U067 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U067 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U068": {
+      "title": "U068 특혜 원산지 증빙",
+      "description": "U068 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U068 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U069": {
+      "title": "U069 특혜 원산지 증빙",
+      "description": "U069 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U069 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U071": {
+      "title": "U071 특혜 원산지 증빙",
+      "description": "U071 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U071 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U074": {
+      "title": "U074 특혜 원산지 증빙",
+      "description": "U074 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U074 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U078": {
+      "title": "U078 특혜 원산지 증빙",
+      "description": "U078 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U078 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U079": {
+      "title": "U079 특혜 원산지 증빙",
+      "description": "U079 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U079 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U084": {
+      "title": "U084 특혜 원산지 증빙",
+      "description": "U084 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U084 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U088": {
+      "title": "U088 특혜 원산지 증빙",
+      "description": "U088 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U088 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U090": {
+      "title": "U090 특혜 원산지 증빙",
+      "description": "U090 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U090 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U091": {
+      "title": "U091 특혜 원산지 증빙",
+      "description": "U091 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U091 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U099": {
+      "title": "U099 특혜 원산지 증빙",
+      "description": "U099 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U099 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U119": {
+      "title": "U119 특혜 원산지 증빙",
+      "description": "U119 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U119 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U120": {
+      "title": "U120 특혜 원산지 증빙",
+      "description": "U120 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U120 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U121": {
+      "title": "U121 특혜 원산지 증빙",
+      "description": "U121 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U121 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U177": {
+      "title": "U177 특혜 원산지 증빙",
+      "description": "U177 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U177 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "U178": {
+      "title": "U178 특혜 원산지 증빙",
+      "description": "U178 특혜 원산지 증빙",
+      "group_id": "PREFERENTIAL_ORIGIN_PROOF",
+      "group_name_ko": "특혜 원산지 증빙 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "U178 특혜 원산지 증빙"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특혜 원산지 증빙 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y001": {
+      "title": "Y001 비대상 또는 면제 선언",
+      "description": "Y001 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y001 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y003": {
+      "title": "Y003 비대상 또는 면제 선언",
+      "description": "Y003 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y003 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y006": {
+      "title": "Y006 비대상 또는 면제 선언",
+      "description": "Y006 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y006 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y007": {
+      "title": "Y007 비대상 또는 면제 선언",
+      "description": "Y007 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y007 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y008": {
+      "title": "Y008 비대상 또는 면제 선언",
+      "description": "Y008 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y008 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y015": {
+      "title": "Y015 비대상 또는 면제 선언",
+      "description": "Y015 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y015 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y017": {
+      "title": "Y017 비대상 또는 면제 선언",
+      "description": "Y017 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y017 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y019": {
+      "title": "Y019 비대상 또는 면제 선언",
+      "description": "Y019 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y019 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y020": {
+      "title": "Y020 비대상 또는 면제 선언",
+      "description": "Y020 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y020 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y021": {
+      "title": "Y021 비대상 또는 면제 선언",
+      "description": "Y021 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y021 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y032": {
+      "title": "Seal product 비해당 선언",
+      "description": "Seal product 비해당 선언",
+      "group_id": "SEAL_PRODUCT_EVIDENCE",
+      "group_name_ko": "Seal product 규제 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Seal product 비해당 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "Seal product 규제 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y033": {
+      "title": "Y033 비대상 또는 면제 선언",
+      "description": "Y033 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y033 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y036": {
+      "title": "Y036 비대상 또는 면제 선언",
+      "description": "Y036 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y036 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y038": {
+      "title": "Y038 비대상 또는 면제 선언",
+      "description": "Y038 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y038 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y043": {
+      "title": "Y043 비대상 또는 면제 선언",
+      "description": "Y043 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y043 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y046": {
+      "title": "Y046 비대상 또는 면제 선언",
+      "description": "Y046 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y046 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y054": {
+      "title": "Y054 비대상 또는 면제 선언",
+      "description": "Y054 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y054 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y057": {
+      "title": "Y057 비대상 또는 면제 선언",
+      "description": "Y057 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y057 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y058": {
+      "title": "개인수하물·개인소비 소량화물 면제 선언",
+      "description": "개인수하물·개인소비 소량화물 면제 선언",
+      "group_id": "HEALTH_CERT_SUPPORT",
+      "group_name_ko": "EU 검역·공식통제 서류 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "개인수하물·개인소비 소량화물 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "EU 검역·공식통제 서류 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y062": {
+      "title": "Y062 비대상 또는 면제 선언",
+      "description": "Y062 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y062 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y063": {
+      "title": "Y063 비대상 또는 면제 선언",
+      "description": "Y063 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y063 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y069": {
+      "title": "Y069 비대상 또는 면제 선언",
+      "description": "Y069 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y069 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y070": {
+      "title": "Y070 비대상 또는 면제 선언",
+      "description": "Y070 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y070 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y072": {
+      "title": "Y072 비대상 또는 면제 선언",
+      "description": "Y072 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y072 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y073": {
+      "title": "Y073 비대상 또는 면제 선언",
+      "description": "Y073 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y073 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y074": {
+      "title": "Y074 비대상 또는 면제 선언",
+      "description": "Y074 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y074 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y075": {
+      "title": "Y075 비대상 또는 면제 선언",
+      "description": "Y075 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y075 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y076": {
+      "title": "Y076 비대상 또는 면제 선언",
+      "description": "Y076 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y076 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y077": {
+      "title": "Y077 비대상 또는 면제 선언",
+      "description": "Y077 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y077 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y078": {
+      "title": "Y078 비대상 또는 면제 선언",
+      "description": "Y078 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y078 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y079": {
+      "title": "Y079 비대상 또는 면제 선언",
+      "description": "Y079 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y079 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y084": {
+      "title": "Y084 비대상 또는 면제 선언",
+      "description": "Y084 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y084 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y085": {
+      "title": "Y085 비대상 또는 면제 선언",
+      "description": "Y085 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y085 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y086": {
+      "title": "Y086 비대상 또는 면제 선언",
+      "description": "Y086 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y086 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y087": {
+      "title": "Y087 비대상 또는 면제 선언",
+      "description": "Y087 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y087 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y088": {
+      "title": "Y088 비대상 또는 면제 선언",
+      "description": "Y088 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y088 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y089": {
+      "title": "Y089 비대상 또는 면제 선언",
+      "description": "Y089 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y089 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y090": {
+      "title": "Y090 비대상 또는 면제 선언",
+      "description": "Y090 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y090 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y091": {
+      "title": "Y091 비대상 또는 면제 선언",
+      "description": "Y091 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y091 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y100": {
+      "title": "Y100 비대상 또는 면제 선언",
+      "description": "Y100 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y100 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y104": {
+      "title": "Y104 비대상 또는 면제 선언",
+      "description": "Y104 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y104 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y105": {
+      "title": "Y105 비대상 또는 면제 선언",
+      "description": "Y105 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y105 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y106": {
+      "title": "Y106 비대상 또는 면제 선언",
+      "description": "Y106 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y106 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y109": {
+      "title": "Y109 비대상 또는 면제 선언",
+      "description": "Y109 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y109 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y110": {
+      "title": "Y110 비대상 또는 면제 선언",
+      "description": "Y110 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y110 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y111": {
+      "title": "Y111 비대상 또는 면제 선언",
+      "description": "Y111 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y111 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y112": {
+      "title": "Y112 비대상 또는 면제 선언",
+      "description": "Y112 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y112 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y113": {
+      "title": "Y113 비대상 또는 면제 선언",
+      "description": "Y113 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y113 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y115": {
+      "title": "Y115 비대상 또는 면제 선언",
+      "description": "Y115 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y115 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y116": {
+      "title": "Y116 비대상 또는 면제 선언",
+      "description": "Y116 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y116 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y120": {
+      "title": "Y120 비대상 또는 면제 선언",
+      "description": "Y120 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y120 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y121": {
+      "title": "Y121 비대상 또는 면제 선언",
+      "description": "Y121 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y121 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y122": {
+      "title": "Y122 비대상 또는 면제 선언",
+      "description": "Y122 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y122 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y123": {
+      "title": "Y123 비대상 또는 면제 선언",
+      "description": "Y123 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y123 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y125": {
+      "title": "Y125 비대상 또는 면제 선언",
+      "description": "Y125 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y125 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y127": {
+      "title": "Y127 비대상 또는 면제 선언",
+      "description": "Y127 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y127 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y128": {
+      "title": "Y128 비대상 또는 면제 선언",
+      "description": "Y128 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y128 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y134": {
+      "title": "Y134 비대상 또는 면제 선언",
+      "description": "Y134 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y134 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y135": {
+      "title": "Y135 비대상 또는 면제 선언",
+      "description": "Y135 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y135 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y136": {
+      "title": "Y136 비대상 또는 면제 선언",
+      "description": "Y136 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y136 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y137": {
+      "title": "Y137 비대상 또는 면제 선언",
+      "description": "Y137 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y137 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y138": {
+      "title": "Y138 비대상 또는 면제 선언",
+      "description": "Y138 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y138 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y146": {
+      "title": "Y146 비대상 또는 면제 선언",
+      "description": "Y146 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y146 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y151": {
+      "title": "Y151 비대상 또는 면제 선언",
+      "description": "Y151 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y151 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y152": {
+      "title": "Y152 비대상 또는 면제 선언",
+      "description": "Y152 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y152 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y154": {
+      "title": "Y154 비대상 또는 면제 선언",
+      "description": "Y154 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y154 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y155": {
+      "title": "Y155 비대상 또는 면제 선언",
+      "description": "Y155 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y155 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y160": {
+      "title": "Y160 비대상 또는 면제 선언",
+      "description": "Y160 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y160 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y162": {
+      "title": "개인물품 수입허가 면제 선언",
+      "description": "개인물품 수입허가 면제 선언",
+      "group_id": "PERSONAL_EFFECTS_EXEMPTION",
+      "group_name_ko": "개인물품 면제 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "개인물품 수입허가 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "개인물품 면제 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y163": {
+      "title": "Y163 비대상 또는 면제 선언",
+      "description": "Y163 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y163 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y165": {
+      "title": "Y165 비대상 또는 면제 선언",
+      "description": "Y165 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y165 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y166": {
+      "title": "Y166 비대상 또는 면제 선언",
+      "description": "Y166 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y166 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y167": {
+      "title": "Y167 비대상 또는 면제 선언",
+      "description": "Y167 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y167 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y169": {
+      "title": "Y169 비대상 또는 면제 선언",
+      "description": "Y169 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y169 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y170": {
+      "title": "특수 경유/재반입 원산지 확인 선언",
+      "description": "특수 경유/재반입 원산지 확인 선언",
+      "group_id": "SPECIAL_TRANSIT_RETURN_EVIDENCE",
+      "group_name_ko": "특수 경유·재반입 원산지 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "특수 경유/재반입 원산지 확인 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특수 경유·재반입 원산지 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y171": {
+      "title": "특수 경유/재반입 원산지 확인 선언",
+      "description": "특수 경유/재반입 원산지 확인 선언",
+      "group_id": "SPECIAL_TRANSIT_RETURN_EVIDENCE",
+      "group_name_ko": "특수 경유·재반입 원산지 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "특수 경유/재반입 원산지 확인 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특수 경유·재반입 원산지 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y172": {
+      "title": "특수 경유/재반입 원산지 확인 선언",
+      "description": "특수 경유/재반입 원산지 확인 선언",
+      "group_id": "SPECIAL_TRANSIT_RETURN_EVIDENCE",
+      "group_name_ko": "특수 경유·재반입 원산지 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "특수 경유/재반입 원산지 확인 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특수 경유·재반입 원산지 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y173": {
+      "title": "특수 경유/재반입 원산지 확인 선언",
+      "description": "특수 경유/재반입 원산지 확인 선언",
+      "group_id": "SPECIAL_TRANSIT_RETURN_EVIDENCE",
+      "group_name_ko": "특수 경유·재반입 원산지 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "특수 경유/재반입 원산지 확인 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특수 경유·재반입 원산지 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y174": {
+      "title": "특수 경유/재반입 원산지 확인 선언",
+      "description": "특수 경유/재반입 원산지 확인 선언",
+      "group_id": "SPECIAL_TRANSIT_RETURN_EVIDENCE",
+      "group_name_ko": "특수 경유·재반입 원산지 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "특수 경유/재반입 원산지 확인 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특수 경유·재반입 원산지 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y175": {
+      "title": "특수 경유/재반입 원산지 확인 선언",
+      "description": "특수 경유/재반입 원산지 확인 선언",
+      "group_id": "SPECIAL_TRANSIT_RETURN_EVIDENCE",
+      "group_name_ko": "특수 경유·재반입 원산지 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "특수 경유/재반입 원산지 확인 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특수 경유·재반입 원산지 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y176": {
+      "title": "특수 경유/재반입 원산지 확인 선언",
+      "description": "특수 경유/재반입 원산지 확인 선언",
+      "group_id": "SPECIAL_TRANSIT_RETURN_EVIDENCE",
+      "group_name_ko": "특수 경유·재반입 원산지 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "특수 경유/재반입 원산지 확인 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특수 경유·재반입 원산지 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y177": {
+      "title": "특수 경유/재반입 원산지 확인 선언",
+      "description": "특수 경유/재반입 원산지 확인 선언",
+      "group_id": "SPECIAL_TRANSIT_RETURN_EVIDENCE",
+      "group_name_ko": "특수 경유·재반입 원산지 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "특수 경유/재반입 원산지 확인 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "특수 경유·재반입 원산지 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y179": {
+      "title": "Y179 비대상 또는 면제 선언",
+      "description": "Y179 비대상 또는 면제 선언",
+      "group_id": "TARIFF_QUOTA_REQUEST",
+      "group_name_ko": "관세할당 신청·잔여 확인자료",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y179 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "관세할당 신청·잔여 확인자료에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y182": {
+      "title": "Y182 비대상 또는 면제 선언",
+      "description": "Y182 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y182 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y185": {
+      "title": "Y185 비대상 또는 면제 선언",
+      "description": "Y185 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y185 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y186": {
+      "title": "Y186 비대상 또는 면제 선언",
+      "description": "Y186 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y186 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y199": {
+      "title": "Y199 비대상 또는 면제 선언",
+      "description": "Y199 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y199 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y235": {
+      "title": "Y235 비대상 또는 면제 선언",
+      "description": "Y235 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y235 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y237": {
+      "title": "Y237 비대상 또는 면제 선언",
+      "description": "Y237 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y237 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y238": {
+      "title": "Y238 비대상 또는 면제 선언",
+      "description": "Y238 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y238 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y239": {
+      "title": "Y239 비대상 또는 면제 선언",
+      "description": "Y239 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y239 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y240": {
+      "title": "Y240 비대상 또는 면제 선언",
+      "description": "Y240 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y240 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y241": {
+      "title": "Y241 비대상 또는 면제 선언",
+      "description": "Y241 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y241 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y242": {
+      "title": "Y242 비대상 또는 면제 선언",
+      "description": "Y242 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y242 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y250": {
+      "title": "Y250 비대상 또는 면제 선언",
+      "description": "Y250 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y250 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y251": {
+      "title": "Y251 비대상 또는 면제 선언",
+      "description": "Y251 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y251 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y257": {
+      "title": "Y257 비대상 또는 면제 선언",
+      "description": "Y257 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y257 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y320": {
+      "title": "Y320 비대상 또는 면제 선언",
+      "description": "Y320 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y320 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y321": {
+      "title": "Y321 비대상 또는 면제 선언",
+      "description": "Y321 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y321 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y323": {
+      "title": "Y323 비대상 또는 면제 선언",
+      "description": "Y323 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y323 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y500": {
+      "title": "Y500 비대상 또는 면제 선언",
+      "description": "Y500 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y500 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y686": {
+      "title": "Y686 비대상 또는 면제 선언",
+      "description": "Y686 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y686 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y687": {
+      "title": "Y687 비대상 또는 면제 선언",
+      "description": "Y687 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y687 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y692": {
+      "title": "Y692 비대상 또는 면제 선언",
+      "description": "Y692 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y692 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y693": {
+      "title": "Y693 비대상 또는 면제 선언",
+      "description": "Y693 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y693 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y694": {
+      "title": "Y694 비대상 또는 면제 선언",
+      "description": "Y694 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y694 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y695": {
+      "title": "Y695 비대상 또는 면제 선언",
+      "description": "Y695 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y695 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y698": {
+      "title": "Y698 비대상 또는 면제 선언",
+      "description": "Y698 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y698 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y699": {
+      "title": "Y699 비대상 또는 면제 선언",
+      "description": "Y699 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y699 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y704": {
+      "title": "Y704 비대상 또는 면제 선언",
+      "description": "Y704 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y704 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y705": {
+      "title": "다이아몬드 중량 기준 비해당 선언",
+      "description": "다이아몬드 중량 기준 비해당 선언",
+      "group_id": "KIMBERLEY_PROCESS_CERT",
+      "group_name_ko": "킴벌리 프로세스 다이아몬드 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "다이아몬드 중량 기준 비해당 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "킴벌리 프로세스 다이아몬드 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y709": {
+      "title": "Y709 비대상 또는 면제 선언",
+      "description": "Y709 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y709 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y710": {
+      "title": "Y710 비대상 또는 면제 선언",
+      "description": "Y710 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y710 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y711": {
+      "title": "Y711 비대상 또는 면제 선언",
+      "description": "Y711 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y711 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y712": {
+      "title": "Y712 비대상 또는 면제 선언",
+      "description": "Y712 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y712 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y715": {
+      "title": "Y715 비대상 또는 면제 선언",
+      "description": "Y715 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y715 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y727": {
+      "title": "Y727 비대상 또는 면제 선언",
+      "description": "Y727 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y727 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y728": {
+      "title": "Y728 비대상 또는 면제 선언",
+      "description": "Y728 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y728 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y729": {
+      "title": "Y729 비대상 또는 면제 선언",
+      "description": "Y729 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y729 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y731": {
+      "title": "Y731 비대상 또는 면제 선언",
+      "description": "Y731 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y731 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y732": {
+      "title": "Y732 비대상 또는 면제 선언",
+      "description": "Y732 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y732 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y733": {
+      "title": "Y733 비대상 또는 면제 선언",
+      "description": "Y733 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y733 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y734": {
+      "title": "Y734 비대상 또는 면제 선언",
+      "description": "Y734 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y734 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y738": {
+      "title": "Y738 비대상 또는 면제 선언",
+      "description": "Y738 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y738 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y739": {
+      "title": "Y739 비대상 또는 면제 선언",
+      "description": "Y739 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y739 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y740": {
+      "title": "Y740 비대상 또는 면제 선언",
+      "description": "Y740 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y740 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y747": {
+      "title": "Y747 비대상 또는 면제 선언",
+      "description": "Y747 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y747 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y750": {
+      "title": "이란 제재 법령 비대상 선언",
+      "description": "이란 제재 법령 비대상 선언",
+      "group_id": "END_USE_STATEMENT",
+      "group_name_ko": "제재·제한 품목 비대상/최종용도 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "이란 제재 법령 비대상 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "제재·제한 품목 비대상/최종용도 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y756": {
+      "title": "Y756 비대상 또는 면제 선언",
+      "description": "Y756 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y756 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y757": {
+      "title": "Y757 비대상 또는 면제 선언",
+      "description": "Y757 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y757 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y758": {
+      "title": "Y758 비대상 또는 면제 선언",
+      "description": "Y758 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y758 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y759": {
+      "title": "Y759 비대상 또는 면제 선언",
+      "description": "Y759 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y759 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y769": {
+      "title": "Y769 비대상 또는 면제 선언",
+      "description": "Y769 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y769 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y784": {
+      "title": "Y784 비대상 또는 면제 선언",
+      "description": "Y784 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y784 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y786": {
+      "title": "Y786 비대상 또는 면제 선언",
+      "description": "Y786 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y786 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y787": {
+      "title": "Y787 비대상 또는 면제 선언",
+      "description": "Y787 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y787 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y788": {
+      "title": "Y788 비대상 또는 면제 선언",
+      "description": "Y788 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y788 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y789": {
+      "title": "Y789 비대상 또는 면제 선언",
+      "description": "Y789 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y789 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y790": {
+      "title": "Y790 비대상 또는 면제 선언",
+      "description": "Y790 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y790 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y791": {
+      "title": "Y791 비대상 또는 면제 선언",
+      "description": "Y791 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y791 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y792": {
+      "title": "Y792 비대상 또는 면제 선언",
+      "description": "Y792 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y792 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y793": {
+      "title": "개인물품 ODS 면제 선언",
+      "description": "개인물품 ODS 면제 선언",
+      "group_id": "PERSONAL_EFFECTS_EXEMPTION",
+      "group_name_ko": "개인물품 면제 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "개인물품 ODS 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "개인물품 면제 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y795": {
+      "title": "Y795 비대상 또는 면제 선언",
+      "description": "Y795 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y795 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y796": {
+      "title": "Y796 비대상 또는 면제 선언",
+      "description": "Y796 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y796 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y797": {
+      "title": "Y797 비대상 또는 면제 선언",
+      "description": "Y797 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y797 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y798": {
+      "title": "Y798 비대상 또는 면제 선언",
+      "description": "Y798 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y798 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y799": {
+      "title": "Y799 비대상 또는 면제 선언",
+      "description": "Y799 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y799 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y824": {
+      "title": "Y824 비대상 또는 면제 선언",
+      "description": "Y824 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y824 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y835": {
+      "title": "Y835 비대상 또는 면제 선언",
+      "description": "Y835 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y835 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y840": {
+      "title": "Y840 비대상 또는 면제 선언",
+      "description": "Y840 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y840 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y841": {
+      "title": "Y841 비대상 또는 면제 선언",
+      "description": "Y841 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y841 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y842": {
+      "title": "Y842 비대상 또는 면제 선언",
+      "description": "Y842 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y842 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y843": {
+      "title": "Y843 비대상 또는 면제 선언",
+      "description": "Y843 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y843 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y845": {
+      "title": "Y845 비대상 또는 면제 선언",
+      "description": "Y845 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y845 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y854": {
+      "title": "Y854 비대상 또는 면제 선언",
+      "description": "Y854 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y854 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y855": {
+      "title": "Y855 비대상 또는 면제 선언",
+      "description": "Y855 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y855 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y859": {
+      "title": "Y859 비대상 또는 면제 선언",
+      "description": "Y859 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y859 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y864": {
+      "title": "Y864 비대상 또는 면제 선언",
+      "description": "Y864 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y864 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y870": {
+      "title": "Y870 비대상 또는 면제 선언",
+      "description": "Y870 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y870 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y872": {
+      "title": "Y872 비대상 또는 면제 선언",
+      "description": "Y872 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y872 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y873": {
+      "title": "Y873 비대상 또는 면제 선언",
+      "description": "Y873 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y873 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y874": {
+      "title": "Y874 비대상 또는 면제 선언",
+      "description": "Y874 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y874 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y875": {
+      "title": "Y875 비대상 또는 면제 선언",
+      "description": "Y875 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y875 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y877": {
+      "title": "Y877 비대상 또는 면제 선언",
+      "description": "Y877 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y877 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y878": {
+      "title": "Y878 비대상 또는 면제 선언",
+      "description": "Y878 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y878 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y879": {
+      "title": "Y879 비대상 또는 면제 선언",
+      "description": "Y879 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y879 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y889": {
+      "title": "Y889 비대상 또는 면제 선언",
+      "description": "Y889 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y889 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y897": {
+      "title": "Y897 비대상 또는 면제 선언",
+      "description": "Y897 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y897 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y900": {
+      "title": "CITES 비해당 선언",
+      "description": "CITES 비해당 선언",
+      "group_id": "CITES_SPECIES_EVIDENCE",
+      "group_name_ko": "CITES 대상종 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "CITES 비해당 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "CITES 대상종 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y904": {
+      "title": "Y904 비대상 또는 면제 선언",
+      "description": "Y904 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y904 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y910": {
+      "title": "Y910 비대상 또는 면제 선언",
+      "description": "Y910 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y910 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y920": {
+      "title": "제한 품목 비해당 선언",
+      "description": "제한 품목 비해당 선언",
+      "group_id": "END_USE_STATEMENT",
+      "group_name_ko": "제재·제한 품목 비대상/최종용도 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "제한 품목 비해당 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "제재·제한 품목 비대상/최종용도 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y921": {
+      "title": "금지/제한 면제 선언",
+      "description": "금지/제한 면제 선언",
+      "group_id": "END_USE_STATEMENT",
+      "group_name_ko": "제재·제한 품목 비대상/최종용도 확인 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "금지/제한 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "제재·제한 품목 비대상/최종용도 확인 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y922": {
+      "title": "Y922 비대상 또는 면제 선언",
+      "description": "Y922 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y922 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y923": {
+      "title": "Y923 비대상 또는 면제 선언",
+      "description": "Y923 비대상 또는 면제 선언",
+      "group_id": "WASTE_SHIPMENT_DOCUMENTS",
+      "group_name_ko": "폐기물 운송·재활용 관련 증빙",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y923 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "폐기물 운송·재활용 관련 증빙에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y924": {
+      "title": "Y924 비대상 또는 면제 선언",
+      "description": "Y924 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y924 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y927": {
+      "title": "IUU 어업 규정 비대상 선언",
+      "description": "IUU 어업 규정 비대상 선언",
+      "group_id": "IUU_FISHERY_CONTROL",
+      "group_name_ko": "IUU 어업 규제 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "IUU 어업 규정 비대상 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "IUU 어업 규제 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y929": {
+      "title": "EU 유기농 규정 비대상 선언",
+      "description": "EU 유기농 규정 비대상 선언",
+      "group_id": "ORGANIC_COI",
+      "group_name_ko": "EU 유기농 수입관리 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "EU 유기농 규정 비대상 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "EU 유기농 수입관리 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y930": {
+      "title": "동물성 식품·복합식품 공식통제 비대상 선언",
+      "description": "동물성 식품·복합식품 공식통제 비대상 선언",
+      "group_id": "OFFICIAL_CONTROL_CHED_EVIDENCE",
+      "group_name_ko": "동물성 식품·복합식품 공식통제 비대상 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "동물성 식품·복합식품 공식통제 비대상 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "동물성 식품·복합식품 공식통제 비대상 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y931": {
+      "title": "수의검역 예외 적용 선언",
+      "description": "수의검역 예외 적용 선언",
+      "group_id": "HEALTH_CERT_SUPPORT",
+      "group_name_ko": "EU 검역·공식통제 서류 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "수의검역 예외 적용 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "EU 검역·공식통제 서류 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y937": {
+      "title": "Y937 비대상 또는 면제 선언",
+      "description": "Y937 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y937 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y942": {
+      "title": "Y942 비대상 또는 면제 선언",
+      "description": "Y942 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y942 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y944": {
+      "title": "Y944 비대상 또는 면제 선언",
+      "description": "Y944 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y944 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y945": {
+      "title": "Y945 비대상 또는 면제 선언",
+      "description": "Y945 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y945 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y946": {
+      "title": "Y946 비대상 또는 면제 선언",
+      "description": "Y946 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y946 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y948": {
+      "title": "Y948 비대상 또는 면제 선언",
+      "description": "Y948 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y948 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y949": {
+      "title": "Y949 비대상 또는 면제 선언",
+      "description": "Y949 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y949 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y951": {
+      "title": "Y951 비대상 또는 면제 선언",
+      "description": "Y951 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y951 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y955": {
+      "title": "Y955 비대상 또는 면제 선언",
+      "description": "Y955 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y955 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y957": {
+      "title": "Y957 비대상 또는 면제 선언",
+      "description": "Y957 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y957 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y958": {
+      "title": "Y958 비대상 또는 면제 선언",
+      "description": "Y958 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y958 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y959": {
+      "title": "Y959 비대상 또는 면제 선언",
+      "description": "Y959 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y959 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y960": {
+      "title": "Y960 비대상 또는 면제 선언",
+      "description": "Y960 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y960 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y961": {
+      "title": "Y961 비대상 또는 면제 선언",
+      "description": "Y961 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y961 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y962": {
+      "title": "Y962 비대상 또는 면제 선언",
+      "description": "Y962 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y962 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y963": {
+      "title": "Y963 비대상 또는 면제 선언",
+      "description": "Y963 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y963 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y964": {
+      "title": "Y964 비대상 또는 면제 선언",
+      "description": "Y964 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y964 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y965": {
+      "title": "Y965 비대상 또는 면제 선언",
+      "description": "Y965 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y965 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y966": {
+      "title": "Y966 비대상 또는 면제 선언",
+      "description": "Y966 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y966 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y969": {
+      "title": "Y969 비대상 또는 면제 선언",
+      "description": "Y969 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y969 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y970": {
+      "title": "Y970 비대상 또는 면제 선언",
+      "description": "Y970 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y970 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y971": {
+      "title": "Y971 비대상 또는 면제 선언",
+      "description": "Y971 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y971 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y972": {
+      "title": "Y972 비대상 또는 면제 선언",
+      "description": "Y972 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y972 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y978": {
+      "title": "Y978 비대상 또는 면제 선언",
+      "description": "Y978 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y978 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y979": {
+      "title": "식물제품 개인수하물 공식통제 면제 선언",
+      "description": "식물제품 개인수하물 공식통제 면제 선언",
+      "group_id": "HEALTH_CERT_SUPPORT",
+      "group_name_ko": "EU 검역·공식통제 서류 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "식물제품 개인수하물 공식통제 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "EU 검역·공식통제 서류 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y980": {
+      "title": "수의검역 예외 적용 선언",
+      "description": "수의검역 예외 적용 선언",
+      "group_id": "HEALTH_CERT_SUPPORT",
+      "group_name_ko": "EU 검역·공식통제 서류 가이드라인",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "수의검역 예외 적용 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "EU 검역·공식통제 서류 가이드라인에 해당하는지 확인하고, 대상이면 수입자와 필요한 서류를 준비합니다."
+        }
+      ]
+    },
+    "Y984": {
+      "title": "Y984 비대상 또는 면제 선언",
+      "description": "Y984 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y984 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y986": {
+      "title": "Y986 비대상 또는 면제 선언",
+      "description": "Y986 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y986 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y997": {
+      "title": "Y997 비대상 또는 면제 선언",
+      "description": "Y997 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y997 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    },
+    "Y999": {
+      "title": "Y999 비대상 또는 면제 선언",
+      "description": "Y999 비대상 또는 면제 선언",
+      "group_id": "",
+      "group_name_ko": "",
+      "blocks": [
+        {
+          "title": "서류 의미",
+          "body": "Y999 비대상 또는 면제 선언"
+        },
+        {
+          "title": "준비 방향",
+          "body": "비대상 또는 면제 조건에 해당하는지 확인하고, 제품 자료로 그 근거를 설명합니다."
+        }
+      ]
+    }
+  }
+}

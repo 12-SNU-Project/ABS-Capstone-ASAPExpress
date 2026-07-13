@@ -3,12 +3,14 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Topbar from "./components/Topbar";
 import AdminPage from "./pages/AdminPage";
+import ConsumerPage from "./pages/ConsumerPage";
 import DocumentPage from "./pages/DocumentPage";
 import WorkbenchPage from "./pages/WorkbenchPage";
 import "./styles/base.css";
 import "./styles/workbench.css";
 import "./styles/admin.css";
 import "./styles/document.css";
+import "./styles/consumer.css";
 
 function App() {
   return (
@@ -20,6 +22,7 @@ function App() {
             <Route path="/" element={<WorkbenchPage />} />
             <Route path="/classification" element={<WorkbenchPage />} />
             <Route path="/admin" element={<AdminPage />} />
+            <Route path="/consumer" element={<ConsumerPage />} />
             <Route path="/document/:jobId/:taric10" element={<DocumentPage />} />
             <Route path="*" element={<Navigate to="/classification" replace />} />
           </Routes>

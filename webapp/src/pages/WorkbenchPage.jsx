@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import DataTable from "../components/DataTable";
 import KeyValueRows from "../components/KeyValueRows";
 import { useClassificationRun } from "../hooks/useClassificationRun";
 import {
@@ -297,27 +298,96 @@ function TaricPanel({ result, derived, candidate }) {
   );
 }
 
+// composition_terms는 "키: 값" 문자열 목록 — LLM reconstruction 표의 행이다.
+function parseCompositionTerms(terms) {
+  return asList(terms)
+    .map((term) => {
+      const text = clean(term);
+      const splitAt = text.indexOf(":");
+      if (splitAt < 1) {
+        return { 구분: "", 내용: text };
+      }
+      return { 구분: text.slice(0, splitAt).trim(), 내용: text.slice(splitAt + 1).trim() };
+    })
+    .filter((row) => row.내용);
+}
+
 function ProductPanel({ result }) {
   const inputView = asObject(result?.input_processing_view);
   const understandingView = asObject(result?.product_understanding_view);
   const understanding = { ...understandingView, ...asObject(understandingView.identity_hints) };
+  const reconstructedFacts = asList(inputView.reconstructed_product_facts);
+  const composition = asObject(understandingView.composition_facts);
+  const compositionRows = parseCompositionTerms(composition.composition_terms);
+  const percentages = asList(composition.ingredient_percentages);
   return (
     <div className="cjs-panel">
       <div className="cjs-panel-title">상품 이해 결과</div>
-      <KeyValueRows data={asObject(inputView.page_product_facts)} keys={PRODUCT_FACT_KEYS} limit={6} />
-      <div className="cjs-subpanel-title">입력 복원</div>
-      <KeyValueRows data={asObject(inputView.reconstruction_status)} keys={RECONSTRUCTION_KEYS} limit={8} />
-      <div className="cjs-subpanel-title">분류에 사용한 상품 정보</div>
-      <KeyValueRows data={understanding} keys={UNDERSTANDING_KEYS} limit={14} />
+      <div className="cjs-understanding-grid">
+        <div>
+          <KeyValueRows data={asObject(inputView.page_product_facts)} keys={PRODUCT_FACT_KEYS} limit={6} />
+          <div className="cjs-subpanel-title">입력 복원</div>
+          <KeyValueRows data={asObject(inputView.reconstruction_status)} keys={RECONSTRUCTION_KEYS} limit={8} />
+          <div className="cjs-subpanel-title">분류에 사용한 상품 정보</div>
+          <KeyValueRows data={understanding} keys={UNDERSTANDING_KEYS} limit={14} />
+        </div>
+        <div>
+          <div className="cjs-subpanel-title cjs-first">복원 fact 표 ({reconstructedFacts.length}건)</div>
+          <DataTable
+            rows={reconstructedFacts}
+            limit={30}
+            emptyMessage="LLM 복원이 만든 구조화 fact가 없습니다."
+            columns={[
+              { key: "field_name", label: "필드", variant: "mono" },
+              { key: "normalized_value", label: "값" },
+              { key: "source_refs", label: "출처", variant: "mono" },
+              { key: "validation_status", label: "상태", variant: "pill" },
+            ]}
+          />
+          <div className="cjs-subpanel-title">Composition lane</div>
+          <div className="cjs-chip-row">
+            {clean(composition.processing_state) && composition.processing_state !== "unknown" ? (
+              <span className="cjs-chip">가공: {composition.processing_state}</span>
+            ) : null}
+            {clean(composition.principal_ingredient) ? (
+              <span className="cjs-chip">주원료: {composition.principal_ingredient}</span>
+            ) : null}
+            <span className="cjs-chip">함량 {percentages.length}건</span>
+            {composition.contains_wrapper_or_dough ? <span className="cjs-chip">피/반죽 포함</span> : null}
+            {composition.contains_sauce_or_broth ? <span className="cjs-chip">소스/육수 포함</span> : null}
+          </div>
+          <DataTable
+            rows={compositionRows}
+            limit={20}
+            emptyMessage="composition lane에 반영된 항목이 없습니다."
+            columns={[
+              { key: "구분", label: "구분", variant: "mono" },
+              { key: "내용", label: "내용" },
+            ]}
+          />
+        </div>
+      </div>
     </div>
   );
 }
 
 function RoutingPanel({ result }) {
+  const routingView = asObject(result?.routing_view);
+  const chapterDetails = asList(routingView.candidate_chapter_details);
   return (
     <div className="cjs-panel">
       <div className="cjs-panel-title">챕터 분기</div>
-      <KeyValueRows data={asObject(result?.routing_view)} keys={ROUTE_KEYS} limit={10} />
+      <KeyValueRows
+        data={routingView}
+        keys={ROUTE_KEYS.filter((key) => key !== "candidate_chapter_details")}
+        limit={10}
+      />
+      {chapterDetails.length ? (
+        <>
+          <div className="cjs-subpanel-title">챕터 점수 상세</div>
+          <DataTable rows={chapterDetails} limit={8} />
+        </>
+      ) : null}
     </div>
   );
 }
@@ -477,10 +547,14 @@ export default function WorkbenchPage() {
           <TaricPanel result={result} derived={derived} candidate={selectedCandidate} />
         </main>
         <aside className="cjs-inspector">
-          <ProductPanel result={result} />
           <RoutingPanel result={result} />
           <TracePanel candidate={selectedCandidate} />
         </aside>
+      </section>
+
+      {/* 표(복원 fact / composition lane)가 있어 전체 폭 섹션으로 배치 */}
+      <section className="cjs-understanding-section">
+        <ProductPanel result={result} />
       </section>
 
       <section className="cjs-debug-section">

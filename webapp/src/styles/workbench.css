@@ -711,3 +711,107 @@ summary.cjs-panel-title {
     width: 100%;
   }
 }
+
+/* ---- 데이터 표 (복원 fact / composition lane / 챕터 점수) ---- */
+.cjs-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--cjs-border);
+  border-radius: 8px;
+  background: var(--cjs-surface-strong);
+}
+
+.cjs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.cjs-table th,
+.cjs-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--cjs-border);
+  text-align: left;
+  vertical-align: top;
+  max-width: 300px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.cjs-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.cjs-table th {
+  color: var(--cjs-muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--cjs-accent) 5%, transparent);
+}
+
+.cjs-cell-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--cjs-muted);
+}
+
+.cjs-cell-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.cjs-cell-pill.ok {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--cjs-accent-2);
+}
+
+.cjs-cell-pill.warn {
+  background: rgba(217, 119, 6, 0.14);
+  color: #d97706;
+}
+
+.cjs-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.cjs-chip {
+  padding: 3px 9px;
+  border: 1px solid var(--cjs-border);
+  border-radius: 999px;
+  background: var(--cjs-surface-strong);
+  color: var(--cjs-text);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+/* 상품 이해 결과 — 표가 커서 전체 폭 섹션으로 */
+.cjs-understanding-section {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.cjs-understanding-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(0, 2fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.cjs-understanding-grid .cjs-subpanel-title.cjs-first {
+  margin-top: 0;
+}
+
+@media (max-width: 900px) {
+  .cjs-understanding-grid {
+    grid-template-columns: 1fr;
+  }
+}

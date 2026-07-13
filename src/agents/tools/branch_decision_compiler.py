@@ -162,11 +162,20 @@ def CompileGroupDecisions(
                 add("exclusion_boundary", "not_contains", sorted(values), neg.group(0))
                 emitted_types.add("exclusion_boundary")
         positive_side = _NEG_VALUE.sub(" ", clean)
+        # dash(중간) 세그먼트는 상태축 전용: 'Molluscs' 같은 dash 명사(류
+        # 정의)가 조건 값이 되면 그 류의 전 형제가 같은 값으로 확정된다
+        # (실측: 1605.5x 일곱 형제 전원 확정 — ingredient_class='molluscs'
+        # 하나로). 명사류 값 추출은 leaf 세그먼트에서만.
+        leaf_positive = _NEG_VALUE.sub(" ", leaf_segment)
+        _STATE_TYPES = {"preservation_state", "processing_method",
+                        "physical_form", "condition_quality"}
         for entry in _TAXONOMY:
             cond_type = entry["criterion_type"]
             if cond_type in ("residual_other", "exclusion_boundary"):
                 continue
-            match = entry["pattern"].search(positive_side)
+            search_text = (positive_side if cond_type in _STATE_TYPES
+                           else leaf_positive)
+            match = entry["pattern"].search(search_text)
             if not match:
                 continue
             if cond_type == "quantitative_threshold":
@@ -179,7 +188,7 @@ def CompileGroupDecisions(
             # 목적어가 값이다 (연산어를 값으로 쓰면 모든 라벨에 오발동).
             if cond_type in ("material_composition", "intended_use_function",
                              "packaging_presentation"):
-                window = positive_side[match.end():match.end() + 40]
+                window = search_text[match.end():match.end() + 40]
                 span_source = window.split(";")[0].split(".")[0]
             else:
                 span_source = match.group(0)
@@ -195,7 +204,7 @@ def CompileGroupDecisions(
                 emitted_types.add(cond_type)
         # 아무 유형도 안 잡힌 순수 명사 라벨 -> product_identity 폴백
         if not emitted_types:
-            nouns = sorted(w for w in _toks(positive_side) if _discriminative(w))[:8]
+            nouns = sorted(w for w in _toks(leaf_positive) if _discriminative(w))[:8]
             if nouns:
                 add("product_identity", "has_token", nouns, clean)
     return rows

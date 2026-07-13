@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>ASAP Example - AIR WAYBILL / BILL OF LADING</title>
+  <link rel="stylesheet" href="../asap_example_forms.css">
+</head>
+<body>
+  <main class="sheet">
+    <header class="doc-header">
+      <div><img class="logo" src="../../../asap_black.png" alt="ASAP"></div>
+      <div class="title-block">
+        <h1 class="doc-title">AIR WAYBILL / BILL OF LADING</h1>
+        <div class="doc-subtitle">운송서류 작성 예시</div>
+        <div class="sample-badge">ASAP 제공 예시 양식</div>
+      </div>
+      <table class="meta-table"><tr><th>AWB / B/L No.</th><td>123-45678901</td></tr><tr><th>Issue Date</th><td>2026-07-01</td></tr><tr><th>Mode</th><td>Air freight</td></tr><tr><th>Freight Term</th><td>Prepaid</td></tr></table>
+    </header>
+
+    <section class="two-col">
+      <div><div class="section-title">Shipper</div><table class="info-table"><tr><th>Company</th><td>ASAP Foods Korea Co., Ltd.</td></tr><tr><th>Address</th><td>12 Sample-ro, Gangnam-gu, Seoul, Republic of Korea</td></tr><tr><th>Account No.</th><td>ASAP-KR-0001</td></tr></table></div><div><div class="section-title">Consignee</div><table class="info-table"><tr><th>Company</th><td>ASAP Europe Import GmbH</td></tr><tr><th>Address</th><td>45 Rue Exemple, 75000 Paris, France</td></tr><tr><th>Notify Party</th><td>Same as consignee</td></tr></table></div>
+    </section>
+
+    <section>
+      <div class="section-title">Transport Information</div>
+      <table class="items-table">
+        <thead><tr><th>Airport / Port of Departure</th><th>Airport / Port of Destination</th><th>Carrier</th><th>Flight / Vessel</th><th>Packages</th><th>Gross Weight</th><th>Goods Description</th></tr></thead>
+        <tbody><tr><td>ICN Seoul</td><td>CDG Paris</td><td>ASAP Air Cargo</td><td>AX 1234</td><td>20 cartons</td><td>184.0 kg</td><td>Prepared food product, retail packed</td></tr><tr><td>Handling info</td><td>Keep dry / ambient temperature</td><td>Declared value</td><td>NVD</td><td></td><td></td><td></td></tr></tbody>
+      </table>
+    </section>
+
+    <section class="signature-grid">
+      <div class="signature-box"><div class="field-label">Prepared by</div><div class="signature-line">Name / Title / Date</div></div>
+      <div class="signature-box"><div class="field-label">Reviewed by</div><div class="signature-line">Quality / Export Manager</div></div>
+      <div class="signature-box"><div class="field-label">Company Stamp</div><div class="signature-line">Stamp / Signature</div></div>
+    </section>
+
+    <div class="note-box"><strong>작성 포인트:</strong> 운송서류는 송하인, 수하인, 운송인, 운송경로, 포장 수량, 총중량, 물품 설명을 연결해 통관 서류와 대조할 수 있게 작성합니다.</div>
+    <div class="source-note">Reference used for field structure: IATA Air Waybill publication page, https://www.iata.org/en/publications/store/air-waybill/. This ASAP example is a visual reference only.</div>
+    <footer class="footer">ASAP Example Form · For visual reference only · Not for official submission</footer>
+  </main>
+</body>
+</html>
