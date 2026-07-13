@@ -12,9 +12,10 @@ from bussiness_logic.pipeline.export_requirement_pipeline import (
     BuildRawInputFromPreparedFacts,
 )
 from bussiness_logic.pipeline.pipeline_context import PipelineContext
+from bussiness_logic.pipeline.pipeline_step import PipelineStep
 
 
-class HsCodeClassificationPipeline:
+class _BuildClassificationRawInputStep:
     def Run(self, context: PipelineContext) -> None:
         context.Emit(
             "Input_Intake",
@@ -31,12 +32,40 @@ class HsCodeClassificationPipeline:
             message="raw product facts 생성",
             raw_input=context.rawInput,
         )
-        for component in (
-            EvidenceIntakeComponent(context.rawInput),
-            ProductUnderstandingComponent(),
-            Hs2RoutingComponent(),
-            ClassificationComponent(),
-        ):
-            context.ExecuteComponent(component)
+
+
+class HsCodeClassificationPipeline:
+    def Run(self, context: PipelineContext) -> None:
+        PipelineStep(
+            "build_raw_input",
+            _BuildClassificationRawInputStep(),
+        ).Run(context)
+        if context.shouldStop:
+            return
+        for step in self._BuildComponentSteps(context):
+            step.Run(context)
             if context.shouldStop:
                 return
+
+    def _BuildComponentSteps(
+        self,
+        context: PipelineContext,
+    ) -> tuple[PipelineStep, ...]:
+        return (
+            PipelineStep(
+                "evidence_intake",
+                EvidenceIntakeComponent(context.rawInput),
+            ),
+            PipelineStep(
+                "product_understanding",
+                ProductUnderstandingComponent(),
+            ),
+            PipelineStep(
+                "hs2_routing",
+                Hs2RoutingComponent(),
+            ),
+            PipelineStep(
+                "classification",
+                ClassificationComponent(),
+            ),
+        )

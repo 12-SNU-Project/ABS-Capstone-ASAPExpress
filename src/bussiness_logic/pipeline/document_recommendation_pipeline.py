@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from bussiness_logic.document.document_component import DocumentComponent
 from bussiness_logic.pipeline.pipeline_context import PipelineContext
+from bussiness_logic.pipeline.pipeline_step import PipelineStep
 from bussiness_logic.utils.json_types import JsonObject
 
 
@@ -18,9 +19,10 @@ class DocumentRecommendationPipeline:
                 partial_result=partial,
             )
             return
-        context.ExecuteComponent(
+        PipelineStep(
+            "document_recommendation",
             DocumentComponent(include_celex_excerpt=context.includeCelexExcerpt),
-        )
+        ).Run(context)
 
     @staticmethod
     def _ShouldSkip(partial: JsonObject) -> bool:

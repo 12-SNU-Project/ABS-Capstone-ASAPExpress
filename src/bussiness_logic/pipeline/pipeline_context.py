@@ -38,6 +38,7 @@ class PipelineContext:
     includeCelexExcerpt: bool = False
     progressCallback: ProgressCallback | None = None
     rawInput: JsonObject = field(default_factory=dict)
+    stepResults: list[JsonObject] = field(default_factory=list)
     componentResults: list[JsonObject] = field(default_factory=list)
     shouldStop: bool = False
 
@@ -53,6 +54,36 @@ class PipelineContext:
             })
         except Exception:
             pass
+
+    def StartStep(
+        self,
+        *,
+        stepName: str,
+        runnerName: str,
+        runnerType: str,
+    ) -> JsonObject:
+        stepResult: JsonObject = {
+            "step_name": stepName,
+            "runner_name": runnerName,
+            "runner_type": runnerType,
+            "status": "running",
+        }
+        self.stepResults.append(stepResult)
+        return stepResult
+
+    def FinishStep(
+        self,
+        stepResult: JsonObject,
+        *,
+        status: str,
+        error: str | None = None,
+        outputsWritten: list[str] | None = None,
+    ) -> None:
+        stepResult["status"] = status
+        if error:
+            stepResult["error"] = error
+        if outputsWritten:
+            stepResult["outputs_written"] = list(outputsWritten)
 
     def ExecuteComponent(self, component: BasePipelineComponent) -> ComponentResult:
         self.Emit(component.component_name, "running", message=f"{component.stage} 실행 중")
@@ -89,6 +120,7 @@ class PipelineContext:
             "document_package": (
                 blackboardSnapshot.get("document_packages") or [None]
             )[-1],
+            "step_results": list(self.stepResults),
             "component_results": list(self.componentResults),
             "component_runs": _ReadComponentRuns(self.store),
             "run_id": self.store.run_id,
@@ -110,6 +142,7 @@ class PipelineContext:
             "raw_document_package": rawDocumentPackage,
             "document_package": documentPackage,
             "candidate_code_set": candidateCodeSet,
+            "step_results": list(self.stepResults),
             "component_results": list(self.componentResults),
             "component_runs": _ReadComponentRuns(self.store),
             "run_id": self.store.run_id,

@@ -1,9 +1,9 @@
 """URL-driven pipeline smoke for the restored LLM ProductUnderstanding combiner.
 
-Reuses the classification-smoke wiring from ``kurly_market_smoke.py`` (commit
-668cf10) — ``BuildRawInputFromUi`` (which scrapes the Kurly URL) + the
-current component chain (EvidenceIntake -> ProductUnderstanding -> DomainRouter ->
-Classification). For every URL in ``tests/EU_HS_test.csv`` it runs the chain
+Reuses the classification-smoke wiring from ``kurly_market_smoke.py``:
+``BuildRawInputFromUi`` prepares the Kurly facts once, then the refactored
+``HsCodeClassificationPipeline`` runs EvidenceIntake -> ProductUnderstanding ->
+DomainRouter -> Classification. For every URL in ``tests/EU_HS_test.csv`` it runs the chain
 twice (``ASAP_USE_LLM_UNDERSTANDING`` off vs on) against the *same* scraped raw
 input, then scores hs4/hs6/cn8 recall vs the ``EU HS CODE`` answer — so you can
 see whether the LLM combiner lifts routing/classification accuracy.
@@ -72,11 +72,11 @@ def LoadRows(csvPath: Path, *, offset: int, limit: int) -> list[dict[str, str]]:
 def _run_chain(rawInput: JsonObject, *, productId: str, use_llm: bool,
                artifact_root: Path) -> JsonObject:
     from agents.blackboard import BlackboardStore
-    from agents.pipeline_components import (
-        ClassificationComponent,
-        Hs2RoutingComponent,
-        EvidenceIntakeComponent,
-        ProductUnderstandingComponent,
+    from bussiness_logic.pipeline.hs_code_classification_pipeline import (
+        HsCodeClassificationPipeline,
+    )
+    from bussiness_logic.pipeline.pipeline_context import (
+        PipelineContext,
     )
 
     saved = {
@@ -92,17 +92,17 @@ def _run_chain(rawInput: JsonObject, *, productId: str, use_llm: bool,
             runtime_mode="smoke", run_id="run_001",
             run_dir=runDirectory, validate_on_write=False,
         )
-        errors: list[str] = []
-        for component in (
-            EvidenceIntakeComponent(rawInput),
-            ProductUnderstandingComponent(),
-            Hs2RoutingComponent(),
-            ClassificationComponent(),
-        ):
-            result = component.Execute(store)
-            if not result.success:
-                errors.append(f"{component.component_name}: {result.error}")
-                break
+        context = PipelineContext(
+            query=str(rawInput.get("product_name") or productId),
+            facts=rawInput,
+            store=store,
+        )
+        HsCodeClassificationPipeline().Run(context)
+        errors = [
+            f"{item['component_name']}: {item['error']}"
+            for item in context.componentResults
+            if item.get("error")
+        ]
 
         bb = store.load()
         productUnderstanding = bb.get("product_understanding") or {}
@@ -114,6 +114,9 @@ def _run_chain(rawInput: JsonObject, *, productId: str, use_llm: bool,
         distilledIdentity = productUnderstanding.get("distilled_identity") or {}
         if not isinstance(distilledIdentity, dict):
             distilledIdentity = {}
+        compositionFacts = productUnderstanding.get("composition_facts") or {}
+        if not isinstance(compositionFacts, dict):
+            compositionFacts = {}
         routing = bb.get("routing_context") or {}
         routerChapters = [
             f"{d.get('chapter')}({d.get('score')})"
@@ -131,6 +134,7 @@ def _run_chain(rawInput: JsonObject, *, productId: str, use_llm: bool,
         return {
             "run_dir": str(runDirectory),
             "blackboard_path": str(store.bb_path),
+            "step_results": list(context.stepResults),
             "understanding_mode": identity.get("understanding_mode"),
             "product_form_terms": identity.get("product_form_terms") or [],
             "chapter_hint_terms": identity.get("chapter_hint_terms") or [],
@@ -138,6 +142,13 @@ def _run_chain(rawInput: JsonObject, *, productId: str, use_llm: bool,
                 "commercial_identity": distilledIdentity.get("commercial_identity"),
                 "product_form_signal_terms": distilledIdentity.get("product_form_signal_terms") or [],
                 "processing_signal_terms": distilledIdentity.get("processing_signal_terms") or [],
+            },
+            "composition_lane": {
+                "composition_terms": compositionFacts.get("composition_terms") or [],
+                "ingredient_percentages": compositionFacts.get("ingredient_percentages") or [],
+                "composition_basis": compositionFacts.get("composition_basis"),
+                "principal_ingredient_status": compositionFacts.get("principal_ingredient_status"),
+                "missing_composition_facts": compositionFacts.get("missing_composition_facts") or [],
             },
             "classification_trace": {
                 "decision_status": classificationTrace.get("decision_status"),
@@ -150,8 +161,8 @@ def _run_chain(rawInput: JsonObject, *, productId: str, use_llm: bool,
             "llm_error": identity.get("llm_error"),
             "router_chapters": routerChapters,
             "cn8_candidates": cn8s,
-            "product_form_signal_terms": identity.get("product_form_signal_terms") or [],
-            "processing_signal_terms": identity.get("processing_signal_terms") or [],
+            "product_form_signal_terms": distilledIdentity.get("product_form_signal_terms") or [],
+            "processing_signal_terms": distilledIdentity.get("processing_signal_terms") or [],
             "errors": errors,
         }
     finally:
