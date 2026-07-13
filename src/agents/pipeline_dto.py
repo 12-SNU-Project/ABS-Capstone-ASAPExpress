@@ -128,6 +128,8 @@ class IdentityHintSet:
     chapterHintSourceTerms: tuple[str, ...] = field(default=(), metadata=_desc("HS2 힌트 생성 근거 토큰"))
     chapterHintBasis: str = field(default="", metadata=_desc("HS2 힌트 생성 근거 설명"))
     chapterHintStatus: str = field(default="", metadata=_desc("HS2 힌트 상태"))
+    principalIngredientGuess: str = field(default="", metadata=_desc("LLM 성분서열 보고: 주성분 추정(라벨 1순위)"))
+    accessoryIngredients: tuple[str, ...] = field(default=(), metadata=_desc("LLM 성분서열 보고: 부성분(소스·국물·고명)"))
     understandingMode: str = field(default="regex", metadata=_desc("힌트 생성 방식"))
     needsReview: bool = field(default=False, metadata=_desc("수동 검토 필요 여부"))
     llmError: str = field(default="", metadata=_desc("LLM 힌트 생성 오류"))
@@ -152,6 +154,8 @@ class IdentityHintSet:
             "chapter_hint_source_terms": list(self.chapterHintSourceTerms),
             "chapter_hint_basis": self.chapterHintBasis,
             "chapter_hint_status": self.chapterHintStatus,
+            "principal_ingredient_guess": self.principalIngredientGuess,
+            "accessory_ingredients": list(self.accessoryIngredients),
             "understanding_mode": self.understandingMode,
             "needs_review": self.needsReview,
             "llm_error": self.llmError,

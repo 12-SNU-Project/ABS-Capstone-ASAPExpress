@@ -26,16 +26,70 @@ from typing import Any, Mapping
 from agents.tools.branch_predicate_evaluator import _aliases, _dig, _field_tokens, _stem
 
 _TOKEN = re.compile(r"[a-z]+")
+
+# boolean 필드의 법조문 어휘 선언 — 필드명(wrapper/dough)과 조건어(stuffed)의
+# 레지스터 갭을 잇는 필드 수준 사전. 제품·코드 하드코딩이 아니라 "이 boolean이
+# 답하는 법조문 단어"의 정의다 (군만두 190220 'stuffed' ↔ wrapper=True 실측 갭).
+_BOOLEAN_REGISTER = {
+    "contains_wrapper_or_dough": frozenset({"stuffed", "filled"}),
+    "contains_sauce_or_broth": frozenset({"sauce", "broth"}),
+}
+_UN_PREFIX = ("un", "non")
+
+# binding-v1: (cond_type|leaf) 확정 자격을 손 규칙이 아니라 실측 정밀도로.
+# artifacts/binding_v1.json (캘리브레이터 산출물). 파일 부재/게이트 OFF면
+# 손 규칙(_TYPED_LEAVES 계열) 폴백. 임계는 env로 노출:
+#   ASAP_BINDING_MIN_N (기본 10) / ASAP_BINDING_MIN_PRECISION (기본 0.25
+#   — 형제 ~10개 기준 무작위 10%의 2.5배 lift)
+_binding_cache: list[dict] = []
+
+
+def _binding_table() -> dict:
+    if not _binding_cache:
+        import pathlib
+        loaded = {}
+        try:
+            path = os.environ.get("ASAP_BINDING_V1_PATH") or str(
+                pathlib.Path(__file__).resolve().parents[3] / "artifacts" / "binding_v1.json")
+            data = json.loads(open(path, encoding="utf-8").read())
+            min_n = int(os.environ.get("ASAP_BINDING_MIN_N", "10"))
+            min_p = float(os.environ.get("ASAP_BINDING_MIN_PRECISION", "0.25"))
+            for key, v in (data.get("pairs") or {}).items():
+                if int(v.get("n", 0)) >= min_n and float(v.get("precision", 0)) >= min_p:
+                    loaded[key] = True
+        except Exception:  # noqa: BLE001 — 산출물 부재 = 손 규칙 폴백
+            loaded = {}
+        _binding_cache.append(loaded)
+    return _binding_cache[0]
+
+
+def _polarity_conflict(value_tokens: frozenset, state_tokens: set) -> bool:
+    """un-/non- 형태론 극성: 조건 'uncooked' vs 상태 'cooked' → 충돌.
+
+    정확한 형태론 쌍만 판정 — 'prepared'가 'uncooked'를 위반하는 식의 인접
+    개념 추론은 하지 않는다(요리 상태 vs 구성품 상태 서열 미해결).
+    """
+    for v in value_tokens:
+        for pref in _UN_PREFIX:
+            if v.startswith(pref) and len(v) > len(pref) + 2 and v[len(pref):] in state_tokens:
+                return True
+        if any(pref + v in state_tokens for pref in _UN_PREFIX):
+            return True
+    return False
 # 확정(confirmed) 자격을 줄 수 있는 typed 경로(단수·저오염 필드).
 # NTD·identity_terms 같은 자유서술 다토큰 필드는 부수 요소('soup' 등)가
 # 섞여 확정 정밀도 17%(정 7/오 33) 실측 — 이들 '단독' 히트는 확정 불가.
 # ingredient_class는 제외: 'cereal' 같은 류(class) 값은 1901~1905 전부에
 # 해당해 확정 근거로 판별력이 없다 — 오발동 6건 중 5건이 이 경로 실측.
 # 점수 경쟁(+3)에는 계속 참여하고 확정(+50) 자격만 없다.
+# ingredient_classes(복수)·contains_sauce_or_broth 제외 — 동족 원칙:
+# 류값(fish/mollusc)은 1601~1605 전부에 걸리고(오발동 3건 실측, 'cereal'
+# 사태의 복수형 재발), "국물이 있다"(boolean T)는 "국물요리다"(정체)가
+# 아니다(2104 확정 정1/오7 실측). 두 신호 모두 +3 증거와 위반 판정은
+# 유지하고 확정(+50) 자격만 없다. wrapper는 구조 판별력이 있어 유지.
 _TYPED_LEAVES = frozenset({
     "food_form", "processing_state",
     "principal_ingredient", "contains_wrapper_or_dough",
-    "contains_sauce_or_broth",
 })
 _ALIAS_AXES = frozenset({
     "species", "contains",  # 구세대 명칭 호환
@@ -122,6 +176,36 @@ def EvaluateCodeDecision(
         elif op == "has_token":
             phrases = _phrase_sets(str(cond.get("value")))
             bound = _field_tokens(product_facts, str(cond.get("dto_field") or ""))
+            # ── 극성 평가 (ASAP_DECISION_POLARITY, 기본 ON) ──
+            polarity_on = (os.environ.get(
+                "ASAP_DECISION_POLARITY", "1") or "1").strip() != "0"
+            if polarity_on:
+                all_value_toks = frozenset(tk for ph in phrases for tk in ph)
+                pol_done = False
+                # B. boolean 레지스터: False면 해당 어휘 조건 위반, True면 히트
+                for leaf, register in _BOOLEAN_REGISTER.items():
+                    if not (all_value_toks & register):
+                        continue
+                    flag = _dig(product_facts, f"composition_facts.{leaf}")
+                    if flag is True:
+                        verdict, why, pol_done = "true", f"field_hit:{leaf}", True
+                    elif flag is False:
+                        verdict, why, pol_done = "false", f"polarity:{leaf}=False", True
+                    break
+                # A. un-/non- 형태론: typed 상태 필드와의 극성 충돌만 위반
+                if not pol_done:
+                    state_toks = _field_tokens(
+                        product_facts,
+                        "identity_hints.processing_state;composition_facts.processing_state",
+                    )
+                    if state_toks and _polarity_conflict(all_value_toks, state_toks):
+                        verdict, why, pol_done = "false", "polarity:morphology", True
+                if pol_done:
+                    answers.append(verdict)
+                    detail.append({"cond": cond_type, "op": op, "verdict": verdict,
+                                   "field": dto_field.split(";")[0][:40], "why": why,
+                                   "value": str(cond.get("value") or "")[:80]})
+                    continue
             if cond_type in _ALIAS_AXES:
                 alias = _aliases()
                 bound = bound | {c for t in bound for c in alias.get(t, ())}
@@ -156,13 +240,45 @@ def EvaluateCodeDecision(
         # 점수 경쟁(술어 +3)은 유지되고 +50 확정만 잃는다.
         # ASAP_DECISION_TYPED_GATE=0으로 이전(77% 커밋) 시맨틱 복귀.
         gate_on = (os.environ.get("ASAP_DECISION_TYPED_GATE", "1") or "1").strip() != "0"
-        typed_ok = any(
-            (d["op"] == "quant_gate" and d["verdict"] == "true")
-            or (d["verdict"] == "true"
-                and any(leaf in _TYPED_LEAVES
-                        for leaf in d["why"].removeprefix("field_hit:").split(",")))
-            for d in detail
-        )
+        # 상태형 단독 확정 금지(동족 원칙 3호 — ingredient_class·NTD 제한과
+        # 같은 계보): 'prepared' 같은 상태값은 조리식품 전부가 가져서 단독
+        # 확정 자격이 없다 (실측: 오발동 21건 중 2102 효모 등 다수가 상태
+        # 단독). 상태는 정체(identity/species/material) true를 전제로만
+        # 확정을 가른다. ASAP_DECISION_STATE_ALONE=1 복귀.
+        state_types = {"processing_method", "preservation_state",
+                       "physical_form", "condition_quality"}
+        if gate_on and (os.environ.get(
+                "ASAP_DECISION_STATE_ALONE", "0") or "0").strip() != "1":
+            true_types = {d["cond"] for d in detail if d["verdict"] == "true"}
+            if true_types and true_types <= state_types:
+                for d in detail:
+                    if d["verdict"] == "true":
+                        d["why"] += ";state_alone_blocked"
+                return "undecided", detail
+        # typed 자격은 '정체 계열' 조건의 typed 히트에서만 나온다 — 상태
+        # 조건의 typed 히트(processing_state)가 자격을 대신 채우면 상태(공통)
+        # +류값(공통) 조합이 확정을 통과한다 (1605 오발동 3건 실측: 상태
+        # true가 자격을 주고 material은 ingredient_classes 비typed 히트).
+        binding = _binding_table() if (os.environ.get(
+            "ASAP_BINDING_V1", "1") or "1").strip() != "0" else {}
+        if binding:
+            # 측정 산출물 모드: (cond|leaf) 쌍의 실측 정밀도가 자격을 준다
+            typed_ok = any(
+                (d["op"] == "quant_gate" and d["verdict"] == "true")
+                or (d["verdict"] == "true" and any(
+                    f"{d['cond']}|{leaf}" in binding
+                    for leaf in d["why"].removeprefix("field_hit:").split(",")))
+                for d in detail
+            )
+        else:
+            typed_ok = any(
+                (d["op"] == "quant_gate" and d["verdict"] == "true")
+                or (d["verdict"] == "true"
+                    and d["cond"] not in state_types
+                    and any(leaf in _TYPED_LEAVES
+                            for leaf in d["why"].removeprefix("field_hit:").split(",")))
+                for d in detail
+            )
         if gate_on and not typed_ok:
             for d in detail:
                 if d["verdict"] == "true":

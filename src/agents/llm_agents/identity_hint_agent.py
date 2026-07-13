@@ -60,10 +60,18 @@ and the processing state — ONLY when the supplied evidence supports them;
 otherwise an empty string. Use tariff-register wording found in the chapter
 context, not marketing language.
 
+principal_ingredient_guess / accessory_ingredients: FACTUAL report of the
+ingredient ORDER, not a legal judgement — principal = the single ingredient
+most likely listed FIRST on the label (highest content); accessories = minor
+components (sauces, broth, seasonings, garnish). Lowercase English. Empty
+when the evidence does not say. Do NOT decide what the product "essentially
+is" — report ingredient ranking only.
+
 JSON keys (all required):
 translated_product_name, commercial_identity, normalized_tariff_description,
 identity_terms, product_form_terms, domain_hints,
 ingredient_class, food_form, processing_state,
+principal_ingredient_guess, accessory_ingredients,
 chapter_hint_terms, chapter_hint_source_terms, chapter_hint_basis,
 chapter_hint_status, confidence, needs_review.
 """.strip()
@@ -326,6 +334,15 @@ def _BuildIdentityFacts(
             limit=20,
         ),
         "ingredient_class": _grounded_typed_field(parsed.get("ingredient_class")),
+        # 주/부성분: 사실 보고(성분 서열)로 한정 — 소비층에서 결정론 근거와
+        # 합류(결정론 우선, LLM 단독 확정 불가). ASAP_IDENTITY_PRINCIPAL=0 비활성.
+        "principal_ingredient_guess": (
+            str(parsed.get("principal_ingredient_guess") or "").strip().lower()[:40]
+            if (os.environ.get("ASAP_IDENTITY_PRINCIPAL", "1") or "1").strip() != "0" else ""
+        ),
+        "accessory_ingredients": _dedup_strings(
+            parsed.get("accessory_ingredients"), limit=8,
+        ) if (os.environ.get("ASAP_IDENTITY_PRINCIPAL", "1") or "1").strip() != "0" else (),
         "food_form": _grounded_typed_field(parsed.get("food_form")),
         "processing_state": _grounded_typed_field(parsed.get("processing_state")),
         "domain_hints": tuple(

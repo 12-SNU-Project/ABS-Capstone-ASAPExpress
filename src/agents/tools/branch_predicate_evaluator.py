@@ -129,8 +129,16 @@ def _field_tokens(product_facts: Mapping[str, Any] | None, dto_field: str) -> se
         elif isinstance(value, str):
             parts = [] if value.strip().lower() in _FIELD_SENTINELS else [value]
         elif isinstance(value, list):
-            parts = [str(v) for v in value
-                     if str(v).strip().lower() not in _FIELD_SENTINELS]
+            parts = []
+            for v in value:
+                if isinstance(v, dict):
+                    # 구조화 엔트리(ingredient_entries 등): 성분명만 읽는다
+                    # — 라벨이든 COI든 존재하는 쪽이 그대로 답안이 된다.
+                    name = str(v.get("ingredient_name") or v.get("name") or "")
+                    if name.strip():
+                        parts.append(name)
+                elif str(v).strip().lower() not in _FIELD_SENTINELS:
+                    parts.append(str(v))
         for part in parts:
             out |= {_stem(t) for t in _TOKEN.findall(part.lower()) if len(t) >= 3}
     return out

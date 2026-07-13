@@ -51,14 +51,17 @@ CRITERION_FIELD_BINDING = {
         "composition_facts.principal_ingredient"
     ),
     "species_source": (
+        # principal_ingredient_guess 선두: 주성분(성분 서열 1위)이 종 질문의
+        # 1차 답안. typed 확정 자격은 없음(LLM 추론 단독 확정 금지) — 증거 가산만.
+        "identity_hints.principal_ingredient_guess;"
         "identity_hints.normalized_tariff_description;identity_hints.identity_terms;"
         "identity_hints.ingredient_class;composition_facts.ingredient_classes;"
-        "composition_facts.principal_ingredient"
+        "composition_facts.principal_ingredient;composition_facts.ingredient_entries"
     ),
     "material_composition": (
         "identity_hints.normalized_tariff_description;identity_hints.identity_terms;"
         "composition_facts.ingredient_classes;composition_facts.principal_ingredient;"
-        "composition_facts.composition_terms"
+        "composition_facts.ingredient_entries;composition_facts.composition_terms"
     ),
     "preservation_state": "identity_hints.processing_state;identity_hints.product_form_terms",
     "processing_method": "identity_hints.processing_state;composition_facts.processing_state;identity_hints.product_form_terms",
@@ -126,6 +129,15 @@ def CompileGroupDecisions(
             continue  # else 분기
         siblings = tuple(l for c, l in ordered if c != code)
         sibling_toks = _toks(" ".join(siblings))
+        # 형제 '배타' 필터는 상태×종 행렬 그룹(0203/0306: fresh·frozen 쌍이
+        # 같은 종 라벨을 반복)에서 모든 토큰을 공유로 판정해 조건을 전멸시킨다
+        # (실측: 0306 20형제 조건 0개). 판별력의 올바른 기준은 배타가 아니라
+        # 희소성 — 형제 '과반'이 공유하는 토큰만 비판별로 기각한다.
+        sib_tok_sets = [_toks(l) for l in siblings]
+        half = max(1, len(sib_tok_sets)) / 2
+
+        def _discriminative(w: str) -> bool:
+            return sum(1 for s in sib_tok_sets if w in s) <= half
 
         def add(cond_type: str, op: str, values, source: str) -> None:
             rows.append({
@@ -138,10 +150,13 @@ def CompileGroupDecisions(
             })
 
         emitted_types: set[str] = set()
-        # 배제 조건은 taxonomy 탐지기와 독립으로 캡처한다 — CSV 패턴에 없는
-        # 변형("containing NO x")도 값 캡처 정규식이 포괄하고, 이후의 긍정
-        # 추출은 부정절을 제거한 텍스트에서만 수행해 반전 오염을 막는다.
-        for neg in _NEG_VALUE.finditer(clean):
+        # 배제 조건은 taxonomy 탐지기와 독립으로 캡처한다 — 단, dash(중간)
+        # 계층의 부정("Uncooked pasta, NOT STUFFED or otherwise prepared")은
+        # 구성품 상태라 광역 풀 배제로 쓰면 밀키트의 'prepared' 같은 요리
+        # 수준 토큰에 정답이 위반당한다(실측). 그래서 부정 캡처는 leaf
+        # 세그먼트(';' 뒤 마지막)에서만, dash 세그먼트는 긍정 조건만 낸다.
+        leaf_segment = clean.rsplit(";", 1)[-1]
+        for neg in _NEG_VALUE.finditer(leaf_segment):
             values = [w for w in _toks(neg.group(1)) if w][:4]
             if values:
                 add("exclusion_boundary", "not_contains", sorted(values), neg.group(0))
@@ -173,14 +188,14 @@ def CompileGroupDecisions(
             # 판별력 있는 꼬리 단어(noodle)가 소실된다 — 1902 실측.
             # 배제(not_contains)는 차단 시맨틱이라 4 유지(보수).
             span_tokens = sorted(
-                w for w in _toks(span_source) if not ({w} <= sibling_toks)
+                w for w in _toks(span_source) if _discriminative(w)
             )[:8]
             if span_tokens:
                 add(cond_type, "has_token", span_tokens, match.group(0))
                 emitted_types.add(cond_type)
         # 아무 유형도 안 잡힌 순수 명사 라벨 -> product_identity 폴백
         if not emitted_types:
-            nouns = sorted(w for w in _toks(positive_side) if not ({w} <= sibling_toks))[:8]
+            nouns = sorted(w for w in _toks(positive_side) if _discriminative(w))[:8]
             if nouns:
                 add("product_identity", "has_token", nouns, clean)
     return rows
@@ -209,10 +224,18 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
                 chapter_label[ch] = f"{d.get('title') or ''} {d.get('description') or ''}"[:200]
     except Exception:  # noqa: BLE001
         pass
+    from agents.tools.cn_predicate_llm_compiler import EnrichSubheadingLabels
+
     rows = [dict(r) for r in manager.FetchRows(text(
         "SELECT cn8, coalesce(heading_description,'') AS h4,"
         " coalesce(subheading_description,'') AS h6,"
-        " coalesce(cn8_description,'') AS h8 FROM cn_table"), {})]
+        " coalesce(cn8_description,'') AS h8,"
+        " coalesce(combined_description,'') AS combined FROM cn_table"), {})]
+    # --enrich-h6: dash 계층 포함 컴파일 (기본 OFF — 'not ... prepared' 배제가
+    # 요리/구성품 상태 서열 미해결 상태에선 정답 면류를 위반시킬 위험 실측.
+    # 극성·서열 처리와 함께 A/B로 도입한다.)
+    if "--enrich-h6" in args:
+        rows = EnrichSubheadingLabels(rows)
     if chapters:
         rows = [r for r in rows if str(r.get("cn8") or "")[:2] in set(chapters)]
     groups = _build_groups(rows, chapter_label)

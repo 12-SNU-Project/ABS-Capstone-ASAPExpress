@@ -393,6 +393,10 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         # evidence did not support a value, so the DTO default stands.
         if result.get("ingredient_class"):
             overlay["ingredientClass"] = result["ingredient_class"]
+        if result.get("principal_ingredient_guess"):
+            overlay["principalIngredientGuess"] = result["principal_ingredient_guess"]
+        if result.get("accessory_ingredients"):
+            overlay["accessoryIngredients"] = tuple(result["accessory_ingredients"])
         if result.get("food_form"):
             overlay["foodForm"] = result["food_form"]
         if result.get("processing_state"):
@@ -425,6 +429,31 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             productFacts=productFacts,
             reconstructedTables=reconstructedTables,
         )
+        # COI 구조화 합류 (ASAP_COI_COMPOSITION, 기본 ON): 원료풀이 표를
+        # 표기순 엔트리로 파싱해 composition lane에 공급 — 텍스트 잡탕이
+        # 아니라 질문이 소비 가능한 구조로. 라벨 엔트리가 없으면 주 소스로
+        # 승격(scope=product), 있으면 보조(scope=coi) 병기.
+        if (os.environ.get("ASAP_COI_COMPOSITION", "1") or "1").strip() != "0":
+            try:
+                from agents.coi_loader import ParseCoiComposition
+                from pathlib import Path as _P
+
+                coi_entries: list[dict[str, JsonValue]] = []
+                for doc in coiEvidence.matchedDocuments[:1]:
+                    for e in ParseCoiComposition(_P(doc)):
+                        coi_entries.append({
+                            "scope": "product" if not ingredientEntries else "coi",
+                            "ingredient_name": e["ingredient_name"],
+                            "component": e.get("component") or "",
+                            "percent": e.get("percent"),
+                            "order_index": e["order_index"],
+                            "origin": e.get("origin") or "",
+                            "source": "coi",
+                        })
+                if coi_entries:
+                    ingredientEntries = [*ingredientEntries, *coi_entries]
+            except Exception:  # noqa: BLE001 — COI 실패는 무증거일 뿐
+                pass
         percentages = ProductUnderstandingComponent._IngredientPercentagesFromEntries(
             ingredientEntries,
         )
@@ -439,6 +468,25 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         principalStatus = ProductUnderstandingComponent._PrincipalStatus(
             principalCandidates,
         )
+        # COI 교차 검증 승격: 라벨 1위 후보와 COI 1위 성분의 정규화 토큰이
+        # 겹치면 독립 2근거 일치 → confirmed 승격. 한↔영 혼재 파일이 있어
+        # 겹침 실패는 conflict가 아니라 '비교 불가'(중립)로 둔다.
+        if principalStatus != "confirmed" and principalCandidates:
+            _tok = lambda s: {w.lower() for w in re.findall(r"[A-Za-z가-힣]+", str(s or "")) if len(w) >= 2}
+            coi_first = next(
+                (e for e in ingredientEntries
+                 if e.get("source") == "coi" and int(e.get("order_index") or 0) == 1),
+                None,
+            )
+            if coi_first is not None:
+                top = principalCandidates[0]
+                overlap = _tok(top.get("ingredient_name")) & _tok(coi_first.get("ingredient_name"))
+                if overlap:
+                    principalStatus = "confirmed"
+                    top = dict(top)
+                    top["basis"] = f"{top.get('basis')}+coi_cross_check"
+                    top["confidence"] = max(float(top.get("confidence") or 0), 0.85)
+                    principalCandidates = [top, *principalCandidates[1:]]
         principalIngredient = (
             str(principalCandidates[0].get("ingredient_name") or "")
             if principalStatus == "confirmed" and principalCandidates
