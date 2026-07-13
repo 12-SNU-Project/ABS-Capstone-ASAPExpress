@@ -1,10 +1,10 @@
-from agents.candiate_classfier import _BuildRoutingBoundary
 from agents.tools.pre_classification_router import (
     PreClassificationDomainRouter,
     PreClassificationRouteInput,
 )
 from bussiness_logic.core.classification.hierarchical_beam import (
     HIERARCHY_LEVEL_HS2,
+    HierarchySearchBoundary,
 )
 
 
@@ -221,13 +221,11 @@ def test_router_plain_seafood_dish_does_not_get_condiment_bonus(
 
 
 def test_routing_context_builds_hs2_hard_boundary() -> None:
-    boundary = _BuildRoutingBoundary({
-        "allowed_hs2": ["19"],
-        "blocked_hs2": ["03"],
-        "enforce_hs2_boundary": True,
-    })
+    boundary = HierarchySearchBoundary(
+        allowedCodesByLevel={HIERARCHY_LEVEL_HS2: frozenset({"19"})},
+        excludedCodesByLevel={HIERARCHY_LEVEL_HS2: frozenset({"03"})},
+    )
 
-    assert boundary is not None
     assert boundary.Allows(HIERARCHY_LEVEL_HS2, "19")
     assert not boundary.Allows(HIERARCHY_LEVEL_HS2, "21")
     assert not boundary.Allows(HIERARCHY_LEVEL_HS2, "03")

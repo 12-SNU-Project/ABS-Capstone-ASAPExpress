@@ -1,4 +1,4 @@
-"""Product source pipeline schema."""
+"""Kurly URL intake pipeline schema."""
 
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -18,8 +18,8 @@ from bussiness_logic.product.ocr.ocr_normalization import ProductOcrFactNormaliz
 from bussiness_logic.input_process.reconstruction import InputReconstructionResult
 
 
-class KurlyPipelineInput(BaseModel):
-    """KurlyMarket 수집 wrapper 입력."""
+class KurlyUrlIntakeInput(BaseModel):
+    """KurlyMarket URL intake 입력."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
@@ -38,8 +38,8 @@ class KurlyPipelineInput(BaseModel):
     )
 
 
-class PipelineStep(BaseModel):
-    """wrapper가 실행한 단계 하나의 상태."""
+class KurlyUrlIntakeStep(BaseModel):
+    """Kurly URL intake 단계 하나의 상태."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
@@ -48,7 +48,7 @@ class PipelineStep(BaseModel):
     message: str = ""
 
 
-class KurlyPipelineResult(BaseModel):
+class KurlyUrlIntakeResult(BaseModel):
     """KurlyMarket parsing과 선택적 OCR fallback을 묶은 결과."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
@@ -71,7 +71,7 @@ class KurlyPipelineResult(BaseModel):
         default_factory=InputReconstructionResult,
         alias="input_reconstruction",
     )
-    steps: List[PipelineStep] = Field(default_factory=list)
+    steps: List[KurlyUrlIntakeStep] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
 
     def BuildPublicResult(self) -> Dict[str, object]:

@@ -1,8 +1,7 @@
-"""End-to-end UI pipeline: product input -> classifier -> documents.
+"""End-to-end export requirement pipeline runner.
 
-This module is intentionally thin. It does not classify or recommend documents
-itself; it only runs the existing Blackboard components in order and returns the
-Document_Component output that the web UI can render.
+The runner owns BlackboardStore creation and ordered component execution. The
+components own classification and document recommendation logic.
 """
 from __future__ import annotations
 
@@ -18,6 +17,7 @@ from typing import TYPE_CHECKING, Protocol
 
 PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
 
+from agents.component_base import BasePipelineComponent
 from agents.pipeline_components import (
     ClassificationComponent,
     Hs2RoutingComponent,
@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     )
 
 
-class KurlyPipelinePublicResult(Protocol):
+class KurlyUrlIntakePublicResult(Protocol):
     def BuildPublicResult(self) -> JsonObject:
         """Return the JSON-safe public pipeline result."""
 
@@ -111,9 +111,9 @@ def _read_component_runs(store: BlackboardStore) -> list[JsonObject]:
     return out
 
 
-def build_kurly_url_facts_from_pipeline_result(
+def BuildKurlyUrlFactsFromPipelineResult(
     url: str,
-    result: KurlyPipelinePublicResult,
+    result: KurlyUrlIntakePublicResult,
     *,
     artifact_root: Path,
     warnings: list[str] | None = None,
@@ -204,7 +204,7 @@ def build_kurly_url_facts_from_pipeline_result(
     return facts
 
 
-def collect_kurly_url_facts(
+def CollectKurlyUrlFacts(
     url: str,
     *,
     run_ocr: bool | None = None,
@@ -219,8 +219,12 @@ def collect_kurly_url_facts(
     Evidence_Intake_Component, so the Blackboard still starts from normalized
     product facts.
     """
-    from bussiness_logic.product.pipeline.pipeline import KurlyProductPipeline
-    from bussiness_logic.product.pipeline.pipeline_schema import KurlyPipelineInput
+    from bussiness_logic.product.pipeline.kurly_url_intake_pipeline import (
+        KurlyUrlIntakePipeline,
+    )
+    from bussiness_logic.product.pipeline.kurly_url_intake_schema import (
+        KurlyUrlIntakeInput,
+    )
     from bussiness_logic.product.web_parser.kurly_domestic import KurlyDomesticPageParser
     from bussiness_logic.product.web_parser.kurly_global import KurlyGlobalPageParser
     from bussiness_logic.product.web_parser.kurly_market_collector import KurlyPageCollector
@@ -255,7 +259,7 @@ def collect_kurly_url_facts(
     if run_ocr:
         try:
             ocr_engine, screening_ocr_engine = _BuildKurlyOcrEngines()
-            pipeline = KurlyProductPipeline(
+            pipeline = KurlyUrlIntakePipeline(
                 collector=collector,
                 ocrEngine=ocr_engine,
                 screeningOcrEngine=screening_ocr_engine,
@@ -263,20 +267,20 @@ def collect_kurly_url_facts(
             )
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"ocr_engine_unavailable: {exc}")
-            pipeline = KurlyProductPipeline(
+            pipeline = KurlyUrlIntakePipeline(
                 collector=collector,
                 inputReconstructionService=input_reconstruction_service,
             )
             run_ocr = False
     else:
-        pipeline = KurlyProductPipeline(
+        pipeline = KurlyUrlIntakePipeline(
             collector=collector,
             inputReconstructionService=input_reconstruction_service,
         )
 
     artifact_root = PRODUCT_INPUT_ARTIFACT_ROOT
     artifact_root.mkdir(parents=True, exist_ok=True)
-    pipelineInput = KurlyPipelineInput(
+    pipelineInput = KurlyUrlIntakeInput(
         productPageUrl=url,
         runOcrFallback=run_ocr,
         artifactRootPath=artifact_root,
@@ -289,7 +293,7 @@ def collect_kurly_url_facts(
             result = pipeline.Run(pipelineInput)
     else:
         result = pipeline.Run(pipelineInput)
-    return build_kurly_url_facts_from_pipeline_result(
+    return BuildKurlyUrlFactsFromPipelineResult(
         url,
         result,
         artifact_root=artifact_root,
@@ -297,7 +301,7 @@ def collect_kurly_url_facts(
     )
 
 
-def rerun_cached_input_reconstruction(product_identifier: str) -> JsonObject:
+def RerunCachedInputReconstruction(product_identifier: str) -> JsonObject:
     """저장된 OCR evidence request를 재사용해 LLM reconstruction만 다시 실행한다."""
 
     from bussiness_logic.input_process.reconstruction import InputEvidencePackage
@@ -422,7 +426,7 @@ def _ReadCachedProductInputFacts(artifactDirectory: Path) -> JsonObject:
     return dict(payload) if isinstance(payload, dict) else {}
 
 
-def load_cached_product_input_facts(product_identifier: str) -> JsonObject:
+def LoadCachedProductInputFacts(product_identifier: str) -> JsonObject:
     """저장된 product-input.json을 읽어 downstream pipeline 입력으로 재사용한다."""
 
     productId = ExtractProductIdFromUrl(product_identifier)
@@ -500,7 +504,7 @@ def _BuildPublicInputReconstruction(
     }
 
 
-def build_raw_input_from_ui(
+def BuildRawInputFromUi(
     *,
     query: str,
     facts: JsonObject,
@@ -516,7 +520,7 @@ def build_raw_input_from_ui(
             or ""
         ).strip()
         try:
-            cachedFacts = load_cached_product_input_facts(productIdentifier)
+            cachedFacts = LoadCachedProductInputFacts(productIdentifier)
             merged = dict(facts)
             for key, value in cachedFacts.items():
                 if value not in ("", [], None):
@@ -535,7 +539,7 @@ def build_raw_input_from_ui(
         )
     ):
         try:
-            collected = collect_kurly_url_facts(url)
+            collected = CollectKurlyUrlFacts(url)
             merged = dict(facts)
             for key, value in collected.items():
                 if value not in ("", [], None):
@@ -693,7 +697,168 @@ def _normalize_kurly_result_facts(facts: JsonObject) -> JsonObject:
     return flattened
 
 
-def run_document_pipeline(
+class ExportRequirementPipeline:
+    """Create a BlackboardStore and run the ordered component chain."""
+
+    def __init__(self, *, pipelineOutputsRoot: Path = PIPELINE_OUTPUTS_ROOT) -> None:
+        self._pipelineOutputsRoot = pipelineOutputsRoot
+
+    def Run(
+        self,
+        *,
+        query: str,
+        facts: JsonObject,
+        include_celex_excerpt: bool = False,
+        progress_callback: Callable[[JsonObject], None] | None = None,
+        job_id: str | None = None,
+    ) -> dict[str, object]:
+        effectiveJobId = job_id or f"job_{uuid.uuid4().hex[:10]}"
+        store = self._CreateStore(
+            query=query,
+            facts=facts,
+            effectiveJobId=effectiveJobId,
+        )
+
+        def emit(stage: str, status: str, **payload: object) -> None:
+            if progress_callback is None:
+                return
+            try:
+                progress_callback({
+                    "stage": stage,
+                    "status": status,
+                    "run_id": store.run_id,
+                    **payload,
+                })
+            except Exception:
+                pass
+
+        emit("Input_Intake", "running", message="사용자 입력/URL/OCR evidence intake 준비")
+        rawInput = BuildRawInputFromUi(query=query, facts=facts)
+        emit("Input_Intake", "completed", message="raw product facts 생성", raw_input=rawInput)
+
+        componentResults: list[JsonObject] = []
+        for component in self._BuildComponents(
+            rawInput,
+            includeCelexExcerpt=include_celex_excerpt,
+        ):
+            emit(component.component_name, "running", message=f"{component.stage} 실행 중")
+            result = component.Execute(store)
+            componentResults.append({
+                "component_name": component.component_name,
+                "success": result.success,
+                "error": result.error,
+                "outputs_written": result.outputs_written,
+            })
+            partial = self._BuildPartialResult(store, componentResults)
+            emit(
+                component.component_name,
+                "completed" if result.success else "failed",
+                message=f"{component.component_name} 완료" if result.success else f"{component.component_name} 실패",
+                component_result=componentResults[-1],
+                partial_result=partial,
+            )
+            if not result.success:
+                break
+            if self._ShouldSkipDocumentComponent(component, partial):
+                emit(
+                    "Document_Component",
+                    "skipped",
+                    message="분류 후보가 없어 문서 추천을 건너뜁니다.",
+                    partial_result=partial,
+                )
+                break
+
+        return self._BuildFinalResult(store, componentResults)
+
+    def _CreateStore(
+        self,
+        *,
+        query: str,
+        facts: JsonObject,
+        effectiveJobId: str,
+    ) -> BlackboardStore:
+        safeJobId = BuildSafeArtifactPathSegment(effectiveJobId, fallback="")
+        if safeJobId != effectiveJobId:
+            raise ValueError("job_id must be a safe artifact path segment.")
+
+        productArtifactId = _ResolveProductArtifactId(query, facts)
+        runDirectory = self._pipelineOutputsRoot / productArtifactId / effectiveJobId
+        return BlackboardStore.create(
+            runtime_mode="webapp",
+            run_id=_BuildInternalRunId(effectiveJobId),
+            run_dir=runDirectory,
+        )
+
+    def _BuildComponents(
+        self,
+        rawInput: JsonObject,
+        *,
+        includeCelexExcerpt: bool,
+    ) -> list[BasePipelineComponent]:
+        return [
+            EvidenceIntakeComponent(rawInput),
+            ProductUnderstandingComponent(),
+            Hs2RoutingComponent(),
+            ClassificationComponent(),
+            DocumentComponent(include_celex_excerpt=includeCelexExcerpt),
+        ]
+
+    def _BuildPartialResult(
+        self,
+        store: BlackboardStore,
+        componentResults: list[JsonObject],
+    ) -> JsonObject:
+        blackboardSnapshot = store.load()
+        return {
+            "blackboard": blackboardSnapshot,
+            "candidate_code_set": (blackboardSnapshot.get("candidate_code_sets") or [None])[-1],
+            "document_package": (blackboardSnapshot.get("document_packages") or [None])[-1],
+            "component_results": list(componentResults),
+            "component_runs": _read_component_runs(store),
+            "run_id": store.run_id,
+            "run_dir": str(Path(store.run_dir)),
+        }
+
+    def _ShouldSkipDocumentComponent(
+        self,
+        component: BasePipelineComponent,
+        partial: JsonObject,
+    ) -> bool:
+        latestCandidateSet = partial.get("candidate_code_set")
+        return (
+            component.component_name == "Classification_Component"
+            and isinstance(latestCandidateSet, dict)
+            and bool(latestCandidateSet.get("classification_status"))
+            and not latestCandidateSet.get("candidates")
+        )
+
+    def _BuildFinalResult(
+        self,
+        store: BlackboardStore,
+        componentResults: list[JsonObject],
+    ) -> dict[str, object]:
+        blackboard = store.load()
+        documentPackage = (blackboard.get("document_packages") or [None])[-1]
+        candidateCodeSet = (blackboard.get("candidate_code_sets") or [None])[-1]
+        rawDocumentPackage = (
+            documentPackage.get("raw_document_package")
+            if isinstance(documentPackage, dict)
+            else None
+        )
+        return {
+            "store": store,
+            "blackboard": blackboard,
+            "raw_document_package": rawDocumentPackage,
+            "document_package": documentPackage,
+            "candidate_code_set": candidateCodeSet,
+            "component_results": componentResults,
+            "component_runs": _read_component_runs(store),
+            "run_id": store.run_id,
+            "run_dir": str(Path(store.run_dir)),
+        }
+
+
+def RunExportRequirementPipeline(
     *,
     query: str,
     facts: JsonObject,
@@ -701,121 +866,13 @@ def run_document_pipeline(
     progress_callback: Callable[[JsonObject], None] | None = None,
     job_id: str | None = None,
 ) -> dict[str, object]:
-    """Run Evidence -> ProductUnderstanding -> HS2 routing -> Classification -> Document.
-
-    Return shape:
-      {
-        "store": BlackboardStore,
-        "blackboard": dict,
-        "raw_document_package": dict | None,
-        "document_package": dict | None,
-        "candidate_code_set": dict | None,
-        "decision": dict | None,
-        "component_results": list[JsonObject],
-      }
-    """
-    effectiveJobId = job_id or f"job_{uuid.uuid4().hex[:10]}"
-    safeJobId = BuildSafeArtifactPathSegment(effectiveJobId, fallback="")
-    if safeJobId != effectiveJobId:
-        raise ValueError("job_id must be a safe artifact path segment.")
-
-    productArtifactId = _ResolveProductArtifactId(query, facts)
-    runDirectory = PIPELINE_OUTPUTS_ROOT / productArtifactId / effectiveJobId
-    store = BlackboardStore.create(
-        runtime_mode="webapp",
-        run_id=_BuildInternalRunId(effectiveJobId),
-        run_dir=runDirectory,
+    return ExportRequirementPipeline().Run(
+        query=query,
+        facts=facts,
+        include_celex_excerpt=include_celex_excerpt,
+        progress_callback=progress_callback,
+        job_id=job_id,
     )
-
-    def emit(stage: str, status: str, **payload: object) -> None:
-        if progress_callback is None:
-            return
-        try:
-            progress_callback({
-                "stage": stage,
-                "status": status,
-                "run_id": store.run_id,
-                **payload,
-            })
-        except Exception:
-            pass
-
-    emit("Input_Intake", "running", message="사용자 입력/URL/OCR evidence intake 준비")
-    raw_input = build_raw_input_from_ui(query=query, facts=facts)
-    emit("Input_Intake", "completed", message="raw product facts 생성", raw_input=raw_input)
-
-    components = [
-        EvidenceIntakeComponent(raw_input),
-        ProductUnderstandingComponent(),
-        Hs2RoutingComponent(),
-        ClassificationComponent(),
-        DocumentComponent(include_celex_excerpt=include_celex_excerpt),
-    ]
-
-    component_results: list[JsonObject] = []
-    for component in components:
-        emit(component.component_name, "running", message=f"{component.stage} 실행 중")
-        result = component.Execute(store)
-        component_results.append({
-            "component_name": component.component_name,
-            "success": result.success,
-            "error": result.error,
-            "outputs_written": result.outputs_written,
-        })
-        bb_snapshot = store.load()
-        partial = {
-            "blackboard": bb_snapshot,
-            "candidate_code_set": (bb_snapshot.get("candidate_code_sets") or [None])[-1],
-            "document_package": (bb_snapshot.get("document_packages") or [None])[-1],
-            "component_results": list(component_results),
-            "component_runs": _read_component_runs(store),
-            "run_id": store.run_id,
-            "run_dir": str(Path(store.run_dir)),
-        }
-        emit(
-            component.component_name,
-            "completed" if result.success else "failed",
-            message=f"{component.component_name} 완료" if result.success else f"{component.component_name} 실패",
-            component_result=component_results[-1],
-            partial_result=partial,
-        )
-        if not result.success:
-            break
-        latestClassificationCandidateSet = partial.get("candidate_code_set")
-        if (
-            component.component_name == "Classification_Component"
-            and isinstance(latestClassificationCandidateSet, dict)
-            and latestClassificationCandidateSet.get("classification_status")
-            and not latestClassificationCandidateSet.get("candidates")
-        ):
-            emit(
-                "Document_Component",
-                "skipped",
-                message="분류 후보가 없어 문서 추천을 건너뜁니다.",
-                partial_result=partial,
-            )
-            break
-
-    bb = store.load()
-    document_package = (bb.get("document_packages") or [None])[-1]
-    candidate_code_set = (bb.get("candidate_code_sets") or [None])[-1]
-    raw_document_package = (
-        document_package.get("raw_document_package")
-        if isinstance(document_package, dict)
-        else None
-    )
-
-    return {
-        "store": store,
-        "blackboard": bb,
-        "raw_document_package": raw_document_package,
-        "document_package": document_package,
-        "candidate_code_set": candidate_code_set,
-        "component_results": component_results,
-        "component_runs": _read_component_runs(store),
-        "run_id": store.run_id,
-        "run_dir": str(Path(store.run_dir)),
-    }
 
 
 def _ResolveProductArtifactId(query: str, facts: JsonObject) -> str:

@@ -39,8 +39,12 @@ from bussiness_logic.product.ocr.ocr_fallback import (  # noqa: E402
     ProductOcrImageDownloader,
     ProductOcrImageResult,
 )
-from bussiness_logic.product.pipeline.pipeline import KurlyProductPipeline  # noqa: E402
-from bussiness_logic.product.pipeline.pipeline_schema import KurlyPipelineInput  # noqa: E402
+from bussiness_logic.product.pipeline.kurly_url_intake_pipeline import (  # noqa: E402
+    KurlyUrlIntakePipeline,
+)
+from bussiness_logic.product.pipeline.kurly_url_intake_schema import (  # noqa: E402
+    KurlyUrlIntakeInput,
+)
 from bussiness_logic.product.web_parser.kurly_domestic import (  # noqa: E402
     KurlyDomesticPageParser,
 )
@@ -705,7 +709,7 @@ class KurlyMarketSmokeRunner:
         self._reuseOcrImageArtifacts = reuseOcrImageArtifacts
         self._pipelineOcrEngine: object = None
         self._pipelineRawOcrEngine: object = None
-        self._productSourcePipeline: KurlyProductPipeline | None = None
+        self._kurlyUrlIntakePipeline: KurlyUrlIntakePipeline | None = None
 
     @staticmethod
     def _LoadAnswerRecords(
@@ -806,7 +810,7 @@ class KurlyMarketSmokeRunner:
             self._RunClassificationPreflight(runLogger)
 
         runLogger.info(
-            "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyPipelineResult action=run url_count={} pipeline_build=on_cache_miss",
+            "pipeline_step=collection_ocr component=KurlyUrlIntakePipeline output_dto=KurlyUrlIntakeResult action=run url_count={} pipeline_build=on_cache_miss",
             len(self._productUrls),
         )
         results: List[Dict[str]] = []
@@ -817,7 +821,7 @@ class KurlyMarketSmokeRunner:
                 len(self._productUrls),
             )
             runLogger.info(
-                "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyPipelineResult index={}/{} url={}",
+                "pipeline_step=collection_ocr component=KurlyUrlIntakePipeline output_dto=KurlyUrlIntakeResult index={}/{} url={}",
                 productIndex,
                 len(self._productUrls),
                 productUrl,
@@ -922,7 +926,7 @@ class KurlyMarketSmokeRunner:
             runtimeConfig.modelName or "default",
         )
 
-    def _BuildProductSourcePipeline(self) -> KurlyProductPipeline:
+    def _BuildKurlyUrlIntakePipeline(self) -> KurlyUrlIntakePipeline:
         pageAdapter = KurlyPageAdapter(
             domesticParser=KurlyDomesticPageParser(),
             globalParser=KurlyGlobalPageParser(),
@@ -953,7 +957,7 @@ class KurlyMarketSmokeRunner:
             )
         self._pipelineOcrEngine = ocrEngine
         self._pipelineRawOcrEngine = screeningOcrEngine
-        return KurlyProductPipeline(
+        return KurlyUrlIntakePipeline(
             collector=collector,
             ocrEngine=ocrEngine,
             screeningOcrEngine=screeningOcrEngine,
@@ -1000,15 +1004,15 @@ class KurlyMarketSmokeRunner:
         runLogger = self._Logger("_RunOne")
         try:
             runLogger.info(
-                "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyCollectionResult url={} use_web_scroll={} reuse_ocr_image_artifacts={}",
+                "pipeline_step=collection_ocr component=KurlyUrlIntakePipeline output_dto=KurlyCollectionResult url={} use_web_scroll={} reuse_ocr_image_artifacts={}",
                 productUrl,
                 True,
                 self._reuseOcrImageArtifacts,
             )
-            if self._productSourcePipeline is None:
-                self._productSourcePipeline = self._BuildProductSourcePipeline()
-            pipelineResult = self._productSourcePipeline.Run(
-                KurlyPipelineInput(
+            if self._kurlyUrlIntakePipeline is None:
+                self._kurlyUrlIntakePipeline = self._BuildKurlyUrlIntakePipeline()
+            pipelineResult = self._kurlyUrlIntakePipeline.Run(
+                KurlyUrlIntakeInput(
                     productPageUrl=productUrl,
                     runOcrFallback=self._runOcrFallback,
                     artifactRootPath=self._artifactRootPath,
@@ -1057,9 +1061,11 @@ class KurlyMarketSmokeRunner:
         productUrl: str,
         pipelineResult: object,
     ) -> Dict[str]:
-        from bussiness_logic.document.document_pipeline import build_kurly_url_facts_from_pipeline_result
+        from bussiness_logic.pipeline.export_requirement_pipeline import (
+            BuildKurlyUrlFactsFromPipelineResult,
+        )
 
-        return build_kurly_url_facts_from_pipeline_result(
+        return BuildKurlyUrlFactsFromPipelineResult(
             productUrl,
             pipelineResult,
             artifact_root=self._artifactRootPath,
@@ -1078,9 +1084,11 @@ class KurlyMarketSmokeRunner:
             Hs2RoutingComponent,
             ProductUnderstandingComponent,
         )
-        from bussiness_logic.document.document_pipeline import build_raw_input_from_ui
+        from bussiness_logic.pipeline.export_requirement_pipeline import (
+            BuildRawInputFromUi,
+        )
 
-        rawInput = build_raw_input_from_ui(
+        rawInput = BuildRawInputFromUi(
             query=str(uiFacts.get("product_name") or productUrl),
             facts=dict(uiFacts),
         )
@@ -1166,9 +1174,9 @@ class KurlyMarketSmokeRunner:
                     "ProductUnderstanding, DomainRouter, and Beam Classification."
                 ),
                 "path": [
-                    "KurlyProductPipeline.Run",
-                    "build_kurly_url_facts_from_pipeline_result",
-                    "build_raw_input_from_ui",
+                    "KurlyUrlIntakePipeline.Run",
+                    "BuildKurlyUrlFactsFromPipelineResult",
+                    "BuildRawInputFromUi",
                     "EvidenceIntakeComponent",
                     "ProductUnderstandingComponent",
                     "Hs2RoutingComponent",
@@ -2124,7 +2132,7 @@ class KurlyMarketSmokeRunner:
         statusData = resultData["status"]
         if "runtime_error" in statusData:
             smokeLogger.error(
-                "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyPipelineResult url={} runtime_error={}",
+                "pipeline_step=collection_ocr component=KurlyUrlIntakePipeline output_dto=KurlyUrlIntakeResult url={} runtime_error={}",
                 resultData["product_page_url"],
                 statusData["runtime_error"],
             )
@@ -2134,7 +2142,7 @@ class KurlyMarketSmokeRunner:
         productData = resultData["product"]
         noticeData = resultData["raw_collection"]["notice"]
         smokeLogger.info(
-            "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyPipelineResult url={} product_name={} domain={} parse_ok={} ocr_fallback_ok={}",
+            "pipeline_step=collection_ocr component=KurlyUrlIntakePipeline output_dto=KurlyUrlIntakeResult url={} product_name={} domain={} parse_ok={} ocr_fallback_ok={}",
             resultData["product_page_url"],
             productData["product_name"],
             productData["product_domain"],
@@ -2142,14 +2150,14 @@ class KurlyMarketSmokeRunner:
             statusData["is_ocr_fallback_ok"],
         )
         smokeLogger.info(
-            "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyCollectionResult brand_name={} package_type={} sale_unit={}",
+            "pipeline_step=collection_ocr component=KurlyUrlIntakePipeline output_dto=KurlyCollectionResult brand_name={} package_type={} sale_unit={}",
             productData["brand_name"],
             productData["package_type"],
             productData["sale_unit"],
         )
         smokeLogger.info(
             (
-                "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=KurlyCollectionResult "
+                "pipeline_step=collection_ocr component=KurlyUrlIntakePipeline output_dto=KurlyCollectionResult "
                 "notice_lines={} notice_options={} "
                 "notice_fields={} requires_ocr_fallback={} "
                 "image_reference_detected={}"
@@ -2170,7 +2178,7 @@ class KurlyMarketSmokeRunner:
         stepLogger = self._Logger("_LogPipelineSteps")
         for pipelineStep in resultData["pipeline_steps"]:
             stepLogger.info(
-                "pipeline_step=collection_ocr component=KurlyProductPipeline output_dto=PipelineStepResult name={} succeeded={} message={}",
+                "pipeline_step=collection_ocr component=KurlyUrlIntakePipeline output_dto=KurlyUrlIntakeStep name={} succeeded={} message={}",
                 pipelineStep["step_name"],
                 pipelineStep["succeeded"],
                 pipelineStep["message"],

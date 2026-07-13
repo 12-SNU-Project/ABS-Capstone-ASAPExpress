@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from agents.component_base import BasePipelineComponent
-from bussiness_logic.document.document_package import get_document_package
+from bussiness_logic.document.document_package_builder import BuildDocumentPackage
 from agents.tools.domain_router import DomainRouteResult, DomainRouterTool
 from agents.blackboard import BlackboardStore, now_iso
 from bussiness_logic.utils.json_types import JsonObject
@@ -73,7 +73,7 @@ def _classify_measure(measure_type: str) -> str:
 
 # ---------------------------------------------------------------------------
 # Certificate prefix → document classification
-# (재사용: agents/document_package.cert_category 와 동일 의미)
+# (재사용: ClassifyCertificateCategory 와 동일 의미)
 # ---------------------------------------------------------------------------
 def _cert_kind(code: str) -> str:
     code = (code or "").strip().upper()
@@ -137,7 +137,7 @@ class DocumentComponent(BasePipelineComponent):
 
                 # 1. Raw TARIC measure package
                 try:
-                    raw = asdict(get_document_package(
+                    raw = asdict(BuildDocumentPackage(
                         taric10,
                         include_celex_excerpt=self._include_celex_excerpt,
                     ))

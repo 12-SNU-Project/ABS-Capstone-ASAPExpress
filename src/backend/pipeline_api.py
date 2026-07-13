@@ -188,7 +188,9 @@ class PipelineApi:
                 runDirText = str(resultData.get("run_dir") or "")
                 if runDirText and Path(runDirText).is_dir():
                     return Path(runDirText)
-        from bussiness_logic.document.document_pipeline import PIPELINE_OUTPUTS_ROOT
+        from bussiness_logic.pipeline.export_requirement_pipeline import (
+            PIPELINE_OUTPUTS_ROOT,
+        )
 
         for candidate in PIPELINE_OUTPUTS_ROOT.glob(f"*/{jobId}"):
             if (candidate / "blackboard.json").is_file():
@@ -272,10 +274,12 @@ class PipelineApi:
                 field="url",
             ).ToDict(), 400
         try:
-            from bussiness_logic.document.document_pipeline import rerun_cached_input_reconstruction
+            from bussiness_logic.pipeline.export_requirement_pipeline import (
+                RerunCachedInputReconstruction,
+            )
             from backend.pipeline_projection import InputProcessingViewProjector
 
-            facts = rerun_cached_input_reconstruction(productIdentifier)
+            facts = RerunCachedInputReconstruction(productIdentifier)
             jobId = "reconstruct_{0}".format(uuid.uuid4().hex[:10])
             inputProcessingView = (
                 InputProcessingViewProjector().BuildInputProcessingViewFromFacts(
