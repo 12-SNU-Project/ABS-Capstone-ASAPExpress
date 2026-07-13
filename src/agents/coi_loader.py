@@ -10,8 +10,14 @@ from pathlib import Path
 from typing import Iterable
 
 
+import os
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_COI_ROOT = PROJECT_ROOT / "test" / "COI(식품원재료풀이)"
+# ASAP_COI_ROOT로 오버라이드 가능 — 실물 46파일은 현재 ~/ASAP_A/test에 있다
+DEFAULT_COI_ROOT = Path(
+    os.environ.get("ASAP_COI_ROOT")
+    or PROJECT_ROOT / "test" / "COI(식품원재료풀이)"
+)
 TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣]+")
 INDEX_PREFIX_RE = re.compile(r"^\s*([0-9,\s]+)\.")
 
@@ -155,6 +161,114 @@ def LoadCoiEvidence(
         text=_CachedFlatten(str(path), maxChars),
         matchedScore=_ScorePath(path, caseIndex=caseIndex, productName=productName),
     )
+
+
+_HEADER_KEYS = ("품명", "성분", "함량")
+_PERCENT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*%?")
+
+
+def _FindTableSheet(workbook):
+    """유효 헤더(품명·성분·함량)를 가진 시트 중 데이터 행이 가장 많은 것.
+
+    실물 COI는 다중 시트에 예시 시트가 섞여 있다(1~2번째가 작성 예시인
+    파일 실측). 시트명에 '예시'가 있으면 제외하고, 헤더 시그니처로 표를
+    찾은 뒤 데이터 행수가 최대인 시트를 고른다 — 순수 결정론 선별.
+    """
+    best = None  # (data_rows, sheet, header_row_idx, colmap)
+    for sheet in workbook.worksheets:
+        if "예시" in str(sheet.title):
+            continue
+        header_idx, colmap = None, {}
+        for i, row in enumerate(sheet.iter_rows(values_only=True)):
+            cells = {j: NormalizeText(v) for j, v in enumerate(row) if v is not None}
+            hits = {key: j for key in _HEADER_KEYS for j, v in cells.items() if key in v}
+            # '함량' 열이 없는 변형(성분(EN) 대체형 — 칼국수·목란 실측)이
+            # 있어 품명+성분만 필수, 함량은 선택.
+            if "품명" in hits and "성분" in hits:
+                header_idx = i
+                colmap = hits
+                # 재료명(하위 단계)·원산지 열도 있으면 기록
+                for j, v in cells.items():
+                    if "재료명" in v:
+                        colmap.setdefault("재료명", j)
+                    if "원산지" in v:
+                        colmap.setdefault("원산지", j)
+                break
+            if i > 60:
+                break
+        if header_idx is None:
+            continue
+        data_rows = 0
+        for i, row in enumerate(sheet.iter_rows(values_only=True)):
+            if i <= header_idx:
+                continue
+            if any(v is not None for v in row):
+                data_rows += 1
+            if i > header_idx + 400:
+                break
+        if best is None or data_rows > best[0]:
+            best = (data_rows, sheet, header_idx, colmap)
+    return best
+
+
+def ParseCoiComposition(path: Path, *, maxEntries: int = 60) -> list[dict]:
+    """COI 원료풀이 표 → 구조화 성분 엔트리 (표기순 = 함량 내림차순 규칙).
+
+    반환: [{ingredient_name, component, percent, order_index, origin,
+            source: "coi"}] — composition lane의 ingredient_entries와
+    같은 소비 계약. 실패는 빈 목록(no-op).
+    """
+    try:
+        from openpyxl import load_workbook
+    except ModuleNotFoundError:
+        return []
+    try:
+        workbook = load_workbook(path, read_only=True, data_only=True)
+    except Exception:  # noqa: BLE001 — 손상 파일 = 증거 없음
+        return []
+    try:
+        found = _FindTableSheet(workbook)
+        if not found:
+            return []
+        _n, sheet, header_idx, colmap = found
+        c_comp = colmap.get("품명")
+        c_ing = colmap.get("성분")
+        c_pct = colmap.get("함량")
+        c_org = colmap.get("원산지")
+        entries: list[dict] = []
+        component = ""
+        order = 0
+        for i, row in enumerate(sheet.iter_rows(values_only=True)):
+            if i <= header_idx or len(entries) >= maxEntries:
+                continue
+            def cell(j):
+                if j is None or j >= len(row):
+                    return ""
+                return NormalizeText(row[j])
+            comp_v, ing_v = cell(c_comp), cell(c_ing)
+            if comp_v:
+                component = comp_v.replace("\n", " ")
+            if not ing_v:
+                continue  # 하위 단계(재료명)만 있는 행은 1차 성분이 아님
+            percent = None
+            m = _PERCENT_RE.search(cell(c_pct))
+            if m:
+                try:
+                    percent = float(m.group(1).replace(",", "."))
+                except ValueError:
+                    percent = None
+            order += 1
+            entries.append({
+                "ingredient_name": ing_v,
+                "component": component,
+                "percent": percent,
+                "order_index": order,
+                "origin": cell(c_org),
+                "source": "coi",
+            })
+        return entries
+    finally:
+        workbook.close()
 
 
 def SummarizeCoiMatches(
