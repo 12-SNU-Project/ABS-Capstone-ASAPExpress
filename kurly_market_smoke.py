@@ -1996,6 +1996,14 @@ class KurlyMarketSmokeRunner:
                 "successful_image_count",
                 0,
             ),
+            "skipped_image_count": ocrSummary.get(
+                "skipped_image_count",
+                0,
+            ),
+            "failed_image_count": ocrSummary.get(
+                "failed_image_count",
+                0,
+            ),
             "structured_table_image_count": ocrSummary.get(
                 "structured_table_image_count",
                 0,
@@ -2228,6 +2236,8 @@ class KurlyMarketSmokeRunner:
         self,
         imageResult: ProductOcrImageResult,
     ) -> Dict[str]:
+        if imageResult.skippedReason is not None:
+            return self._BuildSkippedOcrComparison(imageResult.skippedReason)
         structuredResult = imageResult.structuredOcr
         text = structuredResult.text
         tableTexts = [table.plainText for table in structuredResult.tables]
@@ -2619,6 +2629,7 @@ class KurlyMarketSmokeRunner:
             (
                 "detail_image_count={} ocr_candidate_count={} "
                 "ocr_result_count={} successful_ocr_count={} "
+                "skipped_ocr_count={} failed_ocr_count={} "
                 "structured_table_image_count={} structured_table_count={} "
                 "raw_tile_text_count={} raw_text_length={} "
                 "combined_ocr_text_length={}"
@@ -2627,6 +2638,8 @@ class KurlyMarketSmokeRunner:
             ocrData["candidate_image_url_count"],
             ocrData["image_result_count"],
             ocrData["successful_image_count"],
+            ocrData.get("skipped_image_count", 0),
+            ocrData.get("failed_image_count", 0),
             ocrData["structured_table_image_count"],
             ocrData["structured_table_count"],
             ocrData["raw_tile_text_count"],
@@ -2640,12 +2653,15 @@ class KurlyMarketSmokeRunner:
         for imageResult in ocrData["image_artifacts"]:
             ocrLogger.info(
                 (
-                    "ocr_image index={} image_path={} image_path_count={} text_length={} "
+                    "ocr_image index={} status={} image_path={} "
+                    "image_path_count={} text_length={} "
                     "used_structured_tables={} structured_table_count={} "
                     "raw_tile_text_count={} raw_text_length={} "
-                    "merge_mode={} fallback_reason={} warning_count={} error={}"
+                    "merge_mode={} fallback_reason={} warning_count={} "
+                    "skipped_reason={} error={}"
                 ),
                 imageResult["index"],
+                imageResult.get("status", "ok"),
                 imageResult["image_path"],
                 len(imageResult.get("image_paths", []) or []),
                 imageResult["text_length"],
@@ -2656,6 +2672,7 @@ class KurlyMarketSmokeRunner:
                 imageResult.get("text_merge_mode"),
                 imageResult.get("structured_fallback_reason"),
                 len(imageResult.get("structured_warnings", []) or []),
+                imageResult.get("skipped_reason"),
                 imageResult["error"],
             )
             for warning in imageResult.get("structured_warnings", []) or []:

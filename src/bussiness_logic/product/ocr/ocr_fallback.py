@@ -65,6 +65,7 @@ class ProductOcrImageResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
     imageUrl: str = Field(alias="image_url")
+    imageIndex: Optional[int] = Field(default=None, alias="image_index")
     imagePath: Optional[str] = Field(default=None, alias="image_path")
     imagePaths: List[str] = Field(default_factory=list, alias="image_paths")
     ocrText: str = Field(default="", alias="ocr_text")
@@ -76,6 +77,7 @@ class ProductOcrImageResult(BaseModel):
         default_factory=dict,
         alias="processing_times",
     )
+    skippedReason: Optional[str] = Field(default=None, alias="skipped_reason")
     error: Optional[str] = None
 
 
@@ -355,8 +357,7 @@ class ProductOcrFallbackRunner:
                 downloadTimeoutSeconds=downloadTimeoutSeconds,
                 reuseArtifactImages=reuseArtifactImages,
             )
-            if imageResult is not None:
-                imageResults.append(imageResult)
+            imageResults.append(imageResult)
 
         self._artifactStore.PruneUnretainedArtifacts(
             artifactDirectory,
@@ -390,7 +391,7 @@ class ProductOcrFallbackRunner:
         artifactDirectory: Path,
         downloadTimeoutSeconds: int,
         reuseArtifactImages: bool,
-    ) -> Optional[ProductOcrImageResult]:
+    ) -> ProductOcrImageResult:
         artifactPath: Optional[Path] = None
         processingTimes: Dict[str, float] = {}
         try:
@@ -484,7 +485,18 @@ class ProductOcrFallbackRunner:
                     structuredOcrResult,
                 )
             ):
-                return None
+                return ProductOcrImageResult(
+                    imageUrl=imageUrl,
+                    imageIndex=imageIndex,
+                    imagePath=str(artifactPath) if artifactPath is not None else None,
+                    ocrText=ocrText if isinstance(ocrText, str) else "",
+                    structuredOcr=structuredOcrResult,
+                    processingTimes={
+                        key: round(value, 3)
+                        for key, value in processingTimes.items()
+                    },
+                    skippedReason="non_informative_ocr_result",
+                )
             imageTiles = (
                 [(None, imageBytes)]
                 if screeningResult is not None
@@ -499,9 +511,21 @@ class ProductOcrFallbackRunner:
                 textQualityEvaluator=self._textQualityEvaluator,
             )
             if not artifactPaths:
-                return None
+                return ProductOcrImageResult(
+                    imageUrl=imageUrl,
+                    imageIndex=imageIndex,
+                    imagePath=str(artifactPath) if artifactPath is not None else None,
+                    ocrText=ocrText,
+                    structuredOcr=structuredOcrResult,
+                    processingTimes={
+                        key: round(value, 3)
+                        for key, value in processingTimes.items()
+                    },
+                    skippedReason="no_informative_artifact_tiles",
+                )
             return ProductOcrImageResult(
                 imageUrl=imageUrl,
+                imageIndex=imageIndex,
                 imagePath=str(artifactPaths[0]),
                 imagePaths=[str(path) for path in artifactPaths],
                 ocrText=ocrText,
@@ -514,6 +538,7 @@ class ProductOcrFallbackRunner:
         except Exception as error:
             return ProductOcrImageResult(
                 imageUrl=imageUrl,
+                imageIndex=imageIndex,
                 processingTimes={
                     key: round(value, 3)
                     for key, value in processingTimes.items()
