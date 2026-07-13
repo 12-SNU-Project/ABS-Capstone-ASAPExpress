@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from agents.blackboard import BlackboardStore, now_iso
-from agents.component_base import BasePipelineComponent
+from bussiness_logic.pipeline.component_base import BasePipelineComponent
 from agents.pipeline_dto import CandidateTaricBranchSet, TaricBranchSet
 from agents.tools.taric_branch_resolver import TaricBranchResolverTool
 from bussiness_logic.utils.json_types import JsonObject

@@ -8,11 +8,30 @@ Modules are grouped by pipeline stage for import clarity:
 - TARIC branch resolution
 """
 
-from agents.pipeline_components.classification import ClassificationComponent
-from agents.pipeline_components.evidence_intake import EvidenceIntakeComponent
-from agents.pipeline_components.hs2_routing import Hs2RoutingComponent
-from agents.pipeline_components.product_understanding import ProductUnderstandingComponent
-from agents.pipeline_components.taric_branch_resolution import TaricBranchResolutionComponent
+from __future__ import annotations
+
+import sys
+
+from bussiness_logic.pipeline.components import classification
+from bussiness_logic.pipeline.components import evidence_intake
+from bussiness_logic.pipeline.components import hs2_routing
+from bussiness_logic.pipeline.components import product_understanding
+from bussiness_logic.pipeline.components import taric_branch_resolution
+from bussiness_logic.pipeline.components.classification import ClassificationComponent
+from bussiness_logic.pipeline.components.evidence_intake import EvidenceIntakeComponent
+from bussiness_logic.pipeline.components.hs2_routing import Hs2RoutingComponent
+from bussiness_logic.pipeline.components.product_understanding import (
+    ProductUnderstandingComponent,
+)
+from bussiness_logic.pipeline.components.taric_branch_resolution import (
+    TaricBranchResolutionComponent,
+)
+
+sys.modules[__name__ + ".classification"] = classification
+sys.modules[__name__ + ".evidence_intake"] = evidence_intake
+sys.modules[__name__ + ".hs2_routing"] = hs2_routing
+sys.modules[__name__ + ".product_understanding"] = product_understanding
+sys.modules[__name__ + ".taric_branch_resolution"] = taric_branch_resolution
 
 __all__ = [
     "ClassificationComponent",

@@ -20,7 +20,15 @@ Architecture (codex 2026-06-08):
 
 Components are exposed at the package level; tools at agents.tools.
 """
-from agents.component_base import BasePipelineComponent, ComponentResult
+from __future__ import annotations
+
+import sys
+
+from bussiness_logic.pipeline import component_base as _component_base
+from bussiness_logic.pipeline.component_base import BasePipelineComponent, ComponentResult
+
+sys.modules[__name__ + ".component_base"] = _component_base
+
 from agents.pipeline_components import (
     ClassificationComponent,
     EvidenceIntakeComponent,

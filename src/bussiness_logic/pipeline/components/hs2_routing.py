@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agents.component_base import BasePipelineComponent
+from bussiness_logic.pipeline.component_base import BasePipelineComponent
 from agents.blackboard import BlackboardStore, now_iso
 from agents.pipeline_dto import JsonValue, Hs2RoutingDecision
 from agents.tools.chapter_index_repository import LoadPreClassificationChapterRows

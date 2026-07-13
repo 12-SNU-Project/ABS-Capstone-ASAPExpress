@@ -1,7 +1,7 @@
 """Classification_Component — staged HS4 -> HS6 -> CN8 classifier."""
 from __future__ import annotations
 
-from agents.component_base import BasePipelineComponent
+from bussiness_logic.pipeline.component_base import BasePipelineComponent
 from agents.tools.taric_branch_resolver import TaricBranchResolverTool
 from agents.blackboard import BlackboardStore, now_iso
 from bussiness_logic.utils.json_types import JsonObject

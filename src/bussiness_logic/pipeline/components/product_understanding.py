@@ -8,7 +8,7 @@ import re
 from collections.abc import Mapping
 
 from agents.blackboard import BlackboardStore, now_iso
-from agents.component_base import BasePipelineComponent
+from bussiness_logic.pipeline.component_base import BasePipelineComponent
 from agents.coi_loader import LoadCoiEvidence
 from agents.llm_agents import IdentityHintAgent
 from agents.pipeline_dto import (
