@@ -56,12 +56,12 @@ CRITERION_FIELD_BINDING = {
         "identity_hints.principal_ingredient_guess;"
         "identity_hints.normalized_tariff_description;identity_hints.identity_terms;"
         "identity_hints.ingredient_class;composition_facts.ingredient_classes;"
-        "composition_facts.principal_ingredient"
+        "composition_facts.principal_ingredient;composition_facts.ingredient_entries"
     ),
     "material_composition": (
         "identity_hints.normalized_tariff_description;identity_hints.identity_terms;"
         "composition_facts.ingredient_classes;composition_facts.principal_ingredient;"
-        "composition_facts.composition_terms"
+        "composition_facts.ingredient_entries;composition_facts.composition_terms"
     ),
     "preservation_state": "identity_hints.processing_state;identity_hints.product_form_terms",
     "processing_method": "identity_hints.processing_state;composition_facts.processing_state;identity_hints.product_form_terms",

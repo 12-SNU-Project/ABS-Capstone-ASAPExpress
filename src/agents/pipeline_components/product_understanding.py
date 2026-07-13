@@ -468,6 +468,25 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         principalStatus = ProductUnderstandingComponent._PrincipalStatus(
             principalCandidates,
         )
+        # COI 교차 검증 승격: 라벨 1위 후보와 COI 1위 성분의 정규화 토큰이
+        # 겹치면 독립 2근거 일치 → confirmed 승격. 한↔영 혼재 파일이 있어
+        # 겹침 실패는 conflict가 아니라 '비교 불가'(중립)로 둔다.
+        if principalStatus != "confirmed" and principalCandidates:
+            _tok = lambda s: {w.lower() for w in re.findall(r"[A-Za-z가-힣]+", str(s or "")) if len(w) >= 2}
+            coi_first = next(
+                (e for e in ingredientEntries
+                 if e.get("source") == "coi" and int(e.get("order_index") or 0) == 1),
+                None,
+            )
+            if coi_first is not None:
+                top = principalCandidates[0]
+                overlap = _tok(top.get("ingredient_name")) & _tok(coi_first.get("ingredient_name"))
+                if overlap:
+                    principalStatus = "confirmed"
+                    top = dict(top)
+                    top["basis"] = f"{top.get('basis')}+coi_cross_check"
+                    top["confidence"] = max(float(top.get("confidence") or 0), 0.85)
+                    principalCandidates = [top, *principalCandidates[1:]]
         principalIngredient = (
             str(principalCandidates[0].get("ingredient_name") or "")
             if principalStatus == "confirmed" and principalCandidates
