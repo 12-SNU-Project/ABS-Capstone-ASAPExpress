@@ -161,6 +161,34 @@ class IdentityHintSet:
 
 
 @dataclass(frozen=True, slots=True)
+class CompositionExtractionTrace:
+    sourceFieldName: str = field(metadata=_desc("추출 원천 필드명"))
+    sourceText: str = field(metadata=_desc("추출 원문"))
+    selectedSpan: str = field(default="", metadata=_desc("원문에서 선택한 span"))
+    outputField: str = field(default="", metadata=_desc("채워진 CompositionFactSet 필드"))
+    normalizedValue: str = field(default="", metadata=_desc("정규화된 산출값"))
+    extractionMethod: str = field(default="regex", metadata=_desc("추출 방식"))
+    decisionReason: str = field(default="", metadata=_desc("고정 포맷 판단 근거"))
+    confidence: float = field(default=0.0, metadata=_desc("추출 신뢰도"))
+    unresolvedReason: str = field(default="", metadata=_desc("값을 채우지 못한 이유"))
+    sourceRefs: tuple[str, ...] = field(default=(), metadata=_desc("원천 evidence ref"))
+
+    def ToTrace(self) -> dict[str, JsonValue]:
+        return {
+            "source_field_name": self.sourceFieldName,
+            "source_text": self.sourceText,
+            "selected_span": self.selectedSpan,
+            "output_field": self.outputField,
+            "normalized_value": self.normalizedValue,
+            "extraction_method": self.extractionMethod,
+            "decision_reason": self.decisionReason,
+            "confidence": self.confidence,
+            "unresolved_reason": self.unresolvedReason,
+            "source_refs": list(self.sourceRefs),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class CompositionFactSet:
     processingState: str = field(default="unknown", metadata=_desc("가공 상태"))
     principalIngredient: str = field(default="", metadata=_desc("확정된 주성분 후보"))
@@ -176,6 +204,10 @@ class CompositionFactSet:
     containsSauceOrBroth: bool = field(default=False, metadata=_desc("소스/육수 포함 여부"))
     allergenTermsExcluded: tuple[str, ...] = field(default=(), metadata=_desc("분류에서 제외한 알레르겐 문구"))
     missingCompositionFacts: tuple[str, ...] = field(default=(), metadata=_desc("부족한 성분 정보"))
+    extractionTraces: tuple[CompositionExtractionTrace, ...] = field(
+        default=(),
+        metadata=_desc("Composition Lane 추출 근거 trace"),
+    )
 
     def ToTrace(self) -> dict[str, JsonValue]:
         return {
@@ -193,6 +225,7 @@ class CompositionFactSet:
             "contains_sauce_or_broth": self.containsSauceOrBroth,
             "allergen_terms_excluded": list(self.allergenTermsExcluded),
             "missing_composition_facts": list(self.missingCompositionFacts),
+            "extraction_traces": [trace.ToTrace() for trace in self.extractionTraces],
         }
 
 

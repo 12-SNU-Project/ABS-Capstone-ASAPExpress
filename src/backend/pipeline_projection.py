@@ -260,6 +260,17 @@ class InputProcessingViewProjector:
                 or facts.get("unresolved_product_facts")
                 or []
             ),
+            "reconstruction_evidence_traces": (
+                inputReconstruction.get("evidence_traces")
+                or inputReconstruction.get("reconstruction_evidence_traces")
+                or facts.get("reconstruction_evidence_traces")
+                or []
+            ),
+            "missing_fact_reasons": (
+                inputReconstruction.get("missing_fact_reasons")
+                or facts.get("missing_fact_reasons")
+                or []
+            ),
             "product_fact_conflicts": (
                 inputReconstruction.get("product_fact_conflicts")
                 or facts.get("product_fact_conflicts")
@@ -368,6 +379,16 @@ class InputProcessingViewProjector:
             ),
             "unresolved_product_facts": self._CompactMappingList(
                 inputProcessingView.get("unresolved_product_facts"),
+                limit=40,
+                textLimit=700,
+            ),
+            "reconstruction_evidence_traces": self._CompactMappingList(
+                inputProcessingView.get("reconstruction_evidence_traces"),
+                limit=80,
+                textLimit=700,
+            ),
+            "missing_fact_reasons": self._CompactMappingList(
+                inputProcessingView.get("missing_fact_reasons"),
                 limit=40,
                 textLimit=700,
             ),

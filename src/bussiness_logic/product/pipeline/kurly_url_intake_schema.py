@@ -84,6 +84,8 @@ class KurlyUrlIntakeResult(BaseModel):
                 "productFacts",
                 "reconstructedTables",
                 "unresolvedFacts",
+                "evidenceTraces",
+                "missingFactReasons",
                 "conflicts",
                 "normalizedFactTexts",
                 "warnings",
@@ -98,6 +100,10 @@ class KurlyUrlIntakeResult(BaseModel):
             reconstructionData.get("reconstructed_tables", [])
         )
         unresolvedFacts = list(reconstructionData.get("unresolved_facts", []))
+        evidenceTraces = list(reconstructionData.get("evidence_traces", []))
+        missingFactReasons = list(
+            reconstructionData.get("missing_fact_reasons", [])
+        )
         classificationFactTexts = list(
             reconstructionData.get("normalized_fact_texts", [])
         )
@@ -166,11 +172,15 @@ class KurlyUrlIntakeResult(BaseModel):
                 "fact_count": len(productFacts),
                 "reconstructed_table_count": len(reconstructedTables),
                 "unresolved_count": len(unresolvedFacts),
+                "evidence_trace_count": len(evidenceTraces),
+                "missing_fact_reason_count": len(missingFactReasons),
                 "conflict_count": len(reconstructionData.get("conflicts", [])),
                 "fact_text_count": len(classificationFactTexts),
                 "reconstructed_product_facts": productFacts,
                 "reconstructed_tables": reconstructedTables,
                 "unresolved_product_facts": unresolvedFacts,
+                "evidence_traces": evidenceTraces,
+                "missing_fact_reasons": missingFactReasons,
                 "product_fact_conflicts": list(
                     reconstructionData.get("conflicts", [])
                 ),

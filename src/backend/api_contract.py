@@ -103,6 +103,14 @@ class InputProcessingView(ApiContractModel):
         default_factory=list,
         alias="unresolved_product_facts",
     )
+    reconstructionEvidenceTraces: list[JsonObject] = Field(
+        default_factory=list,
+        alias="reconstruction_evidence_traces",
+    )
+    missingFactReasons: list[JsonObject] = Field(
+        default_factory=list,
+        alias="missing_fact_reasons",
+    )
     productFactConflicts: list[str] = Field(
         default_factory=list,
         alias="product_fact_conflicts",

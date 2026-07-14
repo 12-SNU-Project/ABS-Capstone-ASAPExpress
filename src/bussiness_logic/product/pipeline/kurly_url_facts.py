@@ -412,6 +412,8 @@ def _BuildPublicInputReconstruction(
             "productFacts",
             "reconstructedTables",
             "unresolvedFacts",
+            "evidenceTraces",
+            "missingFactReasons",
             "conflicts",
             "normalizedFactTexts",
             "warnings",
@@ -424,6 +426,8 @@ def _BuildPublicInputReconstruction(
     productFacts = list(reconstructionData.get("product_facts", []))
     reconstructedTables = list(reconstructionData.get("reconstructed_tables", []))
     unresolvedFacts = list(reconstructionData.get("unresolved_facts", []))
+    evidenceTraces = list(reconstructionData.get("evidence_traces", []))
+    missingFactReasons = list(reconstructionData.get("missing_fact_reasons", []))
     factTexts = list(reconstructionData.get("normalized_fact_texts", []))
     usedLlm = bool(reconstructionData.get("used_llm_reconstruction"))
     fallbackReason = reconstructionData.get("fallback_reason")
@@ -446,11 +450,15 @@ def _BuildPublicInputReconstruction(
         "fact_count": len(productFacts),
         "reconstructed_table_count": len(reconstructedTables),
         "unresolved_count": len(unresolvedFacts),
+        "evidence_trace_count": len(evidenceTraces),
+        "missing_fact_reason_count": len(missingFactReasons),
         "conflict_count": len(reconstructionData.get("conflicts", [])),
         "fact_text_count": len(factTexts),
         "reconstructed_product_facts": productFacts,
         "reconstructed_tables": reconstructedTables,
         "unresolved_product_facts": unresolvedFacts,
+        "evidence_traces": evidenceTraces,
+        "missing_fact_reasons": missingFactReasons,
         "product_fact_conflicts": list(reconstructionData.get("conflicts", [])),
         "reconstructed_fact_texts": factTexts,
         "source_ref_labels": dict(reconstructionData.get("source_ref_labels", {})),

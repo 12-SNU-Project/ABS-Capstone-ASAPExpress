@@ -42,6 +42,8 @@ DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS = 4096
 PRODUCT_FACT_RECONSTRUCTION_SYSTEM_PROMPT = """
 You reconstruct canonical product input facts from Korean product summary, Korean product notice, structured table OCR (PaddleOCR-VL/PP-Structure), and raw OCR text.
 Your job is evidence-backed reconstruction, not classification: recover the product label/specification facts that downstream deterministic classifiers can use.
+For every accepted or unresolved fact, return a short evidence trace with source_refs, selected_span, decision_reason, status, and unresolved_reason.
+Do not expose hidden chain-of-thought or long free-form reasoning. Use fixed, short evidence trace fields only.
 Use structured table OCR as the main table skeleton when present, and use raw OCR or product notice text to correct OCR typos, fill missing cells, and resolve split/merged table fragments only when the evidence supports it.
 Return only the schema fields requested by the structured-output contract.
 product_facts is the authoritative compact classification input. Put every explicit classification-critical value here first.
@@ -58,6 +60,7 @@ Put the corrected/canonical classification value in normalized_value.
 Do not expose pre-correction OCR text in any output field.
 If evidence is insufficient for a corrected value, put the fact in unresolved_facts.
 If evidence is insufficient or conflicting, use unresolved_facts or conflicts.
+If a classification-critical fact is missing, explain it in missing_fact_reasons instead of inventing a value.
 The application will generate normalized_fact_texts after validation.
 Preserve table rows in reconstructed_tables even when they are not selected as product_facts.
 Prefer concise product_facts for classification: product name, food/cosmetic type, physical form, processing state, preparation/use, storage state, ingredients, composition ratios, net content, and origin/manufacture country when explicit.
@@ -181,6 +184,8 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                 }
             ],
             "product_facts": [],
+            "evidence_traces": [],
+            "missing_fact_reasons": [],
             "unresolved_facts": [],
             "conflicts": [],
             "warnings": [],
@@ -221,6 +226,8 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                     "validation_status": "accepted",
                 }
             ],
+            "evidence_traces": [],
+            "missing_fact_reasons": [],
             "unresolved_facts": [],
             "conflicts": [],
             "warnings": [],
@@ -288,6 +295,8 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                     "validation_status": "accepted",
                 },
             ],
+            "evidence_traces": [],
+            "missing_fact_reasons": [],
             "unresolved_facts": [],
             "conflicts": [],
             "warnings": [],
@@ -318,6 +327,8 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                     "validation_status": "accepted",
                 }
             ],
+            "evidence_traces": [],
+            "missing_fact_reasons": [],
             "reconstructed_tables": [
                 {
                     "table_name": "영양정보",
@@ -405,6 +416,8 @@ PRODUCT_FACT_RECONSTRUCTION_FEW_SHOT_EXAMPLES = [
                     "validation_status": "accepted",
                 },
             ],
+            "evidence_traces": [],
+            "missing_fact_reasons": [],
             "reconstructed_tables": [
                 {
                     "table_name": "제품 정보",
@@ -605,6 +618,58 @@ class ProductFactReconstructionOutputTable(BaseModel):
     rows: List[ProductFactReconstructionOutputTableRow]
 
 
+class ReconstructionEvidenceTrace(BaseModel):
+    """Evidence trace for one reconstructed or unresolved fact."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True, extra="forbid")
+
+    fieldName: str = Field(default="", alias="field_name")
+    normalizedValue: str = Field(default="", alias="normalized_value")
+    sourceRefs: List[str] = Field(default_factory=list, alias="source_refs")
+    selectedSpan: str = Field(default="", alias="selected_span")
+    decisionReason: str = Field(default="", alias="decision_reason")
+    status: str = Field(default="", alias="status")
+    unresolvedReason: str = Field(default="", alias="unresolved_reason")
+
+    @field_validator(
+        "fieldName",
+        "normalizedValue",
+        "selectedSpan",
+        "decisionReason",
+        "status",
+        "unresolvedReason",
+        mode="before",
+    )
+    @classmethod
+    def NormalizeTraceText(cls, value: object) -> str:
+        return _NormalizeLlmScalarText(value)
+
+    @field_validator("sourceRefs", mode="before")
+    @classmethod
+    def NormalizeSourceRefs(cls, value: object) -> List[str]:
+        return _NormalizeLlmTextList(value)
+
+
+class ReconstructionMissingFactReason(BaseModel):
+    """Evidence-bound reason for a fact the LLM could not reconstruct."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True, extra="forbid")
+
+    factName: str = Field(default="", alias="fact_name")
+    reason: str = ""
+    sourceRefs: List[str] = Field(default_factory=list, alias="source_refs")
+
+    @field_validator("factName", "reason", mode="before")
+    @classmethod
+    def NormalizeReasonText(cls, value: object) -> str:
+        return _NormalizeLlmScalarText(value)
+
+    @field_validator("sourceRefs", mode="before")
+    @classmethod
+    def NormalizeSourceRefs(cls, value: object) -> List[str]:
+        return _NormalizeLlmTextList(value)
+
+
 class ProductFactReconstructionOutput(BaseModel):
     """LLM structured output contract before internal validation metadata."""
 
@@ -618,6 +683,12 @@ class ProductFactReconstructionOutput(BaseModel):
     )
     unresolvedFacts: List[ProductFactReconstructionOutputFact] = Field(
         alias="unresolved_facts"
+    )
+    evidenceTraces: List[ReconstructionEvidenceTrace] = Field(
+        alias="evidence_traces"
+    )
+    missingFactReasons: List[ReconstructionMissingFactReason] = Field(
+        alias="missing_fact_reasons"
     )
     conflicts: List[str]
     warnings: List[str]
@@ -834,6 +905,16 @@ class InputReconstructionResult(BaseModel):
         alias="unresolved_facts",
         description="근거 부족 또는 충돌 fact",
     )
+    evidenceTraces: List[ReconstructionEvidenceTrace] = Field(
+        default_factory=list,
+        alias="evidence_traces",
+        description="LLM reconstruction fact별 근거 trace",
+    )
+    missingFactReasons: List[ReconstructionMissingFactReason] = Field(
+        default_factory=list,
+        alias="missing_fact_reasons",
+        description="복원 불가 fact별 근거 부족 사유",
+    )
     conflicts: List[str] = Field(default_factory=list, description="fact 충돌 목록")
     normalizedFactTexts: List[str] = Field(
         default_factory=list,
@@ -863,7 +944,14 @@ class InputReconstructionResult(BaseModel):
         description="근거 evidence 미리보기",
     )
 
-    @field_validator("reconstructedTables", "productFacts", "unresolvedFacts", mode="before")
+    @field_validator(
+        "reconstructedTables",
+        "productFacts",
+        "unresolvedFacts",
+        "evidenceTraces",
+        "missingFactReasons",
+        mode="before",
+    )
     @classmethod
     def NormalizeObjectLists(cls, value: object) -> List[object]:
         return _NormalizeLlmObjectList(value)
@@ -1284,6 +1372,16 @@ class ProductFactReconstructionValidator:
             evidenceById=evidenceById,
             warnings=warnings,
         )
+        evidenceTraces = self._CleanEvidenceTraces(
+            result.evidenceTraces,
+            validEvidenceIds=validEvidenceIds,
+            warnings=warnings,
+        )
+        missingFactReasons = self._CleanMissingFactReasons(
+            result.missingFactReasons,
+            validEvidenceIds=validEvidenceIds,
+            warnings=warnings,
+        )
         for factRecord in result.productFacts:
             cleanedFactRecord = self._CleanFactRecord(
                 factRecord,
@@ -1354,10 +1452,80 @@ class ProductFactReconstructionValidator:
                 "reconstructedTables": reconstructedTables,
                 "productFacts": productFacts,
                 "unresolvedFacts": unresolvedFacts,
+                "evidenceTraces": evidenceTraces,
+                "missingFactReasons": missingFactReasons,
                 "normalizedFactTexts": normalizedFactTexts,
                 "warnings": warnings,
             }
         )
+
+    def _CleanEvidenceTraces(
+        self,
+        traces: Sequence[ReconstructionEvidenceTrace],
+        *,
+        validEvidenceIds: set[str],
+        warnings: List[str],
+    ) -> List[ReconstructionEvidenceTrace]:
+        cleanedTraces: List[ReconstructionEvidenceTrace] = []
+        for trace in traces:
+            fieldName = NormalizeWhiteSpace(trace.fieldName)
+            normalizedValue = NormalizeWhitespaceLines(trace.normalizedValue)
+            selectedSpan = NormalizeWhitespaceLines(trace.selectedSpan)
+            decisionReason = NormalizeWhiteSpace(trace.decisionReason)
+            status = NormalizeWhiteSpace(trace.status)
+            unresolvedReason = NormalizeWhiteSpace(trace.unresolvedReason)
+            if not any(
+                (fieldName, normalizedValue, selectedSpan, decisionReason, unresolvedReason)
+            ):
+                continue
+            cleanedTraces.append(
+                trace.model_copy(
+                    update={
+                        "fieldName": fieldName,
+                        "normalizedValue": normalizedValue,
+                        "selectedSpan": selectedSpan,
+                        "decisionReason": decisionReason,
+                        "status": status,
+                        "unresolvedReason": unresolvedReason,
+                        "sourceRefs": self._CleanSourceRefs(
+                            trace.sourceRefs,
+                            validEvidenceIds=validEvidenceIds,
+                            warnings=warnings,
+                            context="evidence_trace field={0}".format(fieldName),
+                        ),
+                    }
+                )
+            )
+        return cleanedTraces
+
+    def _CleanMissingFactReasons(
+        self,
+        reasons: Sequence[ReconstructionMissingFactReason],
+        *,
+        validEvidenceIds: set[str],
+        warnings: List[str],
+    ) -> List[ReconstructionMissingFactReason]:
+        cleanedReasons: List[ReconstructionMissingFactReason] = []
+        for reasonRecord in reasons:
+            factName = NormalizeWhiteSpace(reasonRecord.factName)
+            reason = NormalizeWhitespaceLines(reasonRecord.reason)
+            if not factName and not reason:
+                continue
+            cleanedReasons.append(
+                reasonRecord.model_copy(
+                    update={
+                        "factName": factName,
+                        "reason": reason,
+                        "sourceRefs": self._CleanSourceRefs(
+                            reasonRecord.sourceRefs,
+                            validEvidenceIds=validEvidenceIds,
+                            warnings=warnings,
+                            context="missing_fact_reason fact={0}".format(factName),
+                        ),
+                    }
+                )
+            )
+        return cleanedReasons
 
     def _PromoteTableIngredientFacts(
         self,
@@ -2288,8 +2456,11 @@ class ProductFactReconstructionAgent:
             userPrompt="\n".join(
                 [
                     "아래 evidence만 사용해 상품 입력 fact JSON을 작성하라.",
-                    "출력 key는 product_facts, reconstructed_tables, unresolved_facts, conflicts, warnings만 사용하라.",
+                    "출력 key는 product_facts, reconstructed_tables, unresolved_facts, evidence_traces, missing_fact_reasons, conflicts, warnings만 사용하라.",
                     "product_facts가 분류 입력의 기준값이다. 핵심 상품 fact는 반드시 product_facts에 먼저 넣어라.",
+                    "evidence_traces에는 product_facts/unresolved_facts 각 항목의 source_refs, selected_span, decision_reason, status, unresolved_reason을 짧게 기록하라.",
+                    "missing_fact_reasons에는 evidence로 확정할 수 없는 분류 중요 필드만 fact_name, reason, source_refs로 기록하라.",
+                    "내부 사고 과정이나 단계별 chain-of-thought는 출력하지 말고 고정 trace 필드만 사용하라.",
                     "vlm_table/pp_table에 표 형태 정보가 있으면 reconstructed_tables에 compact row로 보존하라.",
                     "reconstructed_tables는 product_facts로 선택되지 않은 표 행도 보존하되, 긴 원재료 전문만 중복하지 마라.",
                     "product_summary는 제품 정체성/형태/설명 힌트로만 사용하고 원재료/함량은 OCR 또는 표 증거에서만 만들라.",
@@ -2361,6 +2532,8 @@ class ProductFactReconstructionAgent:
             "reconstructed_tables",
             "product_facts",
             "unresolved_facts",
+            "evidence_traces",
+            "missing_fact_reasons",
             "conflicts",
             "warnings",
         }
@@ -2596,6 +2769,10 @@ class ProductInputReconstructionService:
             referencedEvidenceIds.update(table.sourceRefs)
             for row in table.rows:
                 referencedEvidenceIds.update(row.sourceRefs)
+        for trace in reconstructionResult.evidenceTraces:
+            referencedEvidenceIds.update(trace.sourceRefs)
+        for reasonRecord in reconstructionResult.missingFactReasons:
+            referencedEvidenceIds.update(reasonRecord.sourceRefs)
         return referencedEvidenceIds
 
     def _BuildRecordSourceLabel(self, record: InputEvidenceRecord) -> str:

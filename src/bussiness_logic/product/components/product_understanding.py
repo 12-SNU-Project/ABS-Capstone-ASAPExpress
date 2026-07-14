@@ -12,6 +12,7 @@ from bussiness_logic.pipeline.component_base import BasePipelineComponent
 from bussiness_logic.product.services.coi_loader import LoadCoiEvidence
 from bussiness_logic.product.services.identity_hint_agent import IdentityHintAgent
 from bussiness_logic.product.model.product_understanding import (
+    CompositionExtractionTrace,
     CompositionFactSet,
     CoiEvidenceSet,
     DistilledIdentityFacts,
@@ -435,9 +436,15 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         )
         factTextValues = ProductUnderstandingComponent._FactTexts(productFacts)
         text = "\n".join([*factTexts, *factTextValues, *tableTexts, *coiTexts])
+        extractionTraces: list[CompositionExtractionTrace] = []
+        ProductUnderstandingComponent._AppendNutritionPercentExclusionTraces(
+            reconstructedTables=reconstructedTables,
+            extractionTraces=extractionTraces,
+        )
         ingredientEntries = ProductUnderstandingComponent._BuildIngredientEntries(
             productFacts=productFacts,
             reconstructedTables=reconstructedTables,
+            extractionTraces=extractionTraces,
         )
         # COI 구조화 합류 (ASAP_COI_COMPOSITION, 기본 ON): 원료풀이 표를
         # 표기순 엔트리로 파싱해 composition lane에 공급 — 텍스트 잡탕이
@@ -503,6 +510,12 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             else ""
         )
 
+        compositionTerms = ProductUnderstandingComponent._CompositionTerms(
+            productFacts=productFacts,
+            reconstructedTables=reconstructedTables,
+            factTexts=factTexts,
+            coiTexts=coiTexts,
+        )
         allergenTexts = [
             item
             for item in factTexts
@@ -511,13 +524,21 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         missing: list[str] = []
         if not percentages:
             missing.append("ingredient_percentages")
-
-        compositionTerms = ProductUnderstandingComponent._CompositionTerms(
-            productFacts=productFacts,
-            reconstructedTables=reconstructedTables,
-            factTexts=factTexts,
-            coiTexts=coiTexts,
-        )
+            reason = (
+                "no_top_level_ingredient_percentages"
+                if any("%" in term for term in compositionTerms)
+                else "ingredient_section_has_no_percent"
+            )
+            extractionTraces.append(
+                CompositionExtractionTrace(
+                    sourceFieldName="composition_lane",
+                    sourceText="\n".join(compositionTerms[:5]),
+                    outputField="ingredient_percentages",
+                    extractionMethod="regex_percent",
+                    decisionReason=reason,
+                    unresolvedReason=reason,
+                ),
+            )
         ingredientClasses = ProductUnderstandingComponent._BuildIngredientClasses(
             ingredientEntries=ingredientEntries,
             compositionTerms=compositionTerms,
@@ -545,6 +566,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             containsSauceOrBroth=bool(SAUCE_BROTH_RE.search(text)),
             allergenTermsExcluded=tuple(allergenTexts[:20]),
             missingCompositionFacts=tuple(missing),
+            extractionTraces=tuple(extractionTraces[:120]),
         )
 
     @staticmethod
@@ -700,6 +722,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         *,
         productFacts: tuple[dict[str, JsonValue], ...],
         reconstructedTables: tuple[dict[str, JsonValue], ...],
+        extractionTraces: list[CompositionExtractionTrace] | None = None,
     ) -> list[dict[str, JsonValue]]:
         entries: list[dict[str, JsonValue]] = []
         for fact in productFacts:
@@ -711,6 +734,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
                 value=value,
                 sourceRefs=ProductUnderstandingComponent._ReadSourceRefs(fact),
                 sourceKind="product_fact",
+                extractionTraces=extractionTraces,
             )
 
         for table in reconstructedTables:
@@ -733,6 +757,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
                     value=value,
                     sourceRefs=sourceRefs,
                     sourceKind="reconstructed_table",
+                    extractionTraces=extractionTraces,
                 )
         return ProductUnderstandingComponent._DedupIngredientEntries(entries)
 
@@ -744,6 +769,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         value: str,
         sourceRefs: tuple[str, ...],
         sourceKind: str,
+        extractionTraces: list[CompositionExtractionTrace] | None = None,
     ) -> None:
         if not fieldName or not value:
             return
@@ -759,6 +785,41 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             if not ingredientName:
                 continue
             percentage = ProductUnderstandingComponent._ReadTopLevelPercentage(segment)
+            if extractionTraces is not None:
+                ProductUnderstandingComponent._AppendExcludedPercentageTraces(
+                    extractionTraces,
+                    fieldName=fieldName,
+                    value=value,
+                    segment=segment,
+                    sourceRefs=sourceRefs,
+                )
+                extractionTraces.append(
+                    CompositionExtractionTrace(
+                        sourceFieldName=fieldName,
+                        sourceText=value,
+                        selectedSpan=segment,
+                        outputField="ingredient_entries",
+                        normalizedValue=ingredientName,
+                        extractionMethod="regex_top_level_split",
+                        decisionReason="composition_field_segment",
+                        confidence=0.7,
+                        sourceRefs=sourceRefs,
+                    ),
+                )
+                if percentage is not None:
+                    extractionTraces.append(
+                        CompositionExtractionTrace(
+                            sourceFieldName=fieldName,
+                            sourceText=value,
+                            selectedSpan=segment,
+                            outputField="ingredient_percentages",
+                            normalizedValue=f"{ingredientName}: {percentage}",
+                            extractionMethod="regex_percent",
+                            decisionReason="top_level_percent_match",
+                            confidence=0.8,
+                            sourceRefs=sourceRefs,
+                        ),
+                    )
             entry: dict[str, JsonValue] = {
                 "ingredient_name": ingredientName,
                 "order_index": orderIndex,
@@ -771,6 +832,87 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             if percentage is not None:
                 entry["percent"] = percentage
             entries.append(entry)
+
+    @staticmethod
+    def _AppendNutritionPercentExclusionTraces(
+        *,
+        reconstructedTables: tuple[dict[str, JsonValue], ...],
+        extractionTraces: list[CompositionExtractionTrace],
+    ) -> None:
+        for table in reconstructedTables:
+            tableName = str(table.get("table_name") or "").strip()
+            rows = table.get("rows")
+            tableRefs = ProductUnderstandingComponent._ReadSourceRefs(table)
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                fieldName = ProductUnderstandingComponent._ReadTextField(row, "field_name")
+                value = ProductUnderstandingComponent._ReadTextField(row, "normalized_value")
+                dailyValuePercent = ProductUnderstandingComponent._ReadTextField(
+                    row,
+                    "daily_value_percent",
+                )
+                if not dailyValuePercent:
+                    continue
+                if not NUTRITION_FIELD_RE.search(f"{tableName} {fieldName} {value}"):
+                    continue
+                unit = ProductUnderstandingComponent._ReadTextField(row, "unit")
+                selectedSpan = " ".join(
+                    item
+                    for item in (fieldName, value, unit, f"{dailyValuePercent}%")
+                    if item
+                )
+                sourceRefs = ProductUnderstandingComponent._ReadSourceRefs(row) or tableRefs
+                extractionTraces.append(
+                    CompositionExtractionTrace(
+                        sourceFieldName=fieldName,
+                        sourceText=selectedSpan,
+                        selectedSpan=selectedSpan,
+                        outputField="ingredient_percentages",
+                        normalizedValue="",
+                        extractionMethod="regex_percent_excluded",
+                        decisionReason="nutrition_daily_value_percent",
+                        confidence=1.0,
+                        sourceRefs=sourceRefs,
+                    ),
+                )
+
+    @staticmethod
+    def _AppendExcludedPercentageTraces(
+        extractionTraces: list[CompositionExtractionTrace],
+        *,
+        fieldName: str,
+        value: str,
+        segment: str,
+        sourceRefs: tuple[str, ...],
+    ) -> None:
+        for match in PERCENT_RE.finditer(segment):
+            term = " ".join((match.group("term") or "").split())[-40:].strip(" ,:/")
+            reason = ""
+            if ProductUnderstandingComponent._IsNestedPercentage(
+                segment,
+                match.start("percent"),
+            ):
+                reason = "nested_origin_or_subingredient_percent"
+            elif ORIGIN_TERM_RE.search(term):
+                reason = "origin_marker_percent"
+            if not reason:
+                continue
+            extractionTraces.append(
+                CompositionExtractionTrace(
+                    sourceFieldName=fieldName,
+                    sourceText=value,
+                    selectedSpan=match.group(0).strip(),
+                    outputField="ingredient_percentages",
+                    normalizedValue="",
+                    extractionMethod="regex_percent_excluded",
+                    decisionReason=reason,
+                    confidence=1.0,
+                    sourceRefs=sourceRefs,
+                ),
+            )
 
     @staticmethod
     def _SplitTopLevelIngredients(text: str) -> tuple[str, ...]:
@@ -1170,6 +1312,9 @@ class ProductUnderstandingComponent(BasePipelineComponent):
     @staticmethod
     def _ReadComponentFromContentField(fieldName: str) -> str:
         normalizedFieldName = " ".join(fieldName.split())
+        compactFieldName = normalizedFieldName.replace(" ", "")
+        if compactFieldName in {"내용량", "총내용량", "중량", "용량", "중량/용량", "중량용량"}:
+            return ""
         for marker in ("내용량", "중량", "용량"):
             if marker not in normalizedFieldName:
                 continue
