@@ -1425,3 +1425,44 @@ body.asap-cjs-neon .app-topbar-logo {
   filter: url(#cjs-smoke-neon);
   opacity: 0.7;
 }
+
+/* ---- 유사 EU 판례 목록 (분류 근거 패널) ---- */
+.cjs-precedent-list {
+  display: grid;
+  gap: 8px;
+}
+
+.cjs-precedent {
+  padding: 10px 12px;
+  border: 1px solid var(--cjs-border);
+  border-left: 3px solid var(--cjs-accent);
+  border-radius: 8px;
+  background: var(--cjs-surface-strong);
+}
+
+.cjs-precedent-ref {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--cjs-accent);
+  margin-bottom: 4px;
+}
+
+.cjs-precedent-sim {
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.cjs-precedent-diff {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #d97706;
+}
+
+.cjs-precedent-body {
+  font-size: 12px;
+  line-height: 1.5;
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}

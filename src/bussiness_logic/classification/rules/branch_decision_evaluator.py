@@ -166,6 +166,12 @@ def EvaluateCodeDecision(
                 (result or {}).get("verdict"), "undecided")
             why = (result or {}).get("reason", "") or (
                 "no_percentages" if not percentages else "threshold_unparsed")
+            # 임계를 파싱 못 했으면 충족 판정 불가 — satisfies가 새어 나와
+            # 확정 자격(quant true)을 주던 버그의 가드 (떡볶이 19022010
+            # 54점 확정 실측: 값=null·threshold_unparsed인데 true).
+            if verdict == "true" and ("unparsed" in why or "no_percentages" in why):
+                verdict = "undecided"
+                why += ";quant_unparsed_guard"
         elif op == "not_contains":
             phrases = _phrase_sets(str(cond.get("value")))
             if any(p <= pool for p in phrases):
@@ -187,6 +193,26 @@ def EvaluateCodeDecision(
                     if not (all_value_toks & register):
                         continue
                     flag = _dig(product_facts, f"composition_facts.{leaf}")
+                    # wrapper 의미 분리(팀장 안건 적용): '도우로 만듦'과 '속을
+                    # 채움'은 다른 사실인데 wrapper=True가 stuffed/filled로
+                    # 직승격되어 떡이 stuffed로 읽혔다(골든 실측). True 승격은
+                    # DTO 어딘가에 채움 서술(stuff-/fill- 형태)이 실재할 때만
+                    # 허용, 없으면 레지스터를 건너뛰고 lexical 평가로 폴백.
+                    # False(위반) 쪽은 그대로 — 도우 자체가 없으면 stuffed일 수
+                    # 없다. ASAP_WRAPPER_SEMANTICS=0 구판 복귀.
+                    if (
+                        flag is True
+                        and leaf == "contains_wrapper_or_dough"
+                        and (os.environ.get("ASAP_WRAPPER_SEMANTICS", "1") or "1").strip() != "0"
+                    ):
+                        corrob = _field_tokens(
+                            product_facts,
+                            "identity_hints.identity_terms;"
+                            "identity_hints.product_form_terms;"
+                            "identity_hints.normalized_tariff_description",
+                        )
+                        if not any(tk.startswith(("stuff", "fill")) for tk in corrob):
+                            break  # 레지스터 미적용 → lexical 폴백
                     if flag is True:
                         verdict, why, pol_done = "true", f"field_hit:{leaf}", True
                     elif flag is False:
@@ -267,13 +293,17 @@ def EvaluateCodeDecision(
             "ASAP_DECISION_ORDER_GUARD", "1") or "1").strip() != "0"
         principal_toks: set = set()
         accessory_toks: set = set()
+        rank_by_tok: dict = {}  # 서열 2탄: 토큰 → 최상 order_index
         if order_guard_on and product_facts:
             entries = _dig(product_facts, "composition_facts.ingredient_entries") or []
             for e in entries:
                 if not isinstance(e, dict):
                     continue
                 toks = {_stem(w) for w in _TOKEN.findall(str(e.get("ingredient_name") or "").lower()) if len(w) >= 3}
-                if int(e.get("order_index") or 99) == 1:
+                rank = int(e.get("order_index") or 99)
+                for tk in toks:
+                    rank_by_tok[tk] = min(rank, rank_by_tok.get(tk, 99))
+                if rank == 1:
                     principal_toks |= toks
                 else:
                     accessory_toks |= toks
@@ -284,15 +314,35 @@ def EvaluateCodeDecision(
                 accessory_toks |= {_stem(w) for w in _TOKEN.findall(str(a).lower()) if len(w) >= 3}
             accessory_toks -= principal_toks
 
-        def _accessory_only(d: dict) -> bool:
-            if not accessory_toks:
-                return False
+        def _value_toks(d: dict) -> set:
             try:
                 vals = json.loads(str(d.get("value") or "null")) or []
             except Exception:
+                return set()
+            return {_stem(w) for v in vals for w in _TOKEN.findall(str(v).lower()) if len(w) >= 3}
+
+        def _accessory_only(d: dict) -> bool:
+            if not accessory_toks:
                 return False
-            vt = {_stem(w) for v in vals for w in _TOKEN.findall(str(v).lower()) if len(w) >= 3}
+            vt = _value_toks(d)
             return bool(vt) and not (vt & principal_toks) and bool(vt & accessory_toks)
+
+        # 서열 2탄(연속 가중, 기본 OFF): 근거 어휘의 최상 표기 순위 r로
+        # 지지도 1/r를 매긴다. 1탄의 이분법(1위 아니면 전부 부수)이 재첩국·
+        # 전골처럼 정체 성분이 2순위인 상품을 일괄 박탈하는 것을 완화 —
+        # 2순위(1/2)는 자격 유지, 3순위 이하(≤1/3)만 박탈.
+        # ASAP_DECISION_ORDER_WEIGHT=1 활성.
+        order_weight_on = (os.environ.get(
+            "ASAP_DECISION_ORDER_WEIGHT", "0") or "0").strip() != "0"
+
+        def _order_weight(d: dict) -> float:
+            vt = _value_toks(d)
+            if not vt:
+                return 0.0
+            if vt & principal_toks:
+                return 1.0
+            ranks = [rank_by_tok[tk] for tk in vt if tk in rank_by_tok]
+            return (1.0 / min(ranks)) if ranks else 0.0
 
         binding = _binding_table() if (os.environ.get(
             "ASAP_BINDING_V1", "1") or "1").strip() != "0" else {}
@@ -317,7 +367,16 @@ def EvaluateCodeDecision(
         if gate_on and typed_ok and order_guard_on:
             id_trues = [d for d in detail
                         if d["verdict"] == "true" and d["cond"] not in state_types]
-            if id_trues and all(_accessory_only(d) for d in id_trues):
+            if order_weight_on:
+                if id_trues:
+                    weights = [_order_weight(d) for d in id_trues]
+                    for d, w in zip(id_trues, weights):
+                        d["why"] += f";order_w={w:.2f}"
+                    if all(0.0 < w <= 1.0 / 3.0 for w in weights):
+                        for d in id_trues:
+                            d["why"] += ";order_weight_blocked"
+                        return "undecided", detail
+            elif id_trues and all(_accessory_only(d) for d in id_trues):
                 for d in id_trues:
                     d["why"] += ";accessory_only_blocked"
                 return "undecided", detail

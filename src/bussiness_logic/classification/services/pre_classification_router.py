@@ -427,16 +427,24 @@ class PreClassificationDomainRouter:
                     blockedReasons,
                     "processed_product_guardrail_redirect",
                 )
+                # redirect 보너스는 원료 챕터 행마다 +5씩 누적된다(02·03이
+                # 같은 16을 가리키면 +10) — 쪽갈비 breakdown에서 16/19/20/21에
+                # 일괄 +10이 뿌려진 원인. A/B용 게이트: =0이면 보너스 없이
+                # blockedReasons 마킹만 남긴다. ASAP_ROUTER_GUARDRAIL_REDIRECT=0
+                _redirect_bonus_on = (
+                    os.environ.get("ASAP_ROUTER_GUARDRAIL_REDIRECT", "1") or "1"
+                ).strip() != "0"
                 for redirect in redirects:
                     redirectChapter = re.sub(r"\D", "", redirect)[:2].zfill(2)
                     if redirectChapter:
-                        self._AddScore(
-                            scores,
-                            scoreBreakdownByChapter,
-                            chapter=redirectChapter,
-                            amount=5.0,
-                            source="guardrail_redirect",
-                        )
+                        if _redirect_bonus_on:
+                            self._AddScore(
+                                scores,
+                                scoreBreakdownByChapter,
+                                chapter=redirectChapter,
+                                amount=5.0,
+                                source="guardrail_redirect",
+                            )
                         matchedByChapter.setdefault(redirectChapter, []).append(
                             "prepared_food_redirect_bonus",
                         )
@@ -448,6 +456,25 @@ class PreClassificationDomainRouter:
                 # a "processed" page word must not erase the chapter from the
                 # recall boundary (measured: organic pepper lost ch07 to 20).
 
+            # 키워드 변형 중복 과금 방지: 'meat/offal/meat offal/edible meat/
+            # meat edible'은 한 개념 군집인데 5회 과금되어 쪽갈비 ch02(25)가
+            # ch16(16)을 뒤집었다(breakdown 실측). 토큰이 겹치는 매칭을 개념
+            # 군집으로 병합해 군집당 1회만 센다. ASAP_ROUTER_KEYWORD_DEDUP=0 복귀.
+            if (os.environ.get("ASAP_ROUTER_KEYWORD_DEDUP", "1") or "1").strip() != "0":
+                concept_groups: list[set] = []
+                deduped: list[str] = []
+                for term in sorted(keywordMatches, key=lambda s: -len(s)):
+                    toks = {w for w in re.findall(r"[a-z가-힣]+", term.lower()) if len(w) >= 2}
+                    merged = False
+                    for g in concept_groups:
+                        if toks & g:
+                            g |= toks
+                            merged = True
+                            break
+                    if not merged:
+                        concept_groups.append(set(toks))
+                        deduped.append(term)
+                keywordMatches = deduped
             keywordScore = float(len(keywordMatches) * 4)
             rawScore = float(len(rawMatches) * (1 if processed else 4))
             formScore = float(len(formMatches) * 8)

@@ -333,6 +333,11 @@ class StagedClassificationTool:
         parent_scores: dict[str, float] = dict(chapter_scores)
 
         stages: list[dict[str, Any]] = []
+        # 조상 조건 위반 상속: 부모 코드가 결정 조건 위반이면 그 자식들은
+        # 후보 자격이 없다 (법리: "Stuffed pasta" 위반 제품이 그 하위
+        # 19022091 'Cooked'로 안착하던 실측 — 떡볶이·모둠나물면).
+        # ASAP_ANCESTOR_INHERIT=0 복귀.
+        ancestor_violated: set[str] = set()
         # Phase-0 observability: per-level score maps for path assembly, plus
         # recovery records — a child of a NON-top parent that outscores the
         # top parent's best child is the classifier disagreeing with the
@@ -407,8 +412,27 @@ class StagedClassificationTool:
                         row["score"] + chapter_scores.get(str(row["code"])[:2], 0.0), 2,
                     )
                 ranked.sort(key=lambda r: r["score"], reverse=True)
+            if ancestor_violated and (os.environ.get(
+                    "ASAP_ANCESTOR_INHERIT", "1") or "1").strip() != "0":
+                parent_len_inh = prefix_len - 2
+                inherited = [r for r in ranked
+                             if r["code"][:parent_len_inh] in ancestor_violated]
+                if inherited:
+                    for r in inherited:
+                        r["score"] = round(r["score"] - QUANT_PENALTY, 2)
+                        r["decision"] = "violated"
+                        r.setdefault("decision_detail", []).append({
+                            "cond": "ancestor", "op": "inherit",
+                            "verdict": "false", "field": "",
+                            "why": f"ancestor_violated:{r['code'][:parent_len_inh]}",
+                            "value": "",
+                        })
+                    ranked = [r for r in ranked if r not in inherited] + inherited
             full_ranked = ranked
             level_score_maps[level] = {r["code"]: float(r["score"]) for r in full_ranked}
+            ancestor_violated = {
+                r["code"] for r in full_ranked if r.get("decision") == "violated"
+            } | {c for c in ancestor_violated}
             if branch_rows and parent_scores:
                 parent_len = prefix_len - 2
                 top_parent = max(parent_scores, key=lambda c: parent_scores.get(c, 0.0))
@@ -1050,6 +1074,19 @@ class StagedClassificationTool:
         # residual by elimination — that is what "Other" means.
         proof = self._proof_tokens(product_facts)
         viable_residuals = [r for r in residuals if r["score"] > -QUANT_PENALTY / 2]
+        # 소거의 자격: "질문이 있었는데 아무도 입증 못함"과 "질문 자체가
+        # 없음"은 다르다 — 무정보 그룹의 residual 승격은 소거가 아니라 추측
+        # (실측: 비식품 residual 안착 30건 중 정답 1건). 그룹에 평가된
+        # 조건·술어가 하나도 없으면 승격하지 않고 lexical 순위 유지.
+        # ASAP_ELIMINATION_NEEDS_QUESTIONS=0 복귀.
+        questions_existed = any(
+            (r.get("decision_detail") or r.get("predicate_results"))
+            for r in [*specific, *residuals]
+        )
+        needs_q = (os.environ.get(
+            "ASAP_ELIMINATION_NEEDS_QUESTIONS", "1") or "1").strip() != "0"
+        if needs_q and not questions_existed:
+            viable_residuals = []
         if viable_residuals and specific:
             def _proven(r: dict[str, Any]) -> bool:
                 if r.get("decision") == "confirmed":

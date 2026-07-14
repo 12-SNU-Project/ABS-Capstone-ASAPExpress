@@ -213,3 +213,241 @@ body.consumer-body {
   font-weight: 800;
   text-shadow: 0 0 10px rgba(34, 211, 238, 0.5);
 }
+
+/* 유사 EU 분류 판례 — 접힘, 궁금하면 펼쳐서 보기 */
+.consumer-precedents {
+  margin-top: 12px;
+  text-align: left;
+}
+
+.consumer-precedents summary {
+  cursor: pointer;
+  color: #a855f7;
+  font-weight: 800;
+  font-size: 13px;
+  text-align: center;
+  text-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
+  list-style: none;
+}
+
+.consumer-precedent {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border: 1px solid rgba(185, 128, 255, 0.22);
+  border-left: 3px solid #a855f7;
+  border-radius: 10px;
+  background: rgba(8, 5, 17, 0.5);
+}
+
+.consumer-precedent-ref {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  color: #22d3ee;
+  margin-bottom: 4px;
+}
+
+.consumer-precedent-body {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #c8b7ea;
+}
+
+/* 로고 이미지 (mask) + 네온 파이어: 불꽃 그라디언트가 아래→위로 타오르고 불규칙하게 일렁인다 */
+.consumer-logo-img {
+  display: block;
+  width: 240px;
+  height: 46px;
+  margin: 0 auto;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  /* 4색 네온 불꽃: 보라 → 파랑 → 초록 → 흰 코어 → 보라 — 첫/끝 동일로 이음새 없는 루프 */
+  background: linear-gradient(
+    0deg,
+    #a855f7 0%,
+    #22d3ee 28%,
+    #34d399 52%,
+    #f7f1ff 66%,
+    #22d3ee 82%,
+    #a855f7 100%
+  );
+  background-size: 100% 300%;
+  animation:
+    consumer-fire-rise 2.8s linear infinite,
+    consumer-fire-flicker 2.1s steps(1, end) infinite;
+}
+
+@keyframes consumer-fire-rise {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 -300%;
+  }
+}
+
+/* 불꽃 플리커 — 불규칙한 시점에 글로우 색·강도가 튄다 */
+@keyframes consumer-fire-flicker {
+  0% {
+    filter: drop-shadow(0 0 14px rgba(168, 85, 247, 0.8)) drop-shadow(0 0 34px rgba(34, 211, 238, 0.4));
+  }
+  13% {
+    filter: drop-shadow(0 0 22px rgba(34, 211, 238, 0.9)) drop-shadow(0 0 42px rgba(52, 211, 153, 0.5));
+  }
+  27% {
+    filter: drop-shadow(0 0 12px rgba(52, 211, 153, 0.7)) drop-shadow(0 0 28px rgba(168, 85, 247, 0.45));
+  }
+  46% {
+    filter: drop-shadow(0 0 24px rgba(247, 241, 255, 0.9)) drop-shadow(0 0 48px rgba(34, 211, 238, 0.5));
+  }
+  61% {
+    filter: drop-shadow(0 0 15px rgba(168, 85, 247, 0.75)) drop-shadow(0 0 34px rgba(52, 211, 153, 0.5));
+  }
+  79% {
+    filter: drop-shadow(0 0 26px rgba(34, 211, 238, 0.95)) drop-shadow(0 0 52px rgba(168, 85, 247, 0.5));
+  }
+  100% {
+    filter: drop-shadow(0 0 14px rgba(168, 85, 247, 0.8)) drop-shadow(0 0 34px rgba(34, 211, 238, 0.4));
+  }
+}
+
+/* 후보 칩 선택 상태 — 클릭하면 해당 코드의 판례를 아래에 표시 */
+.consumer-alt {
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+.consumer-alt.active {
+  border-color: #22d3ee;
+  color: #22d3ee;
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.35);
+}
+
+.consumer-alt-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #c8b7ea;
+  opacity: 0.75;
+}
+
+/* ---- Saber류 로고 화염: displacement로 일렁이는 불길 + 불티 ---- */
+.consumer-logo-fire {
+  position: relative;
+  width: 240px;
+  height: 46px;
+  margin: 26px auto 0;
+}
+
+.consumer-logo-fire .consumer-logo-img {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  margin: 0;
+  z-index: 2;
+}
+
+/* 불길 레이어: 로고 글자를 세로로 늘려(마스크 스트레치) 글자 위로 혀가 솟는다 */
+.consumer-flame {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 96px;
+  z-index: 1;
+  pointer-events: none;
+  mask-repeat: no-repeat;
+  mask-position: center bottom;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center bottom;
+}
+
+.consumer-flame-a {
+  -webkit-mask-size: 100% 72%;
+  mask-size: 100% 72%;
+  background: linear-gradient(
+    0deg,
+    rgba(34, 211, 238, 0) 6%,
+    rgba(34, 211, 238, 0.85) 34%,
+    rgba(52, 211, 153, 0.9) 55%,
+    rgba(168, 85, 247, 0.95) 76%,
+    rgba(168, 85, 247, 0) 96%
+  );
+  filter: url(#consumer-flame-distort) blur(2.5px);
+  animation: consumer-flame-sway 1.9s ease-in-out infinite alternate;
+  opacity: 0.85;
+}
+
+.consumer-flame-b {
+  -webkit-mask-size: 100% 58%;
+  mask-size: 100% 58%;
+  background: linear-gradient(
+    0deg,
+    rgba(247, 241, 255, 0) 10%,
+    rgba(247, 241, 255, 0.95) 40%,
+    rgba(34, 211, 238, 0.9) 68%,
+    rgba(34, 211, 238, 0) 94%
+  );
+  filter: url(#consumer-flame-distort) blur(1.2px);
+  animation: consumer-flame-sway 1.3s ease-in-out infinite alternate-reverse;
+  opacity: 0.95;
+}
+
+@keyframes consumer-flame-sway {
+  from {
+    transform: translateY(1px) scaleY(0.98);
+  }
+  to {
+    transform: translateY(-4px) scaleY(1.06);
+  }
+}
+
+/* 불티: 글자 위로 떠오르며 사라지는 4색 입자 */
+.consumer-embers {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.consumer-embers i {
+  position: absolute;
+  bottom: 18px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  opacity: 0;
+  animation: consumer-ember-rise 2.4s ease-out infinite;
+}
+
+.consumer-embers i:nth-child(1) { left: 12%; background: #22d3ee; animation-delay: 0s; }
+.consumer-embers i:nth-child(2) { left: 30%; background: #a855f7; animation-delay: 0.5s; animation-duration: 2s; }
+.consumer-embers i:nth-child(3) { left: 47%; background: #f7f1ff; animation-delay: 1.1s; }
+.consumer-embers i:nth-child(4) { left: 62%; background: #34d399; animation-delay: 0.3s; animation-duration: 2.8s; }
+.consumer-embers i:nth-child(5) { left: 78%; background: #22d3ee; animation-delay: 1.6s; }
+.consumer-embers i:nth-child(6) { left: 90%; background: #a855f7; animation-delay: 0.8s; animation-duration: 2.2s; }
+
+@keyframes consumer-ember-rise {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: translateY(-52px) translateX(6px) scale(0.4);
+    opacity: 0;
+  }
+}
+
+.consumer-precedent-sim {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #34d399;
+  opacity: 0.85;
+}
