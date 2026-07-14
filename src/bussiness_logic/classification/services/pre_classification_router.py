@@ -431,9 +431,12 @@ class PreClassificationDomainRouter:
                 # 같은 16을 가리키면 +10) — 쪽갈비 breakdown에서 16/19/20/21에
                 # 일괄 +10이 뿌려진 원인. A/B용 게이트: =0이면 보너스 없이
                 # blockedReasons 마킹만 남긴다. ASAP_ROUTER_GUARDRAIL_REDIRECT=0
+                # A/B 실측(2026-07-14, 식품 22 쌍런)으로 기본 OFF 확정:
+                # OFF 95/82/55/57 vs ON 86/73/45/48 — 원료 행마다 +5 누적이
+                # 재첩국·꼬막장(21류)을 16류로 납치. =1로만 재활성.
                 _redirect_bonus_on = (
-                    os.environ.get("ASAP_ROUTER_GUARDRAIL_REDIRECT", "1") or "1"
-                ).strip() != "0"
+                    os.environ.get("ASAP_ROUTER_GUARDRAIL_REDIRECT", "0") or "0"
+                ).strip() == "1"
                 for redirect in redirects:
                     redirectChapter = re.sub(r"\D", "", redirect)[:2].zfill(2)
                     if redirectChapter:

@@ -216,6 +216,22 @@ def EvaluateCodeDecision(
                     if flag is True:
                         verdict, why, pol_done = "true", f"field_hit:{leaf}", True
                     elif flag is False:
+                        # False 위반의 거울상 가드: 정체 lane이 해당 어휘를
+                        # 긍정 서술하는데 boolean만 False면 두 lane의 모순
+                        # (파서 미충전 가능성) — 위반 대신 lexical 폴백.
+                        # 실측: 군만두 wrapper=False 오충전이 identity의
+                        # 'stuffed pasta' 4증거를 -100으로 뒤집어 190219 어부지리.
+                        # 같은 ASAP_WRAPPER_SEMANTICS 게이트로 복귀.
+                        if (os.environ.get("ASAP_WRAPPER_SEMANTICS", "1") or "1").strip() != "0":
+                            corrob = _field_tokens(
+                                product_facts,
+                                "identity_hints.identity_terms;"
+                                "identity_hints.product_form_terms;"
+                                "identity_hints.normalized_tariff_description",
+                            )
+                            prefixes = tuple({tok[:5] for tok in register})
+                            if any(tk.startswith(prefixes) for tk in corrob):
+                                break  # lane 모순 — 레지스터 미적용
                         verdict, why, pol_done = "false", f"polarity:{leaf}=False", True
                     break
                 # A. un-/non- 형태론: typed 상태 필드와의 극성 충돌만 위반

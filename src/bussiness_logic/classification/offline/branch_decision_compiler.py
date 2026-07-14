@@ -345,7 +345,7 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
         i = args.index("--tree-source")
         nxt = args[i + 1] if i + 1 < len(args) else ""
         tree_path = nxt if nxt and not nxt.startswith("--") else str(
-            Path(__file__).resolve().parents[3] / "DB" / "artifacts" / "nomenclature_tree.jsonl")
+            Path(__file__).resolve().parents[4] / "DB" / "artifacts" / "nomenclature_tree.jsonl")
         allow = {str(r.get("cn8") or "") for r in rows}
         rows = _rows_from_tree(tree_path, allow)
         print(f"트리 원천 컴파일: {tree_path} → {len(rows)}행")
