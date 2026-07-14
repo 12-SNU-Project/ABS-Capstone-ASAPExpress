@@ -1,15 +1,15 @@
 from pathlib import Path
 
-from bussiness_logic.core.classification.hierarchical_beam import (
+from bussiness_logic.legacy.core.classification.hierarchical_beam import (
     HIERARCHY_LEVEL_HS2,
     HierarchyBeamConfig,
     HierarchySearchBoundary,
 )
-from bussiness_logic.core.classification.stage1 import (
+from bussiness_logic.legacy.core.classification.stage1 import (
     CnCandidateRetriever,
     ProductClassificationInput,
 )
-from bussiness_logic.core.context_retrieval.semantic_retrieval import (
+from bussiness_logic.legacy.core.context_retrieval.semantic_retrieval import (
     CnSemanticCandidateIndex,
     CnSemanticSearchHit,
 )

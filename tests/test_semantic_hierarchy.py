@@ -3,7 +3,7 @@ from bussiness_logic.bridge.embedding import (
     TextEmbeddingRequest,
     TextEmbeddingResponse,
 )
-from bussiness_logic.core.context_retrieval.semantic_retrieval import (
+from bussiness_logic.legacy.core.context_retrieval.semantic_retrieval import (
     CnSemanticCandidateIndex,
 )
 

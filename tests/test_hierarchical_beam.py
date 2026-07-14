@@ -1,4 +1,4 @@
-from bussiness_logic.core.classification.hierarchical_beam import (
+from bussiness_logic.legacy.core.classification.hierarchical_beam import (
     CnHierarchyIndex,
     HierarchyBeamPath,
     HierarchyBeamSelector,

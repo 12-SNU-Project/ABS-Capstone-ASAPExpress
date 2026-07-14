@@ -2,7 +2,7 @@ from agents.tools.pre_classification_router import (
     PreClassificationDomainRouter,
     PreClassificationRouteInput,
 )
-from bussiness_logic.core.classification.hierarchical_beam import (
+from bussiness_logic.legacy.core.classification.hierarchical_beam import (
     HIERARCHY_LEVEL_HS2,
     HierarchySearchBoundary,
 )
