@@ -551,6 +551,20 @@ class UnderstandingViewProjector:
                 for key in ("quality_status", "source_title", "source_url")
                 if encyclopediaEvidence.get(key) not in (None, "", [], ())
             }
+        coiEvidence = productUnderstanding.get("coi_evidence")
+        if isinstance(coiEvidence, Mapping):
+            view["coi_evidence"] = {
+                "matched_documents": [
+                    str(item)[:200]
+                    for item in list(coiEvidence.get("matched_documents") or [])[:8]
+                ],
+                "matched_texts": [
+                    str(item)[:300]
+                    for item in list(coiEvidence.get("matched_texts") or [])[:8]
+                ],
+                "match_scores": list(coiEvidence.get("match_scores") or [])[:8],
+                "error": str(coiEvidence.get("error") or ""),
+            }
         return view
 
     def BuildRoutingView(self, blackboard: JsonMapping) -> JsonObject:
