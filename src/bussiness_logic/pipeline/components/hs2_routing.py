@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from bussiness_logic.pipeline.component_base import BasePipelineComponent
 from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
-from bussiness_logic.pipeline.model.pipeline_dto import JsonValue, Hs2RoutingDecision
+from bussiness_logic.pipeline.model.schema import JsonValue, Hs2RoutingDecision
 from bussiness_logic.classification.repositories.chapter_index_repository import LoadPreClassificationChapterRows
 from bussiness_logic.classification.services.pre_classification_router import (
     BuildPreClassificationRouteInput,

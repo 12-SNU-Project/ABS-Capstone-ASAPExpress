@@ -14,7 +14,7 @@ import json
 import os
 import re
 
-from bussiness_logic.pipeline.model.pipeline_dto import (
+from bussiness_logic.pipeline.model.schema import (
     DistilledIdentityFacts,
     EncyclopediaEvidenceSet,
 )

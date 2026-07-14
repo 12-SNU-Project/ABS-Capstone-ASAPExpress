@@ -11,7 +11,7 @@ from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
 from bussiness_logic.pipeline.component_base import BasePipelineComponent
 from bussiness_logic.product.services.coi_loader import LoadCoiEvidence
 from bussiness_logic.product.services.identity_hint_agent import IdentityHintAgent
-from bussiness_logic.pipeline.model.pipeline_dto import (
+from bussiness_logic.pipeline.model.schema import (
     CompositionFactSet,
     CoiEvidenceSet,
     DistilledIdentityFacts,
