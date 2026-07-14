@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
-from agents.blackboard import BlackboardStore, now_iso
+from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
 from bussiness_logic.utils.json_types import JsonObject
 
 

@@ -1,5 +1,8 @@
-from agents.pipeline_dto import EncyclopediaEntryDto, EncyclopediaEvidenceSet
-from agents.tools.identity_distiller import IdentityDistillerService
+from bussiness_logic.pipeline.model.pipeline_dto import (
+    EncyclopediaEntryDto,
+    EncyclopediaEvidenceSet,
+)
+from bussiness_logic.product.services.identity_distiller import IdentityDistillerService
 
 
 def test_identity_distiller_uses_wikipedia_evidence_only() -> None:

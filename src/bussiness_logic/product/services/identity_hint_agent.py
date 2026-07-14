@@ -14,7 +14,10 @@ import json
 import os
 import re
 
-from agents.pipeline_dto import DistilledIdentityFacts, EncyclopediaEvidenceSet
+from bussiness_logic.pipeline.model.pipeline_dto import (
+    DistilledIdentityFacts,
+    EncyclopediaEvidenceSet,
+)
 
 
 DOMAIN_HINT_VOCAB = (
@@ -107,7 +110,7 @@ def _grounded_typed_field(value: object) -> str:
 
 def _get_adapter() -> object:
     if not _adapter_cache:
-        from agents.runtime_adapter import BuildPipelineRuntimeAdapter
+        from bussiness_logic.bridge.runtime_adapter import BuildPipelineRuntimeAdapter
 
         _adapter_cache.append(BuildPipelineRuntimeAdapter())
     return _adapter_cache[0]
@@ -135,7 +138,7 @@ def _chapter_context() -> str:
 
     lines: list[str] = []
     try:
-        from agents.tools.chapter_index_repository import LoadPreClassificationChapterRows
+        from bussiness_logic.classification.repositories.chapter_index_repository import LoadPreClassificationChapterRows
 
         for row in LoadPreClassificationChapterRows():
             chapter = str(row.get("chapter") or "").strip()

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 
 from bussiness_logic.pipeline.component_base import BasePipelineComponent
-from agents.blackboard import BlackboardStore, now_iso
+from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
 from bussiness_logic.utils.json_types import JsonObject
 
 

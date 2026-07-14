@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from agents.blackboard import BlackboardStore
+from bussiness_logic.pipeline.blackboard import BlackboardStore
 from bussiness_logic.pipeline.component_base import BasePipelineComponent, ComponentResult
 from bussiness_logic.utils.json_types import JsonObject
 

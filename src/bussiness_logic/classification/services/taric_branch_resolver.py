@@ -31,7 +31,7 @@ from bussiness_logic.app_config import LoadAppConfig
 
 csv.field_size_limit(sys.maxsize)
 
-PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[3])).resolve()
+PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[4])).resolve()
 APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
 DEFAULT_MASTER_CSV = APP_CONFIG.paths.ResolvePath(
     PROJECT_ROOT,

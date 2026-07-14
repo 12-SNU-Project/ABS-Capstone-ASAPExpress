@@ -1,15 +1,10 @@
-"""
-ASAP pipeline Blackboard storage.
+"""Compatibility exports for moved pipeline Blackboard storage."""
 
-One pipeline run = one directory under ``data/runs/run_<NNN>/``:
-  - ``blackboard.json``  — full mutable Blackboard root document.
-  - ``component_runs.jsonl`` — append-only log of ComponentRun records.
+import sys
 
-The schema is defined in
-``docs/ASAP_Ontology_v1/linkml/asap_runtime.yaml``
-and the generated JSON Schema lives at
-``docs/ASAP_Ontology_v1/linkml/generated/asap_runtime.schema.json``.
-"""
-from .store import BlackboardStore, now_iso
+from bussiness_logic.pipeline.blackboard import store
+from bussiness_logic.pipeline.blackboard.store import BlackboardStore, now_iso
+
+sys.modules[__name__ + ".store"] = store
 
 __all__ = ["BlackboardStore", "now_iso"]

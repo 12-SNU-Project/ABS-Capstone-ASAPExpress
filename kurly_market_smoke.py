@@ -1335,7 +1335,7 @@ class KurlyMarketSmokeRunner:
         productUrl: str,
         uiFacts: JsonMapping,
     ) -> Dict[str]:
-        from agents.blackboard import BlackboardStore
+        from bussiness_logic.pipeline.blackboard import BlackboardStore
         from bussiness_logic.pipeline.hs_code_classification_pipeline import (
             HsCodeClassificationPipeline,
         )

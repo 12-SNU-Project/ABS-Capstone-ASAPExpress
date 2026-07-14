@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from bussiness_logic.pipeline.component_base import BasePipelineComponent
-from agents.tools.taric_branch_resolver import TaricBranchResolverTool
-from agents.blackboard import BlackboardStore, now_iso
+from bussiness_logic.classification.services.taric_branch_resolver import TaricBranchResolverTool
+from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
 from bussiness_logic.utils.json_types import JsonObject
 
 
@@ -67,7 +67,7 @@ class ClassificationComponent(BasePipelineComponent):
                 bb.get("routing_context") or {}
             )
 
-            from agents.tools.staged_classification import StagedClassificationTool
+            from bussiness_logic.classification.services.staged_classification import StagedClassificationTool
 
             stagedTool = StagedClassificationTool()
             staged = stagedTool.classify(
@@ -339,7 +339,7 @@ class ClassificationComponent(BasePipelineComponent):
     def _ebti_cases(cn8: str, product_facts: dict) -> list[dict]:
         """유사 EBTI 판례 (표시 전용) — 실패는 빈 목록, 파이프라인 무영향."""
         try:
-            from agents.tools.ebti_precedent_local import FindSimilarCases
+            from bussiness_logic.classification.services.ebti_precedent_local import FindSimilarCases
 
             ih = product_facts.get("identity_hints") or {}
             identity_text = " ".join(

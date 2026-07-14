@@ -10,7 +10,10 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
-from agents.pipeline_dto import EncyclopediaEntryDto, EncyclopediaEvidenceSet
+from bussiness_logic.pipeline.model.pipeline_dto import (
+    EncyclopediaEntryDto,
+    EncyclopediaEvidenceSet,
+)
 
 
 WIKIPEDIA_SEARCH_ENDPOINT = "https://en.wikipedia.org/w/rest.php/v1/search/title"

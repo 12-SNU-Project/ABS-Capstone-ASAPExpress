@@ -39,7 +39,7 @@ COLUMNS = [
 def main() -> int:
     import io
 
-    from agents.tools.db_session_manager import DbSessionManager
+    from db.db_session_manager import DbSessionManager
 
     manager = DbSessionManager.GetInstance()
     with manager.OpenRawConnection() as conn:

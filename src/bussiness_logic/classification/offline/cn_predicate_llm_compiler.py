@@ -20,8 +20,8 @@ wrong hard-block. Rows are written to the SAME sidecar
 can A/B against the rule pass via ASAP_PREDICATE_VERSION.
 
 Usage (designer runtime, LLM + DB env required):
-  PYTHONPATH=src python -m agents.tools.cn_predicate_llm_compiler --chapters 16,19 --limit 5
-  PYTHONPATH=src python -m agents.tools.cn_predicate_llm_compiler --chapters 02,03,07,16,19,20,21 --apply
+  PYTHONPATH=src python -m bussiness_logic.classification.offline.cn_predicate_llm_compiler --chapters 16,19 --limit 5
+  PYTHONPATH=src python -m bussiness_logic.classification.offline.cn_predicate_llm_compiler --chapters 02,03,07,16,19,20,21 --apply
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ _TAXONOMY_CSV_PATH = None  # 지연 로드
 def _taxonomy_rows():
     import csv
     from pathlib import Path as _P
-    path = _P(__file__).resolve().parents[3] / "data" / "classification_criterion_taxonomy_20260702.csv"
+    path = _P(__file__).resolve().parents[4] / "data" / "classification_criterion_taxonomy_20260702.csv"
     return [r for r in csv.DictReader(open(path, encoding="utf-8-sig"))
             if str(r.get("criterion_type")) != "residual_other"]
 _AXES_V2 = frozenset(r["criterion_type"] for r in _taxonomy_rows())
@@ -246,7 +246,7 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
 
     from sqlalchemy import text
 
-    from agents.runtime_adapter import BuildPipelineRuntimeAdapter
+    from bussiness_logic.bridge.runtime_adapter import BuildPipelineRuntimeAdapter
     from bussiness_logic.bridge.schema import LlmGenerationOptions, LlmRequest
     from db.db_session_manager import DbSessionManager
 
@@ -317,7 +317,7 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
                 reject["V2_axis_not_v1"] += 1
                 continue
             if tax_mode:
-                from agents.tools.branch_decision_compiler import CRITERION_FIELD_BINDING
+                from bussiness_logic.classification.offline.branch_decision_compiler import CRITERION_FIELD_BINDING
                 field_binding = CRITERION_FIELD_BINDING.get(axis, "*tokens*")
             else:
                 field_binding = AXIS_FIELD_BINDING.get(axis, "*tokens*")

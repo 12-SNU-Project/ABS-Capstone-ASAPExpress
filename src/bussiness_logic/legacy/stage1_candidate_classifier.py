@@ -1,5 +1,5 @@
 """
-agents.candiate_classfier — reference adapter for the vendored Stage 1 classifier.
+bussiness_logic.legacy.stage1_candidate_classifier — reference adapter for the vendored Stage 1 classifier.
 
 The classifier runtime code lives in ``src/bussiness_logic``. It reads our core
 data from ``docs/ASAP_Ontology_v1`` and orchestrates
@@ -550,7 +550,7 @@ def _expand_compact_decision_to_stage1_json(
 LLM_MAX_TOKENS = 2048
 STAGE1_REVIEW_MODE_FULL = "full"
 
-ASAP_PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
+ASAP_PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[3])).resolve()
 
 from bussiness_logic.app_config import LoadAppConfig
 from bussiness_logic.bridge.embedding import (

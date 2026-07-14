@@ -17,8 +17,8 @@ Token normalisation intentionally mirrors staged_classification/_tokens so
 the alias vocabulary joins the same match space.
 
 Usage (designer runtime, DB env required):
-  PYTHONPATH=src python -m agents.tools.cn_alias_compiler           # read-only audit
-  PYTHONPATH=src python -m agents.tools.cn_alias_compiler --apply   # build sidecar
+  PYTHONPATH=src python -m bussiness_logic.classification.offline.cn_alias_compiler           # read-only audit
+  PYTHONPATH=src python -m bussiness_logic.classification.offline.cn_alias_compiler --apply   # build sidecar
 """
 from __future__ import annotations
 
@@ -154,7 +154,7 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
             session.commit()
         print(f"-> cn_alias_index에 {len(aliases)}개 기록")
 
-    out_dir = Path(__file__).resolve().parents[3] / "artifacts"
+    out_dir = Path(__file__).resolve().parents[4] / "artifacts"
     out_dir.mkdir(exist_ok=True)
     (out_dir / "cn_alias_audit.json").write_text(
         json.dumps({"total_candidates": len(occurrences), "kept": len(aliases),

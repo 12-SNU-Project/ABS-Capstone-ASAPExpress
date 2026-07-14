@@ -23,7 +23,7 @@ import os
 import re
 from typing import Any, Mapping
 
-from agents.tools.branch_predicate_evaluator import _aliases, _dig, _field_tokens, _stem
+from bussiness_logic.classification.rules.branch_predicate_evaluator import _aliases, _dig, _field_tokens, _stem
 
 _TOKEN = re.compile(r"[a-z]+")
 
@@ -50,7 +50,7 @@ def _binding_table() -> dict:
         loaded = {}
         try:
             path = os.environ.get("ASAP_BINDING_V1_PATH") or str(
-                pathlib.Path(__file__).resolve().parents[3] / "artifacts" / "binding_v1.json")
+                pathlib.Path(__file__).resolve().parents[4] / "artifacts" / "binding_v1.json")
             data = json.loads(open(path, encoding="utf-8").read())
             min_n = int(os.environ.get("ASAP_BINDING_MIN_N", "10"))
             min_p = float(os.environ.get("ASAP_BINDING_MIN_PRECISION", "0.25"))

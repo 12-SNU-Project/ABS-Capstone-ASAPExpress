@@ -23,8 +23,8 @@ Audit fields per predicate row: source/confidence/compile_status/source_text
 so an LLM/manual pass can extend the same table under review flags.
 
 Usage (designer runtime, DB env required):
-  PYTHONPATH=src python -m agents.tools.branch_predicate_compiler           # read-only coverage audit
-  PYTHONPATH=src python -m agents.tools.branch_predicate_compiler --apply   # create/refresh sidecar
+  PYTHONPATH=src python -m bussiness_logic.classification.offline.branch_predicate_compiler           # read-only coverage audit
+  PYTHONPATH=src python -m bussiness_logic.classification.offline.branch_predicate_compiler --apply   # create/refresh sidecar
 """
 from __future__ import annotations
 
@@ -270,7 +270,7 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
                             item)
                     session.commit()
             print(f"   -> sidecar에 {len(inserts)}개 술어 기록")
-    out_dir = Path(__file__).resolve().parents[3] / "artifacts"
+    out_dir = Path(__file__).resolve().parents[4] / "artifacts"
     out_dir.mkdir(exist_ok=True)
     (out_dir / "predicate_compile_coverage.json").write_text(
         json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")

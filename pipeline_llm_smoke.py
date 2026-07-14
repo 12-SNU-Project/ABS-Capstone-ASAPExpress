@@ -71,7 +71,7 @@ def LoadRows(csvPath: Path, *, offset: int, limit: int) -> list[dict[str, str]]:
 
 def _run_chain(rawInput: JsonObject, *, productId: str, use_llm: bool,
                artifact_root: Path) -> JsonObject:
-    from agents.blackboard import BlackboardStore
+    from bussiness_logic.pipeline.blackboard import BlackboardStore
     from bussiness_logic.pipeline.hs_code_classification_pipeline import (
         HsCodeClassificationPipeline,
     )

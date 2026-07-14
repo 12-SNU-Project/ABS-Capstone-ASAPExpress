@@ -19,9 +19,9 @@ fallback for unparsed branches). "Other" lines emit nothing: else is
 implicit in elimination.
 
 Usage:
-  PYTHONPATH=src python -m agents.tools.branch_decision_compiler                 # audit
-  PYTHONPATH=src python -m agents.tools.branch_decision_compiler --apply
-  PYTHONPATH=src python -m agents.tools.branch_decision_compiler --chapters 16,19 --apply
+  PYTHONPATH=src python -m bussiness_logic.classification.offline.branch_decision_compiler                 # audit
+  PYTHONPATH=src python -m bussiness_logic.classification.offline.branch_decision_compiler --apply
+  PYTHONPATH=src python -m bussiness_logic.classification.offline.branch_decision_compiler --chapters 16,19 --apply
 """
 from __future__ import annotations
 
@@ -33,13 +33,13 @@ from typing import Any
 
 import csv
 
-from agents.tools.cn_predicate_llm_compiler import _build_groups, _toks
+from bussiness_logic.classification.offline.cn_predicate_llm_compiler import _build_groups, _toks
 
 # ── 기준 유형 taxonomy (7/2 설계 사양서) ─────────────────────────────
 # data/classification_criterion_taxonomy_20260702.csv 가 유일한 축 정의다:
 # criterion_type + 탐지 정규식(examples) + role. 손으로 재발명했던 7축
 # (species/form/... )은 이 16유형의 부분집합이라 폐기.
-_TAXONOMY_CSV = Path(__file__).resolve().parents[3] / "data" / "classification_criterion_taxonomy_20260702.csv"
+_TAXONOMY_CSV = Path(__file__).resolve().parents[4] / "data" / "classification_criterion_taxonomy_20260702.csv"
 
 # criterion_type -> 질문에 답할 DTO 필드 (없는 유형은 미결로 남는 게 정직)
 CRITERION_FIELD_BINDING = {
@@ -275,7 +275,7 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
                 chapter_label[ch] = f"{d.get('title') or ''} {d.get('description') or ''}"[:200]
     except Exception:  # noqa: BLE001
         pass
-    from agents.tools.cn_predicate_llm_compiler import EnrichSubheadingLabels
+    from bussiness_logic.classification.offline.cn_predicate_llm_compiler import EnrichSubheadingLabels
 
     rows = [dict(r) for r in manager.FetchRows(text(
         "SELECT cn8, coalesce(heading_description,'') AS h4,"
@@ -340,7 +340,7 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
                 session.execute(insert_sql, out[start:start + 1000])
             session.commit()
         print(f"-> branch_decision_index에 {len(out)}행 기록")
-    audit_dir = Path(__file__).resolve().parents[3] / "artifacts"
+    audit_dir = Path(__file__).resolve().parents[4] / "artifacts"
     audit_dir.mkdir(exist_ok=True)
     (audit_dir / "decision_table_audit.json").write_text(
         json.dumps({"groups": len(groups), "rows": len(out), "per_level": per_level,

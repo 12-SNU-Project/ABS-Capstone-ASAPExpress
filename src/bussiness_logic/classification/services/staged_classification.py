@@ -7,7 +7,7 @@ chapters.
 
 Baseline building blocks (no dependency on the removed ``llm_classifier``):
   - cn_table children  : managed session-based query via ``DbSessionManager``
-  - LLM validation     : shared ``agents.runtime_adapter`` RuntimeAdapter
+  - LLM validation     : shared ``bussiness_logic.bridge.runtime_adapter`` RuntimeAdapter
 
 Reads baseline ProductUnderstandingFacts / RoutingContext shaped blackboard dicts. Returns compact
 per-stage payloads so ``classification_stage_results`` on the blackboard can
@@ -366,7 +366,7 @@ class StagedClassificationTool:
                     "0", "false", "no", "off",
                 ):
                     try:
-                        from agents.tools.branch_decision_evaluator import LoadBranchDecisions
+                        from bussiness_logic.classification.rules.branch_decision_evaluator import LoadBranchDecisions
 
                         decisions_by_parent = LoadBranchDecisions(level, tuple(parents))
                     except Exception:  # noqa: BLE001 — 사이드카 부재 = 계층 off
@@ -376,7 +376,7 @@ class StagedClassificationTool:
                     "0", "false", "no", "off",
                 ):
                     try:
-                        from agents.tools.branch_predicate_evaluator import LoadBranchPredicates
+                        from bussiness_logic.classification.rules.branch_predicate_evaluator import LoadBranchPredicates
 
                         predicates_by_code = LoadBranchPredicates(
                             level,
@@ -734,7 +734,7 @@ class StagedClassificationTool:
     @staticmethod
     def _load_branch_rows(level: str, parents: list[str]) -> tuple[dict[str, Any], ...]:
         try:
-            from agents.tools.branch_index_repository import LoadBranchRows
+            from bussiness_logic.classification.repositories.branch_index_repository import LoadBranchRows
         except Exception:  # noqa: BLE001
             return ()
         return tuple(dict(row) for row in LoadBranchRows(level, tuple(parents)))
@@ -958,7 +958,7 @@ class StagedClassificationTool:
             predicate_results: list[dict[str, str]] = []
             group_predicates = (predicates_by_code or {}).get(code)
             if group_predicates:
-                from agents.tools.branch_predicate_evaluator import EvaluatePredicates
+                from bussiness_logic.classification.rules.branch_predicate_evaluator import EvaluatePredicates
 
                 pred_delta, predicate_results = EvaluatePredicates(
                     group_predicates, fact_tokens, product_facts,
@@ -968,7 +968,7 @@ class StagedClassificationTool:
             decision_detail: list[dict[str, str]] = []
             code_conditions = (group_decisions or {}).get(code)
             if code_conditions:
-                from agents.tools.branch_decision_evaluator import EvaluateCodeDecision
+                from bussiness_logic.classification.rules.branch_decision_evaluator import EvaluateCodeDecision
 
                 decision_status, decision_detail = EvaluateCodeDecision(
                     code_conditions, product_facts, fact_tokens, percentages,
@@ -1134,7 +1134,7 @@ class StagedClassificationTool:
     # ---- LLM select (bridge) ---------------------------------------------
     def _get_adapter(self):
         if self._adapter is None:
-            from agents.runtime_adapter import BuildPipelineRuntimeAdapter
+            from bussiness_logic.bridge.runtime_adapter import BuildPipelineRuntimeAdapter
             self._adapter = BuildPipelineRuntimeAdapter()
         return self._adapter
 

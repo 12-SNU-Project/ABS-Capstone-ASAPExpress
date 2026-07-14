@@ -7,11 +7,11 @@ import os
 import re
 from collections.abc import Mapping
 
-from agents.blackboard import BlackboardStore, now_iso
+from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
 from bussiness_logic.pipeline.component_base import BasePipelineComponent
-from agents.coi_loader import LoadCoiEvidence
-from agents.llm_agents import IdentityHintAgent
-from agents.pipeline_dto import (
+from bussiness_logic.product.services.coi_loader import LoadCoiEvidence
+from bussiness_logic.product.services.identity_hint_agent import IdentityHintAgent
+from bussiness_logic.pipeline.model.pipeline_dto import (
     CompositionFactSet,
     CoiEvidenceSet,
     DistilledIdentityFacts,
@@ -20,8 +20,8 @@ from agents.pipeline_dto import (
     JsonValue,
     ProductUnderstandingPackage,
 )
-from agents.tools.encyclopedia_lookup import LookupEncyclopediaEvidence
-from agents.tools.identity_distiller import IdentityDistillerService
+from bussiness_logic.product.services.encyclopedia_lookup import LookupEncyclopediaEvidence
+from bussiness_logic.product.services.identity_distiller import IdentityDistillerService
 
 
 PERCENT_RE = re.compile(
@@ -445,7 +445,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         # 승격(scope=product), 있으면 보조(scope=coi) 병기.
         if (os.environ.get("ASAP_COI_COMPOSITION", "1") or "1").strip() != "0":
             try:
-                from agents.coi_loader import ParseCoiComposition
+                from bussiness_logic.product.services.coi_loader import ParseCoiComposition
                 from pathlib import Path as _P
 
                 coi_entries: list[dict[str, JsonValue]] = []

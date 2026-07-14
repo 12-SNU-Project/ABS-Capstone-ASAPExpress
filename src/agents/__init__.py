@@ -1,33 +1,19 @@
-"""ASAP v2 components and tools.
-
-Architecture (codex 2026-06-08):
-
-  Components:
-    - Evidence_Intake_Component    PES 생성 (OCR/parser)
-    - Classification_Component     HS4 -> HS6 -> CN8 후보 생성
-    - Taric_Branch_Resolution_Component
-                                  CN8 후보별 모든 TARIC10 branch 열거
-                               tools: StagedClassificationTool,
-                                      TaricBranchResolverTool
-    - Document_Component           서류/관세/제품규제 추천
-                               document package resolver,
-                                      DomainRouterTool,
-                                      CelexBasisTool (planned)
-  Legacy standalone components were removed from active source:
-    - TARIC resolver behavior      → agents.tools.TaricBranchResolverTool
-    - document requirement behavior → Document_Component + document package resolver
-    - regulatory domain behavior   → Document_Component + DomainRouterTool
-
-Components are exposed at the package level; tools at agents.tools.
-"""
+"""Compatibility exports for moved pipeline components."""
 from __future__ import annotations
 
+import importlib
 import sys
 
 from bussiness_logic.pipeline import component_base as _component_base
 from bussiness_logic.pipeline.component_base import BasePipelineComponent, ComponentResult
 
 sys.modules[__name__ + ".component_base"] = _component_base
+sys.modules[__name__ + ".coi_loader"] = importlib.import_module(
+    "bussiness_logic.product.services.coi_loader",
+)
+sys.modules[__name__ + ".runtime_adapter"] = importlib.import_module(
+    "bussiness_logic.bridge.runtime_adapter",
+)
 
 from agents.pipeline_components import (
     ClassificationComponent,

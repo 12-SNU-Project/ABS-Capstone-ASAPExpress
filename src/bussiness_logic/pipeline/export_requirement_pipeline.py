@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Protocol
 
 PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
 
-from agents.blackboard import BlackboardStore
+from bussiness_logic.pipeline.blackboard import BlackboardStore
 from bussiness_logic.artifact_paths import (
     BuildSafeArtifactPathSegment,
     ExtractProductIdFromUrl,

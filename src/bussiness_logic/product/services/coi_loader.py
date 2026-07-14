@@ -12,7 +12,7 @@ from typing import Iterable
 
 import os
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
 # ASAP_COI_ROOT로 오버라이드 가능 — 실물 46파일은 현재 ~/ASAP_A/test에 있다
 DEFAULT_COI_ROOT = Path(
     os.environ.get("ASAP_COI_ROOT")

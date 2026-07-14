@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from agents.blackboard import BlackboardStore
+from bussiness_logic.pipeline.blackboard import BlackboardStore
 from bussiness_logic.artifact_paths import BuildSafeArtifactPathSegment
 from bussiness_logic.pipeline.document_recommendation_pipeline import (
     DocumentRecommendationPipeline,

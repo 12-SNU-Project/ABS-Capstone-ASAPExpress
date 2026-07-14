@@ -15,7 +15,7 @@ from bussiness_logic.bridge.selector import (
 def BuildPipelineRuntimeAdapter() -> object:
     """Build RuntimeAdapter from project .env, falling back to default runtime."""
 
-    projectRoot = Path(__file__).resolve().parents[2]
+    projectRoot = Path(__file__).resolve().parents[3]
     envFile = projectRoot / ".env"
     try:
         runtimeConfig = BuildLlmRuntimeConfigFromEnv(

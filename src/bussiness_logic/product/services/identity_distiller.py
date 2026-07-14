@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import re
 
-from agents.pipeline_dto import DistilledIdentityFacts, EncyclopediaEvidenceSet
+from bussiness_logic.pipeline.model.pipeline_dto import (
+    DistilledIdentityFacts,
+    EncyclopediaEvidenceSet,
+)
 
 
 TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣]+")

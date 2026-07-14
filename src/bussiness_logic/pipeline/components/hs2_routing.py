@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from bussiness_logic.pipeline.component_base import BasePipelineComponent
-from agents.blackboard import BlackboardStore, now_iso
-from agents.pipeline_dto import JsonValue, Hs2RoutingDecision
-from agents.tools.chapter_index_repository import LoadPreClassificationChapterRows
-from agents.tools.pre_classification_router import (
+from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
+from bussiness_logic.pipeline.model.pipeline_dto import JsonValue, Hs2RoutingDecision
+from bussiness_logic.classification.repositories.chapter_index_repository import LoadPreClassificationChapterRows
+from bussiness_logic.classification.services.pre_classification_router import (
     BuildPreClassificationRouteInput,
     PreClassificationDomainRouter,
 )
