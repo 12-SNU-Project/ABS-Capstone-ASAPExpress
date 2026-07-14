@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from bussiness_logic.core.context_retrieval.schema import OntologyDocument
+from bussiness_logic.legacy.core.context_retrieval.schema import OntologyDocument
 from bussiness_logic.utils import NormalizeWhiteSpace
 
 

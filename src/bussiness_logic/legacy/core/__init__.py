@@ -1,6 +1,6 @@
 """Ontology 기반 RAG 준비 계층."""
 
-from bussiness_logic.core.context_retrieval import (
+from bussiness_logic.legacy.core.context_retrieval import (
     CnSemanticCandidateIndex,
     CnSemanticChunk,
     CnSemanticChunkBuilder,
@@ -23,7 +23,7 @@ from bussiness_logic.core.context_retrieval import (
     OntologyValidationSeverity,
     PackagedOntologyContext,
 )
-from bussiness_logic.core.llm_protocol import LlmRequestBuilder, OntologyRequestBuilder
+from bussiness_logic.legacy.core.llm_protocol import LlmRequestBuilder, OntologyRequestBuilder
 
 __all__ = [
     "CnSemanticCandidateIndex",

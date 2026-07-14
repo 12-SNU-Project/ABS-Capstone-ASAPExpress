@@ -8,8 +8,8 @@ from bussiness_logic.bridge.schema import (
     LlmRequest,
     LlmResponseFormat,
 )
-from bussiness_logic.core.context_retrieval.context_builder import OntologyContextBuilder
-from bussiness_logic.core.context_retrieval.schema import PackagedOntologyContext
+from bussiness_logic.legacy.core.context_retrieval.context_builder import OntologyContextBuilder
+from bussiness_logic.legacy.core.context_retrieval.schema import PackagedOntologyContext
 
 
 DEFAULT_ONTOLOGY_SYSTEM_PROMPT = """\

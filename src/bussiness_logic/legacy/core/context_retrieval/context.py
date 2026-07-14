@@ -2,7 +2,7 @@
 
 from typing import List, Sequence
 
-from bussiness_logic.core.context_retrieval.schema import (
+from bussiness_logic.legacy.core.context_retrieval.schema import (
     OntologyRetrievalResult,
     PackagedOntologyContext,
 )

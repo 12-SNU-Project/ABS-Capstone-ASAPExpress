@@ -25,7 +25,7 @@ from bussiness_logic.bridge.schema import (
     LlmResponse,
     LlmResponseFormat,
 )
-from bussiness_logic.core.classification.hierarchical_beam import (
+from bussiness_logic.legacy.core.classification.hierarchical_beam import (
     CnHierarchyIndex,
     CnHierarchyNode,
     HIERARCHY_LEVEL_CN8,
@@ -40,9 +40,9 @@ from bussiness_logic.core.classification.hierarchical_beam import (
     HierarchyNodeScore,
     HierarchySearchBoundary,
 )
-from bussiness_logic.core.context_retrieval.loader import OntologyDocumentLoader
-from bussiness_logic.core.context_retrieval.schema import PackagedOntologyContext
-from bussiness_logic.core.context_retrieval.semantic_retrieval import (
+from bussiness_logic.legacy.core.context_retrieval.loader import OntologyDocumentLoader
+from bussiness_logic.legacy.core.context_retrieval.schema import PackagedOntologyContext
+from bussiness_logic.legacy.core.context_retrieval.semantic_retrieval import (
     CnSemanticCandidateIndex,
     CnSemanticSearchHit,
 )

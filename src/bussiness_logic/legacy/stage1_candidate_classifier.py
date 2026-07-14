@@ -566,27 +566,27 @@ from bussiness_logic.bridge.selector import (
     BuildDefaultLlmRuntimeConfig,
     BuildLlmRuntimeConfigFromEnv,
 )
-from bussiness_logic.core.classification.stage1 import (
+from bussiness_logic.legacy.core.classification.stage1 import (
     CnCandidateRetriever,
     ProductClassificationInput,
     Stage1EvidencePackageBuilder,
     Stage1RequestBuilder,
     Stage1ResponseValidator,
 )
-from bussiness_logic.core.context_retrieval.context_builder import (
+from bussiness_logic.legacy.core.context_retrieval.context_builder import (
     OntologyContextBuilder,
 )
-from bussiness_logic.core.context_retrieval.semantic_retrieval import (
+from bussiness_logic.legacy.core.context_retrieval.semantic_retrieval import (
     CnSemanticCandidateIndex,
 )
-from bussiness_logic.core.decision_flow.decision_policy import Stage1DecisionPolicy
-from bussiness_logic.core.decision_flow.recommendation import (
+from bussiness_logic.legacy.core.decision_flow.decision_policy import Stage1DecisionPolicy
+from bussiness_logic.legacy.core.decision_flow.recommendation import (
     Stage1RecommendationReportBuilder,
 )
-from bussiness_logic.core.decision_flow.traversal import (
+from bussiness_logic.legacy.core.decision_flow.traversal import (
     Stage1TraversalController,
 )
-from bussiness_logic.core.classification.hierarchical_beam import (
+from bussiness_logic.legacy.core.classification.hierarchical_beam import (
     HIERARCHY_LEVEL_HS2,
     HierarchyBeamConfig,
     HierarchySearchBoundary,

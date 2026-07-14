@@ -3,10 +3,10 @@
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
-from bussiness_logic.core.context_retrieval.context import ContextPackager
-from bussiness_logic.core.context_retrieval.loader import OntologyDocumentLoader
-from bussiness_logic.core.context_retrieval.retriever import OntologyRetriever
-from bussiness_logic.core.context_retrieval.schema import (
+from bussiness_logic.legacy.core.context_retrieval.context import ContextPackager
+from bussiness_logic.legacy.core.context_retrieval.loader import OntologyDocumentLoader
+from bussiness_logic.legacy.core.context_retrieval.retriever import OntologyRetriever
+from bussiness_logic.legacy.core.context_retrieval.schema import (
     OntologyChunk,
     OntologyDocument,
     PackagedOntologyContext,

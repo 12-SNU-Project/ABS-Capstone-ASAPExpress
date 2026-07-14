@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from bussiness_logic.core.context_retrieval.schema import OntologyDocument, OntologyDocumentKind
+from bussiness_logic.legacy.core.context_retrieval.schema import OntologyDocument, OntologyDocumentKind
 from bussiness_logic.utils import NormalizeWhiteSpace
 
 

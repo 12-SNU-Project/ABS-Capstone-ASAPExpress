@@ -4,14 +4,14 @@ from typing import Dict, List, Mapping, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from bussiness_logic.core.classification.stage1 import (
+from bussiness_logic.legacy.core.classification.stage1 import (
     CnCandidate,
     ProductClassificationInput,
     Stage1ResponseValidationReport,
     Stage1EvidencePackage,
 )
-from bussiness_logic.core.decision_flow.decision_policy import ClassificationDecisionHandler
-from bussiness_logic.core.decision_flow.traversal import Stage1TraversalReport
+from bussiness_logic.legacy.core.decision_flow.decision_policy import ClassificationDecisionHandler
+from bussiness_logic.legacy.core.decision_flow.traversal import Stage1TraversalReport
 from bussiness_logic.utils import NormalizeWhiteSpace
 
 

@@ -4,21 +4,21 @@ from typing import List, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from bussiness_logic.core.classification.stage1 import (
+from bussiness_logic.legacy.core.classification.stage1 import (
     CnCandidate,
     CnCandidateRetriever,
     DEFAULT_CN_CANDIDATE_TOP_K,
     ProductClassificationInput,
     Stage1ResponseValidationReport,
 )
-from bussiness_logic.core.decision_flow.decision_policy import (
+from bussiness_logic.legacy.core.decision_flow.decision_policy import (
     Stage1DecisionPolicy,
     ClassificationDecisionHandler,
 )
-from bussiness_logic.core.context_retrieval.semantic_retrieval import (
+from bussiness_logic.legacy.core.context_retrieval.semantic_retrieval import (
     CnSemanticCandidateIndex,
 )
-from bussiness_logic.core.classification.hierarchical_beam import (
+from bussiness_logic.legacy.core.classification.hierarchical_beam import (
     HierarchySearchBoundary,
 )
 

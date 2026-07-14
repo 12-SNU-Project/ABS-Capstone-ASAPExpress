@@ -4,13 +4,13 @@ from typing import Dict, List, Mapping, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from bussiness_logic.core.classification.stage1 import (
+from bussiness_logic.legacy.core.classification.stage1 import (
     ProductClassificationInput,
     Stage1ResponseValidationReport,
     Stage1EvidencePackage,
     Stage1EvidenceRecord,
 )
-from bussiness_logic.core.decision_flow.recommendation import (
+from bussiness_logic.legacy.core.decision_flow.recommendation import (
     Stage1RecommendationReport,
 )
 from bussiness_logic.utils import NormalizeWhiteSpace

@@ -4,11 +4,11 @@ from typing import Dict, List, Mapping, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from bussiness_logic.core.classification.stage1 import (
+from bussiness_logic.legacy.core.classification.stage1 import (
     CnCandidate,
     Stage1ResponseValidationReport,
 )
-from bussiness_logic.core.classification.hierarchical_beam import (
+from bussiness_logic.legacy.core.classification.hierarchical_beam import (
     HIERARCHY_LEVEL_CN8,
     HIERARCHY_LEVEL_HS2,
     HIERARCHY_LEVEL_HS4,

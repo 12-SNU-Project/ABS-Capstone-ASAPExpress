@@ -5,7 +5,7 @@ import json
 import re
 from typing import Dict, Iterable, List, Sequence, Tuple
 
-from bussiness_logic.core.context_retrieval.schema import (
+from bussiness_logic.legacy.core.context_retrieval.schema import (
     OntologyChunk,
     OntologyDocument,
     OntologyDocumentKind,
