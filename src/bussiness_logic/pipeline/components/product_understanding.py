@@ -420,6 +420,16 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         # COI (식품원재료풀이) is composition evidence — it belongs to this lane,
         # not the identity lane. Feed its matched texts into %-parsing and terms.
         coiTexts = tuple(coiEvidence.matchedTexts)
+        # 구조화 COI(entries)가 성립하면 평탄 텍스트 유입은 차단 — 부수 성분
+        # 전체('starch','설탕')가 광역 어휘 풀로 흘러 1903/2009류를 밀었던
+        # 실측의 처방. entries 미성립 시엔 기존대로(정보 손실 방지).
+        # ASAP_COI_FLAT_TEXT=1 로 이전 동작 복귀.
+        _coi_flat_allowed = (os.environ.get(
+            "ASAP_COI_FLAT_TEXT", "0") or "0").strip() == "1"
+        if not _coi_flat_allowed:
+            # 전면 차단: 파싱 실패 파일의 평탄 텍스트도 잡음 우세 실측
+            # (밀면 'starch'→1903, 산채→2009). 정보는 구조화 entries로만.
+            coiTexts = ()
         tableTexts = ProductUnderstandingComponent._ReconstructedTableTexts(
             reconstructedTables,
         )

@@ -1,0 +1,215 @@
+/* 소비자용 네온 화면 — 보라(액션)/시안(진행)/그린(확신)/화이트(주인공) */
+body.consumer-body {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(168, 85, 247, 0.25), transparent 30%),
+    radial-gradient(circle at 88% 12%, rgba(34, 211, 238, 0.12), transparent 26%),
+    radial-gradient(circle at 50% 100%, rgba(52, 211, 153, 0.08), transparent 30%),
+    linear-gradient(180deg, #06030d 0%, #0d0718 58%, #06030d 100%) !important;
+}
+
+.consumer {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 34px 8px 60px;
+  display: grid;
+  gap: 22px;
+  color: #f7f1ff;
+}
+
+.consumer-brand {
+  text-align: center;
+}
+
+.consumer-logo {
+  font-weight: 950;
+  font-size: 20px;
+  letter-spacing: 0.34em;
+  color: #f7f1ff;
+  text-shadow: 0 0 18px rgba(168, 85, 247, 0.9), 0 0 42px rgba(168, 85, 247, 0.4);
+}
+
+.consumer-brand p {
+  color: #c8b7ea;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.consumer-input-card {
+  display: flex;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid rgba(185, 128, 255, 0.22);
+  border-radius: 14px;
+  background: rgba(17, 11, 32, 0.82);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 20px 70px rgba(91, 33, 182, 0.25);
+}
+
+.consumer-input {
+  flex: 1;
+  height: 52px;
+  border: 1px solid rgba(185, 128, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(8, 5, 17, 0.6);
+  color: #f7f1ff;
+  font: inherit;
+  font-size: 15px;
+  padding: 0 16px;
+  outline: none;
+}
+
+.consumer-input::placeholder {
+  color: #c8b7ea;
+}
+
+.consumer-input:focus {
+  border-color: #a855f7;
+  box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.18);
+}
+
+.consumer-go {
+  height: 52px;
+  padding: 0 26px;
+  border: 0;
+  border-radius: 10px;
+  font-weight: 950;
+  font-size: 15px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #a855f7, #c084fc);
+  cursor: pointer;
+  box-shadow: 0 0 22px rgba(168, 85, 247, 0.55);
+}
+
+.consumer-go:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.consumer-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+}
+
+.consumer-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #c8b7ea;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.consumer-sdot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(200, 183, 234, 0.3);
+}
+
+.consumer-step.done {
+  color: #34d399;
+}
+
+.consumer-step.done .consumer-sdot {
+  background: #34d399;
+  box-shadow: 0 0 12px rgba(52, 211, 153, 0.9);
+}
+
+.consumer-step.now {
+  color: #22d3ee;
+}
+
+.consumer-step.now .consumer-sdot {
+  background: #22d3ee;
+  box-shadow: 0 0 14px rgba(34, 211, 238, 1);
+  animation: consumer-pulse 1.2s infinite;
+}
+
+@keyframes consumer-pulse {
+  50% {
+    box-shadow: 0 0 4px rgba(34, 211, 238, 0.4);
+  }
+}
+
+.consumer-result {
+  border: 1px solid rgba(185, 128, 255, 0.22);
+  border-radius: 16px;
+  background: rgba(17, 11, 32, 0.82);
+  backdrop-filter: blur(16px);
+  padding: 30px;
+  text-align: center;
+  box-shadow: 0 24px 80px rgba(91, 33, 182, 0.28);
+}
+
+.consumer-rlabel {
+  color: #c8b7ea;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.consumer-code {
+  margin: 14px 0 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 44px;
+  font-weight: 800;
+  color: #f7f1ff;
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 16px rgba(52, 211, 153, 0.8), 0 0 40px rgba(52, 211, 153, 0.35);
+}
+
+.consumer-rdesc {
+  color: #f7f1ff;
+  font-size: 15px;
+  margin-top: 10px;
+}
+
+.consumer-conf {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 14px;
+  padding: 6px 14px;
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  border-radius: 999px;
+  color: #34d399;
+  font-size: 12px;
+  font-weight: 900;
+  background: rgba(52, 211, 153, 0.08);
+  box-shadow: 0 0 16px rgba(52, 211, 153, 0.25);
+}
+
+.consumer-alts {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 18px;
+}
+
+.consumer-alt {
+  padding: 7px 13px;
+  border: 1px solid rgba(185, 128, 255, 0.22);
+  border-radius: 999px;
+  color: #c8b7ea;
+  font-size: 12px;
+  font-family: ui-monospace, Menlo, monospace;
+  background: rgba(8, 5, 17, 0.5);
+}
+
+.consumer-why {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(185, 128, 255, 0.22);
+  color: #c8b7ea;
+  font-size: 13px;
+}
+
+.consumer-why a {
+  color: #22d3ee;
+  text-decoration: none;
+  font-weight: 800;
+  text-shadow: 0 0 10px rgba(34, 211, 238, 0.5);
+}

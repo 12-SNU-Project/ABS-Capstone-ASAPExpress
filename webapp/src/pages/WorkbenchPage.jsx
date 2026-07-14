@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import DataTable from "../components/DataTable";
 import KeyValueRows from "../components/KeyValueRows";
 import { useClassificationRun } from "../hooks/useClassificationRun";
 import {
@@ -8,7 +9,6 @@ import {
   RECONSTRUCTION_KEYS,
   ROUTE_KEYS,
   STAGES,
-  UNDERSTANDING_KEYS,
 } from "../lib/labels.js";
 import {
   asList,
@@ -142,11 +142,11 @@ function currentStageInfo(result) {
   };
 }
 
-function StageRail({ result, derived }) {
+function StageNav({ result, derived, activeStage, onSelect, busy }) {
   const info = currentStageInfo(result);
   const completed = STAGES.filter(([key]) => stageState(result, derived, key) === "done").length;
   return (
-    <div id="cjs-stage-rail" className="cjs-stage-rail">
+    <div id="cjs-stage-rail" className={`cjs-stage-rail ${busy ? "busy" : ""}`}>
       <div className="cjs-panel-title">진행 상황</div>
       <div className={`cjs-current-stage ${info.status}`}>
         <span className="cjs-stage-dot" />
@@ -158,6 +158,27 @@ function StageRail({ result, derived }) {
           <p>{info.message}</p>
         </div>
       </div>
+      {busy ? (
+        <div className="cjs-progressbar" aria-hidden="true">
+          <span />
+        </div>
+      ) : null}
+      <nav className="cjs-stage-nav">
+        {STAGES.map(([key, label]) => {
+          const state = stageState(result, derived, key);
+          return (
+            <button
+              key={key}
+              type="button"
+              className={`cjs-stage-item ${activeStage === key ? "active" : ""} state-${state}`}
+              onClick={() => onSelect(key)}
+            >
+              <span className="cjs-stage-item-dot" />
+              {label}
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 }
@@ -297,27 +318,191 @@ function TaricPanel({ result, derived, candidate }) {
   );
 }
 
-function ProductPanel({ result }) {
+// composition_terms는 "키: 값" 문자열 목록 — LLM reconstruction 표의 행이다.
+function parseCompositionTerms(terms) {
+  return asList(terms)
+    .map((term) => {
+      const text = clean(term);
+      const splitAt = text.indexOf(":");
+      if (splitAt < 1) {
+        return { 구분: "", 내용: text };
+      }
+      return { 구분: text.slice(0, splitAt).trim(), 내용: text.slice(splitAt + 1).trim() };
+    })
+    .filter((row) => row.내용);
+}
+
+function IntakePanel({ result }) {
   const inputView = asObject(result?.input_processing_view);
+  const reconstructedFacts = asList(inputView.reconstructed_product_facts);
+  return (
+    <div className="cjs-panel">
+      <div className="cjs-panel-title">입력 · LLM 복원</div>
+      <div className="cjs-understanding-grid">
+        <div>
+          <KeyValueRows data={asObject(inputView.page_product_facts)} keys={PRODUCT_FACT_KEYS} limit={6} />
+          <div className="cjs-subpanel-title">입력 복원 상태</div>
+          <KeyValueRows data={asObject(inputView.reconstruction_status)} keys={RECONSTRUCTION_KEYS} limit={8} />
+        </div>
+        <div>
+          <div className="cjs-subpanel-title cjs-first">복원 fact 표 ({reconstructedFacts.length}건)</div>
+          <DataTable
+            rows={reconstructedFacts}
+            limit={30}
+            emptyMessage="LLM 복원이 만든 구조화 fact가 없습니다."
+            columns={[
+              { key: "field_name", label: "필드", variant: "mono" },
+              { key: "normalized_value", label: "값" },
+              { key: "source_refs", label: "출처", variant: "mono" },
+              { key: "validation_status", label: "상태", variant: "pill" },
+            ]}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TermChips({ label, terms }) {
+  const list = asList(terms).map((term) => clean(term)).filter(Boolean);
+  if (!list.length) {
+    return null;
+  }
+  return (
+    <div className="cjs-term-group">
+      <div className="cjs-subpanel-title">{label} ({list.length})</div>
+      <div className="cjs-chip-row">
+        {list.slice(0, 16).map((term, index) => (
+          <span className="cjs-chip" key={index}>
+            {term}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function UnderstandingPanel({ result }) {
   const understandingView = asObject(result?.product_understanding_view);
-  const understanding = { ...understandingView, ...asObject(understandingView.identity_hints) };
+  const hints = asObject(understandingView.identity_hints);
+  const composition = asObject(understandingView.composition_facts);
+  const compositionRows = parseCompositionTerms(composition.composition_terms);
+  const percentages = asList(composition.ingredient_percentages);
+  const modeLabel = { llm_json: "LLM 분석", llm_fallback: "규칙 기반(대체)", regex_fallback: "규칙 기반" }[
+    clean(hints.understanding_mode)
+  ] || clean(hints.understanding_mode);
+  const tiles = [
+    ["영문 상품명", hints.translated_product_name],
+    ["상업적 식별명", hints.commercial_identity],
+    ["원재료 분류", hints.ingredient_class],
+    ["식품 형태", hints.food_form],
+    ["가공 상태", hints.processing_state],
+    ["이해 방식", modeLabel],
+    ["신뢰도", hints.confidence],
+  ].filter(([, value]) => clean(value) !== "");
   return (
     <div className="cjs-panel">
       <div className="cjs-panel-title">상품 이해 결과</div>
-      <KeyValueRows data={asObject(inputView.page_product_facts)} keys={PRODUCT_FACT_KEYS} limit={6} />
-      <div className="cjs-subpanel-title">입력 복원</div>
-      <KeyValueRows data={asObject(inputView.reconstruction_status)} keys={RECONSTRUCTION_KEYS} limit={8} />
-      <div className="cjs-subpanel-title">분류에 사용한 상품 정보</div>
-      <KeyValueRows data={understanding} keys={UNDERSTANDING_KEYS} limit={14} />
+      {tiles.length ? (
+        <div className="cjs-fact-tiles">
+          {tiles.map(([label, value]) => (
+            <div className="cjs-fact-tile" key={label}>
+              <span>{label}</span>
+              <strong>{clean(value)}</strong>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="cjs-muted">상품 이해 결과가 아직 없습니다.</div>
+      )}
+      <div className="cjs-understanding-grid">
+        <div>
+          {clean(hints.normalized_tariff_description) ? (
+            <>
+              <div className="cjs-subpanel-title cjs-first">정규화 tariff 설명</div>
+              <p className="cjs-desc-text">{clean(hints.normalized_tariff_description)}</p>
+            </>
+          ) : null}
+          <TermChips label="식별 토큰" terms={hints.identity_terms} />
+          <TermChips label="형태 토큰" terms={hints.product_form_terms} />
+          <TermChips label="챕터 힌트" terms={hints.chapter_hint_terms} />
+          <TermChips label="라우팅 토큰" terms={understandingView.routing_terms} />
+        </div>
+        <div>
+          <div className="cjs-subpanel-title cjs-first">Composition lane</div>
+          <div className="cjs-chip-row">
+            {clean(composition.processing_state) && composition.processing_state !== "unknown" ? (
+              <span className="cjs-chip">가공: {composition.processing_state}</span>
+            ) : null}
+            {clean(composition.principal_ingredient) ? (
+              <span className="cjs-chip">주원료: {composition.principal_ingredient}</span>
+            ) : null}
+            <span className="cjs-chip">함량 {percentages.length}건</span>
+            {composition.contains_wrapper_or_dough ? <span className="cjs-chip">피/반죽 포함</span> : null}
+            {composition.contains_sauce_or_broth ? <span className="cjs-chip">소스/육수 포함</span> : null}
+          </div>
+          <DataTable
+            rows={compositionRows}
+            limit={20}
+            emptyMessage="composition lane에 반영된 항목이 없습니다."
+            columns={[
+              { key: "구분", label: "구분", variant: "mono" },
+              { key: "내용", label: "내용" },
+            ]}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DocumentStagePanel({ result, derived }) {
+  const jobId = clean(result?.job_id || result?.run_id);
+  const packages = Object.entries(derived.packagesByTaric);
+  return (
+    <div className="cjs-panel">
+      <div className="cjs-panel-title">서류 패키지 ({packages.length}건)</div>
+      {packages.length ? (
+        <div className="cjs-taric-list">
+          {packages.map(([taric, group]) => (
+            <Link
+              key={taric}
+              className="cjs-taric-row linked"
+              to={`/document/${encodeURIComponent(jobId)}/${encodeURIComponent(taric)}`}
+            >
+              <strong>{taric}</strong>
+              <span>{asList(group).length}개 패키지 · 서류 추천 보기</span>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <div className="cjs-muted">생성된 서류 패키지가 없습니다.</div>
+      )}
     </div>
   );
 }
 
 function RoutingPanel({ result }) {
+  const routingView = asObject(result?.routing_view);
+  const chapterDetails = asList(routingView.candidate_chapter_details);
+  const matchedTerms = asList(asObject(routingView.routing_basis).matched_terms);
   return (
     <div className="cjs-panel">
       <div className="cjs-panel-title">챕터 분기</div>
-      <KeyValueRows data={asObject(result?.routing_view)} keys={ROUTE_KEYS} limit={10} />
+      <KeyValueRows
+        data={routingView}
+        keys={ROUTE_KEYS.filter(
+          (key) => !["candidate_chapter_details", "routing_basis"].includes(key),
+        )}
+        limit={10}
+      />
+      <TermChips label="매칭 키워드" terms={matchedTerms} />
+      {chapterDetails.length ? (
+        <>
+          <div className="cjs-subpanel-title">챕터 점수 상세</div>
+          <DataTable rows={chapterDetails} limit={8} />
+        </>
+      ) : null}
     </div>
   );
 }
@@ -354,7 +539,15 @@ export default function WorkbenchPage() {
   const [theme, setTheme] = useState(
     () => window.localStorage.getItem(THEME_STORAGE_KEY) || "classic",
   );
+  const [fx, setFx] = useState(
+    () => window.localStorage.getItem("asap-classification-fx") || "calm",
+  );
+  useEffect(() => {
+    window.localStorage.setItem("asap-classification-fx", fx);
+  }, [fx]);
   const derived = useWorkbenchDerived(result);
+  const [activeStage, setActiveStage] = useState("classification");
+  const followStageRef = useRef(true);
 
   useEffect(() => {
     document.body.classList.toggle("asap-cjs-neon", theme === "neon");
@@ -365,6 +558,38 @@ export default function WorkbenchPage() {
     };
   }, [theme]);
 
+  // 실행 중에는 진행 단계를 자동 추적, 완료되면 분류 결과로 착지.
+  // 사용자가 레일을 직접 클릭하면 그 run이 끝날 때까지 수동 모드 유지.
+  useEffect(() => {
+    if (busy) {
+      followStageRef.current = true;
+    }
+  }, [busy]);
+
+  useEffect(() => {
+    if (!followStageRef.current) {
+      return;
+    }
+    const status = clean(result?.job_status).toLowerCase();
+    if (["completed", "complete", "done"].includes(status)) {
+      setActiveStage("classification");
+      return;
+    }
+    let latest = "input";
+    STAGES.forEach(([key]) => {
+      const state = stageState(result, derived, key);
+      if (state === "done" || state === "running" || state === "completed") {
+        latest = key;
+      }
+    });
+    setActiveStage(latest);
+  }, [result, derived, busy]);
+
+  const pickStage = (key) => {
+    followStageRef.current = false;
+    setActiveStage(key);
+  };
+
   const selectedCandidate =
     derived.candidates.find(
       (candidate, index) => candidateKey(candidate, index) === selectedKey,
@@ -373,7 +598,79 @@ export default function WorkbenchPage() {
   const setField = (key) => (event) => setForm((prev) => ({ ...prev, [key]: event.target.value }));
 
   return (
-    <div className={`classification-js-shell theme-${theme === "neon" ? "neon" : "classic"}`}>
+    <div
+      className={`classification-js-shell theme-${theme === "neon" ? "neon" : "classic"} ${
+        fx === "storm" ? "fx-storm" : ""
+      }`}
+    >
+      {/* feTurbulence 구름 포그 — 카드 뒤에서 떠다니는 노이즈 안개 (테마별 틴트) */}
+      <svg width="0" height="0" aria-hidden="true" focusable="false" style={{ position: "absolute" }}>
+        <filter id="cjs-fog-classic" x="-20%" y="-20%" width="140%" height="140%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.008 0.014" numOctaves="3" seed="11">
+            <animate
+              attributeName="baseFrequency"
+              values="0.008 0.014;0.011 0.017;0.008 0.014"
+              dur="12s"
+              repeatCount="indefinite"
+            />
+          </feTurbulence>
+          {/* 라이트 테마: 부드러운 라벤더-인디고, 성긴 구름 */}
+          <feColorMatrix
+            type="matrix"
+            values="0 0 0 0 0.47  0 0 0 0 0.4  0 0 0 0 0.86  0 0 0.62 0 -0.24"
+          />
+          <feGaussianBlur stdDeviation="10" />
+        </filter>
+        {/* 폭풍 모드: 회색 연기 (불난 집 굴뚝 톤) */}
+        <filter id="cjs-smoke-classic" x="-20%" y="-20%" width="140%" height="140%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.011 0.019" numOctaves="4" seed="23">
+            <animate
+              attributeName="baseFrequency"
+              values="0.011 0.019;0.015 0.024;0.011 0.019"
+              dur="8s"
+              repeatCount="indefinite"
+            />
+          </feTurbulence>
+          <feColorMatrix
+            type="matrix"
+            values="0 0 0 0 0.42  0 0 0 0 0.43  0 0 0 0 0.48  0 0 0.95 0 -0.22"
+          />
+          <feGaussianBlur stdDeviation="8" />
+        </filter>
+        <filter id="cjs-smoke-neon" x="-20%" y="-20%" width="140%" height="140%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.011 0.019" numOctaves="4" seed="29">
+            <animate
+              attributeName="baseFrequency"
+              values="0.011 0.019;0.016 0.025;0.011 0.019"
+              dur="8s"
+              repeatCount="indefinite"
+            />
+          </feTurbulence>
+          {/* 어두운 배경에서 네온 불빛에 비친 밝은 회백색 연기 */}
+          <feColorMatrix
+            type="matrix"
+            values="0 0 0 0 0.78  0 0 0 0 0.77  0 0 0 0 0.84  0 0 0.9 0 -0.2"
+          />
+          <feGaussianBlur stdDeviation="8" />
+        </filter>
+        <filter id="cjs-fog-neon" x="-20%" y="-20%" width="140%" height="140%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.008 0.014" numOctaves="3" seed="7">
+            <animate
+              attributeName="baseFrequency"
+              values="0.008 0.014;0.012 0.018;0.008 0.014"
+              dur="12s"
+              repeatCount="indefinite"
+            />
+          </feTurbulence>
+          {/* 네온 테마: 밝은 바이올렛, 짙은 구름 */}
+          <feColorMatrix
+            type="matrix"
+            values="0 0 0 0 0.68  0 0 0 0 0.36  0 0 0 0 0.99  0 0 0.85 0 -0.16"
+          />
+          <feGaussianBlur stdDeviation="9" />
+        </filter>
+      </svg>
+      <div className="cjs-fog-layer" aria-hidden="true" />
       <div className="cjs-hero">
         <div className="cjs-heading">
           <div className="cjs-eyebrow">ASAP Classification</div>
@@ -400,8 +697,24 @@ export default function WorkbenchPage() {
               네온
             </button>
           </div>
+          <div className="cjs-theme-toggle">
+            <span className="cjs-theme-label">이펙트</span>
+            <button
+              type="button"
+              className={`cjs-theme-button ${fx !== "storm" ? "active" : ""}`}
+              onClick={() => setFx("calm")}
+            >
+              은은
+            </button>
+            <button
+              type="button"
+              className={`cjs-theme-button ${fx === "storm" ? "active" : ""}`}
+              onClick={() => setFx("storm")}
+            >
+              폭풍
+            </button>
+          </div>
           <div className="cjs-runtime-status">
-            <span>API {import.meta.env.VITE_API_BASE_URL || "(proxy)"}</span>
             <strong>{statusLabel(result?.job_status || "idle")}</strong>
             {result?.error ? <em>{result.error}</em> : null}
           </div>
@@ -469,18 +782,35 @@ export default function WorkbenchPage() {
         </div>
       </section>
 
-      <section className="cjs-workspace">
-        <StageRail result={result} derived={derived} />
-        <main className="cjs-main-column">
-          <DecisionPanel result={result} derived={derived} />
-          <CandidateBoard derived={derived} selectedKey={selectedKey} onSelect={setSelectedKey} />
-          <TaricPanel result={result} derived={derived} candidate={selectedCandidate} />
+      <section className="cjs-workspace cjs-workspace-nav">
+        <StageNav
+          result={result}
+          derived={derived}
+          activeStage={activeStage}
+          onSelect={pickStage}
+          busy={busy}
+        />
+        <main className="cjs-stage-content">
+          {activeStage === "input" ? <IntakePanel result={result} /> : null}
+          {activeStage === "understanding" ? <UnderstandingPanel result={result} /> : null}
+          {activeStage === "routing" ? <RoutingPanel result={result} /> : null}
+          {activeStage === "classification" ? (
+            <>
+              <DecisionPanel result={result} derived={derived} />
+              <CandidateBoard derived={derived} selectedKey={selectedKey} onSelect={setSelectedKey} />
+              <TracePanel candidate={selectedCandidate} />
+            </>
+          ) : null}
+          {activeStage === "taric" ? (
+            <>
+              <CandidateBoard derived={derived} selectedKey={selectedKey} onSelect={setSelectedKey} />
+              <TaricPanel result={result} derived={derived} candidate={selectedCandidate} />
+            </>
+          ) : null}
+          {activeStage === "document" ? (
+            <DocumentStagePanel result={result} derived={derived} />
+          ) : null}
         </main>
-        <aside className="cjs-inspector">
-          <ProductPanel result={result} />
-          <RoutingPanel result={result} />
-          <TracePanel candidate={selectedCandidate} />
-        </aside>
       </section>
 
       <section className="cjs-debug-section">

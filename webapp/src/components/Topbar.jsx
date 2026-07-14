@@ -21,6 +21,12 @@ export default function Topbar() {
         >
           프로젝트
         </Link>
+        <Link
+          to="/consumer"
+          className={`app-topbar-tab ${pathname.startsWith("/consumer") ? "active" : ""}`}
+        >
+          소비자 화면
+        </Link>
       </nav>
     </header>
   );

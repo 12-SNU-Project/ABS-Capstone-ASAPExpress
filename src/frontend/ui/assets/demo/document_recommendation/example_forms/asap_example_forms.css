@@ -1,0 +1,211 @@
+@page {
+  size: A4;
+  margin: 14mm;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #e5e7eb;
+  color: #111827;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.sheet {
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 14mm;
+  background: #fff;
+}
+
+.doc-header {
+  display: grid;
+  grid-template-columns: 42mm 1fr 44mm;
+  gap: 9mm;
+  align-items: start;
+  padding-bottom: 6mm;
+  border-bottom: 2px solid #111827;
+}
+
+.logo {
+  width: 38mm;
+  height: auto;
+  margin-top: 1mm;
+}
+
+.title-block {
+  text-align: center;
+}
+
+.doc-title {
+  margin: 0;
+  color: #111827;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.doc-subtitle {
+  margin-top: 2mm;
+  color: #4b5563;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.sample-badge {
+  display: inline-block;
+  margin-top: 3mm;
+  padding: 2mm 4mm;
+  border: 1px solid #111827;
+  color: #111827;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.meta-table,
+.info-table,
+.items-table,
+.small-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border: 1px solid #9ca3af;
+  padding: 2.2mm;
+  vertical-align: top;
+}
+
+th {
+  background: #f3f4f6;
+  color: #111827;
+  font-size: 9px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.meta-table th,
+.meta-table td {
+  padding: 1.8mm;
+}
+
+.section-title {
+  margin: 6mm 0 2mm;
+  color: #111827;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4mm;
+}
+
+.three-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4mm;
+}
+
+.field-label {
+  color: #374151;
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.field-value {
+  margin-top: 1mm;
+  color: #111827;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.muted {
+  color: #6b7280;
+}
+
+.amount {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.declaration-box {
+  min-height: 30mm;
+  padding: 4mm;
+  border: 1.6px solid #111827;
+  background: #fff;
+}
+
+.declaration-text {
+  margin-top: 3mm;
+  color: #111827;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.signature-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4mm;
+  margin-top: 6mm;
+}
+
+.signature-box {
+  min-height: 22mm;
+  border: 1px solid #9ca3af;
+  padding: 2.5mm;
+}
+
+.signature-line {
+  margin-top: 10mm;
+  border-top: 1px solid #111827;
+  padding-top: 1.5mm;
+  color: #374151;
+  font-size: 8px;
+}
+
+.note-box {
+  margin-top: 5mm;
+  padding: 3mm;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  color: #374151;
+  font-size: 9px;
+}
+
+.source-note {
+  margin-top: 5mm;
+  color: #6b7280;
+  font-size: 8px;
+}
+
+.footer {
+  margin-top: 6mm;
+  padding-top: 2mm;
+  border-top: 1px solid #d1d5db;
+  color: #6b7280;
+  font-size: 8px;
+  text-align: center;
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+
+  .sheet {
+    margin: 0;
+    padding: 0;
+    width: auto;
+    min-height: auto;
+  }
+}

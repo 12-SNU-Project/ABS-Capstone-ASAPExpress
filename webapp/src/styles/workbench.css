@@ -711,3 +711,717 @@ summary.cjs-panel-title {
     width: 100%;
   }
 }
+
+/* ---- 데이터 표 (복원 fact / composition lane / 챕터 점수) ---- */
+.cjs-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--cjs-border);
+  border-radius: 8px;
+  background: var(--cjs-surface-strong);
+}
+
+.cjs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.cjs-table th,
+.cjs-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--cjs-border);
+  text-align: left;
+  vertical-align: top;
+  max-width: 300px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.cjs-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.cjs-table th {
+  color: var(--cjs-muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--cjs-accent) 5%, transparent);
+}
+
+.cjs-cell-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--cjs-muted);
+}
+
+.cjs-cell-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.cjs-cell-pill.ok {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--cjs-accent-2);
+}
+
+.cjs-cell-pill.warn {
+  background: rgba(217, 119, 6, 0.14);
+  color: #d97706;
+}
+
+.cjs-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.cjs-chip {
+  padding: 3px 9px;
+  border: 1px solid var(--cjs-border);
+  border-radius: 999px;
+  background: var(--cjs-surface-strong);
+  color: var(--cjs-text);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+/* 상품 이해 결과 — 표가 커서 전체 폭 섹션으로 */
+.cjs-understanding-section {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.cjs-understanding-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(0, 2fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.cjs-understanding-grid .cjs-subpanel-title.cjs-first {
+  margin-top: 0;
+}
+
+@media (max-width: 900px) {
+  .cjs-understanding-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- 스테이지 내비게이션 레이아웃 ---- */
+.cjs-workspace-nav {
+  grid-template-columns: 230px minmax(0, 1fr);
+}
+
+.cjs-stage-nav {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.cjs-stage-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cjs-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 850;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cjs-stage-item:hover {
+  background: color-mix(in srgb, var(--cjs-accent) 7%, transparent);
+}
+
+.cjs-stage-item.active {
+  border-color: var(--cjs-accent);
+  background: color-mix(in srgb, var(--cjs-accent) 10%, transparent);
+  color: var(--cjs-text);
+}
+
+.cjs-stage-item-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--cjs-muted) 35%, transparent);
+}
+
+.cjs-stage-item.state-done .cjs-stage-item-dot {
+  background: var(--cjs-accent-2);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--cjs-accent-2) 60%, transparent);
+}
+
+.cjs-stage-item.state-running .cjs-stage-item-dot,
+.cjs-stage-item.state-submitting .cjs-stage-item-dot,
+.cjs-stage-item.state-queued .cjs-stage-item-dot {
+  background: var(--cjs-accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--cjs-accent) 70%, transparent);
+  animation: cjs-stage-pulse 1.2s infinite;
+}
+
+@keyframes cjs-stage-pulse {
+  50% {
+    box-shadow: 0 0 2px color-mix(in srgb, var(--cjs-accent) 30%, transparent);
+  }
+}
+
+.cjs-stage-content {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  max-width: 100%;
+  align-content: start;
+}
+
+@media (max-width: 900px) {
+  .cjs-workspace-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .cjs-stage-nav {
+    display: flex;
+    flex-wrap: wrap;
+  }
+}
+
+/* ---- 실행 중 네온 로딩 효과 ---- */
+/* 4색 네온 그라디언트가 흐르는 indeterminate 진행 바 */
+.cjs-progressbar {
+  position: relative;
+  height: 3px;
+  margin-top: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--cjs-accent) 12%, transparent);
+}
+
+.cjs-progressbar span {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    #a855f7 25%,
+    #22d3ee 50%,
+    #34d399 75%,
+    transparent
+  );
+  background-size: 55% 100%;
+  background-repeat: no-repeat;
+  animation: cjs-sweep 1.4s linear infinite;
+  filter: drop-shadow(0 0 6px rgba(168, 85, 247, 0.7));
+}
+
+@keyframes cjs-sweep {
+  0% {
+    background-position: -70% 0;
+  }
+  100% {
+    background-position: 175% 0;
+  }
+}
+
+/* 실행 중 단계 항목: 네온 shimmer 스윕 */
+.cjs-stage-item.state-running,
+.cjs-stage-item.state-submitting,
+.cjs-stage-item.state-queued {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--cjs-accent) 45%, transparent);
+  color: var(--cjs-text);
+}
+
+.cjs-stage-item.state-running::after,
+.cjs-stage-item.state-submitting::after,
+.cjs-stage-item.state-queued::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    110deg,
+    transparent 30%,
+    rgba(168, 85, 247, 0.16) 44%,
+    rgba(34, 211, 238, 0.22) 50%,
+    rgba(52, 211, 153, 0.16) 56%,
+    transparent 70%
+  );
+  transform: translateX(-100%);
+  animation: cjs-shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes cjs-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* 완료 단계: 은은한 그린 글로우 유지 + 살짝 숨쉬기 */
+.cjs-stage-item.state-done .cjs-stage-item-dot {
+  animation: cjs-breathe 2.6s ease-in-out infinite;
+}
+
+@keyframes cjs-breathe {
+  50% {
+    box-shadow: 0 0 3px color-mix(in srgb, var(--cjs-accent-2) 40%, transparent);
+  }
+}
+
+/* 실행 중 레일: 별 반짝임(트윙클) 오버레이 */
+.cjs-stage-rail {
+  position: relative;
+}
+
+.cjs-stage-nav {
+  position: relative;
+}
+
+.cjs-stage-nav::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle, rgba(34, 211, 238, 0.9) 0 1px, transparent 2px),
+    radial-gradient(circle, rgba(168, 85, 247, 0.9) 0 1px, transparent 2px),
+    radial-gradient(circle, rgba(52, 211, 153, 0.85) 0 1px, transparent 2px),
+    radial-gradient(circle, rgba(247, 241, 255, 0.9) 0 1px, transparent 2px);
+  background-size: 97px 97px, 131px 131px, 73px 73px, 157px 157px;
+  background-position: 12px 24px, 46px 70px, 76px 36px, 30px 110px;
+  animation: cjs-twinkle 2.2s ease-in-out infinite;
+}
+
+@keyframes cjs-twinkle {
+  0%, 100% {
+    opacity: 0.12;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* 진행 중 현재 단계 텍스트 글로우 */
+.cjs-current-stage.running strong,
+.cjs-current-stage.submitting strong,
+.cjs-current-stage.queued strong {
+  text-shadow: 0 0 12px color-mix(in srgb, var(--cjs-accent) 70%, transparent);
+}
+
+/* ---- 상품 이해: 핵심 필드 타일 + 토큰 칩 배치 ---- */
+.cjs-fact-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.cjs-fact-tile {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--cjs-border);
+  border-radius: 8px;
+  background: var(--cjs-surface-strong);
+}
+
+.cjs-fact-tile span {
+  display: block;
+  color: var(--cjs-muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.cjs-fact-tile strong {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.cjs-term-group {
+  margin-bottom: 4px;
+}
+
+.cjs-desc-text {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--cjs-text);
+  overflow-wrap: anywhere;
+}
+
+/* ---- 네온 테마 로고: 4색 네온 그라디언트 + 글로우 펄스 ---- */
+body.asap-cjs-neon .app-topbar-logo {
+  background: linear-gradient(115deg, #a855f7, #22d3ee 40%, #34d399 65%, #f7f1ff 82%, #a855f7 100%);
+  background-size: 260% 100%;
+  animation: logo-sheen 6s ease-in-out infinite, cjs-logo-glow 2.8s ease-in-out infinite;
+  filter: drop-shadow(0 0 13px rgba(168, 85, 247, 0.72));
+}
+
+@keyframes cjs-logo-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 10px rgba(168, 85, 247, 0.7));
+  }
+  40% {
+    filter: drop-shadow(0 0 16px rgba(34, 211, 238, 0.75));
+  }
+  70% {
+    filter: drop-shadow(0 0 14px rgba(52, 211, 153, 0.7));
+  }
+}
+
+/* ---- 진행 레일: 안개 스포트라이트 (실행 중) ---- */
+.cjs-stage-rail {
+  overflow: hidden;
+}
+
+.cjs-stage-rail > * {
+  position: relative;
+  z-index: 1;
+}
+
+
+
+/* ---- 카드 테두리 포그 라이트: 12초 주기로 테두리를 따라 흐르는 네온 안개 ---- */
+@property --cjs-border-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.cjs-hero,
+.cjs-run-card,
+.cjs-panel,
+.cjs-stage-rail,
+.cjs-candidate-board {
+  position: relative;
+}
+
+.cjs-hero::before,
+.cjs-run-card::before,
+.cjs-panel::before,
+.cjs-stage-rail::before,
+.cjs-candidate-board::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 11px;
+  padding: 2.5px;
+  background: conic-gradient(
+    from var(--cjs-border-angle),
+    transparent 0%,
+    transparent 60%,
+    rgba(168, 85, 247, 0.5) 72%,
+    rgba(34, 211, 238, 0.7) 81%,
+    rgba(247, 241, 255, 0.95) 86%,
+    rgba(52, 211, 153, 0.55) 92%,
+    transparent 100%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  filter: blur(1.6px) drop-shadow(0 0 7px rgba(168, 85, 247, 0.55));
+  opacity: 0.5;
+  animation: cjs-border-fog 12s linear infinite;
+}
+
+/* 카드마다 위상을 어긋나게 — 동시에 돌지 않고 반짝임이 흩어진다 */
+.cjs-run-card::before {
+  animation-delay: -3s;
+}
+
+.cjs-stage-rail::before {
+  animation-delay: -6s;
+}
+
+.cjs-candidate-board::before {
+  animation-delay: -9s;
+}
+
+.cjs-hero::before {
+  animation-delay: -1.5s;
+}
+
+/* 네온 테마에선 더 진하게 */
+.theme-neon .cjs-hero::before,
+.theme-neon .cjs-run-card::before,
+.theme-neon .cjs-panel::before,
+.theme-neon .cjs-stage-rail::before,
+.theme-neon .cjs-candidate-board::before {
+  opacity: 0.9;
+  filter: blur(2px) drop-shadow(0 0 10px rgba(168, 85, 247, 0.7));
+}
+
+@keyframes cjs-border-fog {
+  to {
+    --cjs-border-angle: 360deg;
+  }
+}
+
+/* ---- 터뷸런스 포그 레이어: feTurbulence 노이즈 안개가 카드 뒤를 떠다닌다 ---- */
+.cjs-fog-layer {
+  position: absolute;
+  inset: -40px;
+  z-index: 0;
+  pointer-events: none;
+  filter: url(#cjs-fog-classic);
+  opacity: 0.3;
+  animation: cjs-fog-drift 24s ease-in-out infinite alternate;
+}
+
+.theme-neon .cjs-fog-layer {
+  filter: url(#cjs-fog-neon);
+  opacity: 0.55;
+}
+
+/* 구름 속 반짝임 — 테마별 색의 미세한 별빛이 페이드 인/아웃 */
+.cjs-fog-layer::after {
+  content: "";
+  position: absolute;
+  inset: 40px;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle, rgba(109, 63, 214, 0.75) 0 1px, transparent 2px),
+    radial-gradient(circle, rgba(79, 122, 216, 0.65) 0 1px, transparent 2px),
+    radial-gradient(circle, rgba(147, 100, 235, 0.6) 0 1.5px, transparent 2.5px);
+  background-size: 140px 140px, 190px 190px, 240px 240px;
+  background-position: 20px 30px, 90px 110px, 50px 170px;
+  animation: cjs-twinkle 3.2s ease-in-out infinite;
+  opacity: 0.35;
+}
+
+.theme-neon .cjs-fog-layer::after {
+  background-image:
+    radial-gradient(circle, rgba(168, 85, 247, 0.95) 0 1px, transparent 2px),
+    radial-gradient(circle, rgba(34, 211, 238, 0.9) 0 1px, transparent 2px),
+    radial-gradient(circle, rgba(52, 211, 153, 0.85) 0 1px, transparent 2px),
+    radial-gradient(circle, rgba(247, 241, 255, 0.95) 0 1.5px, transparent 2.5px);
+  background-size: 120px 120px, 170px 170px, 210px 210px, 260px 260px;
+  background-position: 20px 30px, 80px 100px, 140px 60px, 60px 180px;
+  opacity: 0.6;
+}
+
+@keyframes cjs-fog-drift {
+  from {
+    transform: translate3d(-2%, -1%, 0) scale(1.03);
+  }
+  to {
+    transform: translate3d(2%, 2%, 0) scale(1.08);
+  }
+}
+
+/* ---- 카드 아우라: 4변 전체에서 뿜어져 나오는 구름 ---- */
+.cjs-hero::after,
+.cjs-run-card::after,
+.cjs-panel::after,
+.cjs-stage-rail::after,
+.cjs-candidate-board::after {
+  content: "";
+  position: absolute;
+  inset: -30px;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 22px;
+  padding: 32px;
+  filter: url(#cjs-fog-classic);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  opacity: 0.42;
+  animation: cjs-aura-breathe 12s ease-in-out infinite alternate;
+}
+
+/* 카드마다 숨쉬는 위상을 어긋나게 */
+.cjs-run-card::after {
+  animation-delay: -3s;
+}
+
+.cjs-stage-rail::after {
+  animation-delay: -6s;
+}
+
+.cjs-candidate-board::after {
+  animation-delay: -9s;
+}
+
+.cjs-hero::after {
+  animation-delay: -1.5s;
+}
+
+.theme-neon .cjs-hero::after,
+.theme-neon .cjs-run-card::after,
+.theme-neon .cjs-panel::after,
+.theme-neon .cjs-stage-rail::after,
+.theme-neon .cjs-candidate-board::after {
+  filter: url(#cjs-fog-neon);
+  opacity: 0.68;
+}
+
+/* 부드럽게 이어지는 무한 반복 — alternate 왕복이라 점프 없음 */
+@keyframes cjs-aura-breathe {
+  from {
+    transform: scale(1);
+    opacity: 0.3;
+  }
+  to {
+    transform: scale(1.035);
+    opacity: 0.55;
+  }
+}
+
+.theme-neon .cjs-hero::after,
+.theme-neon .cjs-run-card::after,
+.theme-neon .cjs-panel::after,
+.theme-neon .cjs-stage-rail::after,
+.theme-neon .cjs-candidate-board::after {
+  animation-name: cjs-aura-breathe-neon;
+}
+
+@keyframes cjs-aura-breathe-neon {
+  from {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  to {
+    transform: scale(1.035);
+    opacity: 0.8;
+  }
+}
+
+/* ---- 폭풍 모드: 불난 집 굴뚝처럼 연기가 미친 듯이 뿜어져 나온다 ---- */
+/* 카드 아우라 → 치솟는 연기 기둥: 커지며 위로 떠오르다 사라지는 퍼프 (0→0 opacity라 이음새 없음) */
+.fx-storm .cjs-hero::after,
+.fx-storm .cjs-run-card::after,
+.fx-storm .cjs-panel::after,
+.fx-storm .cjs-stage-rail::after,
+.fx-storm .cjs-candidate-board::after {
+  inset: -56px;
+  padding: 58px;
+  border-radius: 34px;
+  animation: cjs-smoke-plume 2.6s ease-out infinite;
+}
+
+@keyframes cjs-smoke-plume {
+  0% {
+    transform: scale(0.94) translateY(10px);
+    opacity: 0;
+  }
+  22% {
+    opacity: 0.72;
+  }
+  60% {
+    opacity: 0.45;
+  }
+  100% {
+    transform: scale(1.28) translateY(-34px);
+    opacity: 0;
+  }
+}
+
+.fx-storm.theme-neon .cjs-hero::after,
+.fx-storm.theme-neon .cjs-run-card::after,
+.fx-storm.theme-neon .cjs-panel::after,
+.fx-storm.theme-neon .cjs-stage-rail::after,
+.fx-storm.theme-neon .cjs-candidate-board::after {
+  animation-name: cjs-smoke-plume-neon;
+}
+
+@keyframes cjs-smoke-plume-neon {
+  0% {
+    transform: scale(0.94) translateY(10px);
+    opacity: 0;
+  }
+  22% {
+    opacity: 0.95;
+  }
+  60% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1.3) translateY(-40px);
+    opacity: 0;
+  }
+}
+
+/* 배경 구름: 더 짙고 빠르게 요동 */
+.fx-storm .cjs-fog-layer {
+  opacity: 0.55;
+  animation-duration: 7s;
+}
+
+.fx-storm.theme-neon .cjs-fog-layer {
+  opacity: 0.85;
+}
+
+/* 별빛: 더 빠르고 촘촘하게 */
+.fx-storm .cjs-fog-layer::after {
+  animation-duration: 1.1s;
+  opacity: 0.6;
+}
+
+.fx-storm.theme-neon .cjs-fog-layer::after {
+  opacity: 0.85;
+}
+
+/* 테두리 혜성: 4초에 한 바퀴, 더 밝게 */
+.fx-storm .cjs-hero::before,
+.fx-storm .cjs-run-card::before,
+.fx-storm .cjs-panel::before,
+.fx-storm .cjs-stage-rail::before,
+.fx-storm .cjs-candidate-board::before {
+  animation-duration: 4s;
+  opacity: 0.85;
+}
+
+/* ---- 폭풍 모드 연기화: 카드 퍼프와 배경을 회색 연기 톤으로 ---- */
+/* 카드에서 뿜어지는 퍼프 → 연기색 */
+.fx-storm .cjs-hero::after,
+.fx-storm .cjs-run-card::after,
+.fx-storm .cjs-panel::after,
+.fx-storm .cjs-stage-rail::after,
+.fx-storm .cjs-candidate-board::after {
+  filter: url(#cjs-smoke-classic);
+}
+
+.fx-storm.theme-neon .cjs-hero::after,
+.fx-storm.theme-neon .cjs-run-card::after,
+.fx-storm.theme-neon .cjs-panel::after,
+.fx-storm.theme-neon .cjs-stage-rail::after,
+.fx-storm.theme-neon .cjs-candidate-board::after {
+  filter: url(#cjs-smoke-neon);
+}
+
+/* 배경 연기: 뷰포트 전체로 확장 — 양옆 여백에도 연기가 흐른다 */
+.fx-storm .cjs-fog-layer {
+  position: fixed;
+  inset: -70px;
+  filter: url(#cjs-smoke-classic);
+  opacity: 0.5;
+  animation-duration: 7s;
+}
+
+.fx-storm.theme-neon .cjs-fog-layer {
+  filter: url(#cjs-smoke-neon);
+  opacity: 0.7;
+}

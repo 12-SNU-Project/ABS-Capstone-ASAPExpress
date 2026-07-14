@@ -180,21 +180,27 @@ def _FindTableSheet(workbook):
             continue
         header_idx, colmap = None, {}
         for i, row in enumerate(sheet.iter_rows(values_only=True)):
-            cells = {j: NormalizeText(v) for j, v in enumerate(row) if v is not None}
-            hits = {key: j for key in _HEADER_KEYS for j, v in cells.items() if key in v}
-            # '함량' 열이 없는 변형(성분(EN) 대체형 — 칼국수·목란 실측)이
-            # 있어 품명+성분만 필수, 함량은 선택.
+            cells = {j: NormalizeText(v).lower() for j, v in enumerate(row) if v is not None}
+            hits: dict[str, int] = {}
+            for j, v in cells.items():
+                # 실물 변형 흡수: 영문 헤더(목란), N차 원재료 열(차려낸)
+                if ("품명" in v or "product name" in v or v.startswith("구분")) and "품명" not in hits:
+                    hits["품명"] = j
+                if ("성분" in v or v == "ingredient" or "1차 원재료" in v) and "성분" not in hits:
+                    hits["성분"] = j
+                if ("함량" in v or "content" in v) and "함량" not in hits:
+                    hits["함량"] = j
             if "품명" in hits and "성분" in hits:
                 header_idx = i
-                colmap = hits
                 # 재료명(하위 단계)·원산지 열도 있으면 기록
+                colmap = hits
                 for j, v in cells.items():
-                    if "재료명" in v:
+                    if "재료명" in v or "breakdown" in v:
                         colmap.setdefault("재료명", j)
-                    if "원산지" in v:
+                    if "원산지" in v or "origin" in v:
                         colmap.setdefault("원산지", j)
                 break
-            if i > 60:
+            if i > 120:
                 break
         if header_idx is None:
             continue

@@ -259,6 +259,41 @@ def EvaluateCodeDecision(
         # 조건의 typed 히트(processing_state)가 자격을 대신 채우면 상태(공통)
         # +류값(공통) 조합이 확정을 통과한다 (1605 오발동 3건 실측: 상태
         # true가 자격을 주고 material은 ingredient_classes 비typed 히트).
+        # 서열 소비 1탄: true의 근거 어휘가 '부수 성분'(entries 2순위 이하
+        # ·accessory 보고)에만 있고 주성분·1순위와 무관하면 확정 자격 박탈
+        # (+3 증거는 유지). "성분에 있다"≠"그 성분의 제품이다"의 서열 판정.
+        # ASAP_DECISION_ORDER_GUARD=0 복귀.
+        order_guard_on = (os.environ.get(
+            "ASAP_DECISION_ORDER_GUARD", "1") or "1").strip() != "0"
+        principal_toks: set = set()
+        accessory_toks: set = set()
+        if order_guard_on and product_facts:
+            entries = _dig(product_facts, "composition_facts.ingredient_entries") or []
+            for e in entries:
+                if not isinstance(e, dict):
+                    continue
+                toks = {_stem(w) for w in _TOKEN.findall(str(e.get("ingredient_name") or "").lower()) if len(w) >= 3}
+                if int(e.get("order_index") or 99) == 1:
+                    principal_toks |= toks
+                else:
+                    accessory_toks |= toks
+            for extra in ("identity_hints.principal_ingredient_guess",
+                          "composition_facts.principal_ingredient"):
+                principal_toks |= _field_tokens(product_facts, extra)
+            for a in _dig(product_facts, "identity_hints.accessory_ingredients") or []:
+                accessory_toks |= {_stem(w) for w in _TOKEN.findall(str(a).lower()) if len(w) >= 3}
+            accessory_toks -= principal_toks
+
+        def _accessory_only(d: dict) -> bool:
+            if not accessory_toks:
+                return False
+            try:
+                vals = json.loads(str(d.get("value") or "null")) or []
+            except Exception:
+                return False
+            vt = {_stem(w) for v in vals for w in _TOKEN.findall(str(v).lower()) if len(w) >= 3}
+            return bool(vt) and not (vt & principal_toks) and bool(vt & accessory_toks)
+
         binding = _binding_table() if (os.environ.get(
             "ASAP_BINDING_V1", "1") or "1").strip() != "0" else {}
         if binding:
@@ -279,6 +314,13 @@ def EvaluateCodeDecision(
                             for leaf in d["why"].removeprefix("field_hit:").split(",")))
                 for d in detail
             )
+        if gate_on and typed_ok and order_guard_on:
+            id_trues = [d for d in detail
+                        if d["verdict"] == "true" and d["cond"] not in state_types]
+            if id_trues and all(_accessory_only(d) for d in id_trues):
+                for d in id_trues:
+                    d["why"] += ";accessory_only_blocked"
+                return "undecided", detail
         if gate_on and not typed_ok:
             for d in detail:
                 if d["verdict"] == "true":
