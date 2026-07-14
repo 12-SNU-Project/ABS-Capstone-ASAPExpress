@@ -1,4 +1,69 @@
+import { useMemo, useState } from "react";
 import { asList, asObject, clean, previewValue } from "../lib/format.js";
+
+const FLOW_KEYS = {
+  REQUIREMENTS: "requirements",
+  DUTY: "duty",
+  BASELINE: "baseline",
+  PRE_ARRIVAL: "pre_arrival",
+};
+
+const FLOW_ITEMS = [
+  {
+    key: FLOW_KEYS.REQUIREMENTS,
+    step: "01",
+    title: "TARIC 관련 수입요건 확인",
+    shortTitle: "수입요건",
+  },
+  {
+    key: FLOW_KEYS.DUTY,
+    step: "02",
+    title: "세율 확인",
+    shortTitle: "세율",
+  },
+  {
+    key: FLOW_KEYS.BASELINE,
+    step: "03",
+    title: "기본 통관 준비서류",
+    shortTitle: "기본서류",
+  },
+  {
+    key: FLOW_KEYS.PRE_ARRIVAL,
+    step: "04",
+    title: "입항 전 서류·시스템 준비",
+    shortTitle: "입항 전",
+  },
+];
+
+const REQUIREMENT_VIEW_KEYS = {
+  EXPORTER: "exporter",
+  BROKER: "broker",
+};
+
+const CERT_DUPLICATE_DOCUMENT_IDS = new Set([
+  "health_cert_support",
+  "organic_coi",
+  "cites_species_evidence",
+]);
+
+const EVIDENCE_LABELS_KO = {
+  animal_origin: "동물성 원료 또는 제품 여부 확인",
+  "approved establishment number": "EU 승인시설 번호 확인",
+  "catch certificate": "어획증명서 준비",
+  "CHED-D reference": "CHED-D 참조번호 또는 제출 상태 확인",
+  "CHED-P reference": "CHED-P 참조번호 또는 제출 상태 확인",
+  "competent authority listing evidence": "관할기관 등재 또는 승인 근거 확인",
+  control_body: "유기농 관리기관 확인",
+  establishment_approval_known: "EU 승인시설 여부 확인",
+  "health certificate": "위생증명서 준비",
+  origin_country: "원산국 확인",
+  processing_country: "가공국 확인",
+  "processing establishment approval": "가공시설 승인 여부 확인",
+  processing_type: "가공 형태 확인",
+  product_category: "제품군 확인",
+  production_country: "생산국 확인",
+  "vessel or factory vessel evidence": "어선 또는 가공선 관련 증빙 확인",
+};
 
 function joinList(value) {
   return asList(value)
@@ -7,79 +72,113 @@ function joinList(value) {
     .join(", ");
 }
 
-function yesNo(value) {
-  return value ? "예" : "아니오";
+function splitTokens(value) {
+  return asList(value)
+    .flatMap((item) => String(item ?? "").split(/[;,]/))
+    .map((item) => clean(item))
+    .filter(Boolean);
 }
 
-function deriveDocumentRows(packageData) {
-  const requiredDocuments = asList(packageData.required_documents);
-  if (requiredDocuments.length) {
-    return requiredDocuments;
+function unique(values) {
+  return Array.from(new Set(asList(values).map((value) => clean(value)).filter(Boolean)));
+}
+
+function firstNonEmpty(...values) {
+  return values.map((value) => clean(value)).find(Boolean) || "";
+}
+
+function formatRate(value) {
+  const text = clean(value);
+  if (!text) {
+    return "";
   }
-  const documents = asObject(asObject(packageData.checklist_summary).documents);
-  const rows = [];
-  Object.entries(documents).forEach(([status, values]) => {
-    asList(values).forEach((value) => {
-      const title = clean(value);
-      if (!title) {
-        return;
-      }
-      rows.push({
-        title,
-        code: title.toUpperCase().replace(/[^A-Z0-9]+/g, "_"),
-        doc_kind: status,
-        required_when: status,
-        celex_id: "",
-      });
-    });
-  });
-  return rows;
+  if (/^-?\d+(\.\d+)?$/.test(text)) {
+    return `${Number(text).toLocaleString(undefined, { maximumFractionDigits: 3 })}%`;
+  }
+  return text;
 }
 
-function Section({ title, description = "", children }) {
-  return (
-    <section className="ddv-section">
-      <div className="ddv-section-head">
-        <h2 className="ddv-section-title">{title}</h2>
-        {description ? <p className="ddv-section-desc">{description}</p> : null}
-      </div>
-      {children}
-    </section>
-  );
+function statusLabel(value) {
+  const normalized = clean(value).toLowerCase();
+  if (normalized === "required" || normalized === "mandatory") {
+    return "필수";
+  }
+  if (normalized === "conditional") {
+    return "조건부";
+  }
+  if (normalized === "optional") {
+    return "선택";
+  }
+  if (normalized === "pending") {
+    return "확인 필요";
+  }
+  return clean(value) || "조건부";
+}
+
+function evidenceLabelKo(value) {
+  const text = clean(value);
+  if (!text) {
+    return "";
+  }
+  return EVIDENCE_LABELS_KO[text] || text;
+}
+
+function plainConditionKo(value) {
+  const text = clean(value);
+  if (!text) {
+    return "";
+  }
+  return text
+    .replace(/^Certificate of inspection for organic products$/i, "유기농 제품 검사증명서가 필요한 경우")
+    .replace(/^Goods not concerned by Regulation \(EU\) 2018\/848 \(organic products\)$/i, "EU 유기농 규정 대상이 아닌 경우")
+    .replace(/^The declared goods are not concerned by Council Regulation \(EC\) No\. 1005\/2008$/i, "IUU 어업 규정 대상이 아닌 경우")
+    .replace(/^Importer Declaration or Re-export Certificate.*$/i, "IUU 어업 규정 대상 수산물인 경우")
+    .replace(/^Common Health Entry Document for Products.*$/i, "동물성 제품 공식통제 대상인 경우")
+    .replace(/^Common Health Entry Document for Feed and Food of Non-Animal Origin.*$/i, "비동물성 고위험 식품·사료 공식통제 대상인 경우")
+    .replace(/^Common Health Entry Document for Plants and Plant Products.*$/i, "식물·식물제품 공식통제 대상인 경우");
 }
 
 function EmptyBlock({ message }) {
   return <div className="ddv-empty">{message}</div>;
 }
 
-function MetricGrid({ items }) {
+function FlowNav({ activeKey, counts, onSelect }) {
   return (
-    <div className="ddv-metric-grid">
-      {items.map((item) => (
-        <div className="ddv-metric-card" key={item.label}>
-          <span>{item.label}</span>
-          <strong>{item.value}</strong>
-        </div>
-      ))}
+    <div className="ddv-flow-nav" role="tablist" aria-label="서류 추천 절차">
+      {FLOW_ITEMS.map((item) => {
+        const active = item.key === activeKey;
+        return (
+          <button
+            key={item.key}
+            type="button"
+            className={`ddv-flow-button ${active ? "active" : ""}`}
+            onClick={() => onSelect(item.key)}
+            role="tab"
+            aria-selected={active}
+          >
+            <span className="ddv-flow-step">{item.step}</span>
+            <strong>{item.title}</strong>
+            <em>{counts[item.key] || 0}건</em>
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-function PillRow({ items, emptyMessage = "표시할 항목이 없습니다." }) {
-  const rows = asList(items).map((item) => clean(item)).filter(Boolean);
-  if (!rows.length) {
-    return <EmptyBlock message={emptyMessage} />;
-  }
+function FlowPanel({ title, description, children }) {
   return (
-    <div className="ddv-pill-row">
-      {rows.map((item) => (
-        <span className="ddv-pill" key={item}>{item}</span>
-      ))}
-    </div>
+    <section className="ddv-flow-panel">
+      <div className="ddv-flow-panel-head">
+        <h2>{title}</h2>
+        {description ? <p>{description}</p> : null}
+      </div>
+      {children}
+    </section>
   );
 }
 
-function DataTable({ columns, rows, emptyMessage }) {
+function MiniTable({ columns, rows, emptyMessage }) {
   const normalizedRows = asList(rows);
   if (!normalizedRows.length) {
     return <EmptyBlock message={emptyMessage} />;
@@ -103,7 +202,7 @@ function DataTable({ columns, rows, emptyMessage }) {
                   <td key={column.key}>
                     {column.render
                       ? column.render(source)
-                      : previewValue(source[column.key], column.limit || 200)}
+                      : previewValue(source[column.key], column.limit || 180)}
                   </td>
                 ))}
               </tr>
@@ -115,249 +214,569 @@ function DataTable({ columns, rows, emptyMessage }) {
   );
 }
 
-function RegulationCards({ rows }) {
-  const records = asList(rows);
-  if (!records.length) {
-    return <EmptyBlock message="제품 규제 규칙이 없습니다." />;
+function BranchCard({ title, value, description, tone = "default" }) {
+  return (
+    <article className={`ddv-branch-card ${tone}`}>
+      <span>{title}</span>
+      <strong>{value || "-"}</strong>
+      {description ? <p>{description}</p> : null}
+    </article>
+  );
+}
+
+function buildCertificateGroups(pkg) {
+  const groups = new Map();
+  asList(pkg.requirements).forEach((requirement) => {
+    const req = asObject(requirement);
+    if (req.applies_to_korea === false) {
+      return;
+    }
+    const certificates = asList(req.certificates);
+    certificates.forEach((certificate) => {
+      const cert = asObject(certificate);
+      const code = clean(cert.code);
+      if (!code) {
+        return;
+      }
+      const guidance = asObject(cert.guidance);
+      const groupName = firstNonEmpty(
+        guidance.control_document_group_name_ko,
+        guidance.display_title_ko,
+        cert.description,
+        req.measure_type,
+        "TARIC certificate/declaration",
+      );
+      const group = groups.get(groupName) || {
+        groupName,
+        measureTypes: new Set(),
+        sourceCodes: new Set(),
+        legalBases: new Set(),
+        exporterGuidance: new Set(),
+        verificationDetails: new Set(),
+        codes: [],
+        footnoteGuidelines: new Map(),
+      };
+      group.measureTypes.add(clean(req.measure_type));
+      asList(req.source_goods_codes).forEach((sourceCode) => group.sourceCodes.add(clean(sourceCode)));
+      if (clean(req.legal_base)) {
+        group.legalBases.add(clean(req.legal_base));
+      }
+      if (clean(guidance.exporter_guidance_ko)) {
+        group.exporterGuidance.add(clean(guidance.exporter_guidance_ko));
+      }
+      if (clean(guidance.verification_detail_ko)) {
+        group.verificationDetails.add(clean(guidance.verification_detail_ko));
+      }
+      group.codes.push({
+        code,
+        category: clean(cert.category || guidance.certificate_category),
+        title: firstNonEmpty(guidance.display_title_ko, cert.description, guidance.guidance_title, code),
+        description: firstNonEmpty(guidance.display_description_ko, cert.description),
+        whenRequired: plainConditionKo(guidance.when_required),
+        requiredEvidence: splitTokens(guidance.required_evidence).map(evidenceLabelKo),
+        notApplicableCondition: plainConditionKo(guidance.not_applicable_condition),
+        declarationWording: plainConditionKo(guidance.declaration_wording),
+      });
+      asList(guidance.footnote_guidelines).forEach((item) => {
+        const guideline = asObject(item);
+        const footnoteCode = clean(guideline.footnote_code);
+        const summary = clean(guideline.guidance_summary_ko);
+        const importerCheck = clean(guideline.importer_check_ko);
+        const legalReference = clean(guideline.legal_reference_en);
+        const footnoteDescription = firstNonEmpty(
+          guideline.footnote_description_ko,
+          guideline.footnote_description_en,
+        );
+        const exporterGuidance = clean(guideline.exporter_guidance_ko);
+        const verificationDetail = clean(guideline.verification_detail_ko);
+        if (exporterGuidance) {
+          group.exporterGuidance.add(exporterGuidance);
+        }
+        if (verificationDetail) {
+          group.verificationDetails.add(verificationDetail);
+        }
+        if (!footnoteCode || (!summary && !importerCheck && !legalReference && !footnoteDescription)) {
+          return;
+        }
+        group.footnoteGuidelines.set(`${groupName}_${footnoteCode}`, {
+          footnoteCode,
+          summary,
+          importerCheck,
+          footnoteDescription,
+          legalReference,
+        });
+      });
+      groups.set(groupName, group);
+    });
+  });
+
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      measureTypes: unique(Array.from(group.measureTypes)),
+      sourceCodes: unique(Array.from(group.sourceCodes)),
+      legalBases: unique(Array.from(group.legalBases)),
+      exporterGuidance: unique(Array.from(group.exporterGuidance)),
+      verificationDetails: unique(Array.from(group.verificationDetails)),
+      codes: group.codes.sort((a, b) => a.code.localeCompare(b.code)),
+      footnoteGuidelines: Array.from(group.footnoteGuidelines.values()).sort((a, b) =>
+        a.footnoteCode.localeCompare(b.footnoteCode),
+      ),
+    }))
+    .sort((a, b) => a.groupName.localeCompare(b.groupName));
+}
+
+function buildDutyRows(pkg) {
+  const rows = [];
+  const seen = new Set();
+
+  function addRow(row) {
+    const normalized = {
+      type: clean(row.type),
+      measure: clean(row.measure),
+      origin: clean(row.origin),
+      rate: formatRate(row.rate),
+      condition: clean(row.condition),
+      legalBase: clean(row.legalBase),
+    };
+    const key = JSON.stringify(normalized);
+    if (!normalized.rate || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    rows.push(normalized);
+  }
+
+  const basicDuty = asObject(pkg.basic_duty);
+  addRow({
+    type: "기본세율",
+    measure: firstNonEmpty(basicDuty.measure_type, "Third country duty"),
+    origin: joinList(basicDuty.origins) || "ERGA OMNES",
+    rate: asObject(basicDuty.duty).rate || basicDuty.rate || basicDuty.duty,
+    condition: "FTA/특혜 요건을 적용하지 않는 경우",
+    legalBase: basicDuty.legal_base,
+  });
+
+  asList(pkg.preferential_evidence).forEach((record) => {
+    const row = asObject(record);
+    const duty = asObject(row.duty);
+    addRow({
+      type: "FTA/특혜",
+      measure: row.measure_type || "Tariff preference",
+      origin: joinList(row.origins),
+      rate: duty.rate || duty.text || row.rate,
+      condition: "원산지 증빙 또는 FTA 원산지 요건 충족 시",
+      legalBase: row.legal_base,
+    });
+  });
+
+  asList(pkg.requirements).forEach((requirement) => {
+    const req = asObject(requirement);
+    const duty = asObject(req.duty);
+    const raw = clean(duty.raw || duty.text || duty.rate);
+    const rate = duty.rate || duty.text || "";
+    const isConditionOnly = raw.startsWith("Cond:") || clean(req.certificates);
+    if (isConditionOnly && !rate) {
+      return;
+    }
+    addRow({
+      type: clean(req.measure_type).toLowerCase().includes("preference") ? "FTA/특혜" : "세율",
+      measure: req.measure_type,
+      origin: joinList(req.origins),
+      rate,
+      condition: duty.conditions ? joinList(duty.conditions) : "",
+      legalBase: req.legal_base,
+    });
+  });
+
+  return rows.sort((a, b) => {
+    const rank = { "FTA/특혜": 0, "기본세율": 1, "세율": 2 };
+    return (rank[a.type] ?? 9) - (rank[b.type] ?? 9) || a.measure.localeCompare(b.measure);
+  });
+}
+
+function buildDutyBranches(rows) {
+  const dutyRows = asList(rows);
+  const fta = dutyRows.find((row) => row.type === "FTA/특혜");
+  const basic = dutyRows.find((row) => row.type === "기본세율");
+  const conditional = dutyRows.filter((row) => row.type !== "FTA/특혜" && row.type !== "기본세율");
+  return { fta, basic, conditional };
+}
+
+function cardHasCertOverlap(card, certificateCodes) {
+  const source = asObject(card);
+  const cardCerts = new Set(splitTokens(source.taric_certificates));
+  if (!cardCerts.size) {
+    return false;
+  }
+  return Array.from(cardCerts).some((code) => certificateCodes.has(code));
+}
+
+function buildBaselineRows(pkg, certificateGroups) {
+  const certificateCodes = new Set(
+    certificateGroups.flatMap((group) => group.codes.map((code) => code.code)),
+  );
+  const cards = asList(asObject(pkg.checklist_summary).document_binding_cards);
+  const baselineCards = cards.filter((card) => {
+    const source = asObject(card);
+    const sourceLayers = new Set(asList(source.source_bindings).map((binding) => clean(asObject(binding).source_layer)));
+    const documentId = clean(source.document_id);
+    if (CERT_DUPLICATE_DOCUMENT_IDS.has(documentId)) {
+      return false;
+    }
+    if (cardHasCertOverlap(source, certificateCodes)) {
+      return false;
+    }
+    return sourceLayers.has("baseline") || !sourceLayers.size;
+  });
+
+  if (baselineCards.length) {
+    return baselineCards.map((card) => {
+      const source = asObject(card);
+      return {
+        documentId: clean(source.document_id),
+        documentName: firstNonEmpty(source.document_name_ko, source.document_name, source.document_code),
+        family: clean(source.document_family),
+        requiredLevel: statusLabel(source.required_level),
+        preparedBy: firstNonEmpty(source.prepared_by_ko, source.prepared_by),
+        submittedTo: firstNonEmpty(source.submitted_to_ko, source.submitted_to),
+        fields: asList(source.fields)
+          .map((field) => evidenceLabelKo(asObject(field).label_ko || asObject(field).label || asObject(field).field_key))
+          .filter(Boolean),
+      };
+    });
+  }
+  return [];
+}
+
+function buildPreArrivalRows(certificateGroups) {
+  return certificateGroups.map((group) => {
+    const evidence = unique(group.codes.flatMap((code) => code.requiredEvidence));
+    const conditions = unique(group.codes.map((code) => code.whenRequired).filter(Boolean));
+    const exemptions = unique(group.codes.map((code) => code.notApplicableCondition).filter(Boolean));
+    return {
+      groupName: group.groupName,
+      codes: group.codes.map((code) => code.code).join(", "),
+      conditions,
+      evidence,
+      exemptions,
+    };
+  });
+}
+
+function DutyBranchView({ rows }) {
+  const { fta, basic, conditional } = buildDutyBranches(rows);
+  if (!fta && !basic && !conditional.length) {
+    return <EmptyBlock message="표시할 세율 정보가 없습니다." />;
   }
   return (
-    <div className="ddv-card-grid">
-      {records.map((row, index) => {
-        const source = asObject(row);
-        return (
-          <article className="ddv-card" key={`${clean(source.domain)}_${index}`}>
-            <div className="ddv-card-head">
-              <strong>{clean(source.domain) || "unknown"}</strong>
-              <span>{clean(source.applies) || "possibly_applies"}</span>
-            </div>
-            <p>{clean(source.scope) || "scope 없음"}</p>
-            <div className="ddv-card-meta">{clean(source.rule_family) || "rule family 없음"}</div>
-            {asList(source.missing_facts).length ? (
-              <div className="ddv-card-foot">부족 정보: {joinList(source.missing_facts)}</div>
-            ) : null}
-          </article>
-        );
-      })}
+    <div className="ddv-duty-flow">
+      <BranchCard
+        title="FTA 특혜 적용"
+        value={fta?.rate || "-"}
+        description={fta?.condition || "원산지 증빙 또는 FTA 원산지 요건 충족 시"}
+        tone="success"
+      />
+      <div className="ddv-duty-arrow">또는</div>
+      <BranchCard
+        title="기본세율"
+        value={basic?.rate || "-"}
+        description={basic?.condition || "FTA/특혜 요건을 적용하지 않는 경우"}
+      />
+      {conditional.length ? (
+        <>
+          <div className="ddv-duty-split">조건부 세율</div>
+          <div className="ddv-duty-conditions">
+            {conditional.map((row) => (
+              <BranchCard
+                key={`${row.measure}_${row.rate}_${row.condition}`}
+                title={row.measure || "조건부"}
+                value={row.rate}
+                description={row.condition || row.origin}
+                tone="conditional"
+              />
+            ))}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
 
-function LinkCards({ links }) {
-  const rows = asList(links);
-  if (!rows.length) {
-    return <EmptyBlock message="추가 외부 조회 링크가 없습니다." />;
-  }
+function RequirementViewSwitch({ activeView, onChange }) {
   return (
-    <div className="ddv-link-grid">
-      {rows.map((row, index) => {
-        const source = asObject(row);
-        const url = clean(source.url);
-        return (
-          <a
-            key={`${clean(source.name)}_${index}`}
-            className="ddv-link-card"
-            href={url || undefined}
-            target="_blank"
-            rel="noreferrer"
-          >
-            <strong>{clean(source.name) || "외부 링크"}</strong>
-            <span>{url || "URL 없음"}</span>
-          </a>
-        );
-      })}
+    <div className="ddv-role-switch" role="tablist" aria-label="수입요건 표시 방식">
+      <button
+        type="button"
+        className={activeView === REQUIREMENT_VIEW_KEYS.EXPORTER ? "active" : ""}
+        onClick={() => onChange(REQUIREMENT_VIEW_KEYS.EXPORTER)}
+        role="tab"
+        aria-selected={activeView === REQUIREMENT_VIEW_KEYS.EXPORTER}
+      >
+        수출자 가이드
+      </button>
+      <button
+        type="button"
+        className={activeView === REQUIREMENT_VIEW_KEYS.BROKER ? "active" : ""}
+        onClick={() => onChange(REQUIREMENT_VIEW_KEYS.BROKER)}
+        role="tab"
+        aria-selected={activeView === REQUIREMENT_VIEW_KEYS.BROKER}
+      >
+        관세사 검토
+      </button>
     </div>
   );
 }
 
-function SignalList({ items, emptyMessage }) {
-  const rows = asList(items);
-  if (!rows.length) {
-    return <EmptyBlock message={emptyMessage} />;
+function ExporterRequirementCard({ group }) {
+  return (
+    <article className="ddv-procedure-card exporter">
+      <div className="ddv-procedure-card-head">
+        <strong>{group.groupName}</strong>
+        <span>{group.codes.length} codes</span>
+      </div>
+      <div className="ddv-group-guidance">
+        <h3>사용자 가이드라인</h3>
+        {group.exporterGuidance.length ? (
+          group.exporterGuidance.map((item) => <p key={item}>{item}</p>)
+        ) : (
+          <p>이 TARIC 수입요건 묶음의 적용 여부를 먼저 확인하고, 연결된 certificate/declaration code와 footnote를 기준으로 세부 신고 경로를 검토합니다.</p>
+        )}
+        {group.verificationDetails.length ? (
+          <div className="ddv-guidance-checkpoints">
+            <strong>확인할 사항</strong>
+            <ul>
+              {group.verificationDetails.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function BrokerRequirementCard({ group }) {
+  return (
+    <article className="ddv-procedure-card broker">
+      <div className="ddv-procedure-card-head">
+        <strong>{group.groupName}</strong>
+        <span>human review</span>
+      </div>
+      <div className="ddv-review-grid">
+        <div>
+          <span>Measure</span>
+          <strong>{group.measureTypes.join(", ") || "-"}</strong>
+        </div>
+        <div>
+          <span>Source TARIC/CN</span>
+          <strong>{group.sourceCodes.join(", ") || "-"}</strong>
+        </div>
+        <div>
+          <span>Legal base</span>
+          <strong>{group.legalBases.join(", ") || "-"}</strong>
+        </div>
+      </div>
+
+      <div className="ddv-broker-section">
+        <h3>Certificate / declaration code</h3>
+        <div className="ddv-cert-list">
+          {group.codes.map((code) => (
+            <div className="ddv-cert-row" key={`${group.groupName}_broker_${code.code}`}>
+              <span>{code.code}</span>
+              <div>
+                <strong>{code.title}</strong>
+                {code.description ? <p>{code.description}</p> : null}
+                {code.whenRequired ? <em>적용 조건: {code.whenRequired}</em> : null}
+                {code.notApplicableCondition ? <em>비대상/면제: {code.notApplicableCondition}</em> : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="ddv-broker-section">
+        <h3>Footnote / regulation 확인</h3>
+        {group.footnoteGuidelines.length ? (
+          <div className="ddv-footnote-guidelines broker">
+            {group.footnoteGuidelines.map((guideline) => (
+              <div className="ddv-footnote-guide" key={`${group.groupName}_broker_${guideline.footnoteCode}`}>
+                <span>{guideline.footnoteCode}</span>
+                <div>
+                  {guideline.footnoteDescription ? <p>{guideline.footnoteDescription}</p> : null}
+                  {guideline.summary ? <p>{guideline.summary}</p> : null}
+                  {guideline.importerCheck ? <p>{guideline.importerCheck}</p> : null}
+                  {guideline.legalReference ? <em>{guideline.legalReference}</em> : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyBlock message="연결된 footnote 또는 legal reference가 없습니다." />
+        )}
+      </div>
+
+      <div className="ddv-review-note">
+        TARIC measure, certificate/declaration code, footnote 및 legal reference를 기준으로 대상/비대상 여부와 제출 경로를 최종 검토하세요.
+      </div>
+    </article>
+  );
+}
+
+function CertificateGroupCards({ groups }) {
+  const [activeView, setActiveView] = useState(REQUIREMENT_VIEW_KEYS.EXPORTER);
+  if (!groups.length) {
+    return <EmptyBlock message="한국 적용 TARIC certificate/declaration 코드가 없습니다." />;
   }
   return (
-    <div className="ddv-signal-list">
-      {rows.map((row, index) => {
-        const source = asObject(row);
-        return (
-          <article className="ddv-signal" key={`${clean(source.type)}_${index}`}>
-            <div className="ddv-signal-head">
-              <strong>{clean(source.type) || "signal"}</strong>
-              {clean(source.candidate_id) ? <span>{clean(source.candidate_id)}</span> : null}
+    <>
+      <RequirementViewSwitch activeView={activeView} onChange={setActiveView} />
+      <div className="ddv-requirement-list">
+        {groups.map((group) =>
+          activeView === REQUIREMENT_VIEW_KEYS.EXPORTER ? (
+            <ExporterRequirementCard group={group} key={group.groupName} />
+          ) : (
+            <BrokerRequirementCard group={group} key={group.groupName} />
+          ),
+        )}
+      </div>
+    </>
+  );
+}
+
+function PreArrivalCards({ rows }) {
+  if (!rows.length) {
+    return <EmptyBlock message="입항 전 준비로 전환할 certificate/declaration 묶음이 없습니다." />;
+  }
+  return (
+    <div className="ddv-procedure-grid">
+      {rows.map((row) => (
+        <article className="ddv-procedure-card" key={row.groupName}>
+          <div className="ddv-procedure-card-head">
+            <strong>{row.groupName}</strong>
+            <span>{row.codes}</span>
+          </div>
+          {row.conditions.length ? (
+            <div className="ddv-prep-block">
+              <h3>적용 조건</h3>
+              <ul>
+                {row.conditions.map((item) => <li key={item}>{item}</li>)}
+              </ul>
             </div>
-            <p>{clean(source.reason) || "설명 없음"}</p>
-            {asList(source.missing_facts).length ? (
-              <div className="ddv-signal-foot">부족 정보: {joinList(source.missing_facts)}</div>
-            ) : null}
-          </article>
-        );
-      })}
+          ) : null}
+          {row.evidence.length ? (
+            <div className="ddv-prep-block">
+              <h3>준비·확인 정보</h3>
+              <div className="ddv-pill-row">
+                {row.evidence.slice(0, 12).map((item) => <span className="ddv-pill" key={item}>{item}</span>)}
+              </div>
+            </div>
+          ) : null}
+          {row.exemptions.length ? (
+            <div className="ddv-prep-block">
+              <h3>비대상·면제 경로</h3>
+              <ul>
+                {row.exemptions.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            </div>
+          ) : null}
+        </article>
+      ))}
     </div>
   );
 }
 
 export default function DocumentPackageDetail({ packageData }) {
+  const [activeFlow, setActiveFlow] = useState(FLOW_KEYS.REQUIREMENTS);
   const pkg = asObject(packageData);
+
+  const viewModel = useMemo(() => {
+    const certificateGroups = buildCertificateGroups(pkg);
+    const dutyRows = buildDutyRows(pkg);
+    const baselineRows = buildBaselineRows(pkg, certificateGroups);
+    const preArrivalRows = buildPreArrivalRows(certificateGroups);
+    return { certificateGroups, dutyRows, baselineRows, preArrivalRows };
+  }, [pkg]);
+
   if (!Object.keys(pkg).length) {
     return <EmptyBlock message="문서 패키지 데이터가 없습니다." />;
   }
 
-  const summary = asObject(pkg.summary);
-  const basicDuty = asObject(pkg.basic_duty);
-  const requiredDocuments = deriveDocumentRows(pkg);
-  const customsChecks = asList(pkg.customs_check_items);
-  const preferentialEvidence = asList(pkg.preferential_evidence);
-  const productRegulations = asList(pkg.product_regulations);
-  const celexBasis = asList(pkg.celex_basis);
-  const externalLookup = asList(pkg.external_lookup);
-  const missingFacts = asList(pkg.missing_facts);
-  const backtrackingSignals = asList(pkg.backtracking_signals);
-  const conflicts = asList(pkg.conflicts);
-  const requirements = asList(pkg.requirements);
-
-  const metrics = [
-    { label: "TARIC10", value: clean(pkg.taric10) || "-" },
-    { label: "CN8", value: clean(pkg.cn8) || "-" },
-    { label: "기본 관세", value: clean(basicDuty.rate || summary.duty) || "-" },
-    { label: "필수 문서", value: `${requiredDocuments.length}건` },
-    { label: "세관/통제", value: `${customsChecks.length}건` },
-    { label: "제품 규제", value: `${productRegulations.length}건` },
-  ];
-
-  const overviewRows = [
-    ["문서 패키지 ID", clean(pkg.document_package_id) || "-"],
-    ["브랜치 분기", pkg.taric10_branch_count ? `${pkg.taric10_branch_index}/${pkg.taric10_branch_count}` : "단일 branch"],
-    ["분기 해석 방식", clean(pkg.taric10_resolution_mode) || "-"],
-    ["데이터 존재", yesNo(!!pkg.has_data)],
-    ["기본 관세 근거", clean(basicDuty.measure_type) || "-"],
-    ["기본 관세 CELEX", clean(basicDuty.celex_id) || "-"],
-  ];
+  const counts = {
+    [FLOW_KEYS.REQUIREMENTS]: viewModel.certificateGroups.length,
+    [FLOW_KEYS.DUTY]: viewModel.dutyRows.length,
+    [FLOW_KEYS.BASELINE]: viewModel.baselineRows.length,
+    [FLOW_KEYS.PRE_ARRIVAL]: viewModel.preArrivalRows.length,
+  };
+  const activeItem = FLOW_ITEMS.find((item) => item.key === activeFlow) || FLOW_ITEMS[0];
 
   return (
     <div className="ddv-shell">
-      <Section
-        title="개요"
-        description="공개 API document package DTO를 직접 렌더링합니다. 내부 raw artifact에는 의존하지 않습니다."
-      >
-        <MetricGrid items={metrics} />
-        <div className="ddv-overview-grid">
-          {overviewRows.map(([label, value]) => (
-            <div className="ddv-overview-row" key={label}>
-              <span>{label}</span>
-              <strong>{value}</strong>
-            </div>
-          ))}
+      <section className="ddv-overview-band">
+        <div>
+          <span>TARIC10</span>
+          <strong>{clean(pkg.taric10) || "-"}</strong>
         </div>
-        <div className="ddv-subblock">
-          <h3>요약된 주요 요구사항</h3>
-          <PillRow items={summary.main_requirements} emptyMessage="요약된 주요 요구사항이 없습니다." />
+        <div>
+          <span>CN8</span>
+          <strong>{clean(pkg.cn8) || "-"}</strong>
         </div>
-        <div className="ddv-subblock">
-          <h3>도메인 / 확인 필요 정보</h3>
-          <PillRow items={summary.domains} emptyMessage="추정 도메인이 없습니다." />
-          {asList(summary.unknowns).length ? (
-            <div className="ddv-inline-note">확인 필요: {joinList(summary.unknowns)}</div>
-          ) : null}
+        <div>
+          <span>수입요건 묶음</span>
+          <strong>{viewModel.certificateGroups.length}건</strong>
         </div>
-      </Section>
-
-      <Section title="필수/조건 문서" description="measure 기반 required document와 checklist 요약 fallback을 함께 반영합니다.">
-        <DataTable
-          rows={requiredDocuments}
-          emptyMessage="표시할 문서가 없습니다."
-          columns={[
-            { key: "title", label: "문서명" },
-            { key: "code", label: "코드" },
-            { key: "doc_kind", label: "유형" },
-            { key: "required_when", label: "요구 조건" },
-            { key: "celex_id", label: "CELEX" },
-          ]}
-        />
-      </Section>
-
-      <Section title="세관/통제 조치" description="검역·통제·제한 조치 bucket입니다.">
-        <DataTable
-          rows={customsChecks}
-          emptyMessage="세관/통제 조치가 없습니다."
-          columns={[
-            { key: "measure_type", label: "Measure" },
-            { key: "applies_to_korea", label: "KR 적용", render: (row) => yesNo(!!row.applies_to_korea) },
-            { key: "origins", label: "대상 원산지", render: (row) => joinList(row.origins) || "-" },
-            { key: "cert_codes", label: "증빙 코드", render: (row) => joinList(row.cert_codes) || "-" },
-            { key: "legal_base", label: "법적 근거" },
-            { key: "celex_id", label: "CELEX" },
-          ]}
-        />
-      </Section>
-
-      <Section title="관세 / 특혜" description="기본 관세와 preferential evidence를 분리해서 표시합니다.">
-        <div className="ddv-duty-card">
-          <strong>{clean(basicDuty.rate || summary.duty) || "-"}</strong>
-          <span>{clean(basicDuty.measure_type) || "기본 관세 정보 없음"}</span>
-          {clean(basicDuty.legal_base) ? <em>{clean(basicDuty.legal_base)}</em> : null}
+        <div>
+          <span>기본서류</span>
+          <strong>{viewModel.baselineRows.length}건</strong>
         </div>
-        <DataTable
-          rows={preferentialEvidence}
-          emptyMessage="특혜/우대 근거가 없습니다."
-          columns={[
-            { key: "measure_type", label: "Measure" },
-            { key: "origins", label: "대상 원산지", render: (row) => joinList(row.origins) || "-" },
-            { key: "duty", label: "관세", render: (row) => previewValue(asObject(row.duty).rate || asObject(row.duty).text, 120) || "-" },
-            { key: "legal_base", label: "법적 근거" },
-            { key: "celex_id", label: "CELEX" },
-          ]}
-        />
-      </Section>
+      </section>
 
-      <Section title="제품 규제 도메인" description="backend domain router가 추정한 제품 규제 family입니다.">
-        <RegulationCards rows={productRegulations} />
-      </Section>
+      <FlowNav activeKey={activeFlow} counts={counts} onSelect={setActiveFlow} />
 
-      <Section title="법령 근거" description="measure에서 추출된 CELEX basis입니다.">
-        <DataTable
-          rows={celexBasis}
-          emptyMessage="표시할 CELEX 근거가 없습니다."
-          columns={[
-            { key: "celex_id", label: "CELEX" },
-            { key: "title", label: "제목" },
-            { key: "for_measure_type", label: "연결 measure" },
-            { key: "match_status", label: "매치 상태" },
-          ]}
-        />
-      </Section>
+      {activeFlow === FLOW_KEYS.REQUIREMENTS ? (
+        <FlowPanel
+          title={activeItem.title}
+          description="taric_master_table의 한국 적용 measure에서 certificate/declaration code를 추출하고, taric_cert_table의 묶음명과 표시 설명으로 정리합니다."
+        >
+          <CertificateGroupCards groups={viewModel.certificateGroups} />
+        </FlowPanel>
+      ) : null}
 
-      <Section title="리스크 / 확인 필요" description="classification 재검토나 추가 사실 확인이 필요한 지점을 보여줍니다.">
-        <div className="ddv-risk-grid">
-          <div>
-            <h3>부족 정보</h3>
-            <PillRow items={missingFacts} emptyMessage="부족 정보가 없습니다." />
-          </div>
-          <div>
-            <h3>충돌</h3>
-            <PillRow items={conflicts} emptyMessage="충돌 항목이 없습니다." />
-          </div>
-        </div>
-        <SignalList items={backtrackingSignals} emptyMessage="분류 backtracking signal이 없습니다." />
-      </Section>
+      {activeFlow === FLOW_KEYS.DUTY ? (
+        <FlowPanel
+          title={activeItem.title}
+          description="기본세율과 FTA/특혜세율을 분리하고, 통제 조건만 있는 certificate/fallback row는 세율 목록에서 제외합니다."
+        >
+          <DutyBranchView rows={viewModel.dutyRows} />
+        </FlowPanel>
+      ) : null}
 
-      <Section title="외부 확인 링크" description="destination-side 확인이 필요한 공식/준공식 외부 조회 지점입니다.">
-        <LinkCards links={externalLookup} />
-      </Section>
+      {activeFlow === FLOW_KEYS.BASELINE ? (
+        <FlowPanel
+          title={activeItem.title}
+          description="baseline_table 성격의 기본 통관 서류만 표시하고, certificate code 묶음에서 이미 다룬 CHED/COI/IUU/CITES 성격의 중복 서류는 제외합니다."
+        >
+          <MiniTable
+            rows={viewModel.baselineRows}
+            emptyMessage="표시할 기본 통관 서류가 없습니다."
+            columns={[
+              { key: "documentName", label: "서류명" },
+              { key: "requiredLevel", label: "구분" },
+              { key: "preparedBy", label: "준비자" },
+              { key: "submittedTo", label: "제출처" },
+              { key: "fields", label: "준비 정보", render: (row) => joinList(row.fields) || "-" },
+            ]}
+          />
+        </FlowPanel>
+      ) : null}
 
-      <Section title="원본 공개 필드" description="DTO에 남아 있는 추가 field를 그대로 확인할 수 있는 fallback 영역입니다.">
-        <details className="ddv-details">
-          <summary>requirements ({requirements.length})</summary>
-          <pre>{JSON.stringify(requirements, null, 2)}</pre>
-        </details>
-        <details className="ddv-details">
-          <summary>checklist_summary</summary>
-          <pre>{JSON.stringify(asObject(pkg.checklist_summary), null, 2)}</pre>
-        </details>
-        <details className="ddv-details">
-          <summary>document_package JSON</summary>
-          <pre>{JSON.stringify(pkg, null, 2)}</pre>
-        </details>
-      </Section>
+      {activeFlow === FLOW_KEYS.PRE_ARRIVAL ? (
+        <FlowPanel
+          title={activeItem.title}
+          description="TARIC 수입요건에서 확인한 certificate/declaration 묶음을 입항 전 준비 체크리스트로 다시 배치합니다."
+        >
+          <PreArrivalCards rows={viewModel.preArrivalRows} />
+        </FlowPanel>
+      ) : null}
     </div>
   );
 }
-

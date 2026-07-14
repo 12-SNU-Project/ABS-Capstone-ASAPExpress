@@ -14,17 +14,25 @@ Document Package Resolver — TARIC10 코드 → EU 수입 시 요구 서류 패
 """
 from __future__ import annotations
 
+import os
 import re
+import threading
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from db.db_session_manager import DbSessionManager
 
 
 DB_SOURCE_NAME = "DbSessionManager"
+DOCUMENT_DATABASE_URL_ENV = "ASAP_DOCUMENT_DATABASE_URL"
+DOCUMENT_DB_POOL_MAX_CONNECTIONS = int(os.environ.get("ASAP_DOCUMENT_DB_POOL_MAX_CONNECTIONS", "4"))
+_DOCUMENT_DB_POOL_LOCK = threading.Lock()
+_DOCUMENT_DB_POOL = None
+_DOCUMENT_DB_POOL_KEY = None
 _TABLE_EXISTS_CACHE: dict[str, bool] = {}
 _TABLE_NAME_CACHE: dict[str, str] = {}
 _TABLE_COLUMNS_CACHE: dict[str, set[str]] = {}
@@ -37,11 +45,92 @@ TABLE_NAME_ALIASES = {
         "taric_certificate_declaration_guidance",
         "taric_cert_table",
     ),
+    "taric_footnote_table": (
+        "taric_footnote_table",
+        "taric_control_group_footnote",
+    ),
+    "taric_group_guidance_table": (
+        "taric_cert_footnote_relation",
+    ),
 }
+
+
+def _load_document_database_url_from_dotenv() -> str:
+    value = os.environ.get(DOCUMENT_DATABASE_URL_ENV, "").strip()
+    if value:
+        return value
+    env_path = Path(__file__).resolve().parents[3] / ".env"
+    try:
+        content = env_path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        key, _, raw_value = line.partition("=")
+        if key.strip() != DOCUMENT_DATABASE_URL_ENV:
+            continue
+        parsed = raw_value.strip()
+        if len(parsed) >= 2 and parsed[0] == parsed[-1] and parsed[0] in ('"', "'"):
+            parsed = parsed[1:-1]
+        if parsed:
+            os.environ[DOCUMENT_DATABASE_URL_ENV] = parsed
+            return parsed
+    return ""
+
+
+def _psycopg2_dsn(database_url: str) -> str:
+    if database_url.startswith("postgresql+psycopg2://"):
+        return "postgresql://" + database_url.split("://", 1)[1]
+    return database_url
+
+
+def _get_document_db_pool():
+    global _DOCUMENT_DB_POOL, _DOCUMENT_DB_POOL_KEY
+
+    document_database_url = _load_document_database_url_from_dotenv()
+    if not document_database_url:
+        return None
+
+    try:
+        from psycopg2 import pool as psycopg2_pool
+    except ImportError as exc:
+        raise RuntimeError(
+            "ASAP_DOCUMENT_DATABASE_URL is set but psycopg2 is not installed."
+        ) from exc
+
+    key = (_psycopg2_dsn(document_database_url), DOCUMENT_DB_POOL_MAX_CONNECTIONS)
+    with _DOCUMENT_DB_POOL_LOCK:
+        if _DOCUMENT_DB_POOL is not None and _DOCUMENT_DB_POOL_KEY == key:
+            return _DOCUMENT_DB_POOL
+        if _DOCUMENT_DB_POOL is not None:
+            _DOCUMENT_DB_POOL.closeall()
+        _TABLE_EXISTS_CACHE.clear()
+        _TABLE_NAME_CACHE.clear()
+        _TABLE_COLUMNS_CACHE.clear()
+        _DOCUMENT_DB_POOL = psycopg2_pool.ThreadedConnectionPool(
+            1,
+            DOCUMENT_DB_POOL_MAX_CONNECTIONS,
+            key[0],
+        )
+        _DOCUMENT_DB_POOL_KEY = key
+        return _DOCUMENT_DB_POOL
 
 
 @contextmanager
 def _connect_db() -> Iterator[object]:
+    document_pool = _get_document_db_pool()
+    if document_pool is not None:
+        connection = document_pool.getconn()
+        try:
+            yield connection
+        finally:
+            document_pool.putconn(connection)
+        return
+
     with DbSessionManager.GetInstance().OpenRawConnection() as connection:
         yield connection
 
@@ -781,6 +870,43 @@ def _binding_field_status(missing_facts: list[str], required_level: str) -> str:
     return "satisfied"
 
 
+def _baseline_localized_value(row: dict, *columns: str) -> str:
+    for column in columns:
+        value = row.get(column)
+        if value not in (None, "", [], ()):
+            return str(value).strip()
+    return ""
+
+
+def _split_aligned_tokens(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [token.strip() for token in re.split(r"[;,]", str(value)) if token.strip()]
+
+
+def _baseline_field_label_map(row: dict) -> dict[str, str]:
+    keys = _split_aligned_tokens(
+        row.get("field_keys")
+        or row.get("field_key")
+        or row.get("required_facts")
+    )
+    labels = _split_aligned_tokens(
+        row.get("field_labels_ko")
+        or row.get("field_keys_ko")
+        or row.get("field_names_ko")
+        or row.get("required_facts_ko")
+    )
+    if not keys or not labels:
+        return {}
+    return {
+        key: labels[index]
+        for index, key in enumerate(keys)
+        if index < len(labels) and key and labels[index]
+    }
+
+
 def _fetch_document_binding_cards(
     cur,
     requirements: list["Requirement"],
@@ -882,7 +1008,19 @@ def _fetch_document_binding_cards(
             "required_level": "optional",
             "decision_status": "optional",
             "prepared_by": baseline.get("prepared_by") or "",
+            "prepared_by_ko": _baseline_localized_value(
+                baseline,
+                "prepared_by_ko",
+                "preparer_ko",
+                "responsible_party_ko",
+            ),
             "submitted_to": baseline.get("submitted_to") or "",
+            "submitted_to_ko": _baseline_localized_value(
+                baseline,
+                "submitted_to_ko",
+                "submission_to_ko",
+                "authority_ko",
+            ),
             "fields": [],
             "pre_checks": [],
             "post_requirements": [],
@@ -917,9 +1055,11 @@ def _fetch_document_binding_cards(
 
         field_key = str(row.get("field_key") or "").strip()
         if (row.get("binding_action") or "") == "add_field" and field_key:
+            field_label_map = _baseline_field_label_map(baseline)
             field = field_maps[document_id].setdefault(field_key, {
                 "field_key": field_key,
                 "label": field_key.replace("_", " "),
+                "label_ko": field_label_map.get(field_key, ""),
                 "required_by": [],
                 "missing_facts": [],
                 "status": "satisfied",
@@ -1246,6 +1386,109 @@ def _fetch_certificate_guidance(cur, certificate_codes: list[str]) -> dict[str, 
         for row_dict in (dict(zip(cols, row)) for row in cur.fetchall())
         if row_dict.get("certificate_code")
     }
+
+
+def _fetch_group_footnote_guidelines(
+    cur,
+    control_document_group_ids: list[str],
+    footnote_codes: list[str],
+) -> dict[str, dict[str, dict]]:
+    if (
+        not control_document_group_ids
+        or not footnote_codes
+        or not _table_exists(cur, "taric_footnote_table")
+    ):
+        return {}
+    footnote_table = _resolve_table_name(cur, "taric_footnote_table")
+    fields = _select_fields(
+        cur,
+        "taric_footnote_table",
+        [
+            "control_document_group_id",
+            "footnote_code",
+            "footnote_description_en",
+            "footnote_description_ko",
+            "guidance_summary_ko",
+            "importer_check_ko",
+            "legal_reference_en",
+            "exporter_guidance_ko",
+            "verification_detail_ko",
+        ],
+    )
+    _execute(
+        cur,
+        f"""
+        SELECT {fields}
+        FROM {footnote_table}
+        WHERE control_document_group_id = ANY(%s)
+          AND footnote_code = ANY(%s)
+        """,
+        (control_document_group_ids, footnote_codes),
+    )
+    cols = [d[0] for d in cur.description]
+    guidelines: dict[str, dict[str, dict]] = defaultdict(dict)
+    for row in cur.fetchall():
+        row_dict = dict(zip(cols, row))
+        group_id = (row_dict.get("control_document_group_id") or "").strip()
+        footnote_code = (row_dict.get("footnote_code") or "").strip()
+        if not group_id or not footnote_code:
+            continue
+        guidelines[group_id][footnote_code] = {
+            "footnote_code": footnote_code,
+            "footnote_description_en": row_dict.get("footnote_description_en") or "",
+            "footnote_description_ko": row_dict.get("footnote_description_ko") or "",
+            "guidance_summary_ko": row_dict.get("guidance_summary_ko") or "",
+            "importer_check_ko": row_dict.get("importer_check_ko") or "",
+            "legal_reference_en": row_dict.get("legal_reference_en") or "",
+            "exporter_guidance_ko": row_dict.get("exporter_guidance_ko") or "",
+            "verification_detail_ko": row_dict.get("verification_detail_ko") or "",
+        }
+    return guidelines
+
+
+def _fetch_group_guidance(
+    cur,
+    control_document_group_ids: list[str],
+) -> dict[str, dict]:
+    if not control_document_group_ids or not _table_exists(cur, "taric_group_guidance_table"):
+        return {}
+    guidance_table = _resolve_table_name(cur, "taric_group_guidance_table")
+    fields = _select_fields(
+        cur,
+        "taric_group_guidance_table",
+        [
+            "control_document_group_id",
+            "control_document_group_name_ko",
+            "exporter_guidance_ko",
+            "verification_detail_ko",
+        ],
+    )
+    _execute(
+        cur,
+        f"""
+        SELECT DISTINCT {fields}
+        FROM {guidance_table}
+        WHERE control_document_group_id = ANY(%s)
+          AND (
+            coalesce(exporter_guidance_ko, '') <> ''
+            OR coalesce(verification_detail_ko, '') <> ''
+          )
+        """,
+        (control_document_group_ids,),
+    )
+    cols = [d[0] for d in cur.description]
+    guidance_by_group: dict[str, dict] = {}
+    for row in cur.fetchall():
+        row_dict = dict(zip(cols, row))
+        group_id = (row_dict.get("control_document_group_id") or "").strip()
+        if not group_id or group_id in guidance_by_group:
+            continue
+        guidance_by_group[group_id] = {
+            "control_document_group_name_ko": row_dict.get("control_document_group_name_ko") or "",
+            "exporter_guidance_ko": row_dict.get("exporter_guidance_ko") or "",
+            "verification_detail_ko": row_dict.get("verification_detail_ko") or "",
+        }
+    return guidance_by_group
 
 
 POST_REQ_FIELDS = [
@@ -2038,6 +2281,23 @@ def BuildDocumentPackage(
                 if c.strip()
             })
             certificate_guidance = _fetch_certificate_guidance(cur, all_certificate_codes)
+            all_control_group_ids = sorted({
+                (guidance.get("control_document_group_id") or "").strip()
+                for guidance in certificate_guidance.values()
+                if (guidance.get("control_document_group_id") or "").strip()
+            })
+            all_footnote_codes = sorted({
+                f.strip()
+                for r in rows
+                for f in (r.get("footnote_codes") or "").split(";")
+                if f.strip()
+            })
+            group_footnote_guidelines = _fetch_group_footnote_guidelines(
+                cur,
+                all_control_group_ids,
+                all_footnote_codes,
+            )
+            group_guidance = _fetch_group_guidance(cur, all_control_group_ids)
 
             # 5. Requirement 객체 구성
             requirements: list[Requirement] = []
@@ -2054,15 +2314,35 @@ def BuildDocumentPackage(
                         if c not in cert_set or len(d) > len(cert_set.get(c, '')):
                             cert_set[c] = d
 
-                certs = [
-                    Certificate(code=c, description=d, category=ClassifyCertificateCategory(c), guidance=certificate_guidance.get(c, {}))
-                    for c, d in sorted(cert_set.items())
-                ]
-
                 footnote_codes = sorted({
                     f.strip() for r in group_rows
                     for f in (r['footnote_codes'] or '').split(';') if f.strip()
                 })
+
+                def _guidance_for_requirement(certificate_code: str) -> dict:
+                    guidance = dict(certificate_guidance.get(certificate_code, {}))
+                    group_id = (guidance.get("control_document_group_id") or "").strip()
+                    if group_id:
+                        guidance.update(group_guidance.get(group_id, {}))
+                        guidance["footnote_guidelines"] = [
+                            guideline
+                            for guideline in (
+                                group_footnote_guidelines.get(group_id, {}).get(footnote_code)
+                                for footnote_code in footnote_codes
+                            )
+                            if guideline
+                        ]
+                    return guidance
+
+                certs = [
+                    Certificate(
+                        code=c,
+                        description=d,
+                        category=ClassifyCertificateCategory(c),
+                        guidance=_guidance_for_requirement(c),
+                    )
+                    for c, d in sorted(cert_set.items())
+                ]
 
                 kr_applicable = any(_measure_applies_to_korea(r) for r in group_rows)
                 origins = sorted({r['origin_description_en'] for r in group_rows if r['origin_description_en']})
