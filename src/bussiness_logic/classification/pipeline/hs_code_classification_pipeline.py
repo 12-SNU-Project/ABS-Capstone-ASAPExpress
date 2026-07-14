@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from bussiness_logic.pipeline.components import (
-    ClassificationComponent,
-    EvidenceIntakeComponent,
-    Hs2RoutingComponent,
+from bussiness_logic.classification.components.classification import ClassificationComponent
+from bussiness_logic.classification.components.hs2_routing import Hs2RoutingComponent
+from bussiness_logic.input_process.components.evidence_intake import EvidenceIntakeComponent
+from bussiness_logic.product.components.product_understanding import (
     ProductUnderstandingComponent,
 )
 from bussiness_logic.pipeline.export_requirement_pipeline import (

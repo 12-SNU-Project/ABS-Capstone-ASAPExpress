@@ -7,7 +7,7 @@ from pathlib import Path
 
 from bussiness_logic.pipeline.blackboard import BlackboardStore
 from bussiness_logic.artifact_paths import BuildSafeArtifactPathSegment
-from bussiness_logic.pipeline.document_recommendation_pipeline import (
+from bussiness_logic.document.pipeline.document_recommendation_pipeline import (
     DocumentRecommendationPipeline,
 )
 from bussiness_logic.pipeline.export_requirement_pipeline import (
@@ -15,15 +15,15 @@ from bussiness_logic.pipeline.export_requirement_pipeline import (
     _BuildInternalRunId,
     _ResolveProductArtifactId,
 )
-from bussiness_logic.pipeline.hs_code_classification_pipeline import (
+from bussiness_logic.classification.pipeline.hs_code_classification_pipeline import (
     HsCodeClassificationPipeline,
 )
-from bussiness_logic.pipeline.kurly_product_collection_pipeline import (
+from bussiness_logic.product.pipeline.kurly_product_collection_pipeline import (
     KurlyProductCollectionPipeline,
 )
 from bussiness_logic.pipeline.pipeline_context import PipelineContext, ProgressCallback
 from bussiness_logic.pipeline.pipeline_step import PipelineStep
-from bussiness_logic.pipeline.user_input_preparation_pipeline import (
+from bussiness_logic.input_process.pipeline.user_input_preparation_pipeline import (
     UserInputPreparationPipeline,
 )
 from bussiness_logic.utils.json_types import JsonObject
