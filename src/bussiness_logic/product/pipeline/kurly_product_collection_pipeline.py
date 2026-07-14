@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from bussiness_logic.pipeline.export_requirement_pipeline import (
+from bussiness_logic.product.pipeline.kurly_product_facts import (
     CollectKurlyProductFactsIfNeeded,
 )
 from bussiness_logic.pipeline.pipeline_context import PipelineContext

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from bussiness_logic.pipeline.component_base import BasePipelineComponent
 from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
-from bussiness_logic.pipeline.model.schema import JsonValue, Hs2RoutingDecision
+from bussiness_logic.classification.model.hs2_routing import Hs2RoutingDecision
 from bussiness_logic.classification.repositories.chapter_index_repository import LoadPreClassificationChapterRows
 from bussiness_logic.classification.services.pre_classification_router import (
     BuildPreClassificationRouteInput,
     PreClassificationDomainRouter,
 )
+from bussiness_logic.utils.json_types import JsonValue
 
 
 class Hs2RoutingComponent(BasePipelineComponent):

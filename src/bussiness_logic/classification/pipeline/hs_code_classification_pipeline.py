@@ -8,7 +8,7 @@ from bussiness_logic.input_process.components.evidence_intake import EvidenceInt
 from bussiness_logic.product.components.product_understanding import (
     ProductUnderstandingComponent,
 )
-from bussiness_logic.pipeline.export_requirement_pipeline import (
+from bussiness_logic.classification.pipeline.raw_input import (
     BuildRawInputFromPreparedFacts,
 )
 from bussiness_logic.pipeline.pipeline_context import PipelineContext

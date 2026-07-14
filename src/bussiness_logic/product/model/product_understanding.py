@@ -1,12 +1,10 @@
-"""Shared DTOs produced and consumed by the export pipeline."""
+"""Product understanding pipeline models."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
-JsonScalar = str | int | float | bool | None
-JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
+from bussiness_logic.utils.json_types import JsonValue
 
 
 def _desc(text: str) -> dict[str, str]:
@@ -243,102 +241,4 @@ class ProductUnderstandingPackage:
             "blocked_routing_terms": list(self.blockedRoutingTerms),
             "excluded_from_routing_terms": list(self.excludedFromRoutingTerms),
             "unknowns": list(self.unknowns),
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class Hs2RoutingDecision:
-    routingDecisionId: str = field(metadata=_desc("HS2 라우팅 결정 ID"))
-    productId: str = field(metadata=_desc("대상 상품 ID"))
-    sourceUnderstandingId: str = field(metadata=_desc("원천 ProductUnderstandingPackage ID"))
-    allowedHs2: tuple[str, ...] = field(metadata=_desc("허용 HS2 후보"))
-    blockedHs2: tuple[str, ...] = field(metadata=_desc("차단 HS2 후보"))
-    enforceHs2Boundary: bool = field(metadata=_desc("HS2 후보 범위 강제 여부"))
-    fallbackAllowed: bool = field(metadata=_desc("후보 없음/실패 시 fallback 허용 여부"))
-    domainScopes: tuple[str, ...] = field(metadata=_desc("도메인 scope 힌트"))
-    preGateDomains: tuple[str, ...] = field(metadata=_desc("사전 게이트 도메인"))
-    routingBasis: dict[str, JsonValue] = field(metadata=_desc("라우팅 판단 근거"))
-    candidateChapterDetails: tuple[dict[str, JsonValue], ...] = field(
-        default=(),
-        metadata=_desc("HS2 후보별 점수와 매칭 근거"),
-    )
-    missingFacts: tuple[str, ...] = field(default=(), metadata=_desc("라우팅에 부족한 fact"))
-
-    def ToBlackboard(self, *, createdBy: str, createdAt: str) -> dict[str, JsonValue]:
-        return {
-            "object_type": "Hs2RoutingDecision",
-            "created_by": createdBy,
-            "created_at": createdAt,
-            "routing_decision_id": self.routingDecisionId,
-            "product_id": self.productId,
-            "source_understanding_id": self.sourceUnderstandingId,
-            "allowed_hs2": list(self.allowedHs2),
-            "blocked_hs2": list(self.blockedHs2),
-            "enforce_hs2_boundary": self.enforceHs2Boundary,
-            "fallback_allowed": self.fallbackAllowed,
-            "domain_scopes": list(self.domainScopes),
-            "pre_gate_domains": list(self.preGateDomains),
-            "routing_basis": dict(self.routingBasis),
-            "candidate_chapter_details": list(self.candidateChapterDetails),
-            "missing_facts": list(self.missingFacts),
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class CandidateTaricBranchSet:
-    candidateId: str = field(metadata=_desc("원천 CandidateCodeSet 후보 ID"))
-    candidateRank: int = field(metadata=_desc("분류 후보 순위"))
-    hs6: str = field(metadata=_desc("후보 HS6"))
-    cn8: str = field(metadata=_desc("후보 CN8"))
-    branchStatus: str = field(metadata=_desc("TARIC10 branch 해석 상태"))
-    primaryTaric10: str = field(default="", metadata=_desc("호환성용 대표 TARIC10"))
-    primaryIsCompatibilityOnly: bool = field(
-        default=True,
-        metadata=_desc("대표 TARIC10이 법적 추천이 아닌 UI/API 호환값인지 여부"),
-    )
-    branchCount: int = field(default=0, metadata=_desc("CN8 하위 TARIC10 branch 수"))
-    declarableBranchCount: int = field(default=0, metadata=_desc("신고 가능한 leaf branch 수"))
-    branches: tuple[dict[str, JsonValue], ...] = field(
-        default=(),
-        metadata=_desc("CN8 하위 모든 TARIC10 branch 후보"),
-    )
-    resolutionNotes: tuple[str, ...] = field(default=(), metadata=_desc("해석 주석"))
-
-    def ToTrace(self) -> dict[str, JsonValue]:
-        return {
-            "candidate_id": self.candidateId,
-            "candidate_rank": self.candidateRank,
-            "hs6": self.hs6,
-            "cn8": self.cn8,
-            "branch_status": self.branchStatus,
-            "primary_taric10": self.primaryTaric10,
-            "primary_is_compatibility_only": self.primaryIsCompatibilityOnly,
-            "branch_count": self.branchCount,
-            "declarable_branch_count": self.declarableBranchCount,
-            "branches": [dict(branch) for branch in self.branches],
-            "resolution_notes": list(self.resolutionNotes),
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class TaricBranchSet:
-    taricBranchSetId: str = field(metadata=_desc("TARIC branch 묶음 ID"))
-    productId: str = field(metadata=_desc("대상 상품 ID"))
-    sourceCandidateSetId: str = field(metadata=_desc("원천 CandidateCodeSet ID"))
-    candidateBranches: tuple[CandidateTaricBranchSet, ...] = field(
-        metadata=_desc("분류 후보별 TARIC10 branch 묶음"),
-    )
-
-    def ToBlackboard(self, *, createdBy: str, createdAt: str) -> dict[str, JsonValue]:
-        return {
-            "object_type": "TaricBranchSet",
-            "created_by": createdBy,
-            "created_at": createdAt,
-            "taric_branch_set_id": self.taricBranchSetId,
-            "product_id": self.productId,
-            "source_candidate_set_id": self.sourceCandidateSetId,
-            "candidate_branches": [
-                candidateBranch.ToTrace()
-                for candidateBranch in self.candidateBranches
-            ],
         }

@@ -11,7 +11,7 @@ from typing import Any
 
 from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
 from bussiness_logic.pipeline.component_base import BasePipelineComponent
-from bussiness_logic.pipeline.model.schema import CandidateTaricBranchSet, TaricBranchSet
+from bussiness_logic.classification.model.taric_branch import CandidateTaricBranchSet, TaricBranchSet
 from bussiness_logic.classification.services.taric_branch_resolver import TaricBranchResolverTool
 from bussiness_logic.utils.json_types import JsonObject
 

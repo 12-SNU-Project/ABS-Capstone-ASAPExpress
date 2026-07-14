@@ -11,17 +11,17 @@ from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
 from bussiness_logic.pipeline.component_base import BasePipelineComponent
 from bussiness_logic.product.services.coi_loader import LoadCoiEvidence
 from bussiness_logic.product.services.identity_hint_agent import IdentityHintAgent
-from bussiness_logic.pipeline.model.schema import (
+from bussiness_logic.product.model.product_understanding import (
     CompositionFactSet,
     CoiEvidenceSet,
     DistilledIdentityFacts,
     EncyclopediaEvidenceSet,
     IdentityHintSet,
-    JsonValue,
     ProductUnderstandingPackage,
 )
 from bussiness_logic.product.services.encyclopedia_lookup import LookupEncyclopediaEvidence
 from bussiness_logic.product.services.identity_distiller import IdentityDistillerService
+from bussiness_logic.utils.json_types import JsonValue
 
 
 PERCENT_RE = re.compile(

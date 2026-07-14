@@ -10,7 +10,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
-from bussiness_logic.pipeline.model.schema import (
+from bussiness_logic.product.model.product_understanding import (
     EncyclopediaEntryDto,
     EncyclopediaEvidenceSet,
 )

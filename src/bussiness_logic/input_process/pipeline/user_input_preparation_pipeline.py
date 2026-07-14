@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from bussiness_logic.pipeline.export_requirement_pipeline import PrepareUserInputFacts
+from bussiness_logic.input_process.product_facts import PrepareUserInputFacts
 from bussiness_logic.pipeline.pipeline_context import PipelineContext
 
 

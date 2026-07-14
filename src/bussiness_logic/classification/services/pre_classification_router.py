@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Mapping, Sequence
 
-from bussiness_logic.pipeline.model.schema import JsonValue
+from bussiness_logic.utils.json_types import JsonValue
 
 
 ChapterIndexRowsProvider = Callable[[], Sequence[Mapping[str, object]]]
