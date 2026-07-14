@@ -1,35 +1,14 @@
-"""End-to-end export requirement pipeline runner.
-
-The runner owns BlackboardStore creation and ordered component execution. The
-components own classification and document recommendation logic.
-"""
+"""Kurly URL product facts collection."""
 from __future__ import annotations
 
 from functools import lru_cache
-import hashlib
 import json
-import os
-from collections.abc import Callable
 from threading import Lock
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
-
-from bussiness_logic.pipeline.blackboard import BlackboardStore
-from bussiness_logic.artifact_paths import (
-    BuildSafeArtifactPathSegment,
-    ExtractProductIdFromUrl,
-)
-from bussiness_logic.app_config import LoadAppConfig
-from bussiness_logic.classification.pipeline.raw_input import (
-    BuildRawInputFromPreparedFacts,
-    BuildRawInputFromUi,
-)
-from bussiness_logic.input_process.product_facts import PrepareUserInputFacts
-from bussiness_logic.product.pipeline.kurly_product_facts import (
-    CollectKurlyProductFactsIfNeeded,
-)
+from bussiness_logic.artifact_paths import ExtractProductIdFromUrl
+from bussiness_logic.pipeline.run_paths import APP_CONFIG, PROJECT_ROOT
 from bussiness_logic.utils.json_types import JsonObject
 
 if TYPE_CHECKING:
@@ -54,14 +33,9 @@ class ReconstructionDumpable(Protocol):
         """Return the JSON-safe reconstruction DTO payload."""
 
 
-APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
 PRODUCT_INPUT_ARTIFACT_ROOT = APP_CONFIG.paths.ResolvePath(
     PROJECT_ROOT,
     APP_CONFIG.paths.product_input_artifact_root,
-)
-PIPELINE_OUTPUTS_ROOT = APP_CONFIG.paths.ResolvePath(
-    PROJECT_ROOT,
-    APP_CONFIG.paths.pipeline_outputs_root,
 )
 _KURLY_OCR_RUNTIME_LOCK = Lock()
 
@@ -92,22 +66,6 @@ def _BuildKurlyOcrEngines() -> tuple[object, object | None]:
         ),
         PaddleOcrEngine(),
     )
-
-
-def _read_component_runs(store: BlackboardStore) -> list[JsonObject]:
-    if not store.component_runs_path.exists():
-        return []
-    out: list[JsonObject] = []
-    with store.component_runs_path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                out.append(json.loads(line))
-            except json.JSONDecodeError:
-                out.append({"raw": line, "parse_error": "invalid_jsonl"})
-    return out
 
 
 def BuildKurlyUrlFactsFromPipelineResult(
@@ -501,75 +459,3 @@ def _BuildPublicInputReconstruction(
         ),
         "warnings": list(reconstructionData.get("warnings", [])),
     }
-
-
-class ExportRequirementPipeline:
-    """Backward-compatible wrapper around ExportPipelineManager."""
-
-    def __init__(self, *, pipelineOutputsRoot: Path = PIPELINE_OUTPUTS_ROOT) -> None:
-        self._pipelineOutputsRoot = pipelineOutputsRoot
-
-    def Run(
-        self,
-        *,
-        query: str,
-        facts: JsonObject,
-        include_celex_excerpt: bool = False,
-        progress_callback: Callable[[JsonObject], None] | None = None,
-        job_id: str | None = None,
-    ) -> dict[str, object]:
-        from bussiness_logic.pipeline.pipeline_manager import ExportPipelineManager
-
-        return ExportPipelineManager(
-            pipelineOutputsRoot=self._pipelineOutputsRoot,
-        ).Run(
-            query=query,
-            facts=facts,
-            include_celex_excerpt=include_celex_excerpt,
-            progress_callback=progress_callback,
-            job_id=job_id,
-        )
-
-
-def RunExportRequirementPipeline(
-    *,
-    query: str,
-    facts: JsonObject,
-    include_celex_excerpt: bool = False,
-    progress_callback: Callable[[JsonObject], None] | None = None,
-    job_id: str | None = None,
-) -> dict[str, object]:
-    return ExportRequirementPipeline().Run(
-        query=query,
-        facts=facts,
-        include_celex_excerpt=include_celex_excerpt,
-        progress_callback=progress_callback,
-        job_id=job_id,
-    )
-
-
-def _ResolveProductArtifactId(query: str, facts: JsonObject) -> str:
-    explicitProductId = BuildSafeArtifactPathSegment(
-        str(facts.get("product_id") or ""),
-        fallback="",
-    )
-    if explicitProductId:
-        return explicitProductId
-
-    sourceUrl = str(facts.get("url") or "").strip()
-    if not sourceUrl:
-        sourceUrls = facts.get("source_urls") or []
-        if isinstance(sourceUrls, list) and sourceUrls:
-            sourceUrl = str(sourceUrls[0] or "").strip()
-    productIdFromUrl = ExtractProductIdFromUrl(sourceUrl)
-    if productIdFromUrl != "unknown":
-        return productIdFromUrl
-
-    fallbackSeed = str(facts.get("product_name") or query or "unknown")
-    fallbackDigest = hashlib.sha256(fallbackSeed.encode("utf-8")).hexdigest()[:12]
-    return f"manual-{fallbackDigest}"
-
-
-def _BuildInternalRunId(jobId: str) -> str:
-    digestBytes = hashlib.sha256(jobId.encode("utf-8")).digest()[:8]
-    return "run_{0:020d}".format(int.from_bytes(digestBytes, byteorder="big"))

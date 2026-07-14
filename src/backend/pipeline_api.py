@@ -188,7 +188,7 @@ class PipelineApi:
                 runDirText = str(resultData.get("run_dir") or "")
                 if runDirText and Path(runDirText).is_dir():
                     return Path(runDirText)
-        from bussiness_logic.pipeline.export_requirement_pipeline import (
+        from bussiness_logic.pipeline.run_paths import (
             PIPELINE_OUTPUTS_ROOT,
         )
 
@@ -274,7 +274,7 @@ class PipelineApi:
                 field="url",
             ).ToDict(), 400
         try:
-            from bussiness_logic.pipeline.export_requirement_pipeline import (
+            from bussiness_logic.product.pipeline.kurly_url_facts import (
                 RerunCachedInputReconstruction,
             )
             from backend.pipeline_projection import InputProcessingViewProjector

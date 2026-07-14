@@ -23,7 +23,7 @@ def CollectKurlyProductFactsIfNeeded(
         )
     ):
         try:
-            from bussiness_logic.pipeline.export_requirement_pipeline import (
+            from bussiness_logic.product.pipeline.kurly_url_facts import (
                 CollectKurlyUrlFacts,
             )
 

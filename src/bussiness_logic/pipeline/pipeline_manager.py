@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import uuid
 from pathlib import Path
 
@@ -10,10 +11,10 @@ from bussiness_logic.artifact_paths import BuildSafeArtifactPathSegment
 from bussiness_logic.document.pipeline.document_recommendation_pipeline import (
     DocumentRecommendationPipeline,
 )
-from bussiness_logic.pipeline.export_requirement_pipeline import (
+from bussiness_logic.pipeline.run_paths import (
+    BuildInternalRunId,
     PIPELINE_OUTPUTS_ROOT,
-    _BuildInternalRunId,
-    _ResolveProductArtifactId,
+    ResolveProductArtifactId,
 )
 from bussiness_logic.classification.pipeline.hs_code_classification_pipeline import (
     HsCodeClassificationPipeline,
@@ -73,11 +74,11 @@ class ExportPipelineManager:
         if safeJobId != effectiveJobId:
             raise ValueError("job_id must be a safe artifact path segment.")
 
-        productArtifactId = _ResolveProductArtifactId(query, facts)
+        productArtifactId = ResolveProductArtifactId(query, facts)
         runDirectory = self._pipelineOutputsRoot / productArtifactId / effectiveJobId
         return BlackboardStore.create(
             runtime_mode="webapp",
-            run_id=_BuildInternalRunId(effectiveJobId),
+            run_id=BuildInternalRunId(effectiveJobId),
             run_dir=runDirectory,
         )
 
@@ -94,3 +95,46 @@ class ExportPipelineManager:
             PipelineStep("hs_code_classification", HsCodeClassificationPipeline()),
             PipelineStep("document_recommendation", DocumentRecommendationPipeline()),
         ]
+
+
+class ExportRequirementPipeline:
+    """Backward-compatible wrapper around ExportPipelineManager."""
+
+    def __init__(self, *, pipelineOutputsRoot: Path = PIPELINE_OUTPUTS_ROOT) -> None:
+        self._pipelineOutputsRoot = pipelineOutputsRoot
+
+    def Run(
+        self,
+        *,
+        query: str,
+        facts: JsonObject,
+        include_celex_excerpt: bool = False,
+        progress_callback: Callable[[JsonObject], None] | None = None,
+        job_id: str | None = None,
+    ) -> dict[str, object]:
+        return ExportPipelineManager(
+            pipelineOutputsRoot=self._pipelineOutputsRoot,
+        ).Run(
+            query=query,
+            facts=facts,
+            include_celex_excerpt=include_celex_excerpt,
+            progress_callback=progress_callback,
+            job_id=job_id,
+        )
+
+
+def RunExportRequirementPipeline(
+    *,
+    query: str,
+    facts: JsonObject,
+    include_celex_excerpt: bool = False,
+    progress_callback: Callable[[JsonObject], None] | None = None,
+    job_id: str | None = None,
+) -> dict[str, object]:
+    return ExportRequirementPipeline().Run(
+        query=query,
+        facts=facts,
+        include_celex_excerpt=include_celex_excerpt,
+        progress_callback=progress_callback,
+        job_id=job_id,
+    )

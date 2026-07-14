@@ -21,7 +21,7 @@ def CreateBackendApp(
     webappDistDir: Path | None = None,
 ) -> Flask:
     if pipelineCallable is None:
-        from bussiness_logic.pipeline.export_requirement_pipeline import (
+        from bussiness_logic.pipeline.pipeline_manager import (
             RunExportRequirementPipeline,
         )
 
