@@ -663,6 +663,8 @@ def _BuildCurrentReconstructionDrawerBinding(
     productFacts = inputProcessingView.get("reconstructed_product_facts") or []
     factTexts = inputProcessingView.get("reconstructed_fact_texts") or []
     unresolvedFacts = inputProcessingView.get("unresolved_product_facts") or []
+    evidenceTraces = inputProcessingView.get("reconstruction_evidence_traces") or []
+    missingFactReasons = inputProcessingView.get("missing_fact_reasons") or []
     conflicts = inputProcessingView.get("product_fact_conflicts") or []
     return {
         "render_mode": "reconstructed_tables",
@@ -679,6 +681,12 @@ def _BuildCurrentReconstructionDrawerBinding(
         ] if isinstance(factTexts, list) else [],
         "unresolved_product_facts": _CompactFacts(
             unresolvedFacts if isinstance(unresolvedFacts, list) else [],
+        ),
+        "reconstruction_evidence_traces": (
+            evidenceTraces[:80] if isinstance(evidenceTraces, list) else []
+        ),
+        "missing_fact_reasons": (
+            missingFactReasons[:40] if isinstance(missingFactReasons, list) else []
         ),
         "product_fact_conflicts": [
             _ShortText(conflict) for conflict in conflicts
@@ -1319,7 +1327,7 @@ class KurlyMarketSmokeRunner:
         productUrl: str,
         pipelineResult: object,
     ) -> Dict[str]:
-        from bussiness_logic.pipeline.export_requirement_pipeline import (
+        from bussiness_logic.product.pipeline.kurly_url_facts import (
             BuildKurlyUrlFactsFromPipelineResult,
         )
 
@@ -1339,7 +1347,7 @@ class KurlyMarketSmokeRunner:
         from bussiness_logic.classification.pipeline.hs_code_classification_pipeline import (
             HsCodeClassificationPipeline,
         )
-        from bussiness_logic.pipeline.export_requirement_pipeline import (
+        from bussiness_logic.classification.pipeline.raw_input import (
             BuildRawInputFromUi,
         )
         from bussiness_logic.pipeline.pipeline_context import PipelineContext
@@ -1692,6 +1700,38 @@ class KurlyMarketSmokeRunner:
         ingredientPercentages = compositionFacts.get("ingredient_percentages") or []
         if not isinstance(ingredientPercentages, list):
             ingredientPercentages = []
+        extractionTraces = compositionFacts.get("extraction_traces") or []
+        if not isinstance(extractionTraces, list):
+            extractionTraces = []
+        compactExtractionTraces = [
+            {
+                "output_field": trace.get("output_field"),
+                "source_field_name": trace.get("source_field_name"),
+                "selected_span": _ShortText(trace.get("selected_span"), 160),
+                "normalized_value": _ShortText(trace.get("normalized_value"), 160),
+                "extraction_method": trace.get("extraction_method"),
+                "decision_reason": trace.get("decision_reason"),
+                "unresolved_reason": trace.get("unresolved_reason"),
+            }
+            for trace in extractionTraces
+            if isinstance(trace, Mapping)
+        ]
+        unresolvedTraceCount = sum(
+            1
+            for trace in compactExtractionTraces
+            if trace.get("unresolved_reason")
+        )
+        unresolvedExtractionTraces = [
+            trace
+            for trace in compactExtractionTraces
+            if trace.get("unresolved_reason")
+        ]
+        excludedExtractionTraces = [
+            trace
+            for trace in compactExtractionTraces
+            if not trace.get("unresolved_reason")
+            and trace.get("extraction_method") == "regex_percent_excluded"
+        ]
         return {
             "understanding_id": productUnderstanding.get("understanding_id"),
             "product_id": productUnderstanding.get("product_id"),
@@ -1782,6 +1822,13 @@ class KurlyMarketSmokeRunner:
                     "missing_composition_facts",
                 )
                 or [],
+                "extraction_trace_count": len(extractionTraces),
+                "unresolved_trace_count": unresolvedTraceCount,
+                "extraction_trace_samples": (
+                    unresolvedExtractionTraces
+                    + excludedExtractionTraces
+                    + compactExtractionTraces
+                )[:3],
             },
             "coi": {
                 "matched_documents": coiEvidence.get("matched_documents") or [],
@@ -2541,7 +2588,8 @@ class KurlyMarketSmokeRunner:
             (
                 "pipeline_step=llm_reconstruction component=ProductInputReconstructionService "
                 "agent=ProductFactReconstructionAgent output_dto=InputReconstructionResult "
-                "method={} facts={} tables={} unresolved={} conflicts={} used_llm={} "
+                "method={} facts={} tables={} unresolved={} evidence_traces={} "
+                "missing_fact_reasons={} conflicts={} used_llm={} "
                 "fallback_reason={} llm_status={} llm_request_artifact={} "
                 "llm_response_artifact={} llm_error_artifact={}"
             ),
@@ -2549,6 +2597,8 @@ class KurlyMarketSmokeRunner:
             len(inputReconstruction.get("facts", []) or []),
             len(inputReconstruction.get("reconstructed_tables", []) or []),
             len(inputReconstruction.get("unresolved_facts", []) or []),
+            len(inputReconstruction.get("evidence_traces", []) or []),
+            len(inputReconstruction.get("missing_fact_reasons", []) or []),
             len(inputReconstruction.get("conflicts", []) or []),
             inputReconstruction.get("used_llm_reconstruction"),
             inputReconstruction.get("fallback_reason"),
@@ -2812,7 +2862,8 @@ class KurlyMarketSmokeRunner:
                 "output_dto=CompositionFactSet lane=composition_lane composition_terms={} "
                 "ingredient_percentages={} composition_basis={} wrapper={} sauce={} "
                 "principal_status={} principal_candidates={} ingredient_entries={} "
-                "component_compositions={} missing_composition_facts={}"
+                "component_compositions={} extraction_traces={} unresolved_traces={} "
+                "missing_composition_facts={}"
             ),
             stepTotal,
             composition.get("composition_term_count"),
@@ -2824,6 +2875,8 @@ class KurlyMarketSmokeRunner:
             len(composition.get("principal_ingredient_candidates") or []),
             composition.get("ingredient_entry_count"),
             composition.get("component_composition_count"),
+            composition.get("extraction_trace_count"),
+            composition.get("unresolved_trace_count"),
             composition.get("missing_composition_facts"),
         )
         classificationLogger.info(
@@ -3215,6 +3268,12 @@ class KurlyMarketSmokeRunner:
             )
             or [],
             "unresolved_facts": unresolvedFacts,
+            "evidence_traces": inputReconstruction.get("evidence_traces", []) or [],
+            "missing_fact_reasons": inputReconstruction.get(
+                "missing_fact_reasons",
+                [],
+            )
+            or [],
             "conflicts": inputReconstruction.get("conflicts", []) or [],
             "fact_texts_for_classification": inputReconstruction.get(
                 "normalized_fact_texts",

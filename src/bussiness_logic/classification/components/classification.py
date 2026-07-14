@@ -251,6 +251,10 @@ class ClassificationComponent(BasePipelineComponent):
             if not ccs_candidates:
                 self.reason("Staged classifier produced no valid CN8.")
                 return False
+            selectedCn8 = str((ccs_candidates[0] or {}).get("cn8") or "")[:8]
+            selectedPath = pathByCn8.get(selectedCn8) or (
+                classificationPaths[0] if classificationPaths else {}
+            )
 
             store.append("candidate_code_sets", {
                 "object_type": "CandidateCodeSet",
@@ -269,7 +273,7 @@ class ClassificationComponent(BasePipelineComponent):
                 "classification_paths": classificationPaths,
                 "recovery_candidates": staged.get("recovery_candidates") or [],
                 "route_disagreements": staged.get("route_disagreements") or [],
-                "selected_path": classificationPaths[0] if classificationPaths else {},
+                "selected_path": selectedPath,
                 "candidates": ccs_candidates,
             })
             self.WriteBlackBoard(ccs_id)
