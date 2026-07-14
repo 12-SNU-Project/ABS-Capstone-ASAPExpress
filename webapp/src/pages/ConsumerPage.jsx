@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useClassificationRun } from "../hooks/useClassificationRun";
 import { asList, asObject, clean } from "../lib/format.js";
+import logo from "../assets/asap_black.png";
 
 // 내부 6단계를 소비자 언어 3단계로 축약
 const CONSUMER_STEPS = ["상품 정보 읽기", "코드 분류 중", "결과 정리"];
@@ -32,6 +33,12 @@ function formatCode(cn8) {
 export default function ConsumerPage() {
   const { result, busy, runPipeline } = useClassificationRun();
   const [query, setQuery] = useState("");
+  const [altIndex, setAltIndex] = useState(-1);
+
+  // 새 run이 뜨면 판례 선택을 추천 코드로 리셋
+  useEffect(() => {
+    setAltIndex(-1);
+  }, [result?.job_id]);
 
   // 네온 톤 통일: 톱바까지 어둡게
   useEffect(() => {
@@ -59,13 +66,29 @@ export default function ConsumerPage() {
   const primary = candidates.find((c) => c.llm_recommended) || candidates[0] || null;
   const alternates = candidates.filter((c) => c !== primary).slice(0, 2);
   const basis = clean(asList(primary?.classification_basis)[0]);
+  // 판례는 선택된 후보 기준 — 기본은 추천 코드, 대안 칩을 누르면 그 코드의 판례
+  const shownCandidate =
+    altIndex >= 0 && alternates[altIndex] ? alternates[altIndex] : primary;
+  const precedents = asList(shownCandidate?.similar_ebti_cases);
   const noCandidates = completed && !candidates.length;
   const stepIndex = consumerStepIndex(result);
 
   return (
     <div className="consumer">
       <div className="consumer-brand">
-        <div className="consumer-logo">ASAP</div>
+        <div className="consumer-logo-fire">
+          {/* Trapcode(AE) 렌더 에셋 슬롯: webapp/src/assets/logo-fire.webm(알파 포함)이
+              생기면 이 자리에 <video autoPlay loop muted playsInline>으로 교체 배선. */}
+          <span
+            className="consumer-logo-img"
+            role="img"
+            aria-label="ASAP"
+            style={{ WebkitMaskImage: `url(${logo})`, maskImage: `url(${logo})` }}
+          />
+          <span className="consumer-embers" aria-hidden="true">
+            <i /><i /><i /><i /><i /><i />
+          </span>
+        </div>
         <p>상품 링크 하나로 EU 수출 관세 코드를 찾아드립니다</p>
       </div>
 
@@ -121,17 +144,42 @@ export default function ConsumerPage() {
             ● {primary.llm_recommended ? "신뢰도 높음" : "후보 검토 권장"}
           </div>
           {alternates.length ? (
-            <div className="consumer-alts">
-              {alternates.map((candidate, index) => (
-                <span className="consumer-alt" key={index}>
-                  {formatCode(candidate.cn8)}
-                </span>
-              ))}
-            </div>
+            <>
+              <div className="consumer-alts">
+                {alternates.map((candidate, index) => (
+                  <button
+                    type="button"
+                    className={`consumer-alt ${altIndex === index ? "active" : ""}`}
+                    key={index}
+                    onClick={() => setAltIndex(altIndex === index ? -1 : index)}
+                  >
+                    {formatCode(candidate.cn8)}
+                  </button>
+                ))}
+              </div>
+              <div className="consumer-alt-hint">후보 코드를 누르면 해당 코드의 판례를 볼 수 있어요</div>
+            </>
           ) : null}
           <div className="consumer-why">
             {basis ? <>{basis.slice(0, 120)} </> : "분류 근거와 서류 연결은 상세 화면에서 확인할 수 있습니다. "}
             <Link to="/classification">자세히 보기 ›</Link>
+            {precedents.length ? (
+              <details className="consumer-precedents" open={altIndex >= 0}>
+                <summary>
+                  유사 EU 분류 판례 {precedents.length}건 참고
+                  {altIndex >= 0 ? ` (${formatCode(shownCandidate?.cn8)} 기준)` : ""} ›
+                </summary>
+                {precedents.map((item, index) => (
+                  <div className="consumer-precedent" key={index}>
+                    <div className="consumer-precedent-ref">{clean(item.evidence_ref)}</div>
+                    {clean(item.case_summary) ? (
+                      <div className="consumer-precedent-body">{clean(item.case_summary)}</div>
+                    ) : null}
+                    <div className="consumer-precedent-sim">{clean(item.similarity_comment)}</div>
+                  </div>
+                ))}
+              </details>
+            ) : null}
           </div>
         </div>
       ) : null}

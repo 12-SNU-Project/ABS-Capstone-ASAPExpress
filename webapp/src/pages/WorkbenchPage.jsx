@@ -363,6 +363,61 @@ function IntakePanel({ result }) {
   );
 }
 
+function CoiEvidenceBlock({ coi }) {
+  const evidence = asObject(coi);
+  const documents = asList(evidence.matched_documents);
+  const texts = asList(evidence.matched_texts);
+  const scores = asList(evidence.match_scores);
+  const rows = texts.map((text, index) => ({
+    문서: clean(documents[index] || documents[0] || "-"),
+    "매칭 텍스트": clean(text),
+    점수: scores[index] !== undefined ? scores[index] : "",
+  }));
+  return (
+    <>
+      <div className="cjs-subpanel-title">COI 보조 근거 ({rows.length}건)</div>
+      {rows.length ? (
+        <DataTable
+          rows={rows}
+          limit={8}
+          columns={[
+            { key: "문서", label: "문서", variant: "mono" },
+            { key: "매칭 텍스트", label: "매칭 텍스트" },
+            { key: "점수", label: "점수", variant: "mono" },
+          ]}
+        />
+      ) : (
+        <div className="cjs-muted">
+          {clean(evidence.error) ? `COI 조회 오류: ${clean(evidence.error)}` : "매칭된 COI 근거가 없습니다."}
+        </div>
+      )}
+    </>
+  );
+}
+
+function PrecedentList({ cases }) {
+  const list = asList(cases);
+  if (!list.length) {
+    return <div className="cjs-muted">이 후보와 연결된 유사 판례가 없습니다.</div>;
+  }
+  return (
+    <div className="cjs-precedent-list">
+      {list.map((item, index) => (
+        <div className="cjs-precedent" key={index}>
+          <div className="cjs-precedent-ref">{clean(item.evidence_ref)}</div>
+          {clean(item.case_summary) ? (
+            <div className="cjs-precedent-body">{clean(item.case_summary)}</div>
+          ) : null}
+          <div className="cjs-precedent-sim">{clean(item.similarity_comment)}</div>
+          {clean(item.difference_comment) ? (
+            <div className="cjs-precedent-diff">{clean(item.difference_comment)}</div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TermChips({ label, terms }) {
   const list = asList(terms).map((term) => clean(term)).filter(Boolean);
   if (!list.length) {
@@ -427,6 +482,7 @@ function UnderstandingPanel({ result }) {
           <TermChips label="형태 토큰" terms={hints.product_form_terms} />
           <TermChips label="챕터 힌트" terms={hints.chapter_hint_terms} />
           <TermChips label="라우팅 토큰" terms={understandingView.routing_terms} />
+          <CoiEvidenceBlock coi={understandingView.coi_evidence} />
         </div>
         <div>
           <div className="cjs-subpanel-title cjs-first">Composition lane</div>
@@ -528,6 +584,10 @@ function TracePanel({ candidate }) {
       ) : (
         <div className="cjs-muted">표시할 판단 메모가 없습니다.</div>
       )}
+      <div className="cjs-subpanel-title">
+        유사 EU 분류 판례 ({asList(candidate?.similar_ebti_cases).length}건)
+      </div>
+      <PrecedentList cases={candidate?.similar_ebti_cases} />
     </div>
   );
 }

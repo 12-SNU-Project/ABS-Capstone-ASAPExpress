@@ -1,6 +1,6 @@
 """Branch-index read adapter for staged narrowing (P2).
 
-Reads the Supabase tables loaded by ``load_branch_indexes.py`` —
+Reads the Supabase tables loaded by ``DB/uploaders/load_branch_indexes.py`` —
 ``hs4_branch_index`` / ``hs6_branch_index`` / ``cn8_branch_index`` — which hold,
 for every CN branching point, the node-local decision criterion
 (positive/negative terms, quantitative conditions, residual flag, and which

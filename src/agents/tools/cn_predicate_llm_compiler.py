@@ -185,6 +185,15 @@ def EnrichSubheadingLabels(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         segments = [s.strip() for s in combined.split(">")]
         middle = [s for s in segments[2:-1] if s]
+        # h6 경계 앵커: 경로에 h6 원문 세그먼트가 있으면 그 앞까지만이
+        # 진짜 subheading dash 헤더다. 그 뒤는 cn8 dash 그룹('Other' 등)
+        # 이라 h6 라벨에 끼면 190220이 'Other ; Stuffed pasta'로 오염되어
+        # residual로 오인·조건 전멸했다(실측: 1902 hs6 조건 3행, 190220 0).
+        orig_h6 = str(r.get("h6") or "").strip().lower()
+        if orig_h6:
+            low = [s.lower() for s in middle]
+            if orig_h6 in low:
+                middle = middle[:low.index(orig_h6)]
         if middle:
             # ';' 구분자: 부정 캡처 창([a-z ,\-]{2,60})이 세그먼트 경계를
             # 넘지 못하게 차단 — 무구분 병합은 "not stuffed ... Containing

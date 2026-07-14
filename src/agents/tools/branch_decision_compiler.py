@@ -127,11 +127,14 @@ def CompileGroupDecisions(
         "and", "for", "the", "its", "with", "from", "this", "thi", "that",
         "heading", "subheading", "chapter", "note", "other", "otherwise",
         "including", "included", "containing", "mixture", "weigh", "whether",
-        "kind", "use", "used",
+        "kind", "use", "used", "but", "less", "more", "than",
     })
     for seq, (code, label) in enumerate(ordered):
         clean = _COND_CLAUSE.sub(" ", str(label or ""))
-        if _RESIDUAL_RX is not None and _RESIDUAL_RX.search(clean.lower()):
+        # residual 판정은 leaf 세그먼트에서만 — 경로(dash 헤더)에 낀 'Other'
+        # 가 라벨 전체 검사에 걸리면 실 조건 보유 코드가 else로 오인된다.
+        if _RESIDUAL_RX is not None and _RESIDUAL_RX.search(
+                clean.rsplit(";", 1)[-1].strip().lower()):
             continue  # else 분기
         siblings = tuple(l for c, l in ordered if c != code)
         sibling_toks = _toks(" ".join(siblings))
@@ -194,6 +197,10 @@ def CompileGroupDecisions(
             if cond_type in ("material_composition", "intended_use_function",
                              "packaging_presentation"):
                 window = search_text[match.end():match.end() + 40]
+                # 창 경계가 단어 중간을 자르면 파편 토큰('mea','of')이 값이
+                # 된다(트리 원천 160249 실측: 'meat'→'mea'). 꼬리 미완 단어 제거.
+                if len(window) == 40 and not window[-1].isspace():
+                    window = window.rsplit(" ", 1)[0] if " " in window else window
                 span_source = window.split(";")[0].split(".")[0]
             else:
                 span_source = match.group(0)
@@ -252,6 +259,56 @@ def CompileGroupDecisions(
     return rows
 
 
+def _rows_from_tree(tree_path: str, allow_cn8: set | None) -> list[dict[str, Any]]:
+    """Nomenclature 트리(JSONL) → 컴파일 입력 행 (h4/h6/h8 라벨 조립).
+
+    cn_table combined_description의 '>' 경로 추측을 대체하는 명시 계층 원천.
+    suffix 80 = 코드 라인, suffix 10/20 = dash 그룹 헤더(조상 조건). 각 레벨
+    라벨 = [부모 레벨 이후의 그룹 헤더들 ; 자기 서술] — 헤더가 정확한 레벨
+    에 붙으므로 enrich의 'Other' 누출류(경로 추측 오염)가 원천 차단된다.
+    allow_cn8: cn_table에 실존하는 cn8만 통과(런타임 후보 공간과 정합 유지).
+    """
+    decl: dict[str, dict] = {}
+    order: list[dict] = []
+    with open(tree_path, encoding="utf-8") as f:
+        for line in f:
+            n = json.loads(line)
+            order.append(n)
+            if n.get("declarable"):
+                # 같은 code10의 suffix 80은 유일 (실측)
+                decl[n["code10"]] = n
+    rows: list[dict[str, Any]] = []
+    dropped = 0
+    for n in order:
+        if not n.get("declarable") or n["code10"][8:10] != "00":
+            continue  # cn8 레벨만 — TARIC10 leaf는 90% 게이트 후 단계
+        cn8 = n["cn8"]
+        if allow_cn8 is not None and cn8 not in allow_cn8:
+            dropped += 1
+            continue
+        heading = decl.get(cn8[:4] + "000000")
+        h4 = heading["description"] if heading else ""
+        n_head = len(heading["ancestor_conditions"]) if heading else 0
+        sub = decl.get(cn8[:6] + "0000")
+        if sub and sub["code10"] == n["code10"]:
+            # cn8 노드가 subheading 그 자체 (하위 분해 없음)
+            h6_heads = n["ancestor_conditions"][n_head:]
+            h6 = " ; ".join([*h6_heads, n["description"]]).strip(" ;")
+            h8 = ""
+        elif sub:
+            h6_heads = sub["ancestor_conditions"][n_head:]
+            h6 = " ; ".join([*h6_heads, sub["description"]]).strip(" ;")
+            h8_heads = n["ancestor_conditions"][len(sub["ancestor_conditions"]):]
+            h8 = " ; ".join([*h8_heads, n["description"]]).strip(" ;")
+        else:
+            h6 = ""
+            h8 = " ; ".join([*n["ancestor_conditions"][n_head:], n["description"]]).strip(" ;")
+        rows.append({"cn8": cn8, "h4": h4, "h6": h6, "h8": h8, "combined": ""})
+    if dropped:
+        print(f"  (트리 cn8 중 cn_table 밖 {dropped}개 제외 — 후보 공간 정합)")
+    return rows
+
+
 def _main() -> int:  # pragma: no cover — designer-run CLI
     args = sys.argv[1:]
     apply_mode = "--apply" in args
@@ -282,10 +339,20 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
         " coalesce(subheading_description,'') AS h6,"
         " coalesce(cn8_description,'') AS h8,"
         " coalesce(combined_description,'') AS combined FROM cn_table"), {})]
+    # --tree-source [path]: Nomenclature 트리를 라벨 원천으로 (경로 추측 대체).
+    # 미지정 시 기본 경로 DB/artifacts/nomenclature_tree.jsonl.
+    if "--tree-source" in args:
+        i = args.index("--tree-source")
+        nxt = args[i + 1] if i + 1 < len(args) else ""
+        tree_path = nxt if nxt and not nxt.startswith("--") else str(
+            Path(__file__).resolve().parents[3] / "DB" / "artifacts" / "nomenclature_tree.jsonl")
+        allow = {str(r.get("cn8") or "") for r in rows}
+        rows = _rows_from_tree(tree_path, allow)
+        print(f"트리 원천 컴파일: {tree_path} → {len(rows)}행")
     # --enrich-h6: dash 계층 포함 컴파일 (기본 OFF — 'not ... prepared' 배제가
     # 요리/구성품 상태 서열 미해결 상태에선 정답 면류를 위반시킬 위험 실측.
     # 극성·서열 처리와 함께 A/B로 도입한다.)
-    if "--enrich-h6" in args:
+    elif "--enrich-h6" in args:
         rows = EnrichSubheadingLabels(rows)
     if chapters:
         rows = [r for r in rows if str(r.get("cn8") or "")[:2] in set(chapters)]
