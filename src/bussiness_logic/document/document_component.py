@@ -30,10 +30,10 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from agents.component_base import BasePipelineComponent
+from bussiness_logic.pipeline.component_base import BasePipelineComponent
 from bussiness_logic.document.document_package_builder import BuildDocumentPackage
-from agents.tools.domain_router import DomainRouteResult, DomainRouterTool
-from agents.blackboard import BlackboardStore, now_iso
+from bussiness_logic.document.services.domain_router import DomainRouteResult, DomainRouterTool
+from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
 from bussiness_logic.utils.json_types import JsonObject
 
 

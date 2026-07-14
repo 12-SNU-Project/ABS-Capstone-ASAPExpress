@@ -239,6 +239,16 @@ class KurlyUrlIntakePipeline:
             "structured_ocr" in imageResult.processingTimes
             for imageResult in imageResults
         )
+        successfulOcrImageCount = sum(
+            imageResult.error is None
+            and imageResult.skippedReason is None
+            and imageResult.ocrText.strip() != ""
+            for imageResult in imageResults
+        )
+        skippedOcrImageCount = sum(
+            imageResult.skippedReason is not None
+            for imageResult in imageResults
+        )
         screenedRawImageCount = sum(
             imageResult.structuredOcr.textMergeMode == "screened_raw_only"
             for imageResult in imageResults
@@ -250,13 +260,16 @@ class KurlyUrlIntakePipeline:
                 succeeded=not errors,
                 message=(
                     "candidate_image_count={0}, selected_image_count={1}, "
-                    "ocr_image_count={2}, structured_ocr_image_count={3}, "
-                    "screened_raw_image_count={4}, reused_image_count={5}, "
-                    "error_count={6}"
+                    "ocr_image_count={2}, successful_ocr_count={3}, "
+                    "skipped_ocr_count={4}, structured_ocr_image_count={5}, "
+                    "screened_raw_image_count={6}, reused_image_count={7}, "
+                    "error_count={8}"
                 ).format(
                     candidateImageCount,
                     selectedImageCount,
                     len(imageResults),
+                    successfulOcrImageCount,
+                    skippedOcrImageCount,
                     structuredOcrImageCount,
                     screenedRawImageCount,
                     sum(

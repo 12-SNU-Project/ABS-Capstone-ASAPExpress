@@ -195,7 +195,21 @@ class KurlyUrlIntakeResult(BaseModel):
         successfulImageResults = [
             imageResult
             for imageResult in self.ocrImageResults
-            if imageResult.error is None and imageResult.ocrText.strip() != ""
+            if (
+                imageResult.error is None
+                and imageResult.skippedReason is None
+                and imageResult.ocrText.strip() != ""
+            )
+        ]
+        skippedImageResults = [
+            imageResult
+            for imageResult in self.ocrImageResults
+            if imageResult.skippedReason is not None
+        ]
+        failedImageResults = [
+            imageResult
+            for imageResult in self.ocrImageResults
+            if imageResult.error is not None
         ]
         structuredTableImageResults = [
             imageResult
@@ -205,9 +219,8 @@ class KurlyUrlIntakeResult(BaseModel):
         summary: Dict[str, object] = {
             "image_result_count": len(self.ocrImageResults),
             "successful_image_count": len(successfulImageResults),
-            "failed_image_count": (
-                len(self.ocrImageResults) - len(successfulImageResults)
-            ),
+            "skipped_image_count": len(skippedImageResults),
+            "failed_image_count": len(failedImageResults),
             "artifact_image_count": sum(
                 len(imageResult.imagePaths)
                 if imageResult.imagePaths
@@ -250,7 +263,15 @@ class KurlyUrlIntakeResult(BaseModel):
                 ),
                 "image_artifacts": [
                     {
-                        "index": imageIndex,
+                        "index": imageResult.imageIndex or imageIndex,
+                        "image_index": imageResult.imageIndex or imageIndex,
+                        "status": (
+                            "error"
+                            if imageResult.error is not None
+                            else "skipped"
+                            if imageResult.skippedReason is not None
+                            else "ok"
+                        ),
                         "image_path": (
                             str(imageResult.imagePath)
                             if imageResult.imagePath is not None
@@ -276,6 +297,7 @@ class KurlyUrlIntakeResult(BaseModel):
                         ),
                         "raw_text_length": len(imageResult.structuredOcr.rawText),
                         "processing_times": dict(imageResult.processingTimes),
+                        "skipped_reason": imageResult.skippedReason,
                         "error": imageResult.error,
                     }
                     for imageIndex, imageResult in enumerate(
@@ -283,7 +305,6 @@ class KurlyUrlIntakeResult(BaseModel):
                         start=1,
                     )
                     if imageResult.imagePath is not None
-                    and imageResult.ocrText.strip() != ""
                 ],
             }
         )

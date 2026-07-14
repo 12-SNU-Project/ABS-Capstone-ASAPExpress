@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from agents.tools.staged_classification import (  # noqa: E402
+from bussiness_logic.classification.services.staged_classification import (  # noqa: E402
     StagedClassificationTool, _tokens, LEVEL_AXES, LEVEL_AXIS_WEIGHTS,
 )
 

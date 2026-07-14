@@ -1,8 +1,8 @@
 from pytest import MonkeyPatch
 
-from agents.llm_agents import identity_hint_agent
-from agents.pipeline_components import product_understanding
-from agents.pipeline_dto import (
+from bussiness_logic.pipeline.components import product_understanding
+from bussiness_logic.product.services import identity_hint_agent
+from bussiness_logic.pipeline.model.pipeline_dto import (
     CoiEvidenceSet,
     DistilledIdentityFacts,
     EncyclopediaEvidenceSet,

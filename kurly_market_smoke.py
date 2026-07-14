@@ -98,10 +98,15 @@ ANSWER_TARIC10_COLUMNS = (
 )
 RECALL_LEVELS = (("hs2", 2), ("hs4", 4), ("hs6", 6), ("cn8", 8))
 SMOKE_LOG_CONTEXT_PATTERN = re.compile(
-    r"\s*(?:pipeline_step|component)=([^\s]+)"
+    r"\s*(?:pipeline|pipeline_step|step_index|step_total|component|input_dto|output_dto)=([^\s]+)"
 )
 SMOKE_LOG_STEP_PATTERN = re.compile(r"(?:^|\s)pipeline_step=([^\s]+)")
+SMOKE_LOG_PIPELINE_PATTERN = re.compile(r"(?:^|\s)pipeline=([^\s]+)")
+SMOKE_LOG_STEP_INDEX_PATTERN = re.compile(r"(?:^|\s)step_index=([^\s]+)")
+SMOKE_LOG_STEP_TOTAL_PATTERN = re.compile(r"(?:^|\s)step_total=([^\s]+)")
 SMOKE_LOG_COMPONENT_PATTERN = re.compile(r"(?:^|\s)component=([^\s]+)")
+SMOKE_LOG_INPUT_DTO_PATTERN = re.compile(r"(?:^|\s)input_dto=([^\s]+)")
+SMOKE_LOG_OUTPUT_DTO_PATTERN = re.compile(r"(?:^|\s)output_dto=([^\s]+)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +117,8 @@ class AnswerRecord:
 
 
 class _BoundLogger:
-    _currentSectionKey: tuple[str, str, str] | None = None
+    _currentSectionKey: tuple[str, ...] | None = None
+    _currentPipelineKey: tuple[str, str] | None = None
 
     def __init__(self, logger: logging.Logger, className: str, functionName: str) -> None:
         self._logger = logger
@@ -133,13 +139,18 @@ class _BoundLogger:
             renderedMessage = message.format(*args)
         except Exception:
             renderedMessage = " ".join([message, *[str(arg) for arg in args]])
+        hasStepContext = self._HasStepContext(renderedMessage)
         self._emitSectionHeaderIfNeeded(level, renderedMessage)
         renderedMessage = self._StripStepComponentContext(renderedMessage)
         if not renderedMessage:
             return
+        if hasStepContext:
+            renderedMessage = f"  {renderedMessage}"
         self._logger.log(level, "%s", renderedMessage)
 
     def _emitSectionHeaderIfNeeded(self, level: int, message: str) -> None:
+        if self._emitPipelineHeaderIfNeeded(level, message):
+            return
         stepMatch = SMOKE_LOG_STEP_PATTERN.search(message)
         if stepMatch is None:
             return
@@ -150,7 +161,37 @@ class _BoundLogger:
             if componentMatch is not None
             else self._functionName.strip("_") or self._className
         )
-        sectionKey = (stepName, self._className, componentName)
+        pipelineName = self._InferPipelineName(stepName, componentName)
+        inputDtoMatch = SMOKE_LOG_INPUT_DTO_PATTERN.search(message)
+        outputDtoMatch = SMOKE_LOG_OUTPUT_DTO_PATTERN.search(message)
+        explicitInputDto = (
+            inputDtoMatch.group(1) if inputDtoMatch is not None else ""
+        )
+        explicitOutputDto = (
+            outputDtoMatch.group(1) if outputDtoMatch is not None else ""
+        )
+        inputDto, outputDto = self._InferStepDtos(
+            pipelineName=pipelineName,
+            stepName=stepName,
+            componentName=componentName,
+            explicitInputDto=explicitInputDto,
+            explicitOutputDto=explicitOutputDto,
+        )
+        stepTotal = self._InferPipelineStepTotal(pipelineName, "")
+        stepIndex = self._InferLegacyStepIndex(
+            pipelineName=pipelineName,
+            stepName=stepName,
+            outputDto=outputDto,
+        )
+        pipelineKey = (pipelineName, stepTotal)
+        if pipelineKey != _BoundLogger._currentPipelineKey:
+            _BoundLogger._currentPipelineKey = pipelineKey
+            self._logger.log(
+                level,
+                "%s",
+                f"==========[Pipeline: {pipelineName} | Total Step = {stepTotal}]==========",
+            )
+        sectionKey = (pipelineName, stepIndex, componentName, inputDto, outputDto)
         if sectionKey == _BoundLogger._currentSectionKey:
             return
         _BoundLogger._currentSectionKey = sectionKey
@@ -158,9 +199,210 @@ class _BoundLogger:
             level,
             "%s",
             (
-                "==========[STEP: {0} Pipeline: {1} Component: {2}]=========="
-            ).format(stepName, self._className, componentName),
+                f"[Step {stepIndex}/{stepTotal} Component: {componentName} "
+                f"Input: {inputDto} Output: {outputDto}]"
+            ),
         )
+
+    def _emitPipelineHeaderIfNeeded(self, level: int, message: str) -> bool:
+        pipelineMatch = SMOKE_LOG_PIPELINE_PATTERN.search(message)
+        if pipelineMatch is None:
+            return False
+        stepIndexMatch = SMOKE_LOG_STEP_INDEX_PATTERN.search(message)
+        stepTotalMatch = SMOKE_LOG_STEP_TOTAL_PATTERN.search(message)
+        componentMatch = SMOKE_LOG_COMPONENT_PATTERN.search(message)
+        inputDtoMatch = SMOKE_LOG_INPUT_DTO_PATTERN.search(message)
+        outputDtoMatch = SMOKE_LOG_OUTPUT_DTO_PATTERN.search(message)
+        pipelineName = pipelineMatch.group(1)
+        explicitStepTotal = stepTotalMatch.group(1) if stepTotalMatch is not None else ""
+        stepTotal = self._InferPipelineStepTotal(pipelineName, explicitStepTotal)
+        pipelineKey = (pipelineName, stepTotal)
+        if pipelineKey != _BoundLogger._currentPipelineKey:
+            _BoundLogger._currentPipelineKey = pipelineKey
+            self._logger.log(
+                level,
+                "%s",
+                f"==========[Pipeline: {pipelineName} | Total Step = {stepTotal}]==========",
+            )
+        if stepIndexMatch is None:
+            return True
+        stepIndex = stepIndexMatch.group(1)
+        componentName = (
+            componentMatch.group(1)
+            if componentMatch is not None
+            else self._functionName.strip("_") or self._className
+        )
+        explicitInputDto = inputDtoMatch.group(1) if inputDtoMatch is not None else ""
+        explicitOutputDto = (
+            outputDtoMatch.group(1) if outputDtoMatch is not None else ""
+        )
+        inputDto, outputDto = self._InferStepDtos(
+            pipelineName=pipelineName,
+            stepName=stepIndex,
+            componentName=componentName,
+            explicitInputDto=explicitInputDto,
+            explicitOutputDto=explicitOutputDto,
+        )
+        sectionKey = (pipelineName, stepIndex, componentName, inputDto, outputDto)
+        if sectionKey == _BoundLogger._currentSectionKey:
+            return True
+        _BoundLogger._currentSectionKey = sectionKey
+        self._logger.log(
+            level,
+            "%s",
+            (
+                f"[Step {stepIndex}/{stepTotal} "
+                f"Component: {componentName} Input: {inputDto} Output: {outputDto}]"
+            ),
+        )
+        return True
+
+    @staticmethod
+    def _HasStepContext(message: str) -> bool:
+        return (
+            SMOKE_LOG_PIPELINE_PATTERN.search(message) is not None
+            or SMOKE_LOG_STEP_PATTERN.search(message) is not None
+        )
+
+    @staticmethod
+    def _InferPipelineName(stepName: str, componentName: str) -> str:
+        if stepName in {
+            "preflight",
+            "product_collection",
+            "smoke_boot",
+            "summary",
+            "evaluation",
+        }:
+            return "KurlyMarketSmokePipeline"
+        if componentName.endswith("Pipeline"):
+            return componentName
+        if stepName in {"collection_ocr", "llm_reconstruction"}:
+            return "KurlyUrlIntakePipeline"
+        return f"{stepName}_pipeline"
+
+    @staticmethod
+    def _InferPipelineStepTotal(pipelineName: str, explicitStepTotal: str) -> str:
+        if explicitStepTotal and explicitStepTotal != "0":
+            return explicitStepTotal
+        return {
+            "KurlyMarketSmokePipeline": "4",
+            "KurlyUrlIntakePipeline": "6",
+            "HsCodeClassificationPipeline": "5",
+            "UserInputPreparationPipeline": "1",
+            "KurlyProductCollectionPipeline": "1",
+            "DocumentRecommendationPipeline": "1",
+        }.get(pipelineName, "1")
+
+    @staticmethod
+    def _InferLegacyStepIndex(
+        *,
+        pipelineName: str,
+        stepName: str,
+        outputDto: str,
+    ) -> str:
+        if pipelineName == "KurlyUrlIntakePipeline":
+            if stepName == "llm_reconstruction":
+                return "5"
+            if stepName == "collection_ocr":
+                if outputDto == "KurlyCollectionResult":
+                    return "3"
+                return "6"
+        return {
+            ("KurlyMarketSmokePipeline", "smoke_boot"): "1",
+            ("KurlyMarketSmokePipeline", "preflight"): "2",
+            ("KurlyMarketSmokePipeline", "product_collection"): "3",
+            ("KurlyMarketSmokePipeline", "summary"): "4",
+            ("KurlyMarketSmokePipeline", "evaluation"): "4",
+            ("HsCodeClassificationPipeline", "build_raw_input"): "1",
+            ("HsCodeClassificationPipeline", "evidence_intake"): "2",
+            ("HsCodeClassificationPipeline", "product_understanding"): "3",
+            ("HsCodeClassificationPipeline", "identity_distillation"): "3",
+            ("HsCodeClassificationPipeline", "identity_hinting"): "3",
+            ("HsCodeClassificationPipeline", "llm_reconstruction_projection"): "3",
+            ("HsCodeClassificationPipeline", "composition_lane"): "3",
+            ("HsCodeClassificationPipeline", "domain_routing"): "4",
+            ("HsCodeClassificationPipeline", "beam_classification"): "5",
+            ("HsCodeClassificationPipeline", "llm_validation"): "5",
+            ("HsCodeClassificationPipeline", "evaluation"): "5",
+        }.get((pipelineName, stepName), "1")
+
+    @staticmethod
+    def _InferStepDtos(
+        *,
+        pipelineName: str,
+        stepName: str,
+        componentName: str,
+        explicitInputDto: str,
+        explicitOutputDto: str,
+    ) -> tuple[str, str]:
+        outputDto = explicitOutputDto or {
+            ("KurlyMarketSmokePipeline", "smoke_boot"): "SmokeRunConfig",
+            ("KurlyMarketSmokePipeline", "preflight"): "PreflightStatus",
+            ("KurlyMarketSmokePipeline", "product_collection"): (
+                "KurlySmokeCollectionBatch"
+            ),
+            ("KurlyMarketSmokePipeline", "summary"): "RuntimeSmokeSummary",
+            ("KurlyMarketSmokePipeline", "evaluation"): "AnswerRecallSummary",
+            ("KurlyUrlIntakePipeline", "collection_ocr"): "KurlyUrlIntakeResult",
+            ("KurlyUrlIntakePipeline", "llm_reconstruction"): (
+                "InputReconstructionResult"
+            ),
+        }.get((pipelineName, stepName), "-")
+        inputDto = explicitInputDto or _BoundLogger._InferInputDto(
+            pipelineName=pipelineName,
+            stepName=stepName,
+            componentName=componentName,
+            outputDto=outputDto,
+        )
+        return inputDto, outputDto
+
+    @staticmethod
+    def _InferInputDto(
+        *,
+        pipelineName: str,
+        stepName: str,
+        componentName: str,
+        outputDto: str,
+    ) -> str:
+        if pipelineName == "KurlyUrlIntakePipeline":
+            if stepName == "collection_ocr":
+                if outputDto == "KurlyCollectionResult":
+                    return "RenderedPageEvidence"
+                return "KurlyUrlIntakeInput"
+            if stepName == "llm_reconstruction":
+                if outputDto == "RuntimeAdapter":
+                    return "LlmRuntimeConfig"
+                if outputDto in {"ClassificationFact", "ReconstructionTable"}:
+                    return "InputReconstructionResult"
+                return "InputEvidencePackage"
+        if pipelineName == "KurlyMarketSmokePipeline":
+            if stepName == "smoke_boot":
+                return "SmokeCliArguments"
+            if stepName == "preflight":
+                return "SmokeRunConfig"
+            if stepName == "product_collection":
+                return "SmokeRunConfig"
+            if stepName == "summary":
+                return "SmokeRunResult"
+            if stepName == "evaluation":
+                return "CandidateCodeSet"
+        if pipelineName == "HsCodeClassificationPipeline":
+            return {
+                "build_raw_input": "PreparedProductFacts",
+                "evidence_intake": "RawProductInput",
+                "product_understanding": "InputEvidenceState",
+                "identity_distillation": "ProductUnderstandingPackage",
+                "identity_hinting": "DistilledIdentityFacts",
+                "llm_reconstruction_projection": "InputEvidenceState",
+                "composition_lane": "ReconstructionProjection",
+                "domain_routing": "ProductUnderstandingPackage",
+                "beam_classification": "Hs2RoutingDecision",
+                "llm_validation": "CandidateCodeSet",
+                "evaluation": "CandidateCodeSet",
+            }.get(stepName, "-")
+        if componentName.endswith("Pipeline"):
+            return f"{pipelineName}Input"
+        return "-"
 
     @staticmethod
     def _StripStepComponentContext(message: str) -> str:
@@ -810,18 +1052,30 @@ class KurlyMarketSmokeRunner:
             self._RunClassificationPreflight(runLogger)
 
         runLogger.info(
-            "pipeline_step=collection_ocr component=KurlyUrlIntakePipeline output_dto=KurlyUrlIntakeResult action=run url_count={} pipeline_build=on_cache_miss",
+            (
+                "pipeline_step=product_collection component=KurlyMarketSmokeRunner "
+                "input_dto=SmokeRunConfig output_dto=KurlySmokeCollectionBatch "
+                "action=run url_count={} pipeline_build=on_cache_miss"
+            ),
             len(self._productUrls),
         )
         results: List[Dict[str]] = []
         for productIndex, productUrl in enumerate(self._productUrls, start=1):
             runLogger.info(
-                "product_index={}/{}",
+                (
+                    "pipeline_step=product_collection component=KurlyMarketSmokeRunner "
+                    "input_dto=SmokeRunConfig output_dto=KurlySmokeCollectionBatch "
+                    "product_index={}/{}"
+                ),
                 productIndex,
                 len(self._productUrls),
             )
             runLogger.info(
-                "pipeline_step=collection_ocr component=KurlyUrlIntakePipeline output_dto=KurlyUrlIntakeResult index={}/{} url={}",
+                (
+                    "pipeline_step=product_collection component=KurlyMarketSmokeRunner "
+                    "input_dto=SmokeRunConfig output_dto=KurlySmokeCollectionBatch "
+                    "index={}/{} url={}"
+                ),
                 productIndex,
                 len(self._productUrls),
                 productUrl,
@@ -1004,7 +1258,11 @@ class KurlyMarketSmokeRunner:
         runLogger = self._Logger("_RunOne")
         try:
             runLogger.info(
-                "pipeline_step=collection_ocr component=KurlyUrlIntakePipeline output_dto=KurlyCollectionResult url={} use_web_scroll={} reuse_ocr_image_artifacts={}",
+                (
+                    "pipeline_step=product_collection component=KurlyUrlIntakePipeline "
+                    "input_dto=KurlyUrlIntakeInput output_dto=KurlyUrlIntakeResult "
+                    "url={} use_web_scroll={} reuse_ocr_image_artifacts={}"
+                ),
                 productUrl,
                 True,
                 self._reuseOcrImageArtifacts,
@@ -1077,16 +1335,14 @@ class KurlyMarketSmokeRunner:
         productUrl: str,
         uiFacts: JsonMapping,
     ) -> Dict[str]:
-        from agents.blackboard import BlackboardStore
-        from agents.pipeline_components import (
-            ClassificationComponent,
-            EvidenceIntakeComponent,
-            Hs2RoutingComponent,
-            ProductUnderstandingComponent,
+        from bussiness_logic.pipeline.blackboard import BlackboardStore
+        from bussiness_logic.classification.pipeline.hs_code_classification_pipeline import (
+            HsCodeClassificationPipeline,
         )
         from bussiness_logic.pipeline.export_requirement_pipeline import (
             BuildRawInputFromUi,
         )
+        from bussiness_logic.pipeline.pipeline_context import PipelineContext
 
         rawInput = BuildRawInputFromUi(
             query=str(uiFacts.get("product_name") or productUrl),
@@ -1109,21 +1365,15 @@ class KurlyMarketSmokeRunner:
         previousReviewMode = os.environ.get("ASAP_STAGE1_REVIEW_MODE")
         os.environ["ASAP_STAGE1_REVIEW_MODE"] = self._stage1ReviewMode
         try:
-            for component in (
-                EvidenceIntakeComponent(rawInput),
-                ProductUnderstandingComponent(),
-                Hs2RoutingComponent(),
-                ClassificationComponent(),
-            ):
-                result = component.Execute(store)
-                componentResults.append({
-                    "component_name": component.component_name,
-                    "success": result.success,
-                    "error": result.error,
-                    "outputs_written": result.outputs_written,
-                })
-                if not result.success:
-                    break
+            context = PipelineContext(
+                query=str(rawInput.get("product_name") or productUrl),
+                facts=rawInput,
+                store=store,
+            )
+            HsCodeClassificationPipeline().Run(context)
+            stepResults = list(context.stepResults)
+            componentResults = list(context.componentResults)
+            rawInput = context.rawInput
         finally:
             if previousReviewMode is None:
                 os.environ.pop("ASAP_STAGE1_REVIEW_MODE", None)
@@ -1177,10 +1427,11 @@ class KurlyMarketSmokeRunner:
                     "KurlyUrlIntakePipeline.Run",
                     "BuildKurlyUrlFactsFromPipelineResult",
                     "BuildRawInputFromUi",
-                    "EvidenceIntakeComponent",
-                    "ProductUnderstandingComponent",
-                    "Hs2RoutingComponent",
-                    "ClassificationComponent",
+                    "HsCodeClassificationPipeline.Run",
+                    *[
+                        self._FormatStepPathItem(stepResult)
+                        for stepResult in stepResults
+                    ],
                 ],
                 "raw_input_matches_evidence_intake": (
                     self._DoesRawInputMatchObservedFacts(rawInput, observedFacts)
@@ -1260,9 +1511,16 @@ class KurlyMarketSmokeRunner:
             "traversal_history": list(trace.get("traversal_history") or []),
             "llm_validation_recommendation": llmValidationRecommendation,
             "answer_recall": answerRecall,
+            "step_results": stepResults,
             "component_results": componentResults,
             "component_runs": list(store.iter_component_runs()),
         }
+
+    @staticmethod
+    def _FormatStepPathItem(stepResult: JsonMapping) -> str:
+        stepName = str(stepResult.get("step_name") or "unknown_step")
+        runnerName = str(stepResult.get("runner_name") or "unknown_runner")
+        return f"{stepName} -> {runnerName}"
 
     @staticmethod
     def _FindComponentResult(
@@ -1738,6 +1996,14 @@ class KurlyMarketSmokeRunner:
                 "successful_image_count",
                 0,
             ),
+            "skipped_image_count": ocrSummary.get(
+                "skipped_image_count",
+                0,
+            ),
+            "failed_image_count": ocrSummary.get(
+                "failed_image_count",
+                0,
+            ),
             "structured_table_image_count": ocrSummary.get(
                 "structured_table_image_count",
                 0,
@@ -1970,6 +2236,8 @@ class KurlyMarketSmokeRunner:
         self,
         imageResult: ProductOcrImageResult,
     ) -> Dict[str]:
+        if imageResult.skippedReason is not None:
+            return self._BuildSkippedOcrComparison(imageResult.skippedReason)
         structuredResult = imageResult.structuredOcr
         text = structuredResult.text
         tableTexts = [table.plainText for table in structuredResult.tables]
@@ -2132,7 +2400,11 @@ class KurlyMarketSmokeRunner:
         statusData = resultData["status"]
         if "runtime_error" in statusData:
             smokeLogger.error(
-                "pipeline_step=collection_ocr component=KurlyUrlIntakePipeline output_dto=KurlyUrlIntakeResult url={} runtime_error={}",
+                (
+                    "pipeline_step=product_collection component=KurlyUrlIntakePipeline "
+                    "input_dto=KurlyUrlIntakeInput output_dto=KurlyUrlIntakeResult "
+                    "url={} runtime_error={}"
+                ),
                 resultData["product_page_url"],
                 statusData["runtime_error"],
             )
@@ -2142,7 +2414,11 @@ class KurlyMarketSmokeRunner:
         productData = resultData["product"]
         noticeData = resultData["raw_collection"]["notice"]
         smokeLogger.info(
-            "pipeline_step=collection_ocr component=KurlyUrlIntakePipeline output_dto=KurlyUrlIntakeResult url={} product_name={} domain={} parse_ok={} ocr_fallback_ok={}",
+            (
+                "pipeline_step=product_collection component=KurlyUrlIntakePipeline "
+                "input_dto=KurlyUrlIntakeInput output_dto=KurlyUrlIntakeResult "
+                "url={} product_name={} domain={} parse_ok={} ocr_fallback_ok={}"
+            ),
             resultData["product_page_url"],
             productData["product_name"],
             productData["product_domain"],
@@ -2176,13 +2452,55 @@ class KurlyMarketSmokeRunner:
 
     def _LogPipelineSteps(self, resultData: Dict[str]) -> None:
         stepLogger = self._Logger("_LogPipelineSteps")
-        for pipelineStep in resultData["pipeline_steps"]:
+        pipelineSteps = resultData["pipeline_steps"]
+        stepTotal = len(pipelineSteps)
+        for stepIndex, pipelineStep in enumerate(pipelineSteps, start=1):
+            inputDto, outputDto = self._KurlyUrlIntakeStepDtos(
+                str(pipelineStep["step_name"]),
+            )
             stepLogger.info(
-                "pipeline_step=collection_ocr component=KurlyUrlIntakePipeline output_dto=KurlyUrlIntakeStep name={} succeeded={} message={}",
+                (
+                    "pipeline=KurlyUrlIntakePipeline step_index={} step_total={} "
+                    "component=KurlyUrlIntakePipeline input_dto={} output_dto={} "
+                    "name={} succeeded={} message={}"
+                ),
+                stepIndex,
+                stepTotal,
+                inputDto,
+                outputDto,
                 pipelineStep["step_name"],
                 pipelineStep["succeeded"],
                 pipelineStep["message"],
             )
+
+    @staticmethod
+    def _KurlyUrlIntakeStepDtos(stepName: str) -> tuple[str, str]:
+        return {
+            "validate_product_page_url": (
+                "KurlyUrlIntakeInput",
+                "ValidatedProductPageUrl",
+            ),
+            "collect_rendered_page_evidence": (
+                "ProductPageUrl",
+                "RenderedPageEvidence",
+            ),
+            "parse_product_page_evidence": (
+                "RenderedPageEvidence",
+                "KurlyCollectionResult",
+            ),
+            "ocr_fallback": (
+                "KurlyCollectionResult",
+                "ProductOcrImageResult[]",
+            ),
+            "reconstruct_product_input": (
+                "KurlyCollectionResult/ProductOcrImageResult[]",
+                "InputReconstructionResult",
+            ),
+            "build_classification_fact_texts": (
+                "InputReconstructionResult",
+                "ProductOcrFactNormalizationResult",
+            ),
+        }.get(stepName, ("-", "-"))
 
     def _LogNoticeOptions(self, resultData: Dict[str]) -> None:
         noticeLogger = self._Logger("_LogNoticeOptions")
@@ -2311,6 +2629,7 @@ class KurlyMarketSmokeRunner:
             (
                 "detail_image_count={} ocr_candidate_count={} "
                 "ocr_result_count={} successful_ocr_count={} "
+                "skipped_ocr_count={} failed_ocr_count={} "
                 "structured_table_image_count={} structured_table_count={} "
                 "raw_tile_text_count={} raw_text_length={} "
                 "combined_ocr_text_length={}"
@@ -2319,6 +2638,8 @@ class KurlyMarketSmokeRunner:
             ocrData["candidate_image_url_count"],
             ocrData["image_result_count"],
             ocrData["successful_image_count"],
+            ocrData.get("skipped_image_count", 0),
+            ocrData.get("failed_image_count", 0),
             ocrData["structured_table_image_count"],
             ocrData["structured_table_count"],
             ocrData["raw_tile_text_count"],
@@ -2332,12 +2653,15 @@ class KurlyMarketSmokeRunner:
         for imageResult in ocrData["image_artifacts"]:
             ocrLogger.info(
                 (
-                    "ocr_image index={} image_path={} image_path_count={} text_length={} "
+                    "ocr_image index={} status={} image_path={} "
+                    "image_path_count={} text_length={} "
                     "used_structured_tables={} structured_table_count={} "
                     "raw_tile_text_count={} raw_text_length={} "
-                    "merge_mode={} fallback_reason={} warning_count={} error={}"
+                    "merge_mode={} fallback_reason={} warning_count={} "
+                    "skipped_reason={} error={}"
                 ),
                 imageResult["index"],
+                imageResult.get("status", "ok"),
                 imageResult["image_path"],
                 len(imageResult.get("image_paths", []) or []),
                 imageResult["text_length"],
@@ -2348,6 +2672,7 @@ class KurlyMarketSmokeRunner:
                 imageResult.get("text_merge_mode"),
                 imageResult.get("structured_fallback_reason"),
                 len(imageResult.get("structured_warnings", []) or []),
+                imageResult.get("skipped_reason"),
                 imageResult["error"],
             )
             for warning in imageResult.get("structured_warnings", []) or []:
@@ -2381,6 +2706,12 @@ class KurlyMarketSmokeRunner:
         classificationLogger = self._Logger("_LogClassificationSmoke")
         status = classificationData.get("status") or {}
         productUnderstanding = classificationData.get("product_understanding") or {}
+        identity = productUnderstanding.get("identity") or {}
+        if not isinstance(identity, Mapping):
+            identity = {}
+        distilledIdentity = productUnderstanding.get("distilled_identity") or {}
+        if not isinstance(distilledIdentity, Mapping):
+            distilledIdentity = {}
         composition = productUnderstanding.get("composition") or {}
         if not isinstance(composition, Mapping):
             composition = {}
@@ -2399,44 +2730,91 @@ class KurlyMarketSmokeRunner:
         candidateCodeSet = classificationData.get("candidate_code_set") or {}
         if not isinstance(candidateCodeSet, Mapping):
             candidateCodeSet = {}
+        stepResults = classificationData.get("step_results") or []
+        stepTotal = len(stepResults) if isinstance(stepResults, list) else 0
+        for stepIndex, stepResult in enumerate(stepResults, start=1):
+            if not isinstance(stepResult, Mapping):
+                continue
+            inputDto, outputDto = self._ClassificationStepDtos(
+                str(stepResult.get("step_name") or ""),
+            )
+            classificationLogger.info(
+                (
+                    "pipeline=HsCodeClassificationPipeline step_index={} step_total={} "
+                    "component={} input_dto={} output_dto={} step_name={} "
+                    "status={} outputs={}"
+                ),
+                stepIndex,
+                stepTotal,
+                stepResult.get("runner_name"),
+                inputDto,
+                outputDto,
+                stepResult.get("step_name"),
+                stepResult.get("status"),
+                stepResult.get("outputs_written") or [],
+            )
         classificationLogger.info(
-            "pipeline_step=component_run component=PipelineWrapper output_dto=BlackboardWriteSet components={}",
-            self._CompactComponentResults(
-                classificationData.get("component_results") or [],
+            (
+                "pipeline=HsCodeClassificationPipeline step_index=3 step_total={} "
+                "component=ProductUnderstandingComponent input_dto=InputEvidenceState "
+                "output_dto=DistilledIdentityFacts lane=identity_distillation "
+                "service=IdentityDistillerService "
+                "commercial_identity={} quality={} identity_terms={} "
+                "form_signals={} processing_signals={} sources={}"
             ),
+            stepTotal,
+            distilledIdentity.get("commercial_identity"),
+            distilledIdentity.get("quality_status"),
+            self._CompactTextList(distilledIdentity.get("identity_terms")),
+            self._CompactTextList(
+                distilledIdentity.get("product_form_signal_terms"),
+            ),
+            self._CompactTextList(
+                distilledIdentity.get("processing_signal_terms"),
+            ),
+            self._CompactTextList(distilledIdentity.get("source_titles")),
         )
         classificationLogger.info(
             (
-                "pipeline_step=product_understanding component=ProductUnderstandingComponent "
-                "agent=IdentityHintAgent output_dto=ProductUnderstandingPackage id={} "
+                "pipeline=HsCodeClassificationPipeline step_index=3 step_total={} "
+                "component=ProductUnderstandingComponent input_dto=DistilledIdentityFacts "
+                "output_dto=IdentityHintSet lane=identity_hinting "
+                "agent=IdentityHintAgent id={} "
                 "product={} facts={} fact_texts={} identity_mode={} form_terms={} "
                 "chapter_hints={} coi_docs={} encyclopedia={}"
             ),
+            stepTotal,
             productUnderstanding.get("understanding_id"),
             productUnderstanding.get("product_name"),
             productUnderstanding.get("fact_count"),
             productUnderstanding.get("fact_text_count"),
-            (productUnderstanding.get("identity") or {}).get("understanding_mode"),
-            self._CompactTextList(
-                (productUnderstanding.get("identity") or {}).get("product_form_terms"),
-            ),
-            self._CompactTextList(
-                (productUnderstanding.get("identity") or {}).get("chapter_hint_terms"),
-            ),
+            identity.get("understanding_mode"),
+            self._CompactTextList(identity.get("product_form_terms")),
+            self._CompactTextList(identity.get("chapter_hint_terms")),
             len((productUnderstanding.get("coi") or {}).get("matched_documents") or []),
             (productUnderstanding.get("encyclopedia") or {}).get("quality_status"),
         )
         classificationLogger.info(
             (
-                "pipeline_step=product_understanding component=ProductUnderstandingComponent "
-                "output_dto=ProductUnderstandingPackage projected_reconstruction_facts={} "
-                "projected_reconstruction_texts={} composition_terms={} "
+                "pipeline=HsCodeClassificationPipeline step_index=3 step_total={} "
+                "component=ProductUnderstandingComponent input_dto=InputEvidenceState "
+                "output_dto=ReconstructionProjection lane=llm_reconstruction_projection "
+                "projected_reconstruction_facts={} projected_reconstruction_texts={}"
+            ),
+            stepTotal,
+            len(reconstructionProjection.get("facts") or []),
+            len(reconstructionProjection.get("fact_texts") or []),
+        )
+        classificationLogger.info(
+            (
+                "pipeline=HsCodeClassificationPipeline step_index=3 step_total={} "
+                "component=ProductUnderstandingComponent input_dto=ReconstructionProjection "
+                "output_dto=CompositionFactSet lane=composition_lane composition_terms={} "
                 "ingredient_percentages={} composition_basis={} wrapper={} sauce={} "
                 "principal_status={} principal_candidates={} ingredient_entries={} "
                 "component_compositions={} missing_composition_facts={}"
             ),
-            len(reconstructionProjection.get("facts") or []),
-            len(reconstructionProjection.get("fact_texts") or []),
+            stepTotal,
             composition.get("composition_term_count"),
             composition.get("ingredient_percentage_count"),
             composition.get("composition_basis"),
@@ -2450,12 +2828,14 @@ class KurlyMarketSmokeRunner:
         )
         classificationLogger.info(
             (
-                "pipeline_step=domain_routing component=Hs2RoutingComponent "
+                "pipeline=HsCodeClassificationPipeline step_index=4 step_total={} "
+                "component=Hs2RoutingComponent input_dto=ProductUnderstandingPackage "
                 "output_dto=Hs2RoutingDecision routing_context_id={} allowed_hs2={} "
                 "blocked_hs2={} enforce_hs2_boundary={} fallback_allowed={} "
                 "candidate_chapter_top={} boundary_applied={} fallback_used={} "
                 "missing_facts={}"
             ),
+            stepTotal,
             domainRouting.get("routing_context_id"),
             domainRouting.get("allowed_hs2"),
             domainRouting.get("blocked_hs2"),
@@ -2472,11 +2852,13 @@ class KurlyMarketSmokeRunner:
         )
         classificationLogger.info(
             (
-                "pipeline_step=beam_classification component=ClassificationComponent "
+                "pipeline=HsCodeClassificationPipeline step_index=5 step_total={} "
+                "component=ClassificationComponent input_dto=Hs2RoutingDecision "
                 "output_dto=CandidateCodeSet error={} candidates={} zero_score={} "
                 "stage_count={} selected_path={} level_scores={} decision={} backtracking={} "
                 "traversal={} raw_input_match={} answer_found={}"
             ),
+            stepTotal,
             status.get("error"),
             status.get("candidate_count"),
             status.get("zero_score_candidate_codes"),
@@ -2493,11 +2875,13 @@ class KurlyMarketSmokeRunner:
         )
         classificationLogger.info(
             (
-                "pipeline_step=llm_validation component=ClassificationComponent "
-                "agent=CandidateValidationAgent output_dto=LlmValidationRecommendation "
+                "pipeline=HsCodeClassificationPipeline step_index=5 step_total={} "
+                "component=ClassificationComponent input_dto=CandidateCodeSet "
+                "output_dto=LlmValidationRecommendation agent=CandidateValidationAgent "
                 "llm_status={} recommended={} rank={} cn8={} hs6={} taric10={} "
                 "hard_condition={} reason={}"
             ),
+            stepTotal,
             (
                 "recommendation_ok"
                 if llmValidationRecommendation.get("recommended")
@@ -2515,11 +2899,13 @@ class KurlyMarketSmokeRunner:
         for candidate in classificationData.get("candidates") or []:
             classificationLogger.info(
                 (
-                    "pipeline_step=beam_classification component=ClassificationComponent "
+                    "pipeline=HsCodeClassificationPipeline step_index=5 step_total={} "
+                    "component=ClassificationComponent input_dto=CandidateCodeSet "
                     "output_dto=ClassificationCandidate rank={} cn8={} hs6={} "
                     "score={} stage_scores={} recommended={} taric_branches={} "
                     "evidence_refs={} ebti_cases={}"
                 ),
+                stepTotal,
                 candidate.get("rank"),
                 candidate.get("cn8"),
                 candidate.get("hs6"),
@@ -2530,6 +2916,22 @@ class KurlyMarketSmokeRunner:
                 len(candidate.get("classification_evidence_refs") or []),
                 len(candidate.get("similar_ebti_cases") or []),
             )
+
+    @staticmethod
+    def _ClassificationStepDtos(stepName: str) -> tuple[str, str]:
+        return {
+            "build_raw_input": ("PreparedProductFacts", "RawProductInput"),
+            "evidence_intake": ("RawProductInput", "InputEvidenceState"),
+            "product_understanding": (
+                "InputEvidenceState",
+                "ProductUnderstandingPackage",
+            ),
+            "hs2_routing": (
+                "ProductUnderstandingPackage",
+                "Hs2RoutingDecision",
+            ),
+            "classification": ("Hs2RoutingDecision", "CandidateCodeSet"),
+        }.get(stepName, ("-", "-"))
 
     @staticmethod
     def _CompactComponentResults(componentResults: Sequence[object]) -> List[str]:
@@ -2543,6 +2945,24 @@ class KurlyMarketSmokeRunner:
             outputCount = len(outputs) if isinstance(outputs, list) else 0
             error = str(componentResult.get("error") or "")
             text = f"{name}:{status}:outputs={outputCount}"
+            if error:
+                text = f"{text}:error={error[:80]}"
+            out.append(text)
+        return out
+
+    @staticmethod
+    def _CompactStepResults(stepResults: Sequence[object]) -> List[str]:
+        out: List[str] = []
+        for stepResult in stepResults:
+            if not isinstance(stepResult, Mapping):
+                continue
+            name = str(stepResult.get("step_name") or "unknown_step")
+            runner = str(stepResult.get("runner_name") or "unknown_runner")
+            status = str(stepResult.get("status") or "unknown")
+            outputs = stepResult.get("outputs_written") or []
+            outputCount = len(outputs) if isinstance(outputs, list) else 0
+            error = str(stepResult.get("error") or "")
+            text = f"{name}->{runner}:{status}:outputs={outputCount}"
             if error:
                 text = f"{text}:error={error[:80]}"
             out.append(text)
