@@ -1604,3 +1604,15 @@
   background: rgba(168, 85, 247, 0.12);
   color: #c8b7ea;
 }
+
+/* ---- 상품 추가 폼 안내 문구 ---- */
+.ent-add-note {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: #c8b7ea;
+}
+
+.ent-add-note b { color: #34d399; }
+
+.ent.theme-light .ent-add-note { color: #64748b; }
+.ent.theme-light .ent-add-note b { color: #15803d; }

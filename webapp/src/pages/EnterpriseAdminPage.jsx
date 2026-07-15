@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { fetchCases } from "../lib/enterpriseApi.js";
 
 // ASAP 내부용 — 계약 기업들의 서류 제출 진행 현황 관제.
 // 기업 서류는 고객에게 제출 URL만 발급되고, 실제 수취·검토는 이 페이지에서 이뤄진다.
@@ -137,6 +138,16 @@ export default function EnterpriseAdminPage() {
   const [openId, setOpenId] = useState(COMPANIES[0].id);
   const open = COMPANIES.find((c) => c.id === openId);
 
+  // 수집 원장(/api/enterprise/cases)에서 실데이터 케이스 로드 — 백엔드 미기동이면 빈 목록
+  const [liveCases, setLiveCases] = useState([]);
+  useEffect(() => {
+    fetchCases().then((response) => {
+      if (Array.isArray(response?.cases)) {
+        setLiveCases(response.cases);
+      }
+    });
+  }, []);
+
   return (
     <div className="classification-admin-shell">
       <header className="cadm-hero">
@@ -149,6 +160,37 @@ export default function EnterpriseAdminPage() {
       </header>
 
       <section className="cadm-section">
+        {liveCases.length ? (
+          <div className="cadm-panel cadm-panel-wide">
+            <div className="cadm-panel-title">수집 원장 — 실데이터 케이스 ({liveCases.length})</div>
+            <div className="cadm-table-scroll">
+              <table className="cadm-table eadm-table">
+                <thead>
+                  <tr>
+                    <th>케이스</th><th>상품</th><th>판매 채널 · URL</th><th>판매가</th><th>월 물량</th>
+                    <th>서류 이벤트</th><th>최근 분류 job</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {liveCases.map((c) => (
+                    <tr key={c.caseId}>
+                      <td className="eadm-mono">{c.caseId}</td>
+                      <td><b>{c.name || "-"}</b></td>
+                      <td className="eadm-mono">{c.channel ? `${c.channel} · ` : ""}{c.url || "-"}</td>
+                      <td>{c.price ? `${Number(c.price).toLocaleString()}원` : "-"}</td>
+                      <td>{c.volume ? Number(c.volume).toLocaleString() : "-"}</td>
+                      <td>{Object.keys(c.docs || {}).length}종 · {c.events || 0}건</td>
+                      <td className="eadm-mono">{c.lastJobId || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="cadm-muted" style={{ marginTop: 8 }}>
+              /api/enterprise 이벤트 원장에서 집계 — 판매 채널·가격·물량·서류 흐름·분류 귀속이 케이스 단위로 쌓입니다.
+            </p>
+          </div>
+        ) : null}
         <div className="cadm-panel cadm-panel-wide">
           <div className="cadm-panel-title">계약 기업 ({COMPANIES.length})</div>
           <div className="cadm-table-scroll">

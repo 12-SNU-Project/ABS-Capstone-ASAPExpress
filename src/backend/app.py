@@ -8,6 +8,7 @@ from pathlib import Path
 from flask import Flask, Response, jsonify, request, send_from_directory
 from werkzeug.exceptions import NotFound
 
+from backend.enterprise_api import RegisterEnterpriseApi
 from backend.pipeline_api import PipelineApi
 from backend.pipeline_service import PipelineRunService, RunRegistry
 
@@ -39,6 +40,7 @@ def CreateBackendApp(
 
     app = Flask(__name__)
     pipelineApi.RegisterRoutes(app)
+    RegisterEnterpriseApi(app)
     _RegisterCors(app, allowedFrontendOrigins)
 
     @app.get("/api/health")

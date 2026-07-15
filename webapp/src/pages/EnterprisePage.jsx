@@ -2,7 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useClassificationRun } from "../hooks/useClassificationRun";
 import { asList, asObject, clean } from "../lib/format.js";
-import { registerProduct, submitDocRequest, issueSubmitUrl, normalizeCoi } from "../lib/enterpriseApi.js";
+import {
+  registerProduct,
+  reportDocStatus,
+  submitDocRequest,
+  issueSubmitUrl,
+  normalizeCoi,
+  linkJob,
+} from "../lib/enterpriseApi.js";
 import logo from "../assets/asap_black.png";
 
 // 페르소나: 수출업자(제조사 아님) — 예: 식당이 밀키트를 제작해 수출.
@@ -202,11 +209,18 @@ export default function EnterprisePage() {
   // 누락 서류 요청 발송 (메일/휴대폰)
   const [reqOpen, setReqOpen] = useState(null);
   const [reqContact, setReqContact] = useState("");
-  // 상품 추가 폼
+  // 상품 추가 폼 — 판매가·물량·채널은 "예상 관세 절감액" 계산 명분의 수집 필드
   const [addOpen, setAddOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newUrl, setNewUrl] = useState("");
   const [newCoi, setNewCoi] = useState("");
+  const [newPrice, setNewPrice] = useState("");
+  const [newVolume, setNewVolume] = useState("");
+  const [newChannel, setNewChannel] = useState("");
+  // 행별 판매 정보 (절감액 계산용) — 메인 데모 케이스는 기본값 제공
+  const [metaById, setMetaById] = useState({
+    [DEMO_CASE.caseId]: { price: 12900, volume: 400, channel: "스마트스토어" },
+  });
   // 관세사의 해당/비해당 오버라이드 (기본값 = 시스템 판정)
   const [regChoice, setRegChoice] = useState({});
   const fileTargetRef = useRef(null);
@@ -245,6 +259,15 @@ export default function EnterprisePage() {
   const precedents = livePrecedents.length ? livePrecedents : DEMO_PRECEDENTS;
   const dutyBase = clean(firstPackage.basic_duty) || "20%";
   const jobId = clean(result?.job_id);
+
+  // 분류 완료 시 케이스 ↔ job 귀속을 원장에 기록 (job당 1회)
+  const linkedJobRef = useRef("");
+  useEffect(() => {
+    if (isLive && jobId && linkedJobRef.current !== jobId) {
+      linkedJobRef.current = jobId;
+      linkJob({ caseId: runOwner, jobId, taric10: liveTaric10 });
+    }
+  }, [isLive, jobId, runOwner, liveTaric10]);
 
   // 활성 행 = 카드가 열려 있는 행 (없으면 메인 케이스)
   const activeId = panel?.id && docsById[panel.id] ? panel.id : DEMO_CASE.caseId;
@@ -302,12 +325,14 @@ export default function EnterprisePage() {
       setDocs((prev) =>
         prev.map((d) => (d.key === target ? { ...d, quality: "unverified", file: file.name, origin: d.origin ? d.origin : "직접 업로드" } : d)),
       );
+      reportDocStatus({ caseId: activeId, doc: target, quality: "unverified", file: file.name });
     }
     event.target.value = "";
   };
 
   const markVerified = (key) => {
     setDocs((prev) => prev.map((d) => (d.key === key ? { ...d, quality: "verified" } : d)));
+    reportDocStatus({ caseId: activeId, doc: key, quality: "verified" });
   };
 
   // 통관 서류: 직접 제출 ↔ 대행 위임 전환 (직접 복귀 시 이전 검증 상태 복원)
@@ -319,6 +344,7 @@ export default function EnterprisePage() {
         return { ...d, chosen: "direct", quality: d.file ? (d.prevQuality || "unverified") : "missing" };
       }),
     );
+    reportDocStatus({ caseId: activeId, doc: key, chosen: method });
   };
 
   // 누락 서류 요청 — 입력한 메일/휴대폰으로 제출 요청 발송
@@ -331,13 +357,13 @@ export default function EnterprisePage() {
     setReqContact("");
   };
 
-  // 기업 서류: 제출 URL 발급 — 실제 수취·검토는 관리자 페이지에서
-  const issueUrl = (key) => {
-    issueSubmitUrl({ caseId: activeId, doc: key });
+  // 기업 서류: 제출 URL 발급 — 실제 수취·검토는 관리자 페이지에서.
+  // 백엔드가 살아 있으면 토큰 포함 URL을 받아서 쓰고, 아니면 로컬 표기로 폴백.
+  const issueUrl = async (key) => {
+    const response = await issueSubmitUrl({ caseId: activeId, doc: key });
+    const submitUrl = clean(response?.url) || `asap.export/submit/${activeId}/${key}`;
     setDocs((prev) =>
-      prev.map((d) =>
-        d.key === key ? { ...d, quality: "url_sent", url: `asap.export/submit/${activeId}/${key}` } : d,
-      ),
+      prev.map((d) => (d.key === key ? { ...d, quality: "url_sent", url: submitUrl } : d)),
     );
   };
 
@@ -355,14 +381,29 @@ export default function EnterprisePage() {
     runPipeline("full", { productName: rowName, url: clean(urlById[rowId]), description: "" });
   };
 
-  // 상품 추가 — COI와 URL은 사용자가 제공, 등록 즉시 서류 인벤토리가 열린다
+  // 상품 추가 — COI와 URL은 사용자가 제공, 등록 즉시 서류 인벤토리가 열린다.
+  // 판매가·물량·채널은 절감액 계산에 쓰이며 케이스와 함께 원장에 적재된다.
   const addProduct = () => {
     const name = clean(newName);
     if (!name) return;
     const id = `EXP-2026-0715-${String(4 + extraRows.length).padStart(3, "0")}`;
-    registerProduct({ caseId: id, name, url: clean(newUrl), coi: newCoi });
+    const price = Number(clean(newPrice).replace(/[^\d.]/g, "")) || 0;
+    const volume = Number(clean(newVolume).replace(/[^\d.]/g, "")) || 0;
+    registerProduct({
+      caseId: id,
+      name,
+      url: clean(newUrl),
+      coi: newCoi,
+      price,
+      volume,
+      channel: clean(newChannel),
+      destination: DEMO_CASE.destination,
+    });
     setDocsById((prev) => ({ ...prev, [id]: newProductDocs(newCoi) }));
     setUrlById((prev) => ({ ...prev, [id]: clean(newUrl) }));
+    if (price || volume || clean(newChannel)) {
+      setMetaById((prev) => ({ ...prev, [id]: { price, volume, channel: clean(newChannel) } }));
+    }
     setExtraRows((prev) => [...prev, { id, name }]);
     setPanel({ id, key: "docs" });
     setOpenCat("product");
@@ -370,6 +411,9 @@ export default function EnterprisePage() {
     setNewName("");
     setNewUrl("");
     setNewCoi("");
+    setNewPrice("");
+    setNewVolume("");
+    setNewChannel("");
   };
 
   const togglePanel = (id, key) =>
@@ -528,11 +572,32 @@ export default function EnterprisePage() {
     </>
   );
 
+  // 연 예상 관세 절감액 = 판매가 × 월 물량 × 12 × 제3국 세율 (FTA 0% 적용 가정)
+  const activeMeta = metaById[activeId] || {};
+  const dutyRate = parseFloat(dutyBase) || 0;
+  const annualSaving =
+    activeMeta.price && activeMeta.volume
+      ? Math.round((activeMeta.price * activeMeta.volume * 12 * dutyRate) / 100)
+      : 0;
+
   const dutyPanel = (
     <>
       <div className="ent-duty compact wide">
         <div className="ent-duty-row"><span>제3국 세율</span><strong className="strike">{dutyBase}</strong></div>
         <div className="ent-duty-row highlight"><span>한-EU FTA</span><strong>0%</strong><em>원산지 문안 제출 시</em></div>
+        {annualSaving ? (
+          <div className="ent-duty-row highlight">
+            <span>연 예상 절감액</span>
+            <strong>{annualSaving.toLocaleString()}원</strong>
+            <em>판매가 {Number(activeMeta.price).toLocaleString()}원 × 월 {Number(activeMeta.volume).toLocaleString()}개 기준</em>
+          </div>
+        ) : (
+          <div className="ent-duty-row">
+            <span>연 예상 절감액</span>
+            <strong>—</strong>
+            <em>상품 추가 시 판매가·물량을 입력하면 계산됩니다</em>
+          </div>
+        )}
       </div>
       <div className="ent-review-label" style={{ marginTop: 16 }}>TARIC10 세율 관련 선언</div>
       <div className="ent-reg-list">
@@ -854,10 +919,32 @@ export default function EnterprisePage() {
               value={newUrl}
               onChange={(e) => setNewUrl(e.target.value)}
             />
+            <input
+              className="ent-mgmt-url-input"
+              style={{ width: 120 }}
+              placeholder="판매가 (원)"
+              value={newPrice}
+              onChange={(e) => setNewPrice(e.target.value)}
+            />
+            <input
+              className="ent-mgmt-url-input"
+              style={{ width: 120 }}
+              placeholder="월 물량 (개)"
+              value={newVolume}
+              onChange={(e) => setNewVolume(e.target.value)}
+            />
+            <input
+              className="ent-mgmt-url-input"
+              style={{ width: 130 }}
+              placeholder="판매 채널 (선택)"
+              value={newChannel}
+              onChange={(e) => setNewChannel(e.target.value)}
+            />
             <button type="button" className="ent-mini-btn" onClick={() => coiInputRef.current?.click()}>
               {newCoi ? `📎 ${newCoi}` : "COI 첨부"}
             </button>
             <button type="button" className="ent-mini-btn solid" disabled={!clean(newName)} onClick={addProduct}>등록</button>
+            <span className="ent-add-note">판매가·물량을 입력하면 FTA 적용 시 <b>연 예상 관세 절감액</b>을 계산해 드립니다.</span>
           </div>
         ) : null}
 
