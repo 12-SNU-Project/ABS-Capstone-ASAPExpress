@@ -451,3 +451,161 @@ body.consumer-body {
   color: #34d399;
   opacity: 0.85;
 }
+
+/* ================= 사용자용 화이트 테마 ================= */
+/* 워크벤치 클래식 팔레트 기반: bg #f8fafc / surface #fff / border #e4e7ee
+   text #111827 / muted #64748b / accent #6d3fd6 */
+
+body.asap-user-light {
+  background: linear-gradient(180deg, #f8f7fc 0%, #f3f1fa 100%) !important;
+}
+
+.user-theme-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid rgba(109, 63, 214, 0.25);
+  background: rgba(109, 63, 214, 0.06);
+  width: fit-content;
+}
+
+.user-theme-toggle button {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.65;
+  cursor: pointer;
+}
+
+.user-theme-toggle button.on {
+  background: #6d3fd6;
+  color: #ffffff;
+  opacity: 1;
+}
+
+.consumer .user-theme-toggle {
+  justify-self: end;
+  margin-bottom: -10px;
+}
+
+.consumer.theme-neon .user-theme-toggle {
+  border-color: rgba(185, 128, 255, 0.35);
+  background: rgba(168, 85, 247, 0.12);
+  color: #c8b7ea;
+}
+
+/* ---- 소비자 화면 라이트 ---- */
+.consumer.theme-light {
+  color: #111827;
+}
+
+.consumer.theme-light .consumer-logo-img {
+  background: linear-gradient(120deg, #6d3fd6, #8b5cf6 60%, #22b8cf);
+  filter: none;
+  animation: none;
+}
+
+.consumer.theme-light .consumer-flame,
+.consumer.theme-light .consumer-embers {
+  display: none;
+}
+
+.consumer.theme-light .consumer-brand p {
+  color: #64748b;
+}
+
+.consumer.theme-light .consumer-input-card,
+.consumer.theme-light .consumer-result,
+.consumer.theme-light .consumer-why,
+.consumer.theme-light .consumer-precedents {
+  background: #ffffff;
+  border: 1px solid #e4e7ee;
+  box-shadow: 0 10px 30px rgba(23, 16, 53, 0.06);
+}
+
+.consumer.theme-light .consumer-input {
+  background: #f8fafc;
+  border: 1px solid #e4e7ee;
+  color: #111827;
+}
+
+.consumer.theme-light .consumer-input::placeholder {
+  color: #94a3b8;
+}
+
+.consumer.theme-light .consumer-go {
+  background: #6d3fd6;
+  border-color: #6d3fd6;
+  color: #ffffff;
+  box-shadow: 0 8px 22px rgba(109, 63, 214, 0.28);
+  text-shadow: none;
+}
+
+.consumer.theme-light .consumer-step {
+  color: #64748b;
+}
+
+.consumer.theme-light .consumer-step.done,
+.consumer.theme-light .consumer-step.now {
+  color: #111827;
+}
+
+.consumer.theme-light .consumer-rlabel {
+  color: #64748b;
+}
+
+.consumer.theme-light .consumer-code {
+  color: #6d3fd6;
+  text-shadow: none;
+}
+
+.consumer.theme-light .consumer-rdesc {
+  color: #334155;
+}
+
+.consumer.theme-light .consumer-alt {
+  background: #f8fafc;
+  border: 1px solid #e4e7ee;
+  color: #334155;
+}
+
+.consumer.theme-light .consumer-alt.active {
+  border-color: #6d3fd6;
+  color: #6d3fd6;
+  background: rgba(109, 63, 214, 0.07);
+}
+
+.consumer.theme-light .consumer-alt-hint {
+  color: #94a3b8;
+}
+
+.consumer.theme-light .consumer-why {
+  color: #334155;
+}
+
+.consumer.theme-light .consumer-precedent {
+  background: #fdfcff;
+  border: 1px solid #e9e6f5;
+}
+
+.consumer.theme-light .consumer-precedent-ref {
+  color: #6d3fd6;
+}
+
+.consumer.theme-light .consumer-precedent-body,
+.consumer.theme-light .consumer-precedent-sim {
+  color: #334155;
+}
+
+/* 라이트 로고도 메인 로고와 같은 sheen */
+.consumer.theme-light .consumer-logo-img {
+  background: linear-gradient(115deg, #5b2fc4, #6d3fd6 35%, #a855f7 55%, #c084fc 70%, #6d3fd6 90%);
+  background-size: 220% 100%;
+  animation: logo-sheen 7s ease-in-out infinite;
+}

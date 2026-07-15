@@ -40,11 +40,20 @@ export default function ConsumerPage() {
     setAltIndex(-1);
   }, [result?.job_id]);
 
-  // 네온 톤 통일: 톱바까지 어둡게
+  // 사용자용 테마 — 기본은 화이트(가독성 피드백), 네온은 토글로
+  const [uiTheme, setUiTheme] = useState(
+    () => window.localStorage.getItem("asap-user-theme") || "light",
+  );
   useEffect(() => {
-    document.body.classList.add("asap-cjs-neon", "consumer-body");
-    return () => document.body.classList.remove("asap-cjs-neon", "consumer-body");
-  }, []);
+    window.localStorage.setItem("asap-user-theme", uiTheme);
+    document.body.classList.remove("asap-cjs-neon", "consumer-body", "asap-user-light");
+    if (uiTheme === "neon") {
+      document.body.classList.add("asap-cjs-neon", "consumer-body");
+    } else {
+      document.body.classList.add("asap-user-light");
+    }
+    return () => document.body.classList.remove("asap-cjs-neon", "consumer-body", "asap-user-light");
+  }, [uiTheme]);
 
   const start = () => {
     const text = clean(query);
@@ -74,7 +83,11 @@ export default function ConsumerPage() {
   const stepIndex = consumerStepIndex(result);
 
   return (
-    <div className="consumer">
+    <div className={`consumer theme-${uiTheme}`}>
+      <div className="user-theme-toggle" role="group" aria-label="테마 선택">
+        <button type="button" className={uiTheme === "light" ? "on" : ""} onClick={() => setUiTheme("light")}>화이트</button>
+        <button type="button" className={uiTheme === "neon" ? "on" : ""} onClick={() => setUiTheme("neon")}>네온</button>
+      </div>
       <div className="consumer-brand">
         <div className="consumer-logo-fire">
           {/* Trapcode(AE) 렌더 에셋 슬롯: webapp/src/assets/logo-fire.webm(알파 포함)이

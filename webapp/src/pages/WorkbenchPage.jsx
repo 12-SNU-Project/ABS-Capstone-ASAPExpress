@@ -405,12 +405,15 @@ function PrecedentList({ cases }) {
       {list.map((item, index) => (
         <div className="cjs-precedent" key={index}>
           <div className="cjs-precedent-ref">{clean(item.evidence_ref)}</div>
-          {clean(item.case_summary) ? (
-            <div className="cjs-precedent-body">{clean(item.case_summary)}</div>
-          ) : null}
           <div className="cjs-precedent-sim">{clean(item.similarity_comment)}</div>
           {clean(item.difference_comment) ? (
             <div className="cjs-precedent-diff">{clean(item.difference_comment)}</div>
+          ) : null}
+          {clean(item.case_summary) ? (
+            <details className="cjs-precedent-more">
+              <summary>판결문 요약</summary>
+              <div className="cjs-precedent-body">{clean(item.case_summary)}</div>
+            </details>
           ) : null}
         </div>
       ))}
@@ -482,7 +485,6 @@ function UnderstandingPanel({ result }) {
           <TermChips label="형태 토큰" terms={hints.product_form_terms} />
           <TermChips label="챕터 힌트" terms={hints.chapter_hint_terms} />
           <TermChips label="라우팅 토큰" terms={understandingView.routing_terms} />
-          <CoiEvidenceBlock coi={understandingView.coi_evidence} />
         </div>
         <div>
           <div className="cjs-subpanel-title cjs-first">Composition lane</div>
@@ -506,6 +508,8 @@ function UnderstandingPanel({ result }) {
               { key: "내용", label: "내용" },
             ]}
           />
+          {/* COI는 성분 근거라 composition 쪽에 붙인다 — 좌우 무게 균형 */}
+          <CoiEvidenceBlock coi={understandingView.coi_evidence} />
         </div>
       </div>
     </div>
@@ -545,14 +549,20 @@ function RoutingPanel({ result }) {
   return (
     <div className="cjs-panel">
       <div className="cjs-panel-title">챕터 분기</div>
-      <KeyValueRows
-        data={routingView}
-        keys={ROUTE_KEYS.filter(
-          (key) => !["candidate_chapter_details", "routing_basis"].includes(key),
-        )}
-        limit={10}
-      />
-      <TermChips label="매칭 키워드" terms={matchedTerms} />
+      <div className="cjs-trace-cols">
+        <div>
+          <KeyValueRows
+            data={routingView}
+            keys={ROUTE_KEYS.filter(
+              (key) => !["candidate_chapter_details", "routing_basis"].includes(key),
+            )}
+            limit={10}
+          />
+        </div>
+        <div>
+          <TermChips label="매칭 키워드" terms={matchedTerms} />
+        </div>
+      </div>
       {chapterDetails.length ? (
         <>
           <div className="cjs-subpanel-title">챕터 점수 상세</div>
@@ -570,10 +580,16 @@ function TracePanel({ candidate }) {
   return (
     <div className="cjs-panel">
       <div className="cjs-panel-title">단계별 분류 근거</div>
-      <div className="cjs-subpanel-title">코드 경로</div>
-      <KeyValueRows data={tree} limit={8} />
-      <div className="cjs-subpanel-title">점수 근거</div>
-      <KeyValueRows data={score} limit={8} />
+      <div className="cjs-trace-cols">
+        <div>
+          <div className="cjs-subpanel-title cjs-first">코드 경로</div>
+          <KeyValueRows data={tree} limit={8} />
+        </div>
+        <div>
+          <div className="cjs-subpanel-title cjs-first">점수 근거</div>
+          <KeyValueRows data={score} limit={8} />
+        </div>
+      </div>
       <div className="cjs-subpanel-title">판단 메모</div>
       {basis.length ? (
         basis.map((line, index) => (
@@ -857,15 +873,18 @@ export default function WorkbenchPage() {
           {activeStage === "classification" ? (
             <>
               <DecisionPanel result={result} derived={derived} />
-              <CandidateBoard derived={derived} selectedKey={selectedKey} onSelect={setSelectedKey} />
-              <TracePanel candidate={selectedCandidate} />
+              {/* 후보 선택(좌) ↔ 선택한 후보의 근거(우)를 나란히 — 클릭 즉시 옆에서 갱신 */}
+              <div className="cjs-stage-duo">
+                <CandidateBoard derived={derived} selectedKey={selectedKey} onSelect={setSelectedKey} />
+                <TracePanel candidate={selectedCandidate} />
+              </div>
             </>
           ) : null}
           {activeStage === "taric" ? (
-            <>
+            <div className="cjs-stage-duo">
               <CandidateBoard derived={derived} selectedKey={selectedKey} onSelect={setSelectedKey} />
               <TaricPanel result={result} derived={derived} candidate={selectedCandidate} />
-            </>
+            </div>
           ) : null}
           {activeStage === "document" ? (
             <DocumentStagePanel result={result} derived={derived} />

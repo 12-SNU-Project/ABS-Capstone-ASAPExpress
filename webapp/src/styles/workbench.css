@@ -1466,3 +1466,81 @@ body.asap-cjs-neon .app-topbar-logo {
   margin-bottom: 4px;
   overflow-wrap: anywhere;
 }
+
+/* ---- 워크벤치 배치 마감 ---- */
+
+/* 분류/서류연결 스테이지: 후보 선택(좌) ↔ 상세(우) 2열 */
+.cjs-stage-duo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 14px;
+  align-items: start;
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .cjs-stage-duo {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 듀오 안에서는 후보 카드를 세로로 쌓아 목록처럼 */
+.cjs-stage-duo .cjs-candidate-grid {
+  grid-template-columns: 1fr;
+}
+
+.cjs-stage-duo .cjs-candidate-card {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 4px 14px;
+  align-items: center;
+}
+
+.cjs-stage-duo .cjs-candidate-card .cjs-code-row {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.cjs-stage-duo .cjs-candidate-card .cjs-card-foot {
+  grid-column: 1 / -1;
+}
+
+/* 결론 패널: 지표를 한 줄 스트립으로 */
+.cjs-metric-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+/* 패널 내부 2열 (코드 경로|점수 근거, 라우팅 요약|매칭 키워드) */
+.cjs-trace-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 0 20px;
+  align-items: start;
+}
+
+.cjs-trace-cols .cjs-term-group .cjs-subpanel-title {
+  margin-top: 0;
+}
+
+/* 상품 이해: 좌(정체성)·우(성분+COI) 균형 */
+.cjs-understanding-grid {
+  grid-template-columns: minmax(280px, 1fr) minmax(0, 1.25fr);
+}
+
+/* 판례 카드: 판결문 요약은 접힘 */
+.cjs-precedent-more {
+  margin-top: 6px;
+}
+
+.cjs-precedent-more summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--cjs-accent);
+  user-select: none;
+}
+
+.cjs-precedent-more[open] summary {
+  margin-bottom: 4px;
+}

@@ -310,3 +310,80 @@
   font-size: 13px;
   font-weight: 700;
 }
+
+/* ---- 기업 서류 관제 (/admin/companies) ---- */
+.eadm-table tbody tr.eadm-row { cursor: pointer; }
+.eadm-table tbody tr.eadm-row.open td { background: rgba(109, 63, 214, 0.07); }
+.eadm-table tbody tr.eadm-row:hover td { background: rgba(109, 63, 214, 0.05); }
+
+.eadm-mono {
+  font-family: "SFMono-Regular", ui-monospace, Menlo, monospace;
+  font-size: 12px;
+}
+
+.eadm-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 96px;
+}
+
+.eadm-progress-num {
+  font-size: 12px;
+  font-weight: 800;
+  min-width: 28px;
+}
+
+.eadm-progress-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(109, 63, 214, 0.14);
+  overflow: hidden;
+}
+
+.eadm-progress-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #6d3fd6;
+}
+
+.eadm-chip {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.eadm-chip.ok { background: rgba(22, 163, 74, 0.12); color: #15803d; }
+.eadm-chip.warn { background: rgba(217, 119, 6, 0.12); color: #b45309; }
+.eadm-chip.miss { background: rgba(225, 29, 72, 0.1); color: #be123c; }
+.eadm-chip.violet { background: rgba(109, 63, 214, 0.12); color: #6d3fd6; }
+.eadm-chip.info { background: rgba(2, 132, 199, 0.1); color: #0369a1; }
+
+.eadm-detail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.eadm-detail-head {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  color: #6d3fd6;
+}
+
+.eadm-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  font-size: 13px;
+}
