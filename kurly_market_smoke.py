@@ -447,6 +447,15 @@ def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--use-cached-product-input",
+        action="store_true",
+        help=(
+            "저장된 product-input.json(직전 런의 스크롤/OCR/LLM 재구성 완성본)을 "
+            "그대로 입력으로 재사용합니다. 수집·재구성을 전부 건너뛰어 분류 "
+            "층만 재실행합니다 (지각 고정 A/B용). 캐시 없는 상품은 실패 처리."
+        ),
+    )
+    parser.add_argument(
         "--classify-reconstruction",
         action="store_true",
         help=(
@@ -881,6 +890,7 @@ class KurlyMarketSmokeRunner:
         answerCsvPath: Path | None = None,
         writeSummaryArtifact: bool | None = None,
         reuseOcrImageArtifacts: bool = True,
+        useCachedProductInput: bool = False,
     ) -> None:
         _LoadDotEnvDefaults(PROJECT_ROOT_PATH / ".env")
         appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
@@ -957,6 +967,7 @@ class KurlyMarketSmokeRunner:
         self._fieldValuePreviewCharacters = smokeConfig.field_value_preview_characters
         self._ocrTextPreviewCharacters = smokeConfig.ocr_text_preview_characters
         self._reuseOcrImageArtifacts = reuseOcrImageArtifacts
+        self._useCachedProductInput = useCachedProductInput
         self._pipelineOcrEngine: object = None
         self._pipelineRawOcrEngine: object = None
         self._kurlyUrlIntakePipeline: KurlyUrlIntakePipeline | None = None
@@ -1264,6 +1275,8 @@ class KurlyMarketSmokeRunner:
         productUrl: str,
     ) -> Dict[str]:
         runLogger = self._Logger("_RunOne")
+        if self._useCachedProductInput:
+            return self._RunOneFromCachedInput(productUrl, runLogger)
         try:
             runLogger.info(
                 (
@@ -1321,6 +1334,67 @@ class KurlyMarketSmokeRunner:
                     "runtime_error": str(error),
                 },
             }
+
+    def _RunOneFromCachedInput(
+        self,
+        productUrl: str,
+        runLogger: _BoundLogger,
+    ) -> Dict[str]:
+        """캐시된 product-input.json(직전 런 재구성 완성본)으로 분류만 재실행.
+
+        수집·OCR·LLM 재구성 0회 — 지각을 직전 풀런에 고정한 채 술어·매칭
+        층의 변화만 측정한다 (재구성 모델 비결정성 잡음 차단).
+        """
+        from bussiness_logic.product.pipeline.kurly_url_facts import (
+            LoadCachedProductInputFacts,
+        )
+
+        try:
+            uiFacts = LoadCachedProductInputFacts(productUrl)
+        except Exception as error:  # noqa: BLE001 — 캐시 부재 = 해당 상품 실패
+            return {
+                "product_page_url": productUrl,
+                "status": {
+                    "is_parse_ok": False,
+                    "is_ocr_fallback_ok": False,
+                    "runtime_error": str(error),
+                },
+            }
+        runLogger.info(
+            (
+                "pipeline_step=product_collection component=KurlyMarketSmokeRunner "
+                "input_dto=CachedProductInput output_dto=KurlyUrlFacts "
+                "url={} product_name={} source=product-input.json "
+                "fact_count={} fact_text_count={}"
+            ),
+            productUrl,
+            uiFacts.get("product_name") or "",
+            len(uiFacts.get("reconstructed_product_facts") or []),
+            len(uiFacts.get("reconstructed_fact_texts") or []),
+        )
+        resultData: Dict[str] = {
+            "product_page_url": productUrl,
+            "status": {
+                "is_parse_ok": True,
+                "is_ocr_fallback_ok": True,
+                "cached_product_input": True,
+            },
+            "product": {
+                "product_name": uiFacts.get("product_name") or "",
+                "product_domain": uiFacts.get("product_domain") or "unknown",
+            },
+        }
+        if self._checkUiBinding:
+            resultData["ui_binding_smoke"] = BuildUiBindingSmoke(
+                uiFacts,
+                sourceLabel=productUrl,
+            )
+        if self._classifyReconstruction:
+            resultData["classification_smoke"] = self._RunClassificationSmoke(
+                productUrl,
+                uiFacts,
+            )
+        return resultData
 
     def _BuildDashFactsFromPipelineResult(
         self,
@@ -2457,6 +2531,19 @@ class KurlyMarketSmokeRunner:
             )
             return
 
+        if statusData.get("cached_product_input"):
+            smokeLogger.info(
+                (
+                    "pipeline_step=product_collection component=KurlyMarketSmokeRunner "
+                    "input_dto=CachedProductInput url={} product_name={} "
+                    "collection=skipped reason=cached_product_input"
+                ),
+                resultData["product_page_url"],
+                resultData["product"]["product_name"],
+            )
+            self._LogClassificationSmoke(resultData)
+            return
+
         self._LogPipelineSteps(resultData)
         productData = resultData["product"]
         noticeData = resultData["raw_collection"]["notice"]
@@ -3386,4 +3473,5 @@ if __name__ == "__main__":
         answerCsvPath=cliArguments.answer_csv,
         writeSummaryArtifact=cliArguments.write_summary_artifact,
         reuseOcrImageArtifacts=cliArguments.reuse_ocr_image_artifacts,
+        useCachedProductInput=cliArguments.use_cached_product_input,
     ).Run()
