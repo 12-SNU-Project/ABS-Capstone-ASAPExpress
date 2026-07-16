@@ -21,6 +21,7 @@ from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
@@ -51,6 +52,15 @@ TABLE_NAME_ALIASES = {
     ),
     "taric_group_guidance_table": (
         "taric_cert_footnote_relation",
+    ),
+    "a2m_codes_food_fr": (
+        "a2m_codes_food_fr",
+    ),
+    "a2m_guideline": (
+        "a2m_guideline",
+    ),
+    "taric_duty_table": (
+        "taric_duty_table",
     ),
 }
 
@@ -594,6 +604,8 @@ class DocumentPackage:
     notes: list[str] = field(default_factory=list)
     product_facts: dict = field(default_factory=dict)
     checklist_summary: dict = field(default_factory=dict)
+    a2m_guidelines: list[dict] = field(default_factory=list)
+    duty_priority: dict = field(default_factory=dict)
 
 
 def _resolve_parent_goods_code(nomenclature_row: dict) -> Optional[str]:
@@ -1453,6 +1465,7 @@ def _fetch_group_guidance(
     if not control_document_group_ids or not _table_exists(cur, "taric_group_guidance_table"):
         return {}
     guidance_table = _resolve_table_name(cur, "taric_group_guidance_table")
+    guidance_columns = _table_columns(cur, "taric_group_guidance_table")
     fields = _select_fields(
         cur,
         "taric_group_guidance_table",
@@ -1461,18 +1474,38 @@ def _fetch_group_guidance(
             "control_document_group_name_ko",
             "exporter_guidance_ko",
             "verification_detail_ko",
+            "exporter_summary_ko",
+            "exporter_action_steps_ko",
+            "exporter_required_evidence_ko",
+            "exporter_verification_sources_ko",
+            "broker_review_detail_ko",
+            "a2m_code",
         ],
     )
+    non_empty_columns = [
+        column
+        for column in [
+            "exporter_guidance_ko",
+            "verification_detail_ko",
+            "exporter_summary_ko",
+            "exporter_action_steps_ko",
+            "exporter_required_evidence_ko",
+            "exporter_verification_sources_ko",
+            "broker_review_detail_ko",
+            "a2m_code",
+        ]
+        if column in guidance_columns
+    ]
+    non_empty_condition = " OR ".join(
+        f"coalesce({column}, '') <> ''" for column in non_empty_columns
+    ) or "TRUE"
     _execute(
         cur,
         f"""
         SELECT DISTINCT {fields}
         FROM {guidance_table}
         WHERE control_document_group_id = ANY(%s)
-          AND (
-            coalesce(exporter_guidance_ko, '') <> ''
-            OR coalesce(verification_detail_ko, '') <> ''
-          )
+          AND ({non_empty_condition})
         """,
         (control_document_group_ids,),
     )
@@ -1487,8 +1520,186 @@ def _fetch_group_guidance(
             "control_document_group_name_ko": row_dict.get("control_document_group_name_ko") or "",
             "exporter_guidance_ko": row_dict.get("exporter_guidance_ko") or "",
             "verification_detail_ko": row_dict.get("verification_detail_ko") or "",
+            "exporter_summary_ko": row_dict.get("exporter_summary_ko") or "",
+            "exporter_action_steps_ko": row_dict.get("exporter_action_steps_ko") or "",
+            "exporter_required_evidence_ko": row_dict.get("exporter_required_evidence_ko") or "",
+            "exporter_verification_sources_ko": row_dict.get("exporter_verification_sources_ko") or "",
+            "broker_review_detail_ko": row_dict.get("broker_review_detail_ko") or "",
+            "a2m_code": row_dict.get("a2m_code") or "",
         }
     return guidance_by_group
+
+
+def _fetch_a2m_guidelines(
+    cur,
+    goods_codes: list[str],
+    excluded_a2m_codes: list[str],
+    exact_goods_code: str,
+) -> list[dict]:
+    if (
+        not goods_codes
+        or not _table_exists(cur, "a2m_codes_food_fr")
+        or not _table_exists(cur, "a2m_guideline")
+    ):
+        return []
+
+    codes_table = _resolve_table_name(cur, "a2m_codes_food_fr")
+    guideline_table = _resolve_table_name(cur, "a2m_guideline")
+    fields = _select_fields(
+        cur,
+        "a2m_guideline",
+        [
+            "a2m_code",
+            "title_en",
+            "title_ko",
+            "requirement_type",
+            "revision_dates",
+            "systems",
+            "celex_ids",
+            "regulation_refs",
+            "official_links_json",
+            "key_sections_json",
+            "exporter_summary_ko",
+            "exporter_action_steps_ko",
+            "exporter_required_evidence_ko",
+            "exporter_verification_sources_ko",
+            "broker_review_detail_ko",
+            "exporter_guideline_ko",
+            "broker_review_ko",
+            "source_section_count",
+            "selected_section_count",
+            "source_html_path",
+            "content_hash",
+        ],
+        qualifier="g",
+    )
+    _execute(
+        cur,
+        f"""
+        SELECT
+          c.goods_code_10,
+          c.origin_country,
+          c.destination_country,
+          c.exception_text,
+          {fields}
+        FROM {codes_table} c
+        JOIN {guideline_table} g
+          ON g.a2m_code = c.a2m_code
+        WHERE c.goods_code_10 = ANY(%s)
+          AND NOT (c.a2m_code = ANY(%s))
+        ORDER BY
+          CASE WHEN c.goods_code_10 = %s THEN 0 ELSE 1 END,
+          c.goods_code_10,
+          c.a2m_code
+        """,
+        (goods_codes, excluded_a2m_codes, exact_goods_code),
+    )
+    cols = [d[0] for d in cur.description]
+    guidelines: list[dict] = []
+    seen: set[str] = set()
+    for row in cur.fetchall():
+        row_dict = dict(zip(cols, row))
+        a2m_code = (row_dict.get("a2m_code") or "").strip()
+        if not a2m_code or a2m_code in seen:
+            continue
+        seen.add(a2m_code)
+        guidelines.append({
+            "source": "access2markets",
+            "goods_code_10": row_dict.get("goods_code_10") or "",
+            "origin_country": row_dict.get("origin_country") or "",
+            "destination_country": row_dict.get("destination_country") or "",
+            "exception_text": row_dict.get("exception_text") or "",
+            "a2m_code": a2m_code,
+            "title_en": row_dict.get("title_en") or "",
+            "title_ko": row_dict.get("title_ko") or "",
+            "requirement_type": row_dict.get("requirement_type") or "",
+            "revision_dates": row_dict.get("revision_dates") or "",
+            "systems": row_dict.get("systems") or "",
+            "celex_ids": row_dict.get("celex_ids") or "",
+            "regulation_refs": row_dict.get("regulation_refs") or "",
+            "official_links_json": row_dict.get("official_links_json") or [],
+            "key_sections_json": row_dict.get("key_sections_json") or [],
+            "exporter_summary_ko": row_dict.get("exporter_summary_ko") or "",
+            "exporter_action_steps_ko": row_dict.get("exporter_action_steps_ko") or "",
+            "exporter_required_evidence_ko": row_dict.get("exporter_required_evidence_ko") or "",
+            "exporter_verification_sources_ko": row_dict.get("exporter_verification_sources_ko") or "",
+            "broker_review_detail_ko": row_dict.get("broker_review_detail_ko") or "",
+            "exporter_guideline_ko": row_dict.get("exporter_guideline_ko") or "",
+            "broker_review_ko": row_dict.get("broker_review_ko") or "",
+            "source_section_count": row_dict.get("source_section_count") or 0,
+            "selected_section_count": row_dict.get("selected_section_count") or 0,
+            "source_html_path": row_dict.get("source_html_path") or "",
+            "content_hash": row_dict.get("content_hash") or "",
+        })
+    return guidelines
+
+
+def _fetch_a2m_guidelines_by_code(cur, a2m_codes: list[str]) -> dict[str, dict]:
+    if (
+        not a2m_codes
+        or not _table_exists(cur, "a2m_guideline")
+    ):
+        return {}
+
+    guideline_table = _resolve_table_name(cur, "a2m_guideline")
+    fields = _select_fields(
+        cur,
+        "a2m_guideline",
+        [
+            "a2m_code",
+            "title_en",
+            "title_ko",
+            "requirement_type",
+            "revision_dates",
+            "systems",
+            "celex_ids",
+            "regulation_refs",
+            "official_links_json",
+            "key_sections_json",
+            "exporter_summary_ko",
+            "exporter_action_steps_ko",
+            "exporter_required_evidence_ko",
+            "exporter_verification_sources_ko",
+            "broker_review_detail_ko",
+            "exporter_guideline_ko",
+            "broker_review_ko",
+        ],
+    )
+    _execute(
+        cur,
+        f"""
+        SELECT {fields}
+        FROM {guideline_table}
+        WHERE a2m_code = ANY(%s)
+        """,
+        (a2m_codes,),
+    )
+    cols = [d[0] for d in cur.description]
+    guidelines_by_code: dict[str, dict] = {}
+    for row in cur.fetchall():
+        row_dict = dict(zip(cols, row))
+        a2m_code = (row_dict.get("a2m_code") or "").strip()
+        if not a2m_code:
+            continue
+        guidelines_by_code[a2m_code] = {
+            "a2m_title_en": row_dict.get("title_en") or "",
+            "a2m_title_ko": row_dict.get("title_ko") or "",
+            "a2m_requirement_type": row_dict.get("requirement_type") or "",
+            "a2m_revision_dates": row_dict.get("revision_dates") or "",
+            "a2m_systems": row_dict.get("systems") or "",
+            "a2m_celex_ids": row_dict.get("celex_ids") or "",
+            "a2m_regulation_refs": row_dict.get("regulation_refs") or "",
+            "a2m_official_links_json": row_dict.get("official_links_json") or [],
+            "a2m_key_sections_json": row_dict.get("key_sections_json") or [],
+            "a2m_exporter_summary_ko": row_dict.get("exporter_summary_ko") or "",
+            "a2m_exporter_action_steps_ko": row_dict.get("exporter_action_steps_ko") or "",
+            "a2m_exporter_required_evidence_ko": row_dict.get("exporter_required_evidence_ko") or "",
+            "a2m_exporter_verification_sources_ko": row_dict.get("exporter_verification_sources_ko") or "",
+            "a2m_broker_review_detail_ko": row_dict.get("broker_review_detail_ko") or "",
+            "a2m_exporter_guideline_ko": row_dict.get("exporter_guideline_ko") or "",
+            "a2m_broker_review_ko": row_dict.get("broker_review_ko") or "",
+        }
+    return guidelines_by_code
 
 
 POST_REQ_FIELDS = [
@@ -2134,6 +2345,267 @@ def _candidate_goods_codes(cur, goods_code_10: str, notes: list[str]) -> list[st
     return codes
 
 
+def _goods_specificity(goods_code_10: str, target_code: str) -> tuple[int, int]:
+    code = re.sub(r"\D", "", str(goods_code_10 or ""))
+    target = re.sub(r"\D", "", str(target_code or ""))
+    return (1 if code == target else 0, len(code.rstrip("0")))
+
+
+def _duty_bucket(row: dict) -> str:
+    measure_code = str(row.get("measure_type_code") or "").strip()
+    measure_text = str(row.get("measure_type_description") or "").lower()
+    if any(keyword in measure_text for keyword in ("quota", "suspension", "end-use", "end use")):
+        return "conditional"
+    if measure_code in {"143", "145", "146"}:
+        return "conditional"
+    if measure_code == "142" or "tariff preference" in measure_text:
+        return "fta"
+    if measure_code in {"103", "105"} or "third country duty" in measure_text:
+        return "basic"
+    if any(row.get(field) for field in ("condition_group", "certificate_code", "action_code", "condition_expression")):
+        return "conditional"
+    return "conditional"
+
+
+def _is_tariff_measure(row: dict) -> bool:
+    measure_code = str(row.get("measure_type_code") or "").strip()
+    measure_text = str(row.get("measure_type_description") or "").lower()
+    if measure_code in {"103", "105", "106", "142", "143", "145", "146"}:
+        return True
+    return any(
+        keyword in measure_text
+        for keyword in (
+            "duty",
+            "tariff",
+            "preference",
+            "quota",
+            "suspension",
+            "end-use",
+            "end use",
+        )
+    )
+
+
+def _duty_condition_label(row: dict) -> str:
+    parts = []
+    measure_text = str(row.get("measure_type_description") or "").lower()
+    if row.get("condition_expression"):
+        parts.append(str(row["condition_expression"]).strip())
+    if row.get("certificate_code"):
+        parts.append(f"{row['certificate_code']} 조건 충족 시")
+    if row.get("action_code_description_ko"):
+        parts.append(str(row["action_code_description_ko"]).strip())
+    elif row.get("action_code"):
+        parts.append(f"Action {row['action_code']} 조건")
+    if "quota" in measure_text:
+        parts.append("쿼터 조건 충족 시")
+    if "suspension" in measure_text:
+        parts.append("suspension 조건 충족 시")
+    if "end-use" in measure_text or "end use" in measure_text:
+        parts.append("end-use 용도 조건 충족 시")
+    return "; ".join(dict.fromkeys(p for p in parts if p))
+
+
+def _rate_display(duty_row: dict, master_row: dict) -> str:
+    parsed_rate = (duty_row.get("rate_text") or "").strip()
+    if parsed_rate:
+        return parsed_rate
+    raw = (master_row.get("duty_text") or "").strip()
+    return ParseDutyText(raw).get("rate") or raw
+
+
+def _json_number(value):
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
+def _duty_branch(duty_row: dict, master_row: dict) -> dict:
+    rate = _rate_display(duty_row, master_row)
+    return {
+        "row_seq": duty_row.get("row_seq"),
+        "segment_type": duty_row.get("segment_type") or "",
+        "condition_group": duty_row.get("condition_group") or "",
+        "condition_expression": duty_row.get("condition_expression") or "",
+        "certificate_code": duty_row.get("certificate_code") or "",
+        "action_code": duty_row.get("action_code") or "",
+        "action_code_description_ko": duty_row.get("action_code_description_ko") or "",
+        "rate_text": rate,
+        "rate_kind": duty_row.get("rate_kind") or ParseDutyText(master_row.get("duty_text") or "").get("normalized_type"),
+        "percent_rate": _json_number(duty_row.get("percent_rate")),
+        "specific_amount": _json_number(duty_row.get("specific_amount")),
+        "threshold_amount": _json_number(duty_row.get("threshold_amount")),
+        "currency": duty_row.get("currency") or "",
+        "unit_code": duty_row.get("unit_code") or "",
+        "min_amount": _json_number(duty_row.get("min_amount")),
+        "max_amount": _json_number(duty_row.get("max_amount")),
+        "condition_label": _duty_condition_label({**master_row, **duty_row}),
+    }
+
+
+def _branch_signature(branches: list[dict]) -> tuple:
+    return tuple(
+        (
+            branch.get("condition_expression") or "",
+            branch.get("certificate_code") or "",
+            branch.get("action_code") or "",
+            branch.get("rate_text") or "",
+            branch.get("rate_kind") or "",
+            branch.get("currency") or "",
+            branch.get("unit_code") or "",
+        )
+        for branch in branches
+    )
+
+
+def _fetch_duty_priority(cur, rows: list[dict], target_code: str) -> dict:
+    empty = {"fta": [], "conditional": [], "basic": []}
+    if not rows:
+        return empty
+
+    master_by_id = {
+        row.get("master_id"): row
+        for row in rows
+        if row.get("master_id") is not None
+    }
+    master_ids = list(master_by_id)
+    if not master_ids or not _table_exists(cur, "taric_duty_table"):
+        return empty
+
+    duty_table = _resolve_table_name(cur, "taric_duty_table")
+    fields = _select_fields(
+        cur,
+        duty_table,
+        [
+            "master_id",
+            "taric_code",
+            "duty_text",
+            "row_seq",
+            "segment_type",
+            "condition_group",
+            "certificate_code",
+            "action_code",
+            "action_code_description_ko",
+            "condition_expression",
+            "rate_text",
+            "rate_kind",
+            "is_rate_option",
+            "is_fallback",
+            "percent_rate",
+            "specific_amount",
+            "threshold_amount",
+            "currency",
+            "unit_code",
+            "min_amount",
+            "max_amount",
+        ],
+    )
+    _execute(
+        cur,
+        f"""
+        SELECT {fields}
+        FROM {duty_table}
+        WHERE master_id = ANY(%s)
+        ORDER BY master_id, row_seq
+        """,
+        (master_ids,),
+    )
+    if not cur.description:
+        return empty
+    cols = [d[0] for d in cur.description]
+    grouped_rows: dict[str, list[dict]] = defaultdict(list)
+    for raw_row in cur.fetchall():
+        duty_row = dict(zip(cols, raw_row))
+        if _truthy(duty_row.get("is_fallback")):
+            continue
+        master_row = master_by_id.get(duty_row.get("master_id")) or {}
+        if not _is_tariff_measure(master_row):
+            continue
+        if duty_row.get("is_rate_option") is not None and not _truthy(duty_row.get("is_rate_option")):
+            continue
+        rate = _rate_display(duty_row, master_row)
+        if str(rate or "").strip().lower().startswith("cond:"):
+            continue
+        if not rate:
+            continue
+        grouped_rows[str(duty_row.get("master_id") or "")].append(duty_row)
+
+    candidates: list[dict] = []
+    for master_id, duty_rows in grouped_rows.items():
+        master_row = master_by_id.get(master_id) or {}
+        if not master_row:
+            continue
+        source_code = str(master_row.get("goods_code_10") or (duty_rows[0].get("taric_code") if duty_rows else "") or "")
+        branches = [
+            _duty_branch(duty_row, master_row)
+            for duty_row in sorted(duty_rows, key=lambda row: row.get("row_seq") or 0)
+        ]
+        branches = [branch for branch in branches if branch.get("rate_text")]
+        if not branches:
+            continue
+        has_branch_conditions = len(branches) > 1 or any(
+            branch.get("condition_expression")
+            or branch.get("certificate_code")
+            or branch.get("action_code")
+            for branch in branches
+        )
+        unit_codes = sorted({
+            branch.get("unit_code")
+            for branch in branches
+            if branch.get("unit_code")
+        })
+        item = {
+            "master_id": master_id,
+            "bucket": "",
+            "measure_type_code": str(master_row.get("measure_type_code") or ""),
+            "measure_type_description": master_row.get("measure_type_description") or "",
+            "goods_code_10": source_code,
+            "source_scope": "direct" if source_code == target_code else "ancestor",
+            "origin_code": master_row.get("origin_code") or "",
+            "origin_description": master_row.get("origin_description_en") or "",
+            "rate_text": "" if has_branch_conditions else branches[0].get("rate_text", ""),
+            "rate_kind": "condition_branches" if has_branch_conditions else branches[0].get("rate_kind", ""),
+            "unit_codes": unit_codes,
+            "branches": branches if has_branch_conditions else [],
+            "legal_base": master_row.get("legal_base") or "",
+            "duty_text": master_row.get("duty_text") or (duty_rows[0].get("duty_text") if duty_rows else "") or "",
+            "_specificity": _goods_specificity(source_code, target_code),
+        }
+        item["bucket"] = _duty_bucket(item)
+        candidates.append(item)
+
+    deduped: dict[tuple, dict] = {}
+    for item in candidates:
+        key = (
+            item["bucket"],
+            item["measure_type_code"],
+            item["origin_code"],
+            item["rate_text"],
+            item["rate_kind"],
+            _branch_signature(item.get("branches") or []),
+            item["legal_base"],
+        )
+        existing = deduped.get(key)
+        if existing is None or item["_specificity"] > existing["_specificity"]:
+            deduped[key] = item
+
+    ranked = sorted(
+        deduped.values(),
+        key=lambda item: (
+            {"fta": 0, "conditional": 1, "basic": 2}.get(item["bucket"], 9),
+            -item["_specificity"][0],
+            -item["_specificity"][1],
+            item["measure_type_description"],
+            item["rate_text"],
+        ),
+    )
+    result = {"fta": [], "conditional": [], "basic": []}
+    for item in ranked:
+        item.pop("_specificity", None)
+        result.setdefault(item["bucket"], []).append(item)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # 핵심 함수
 # ---------------------------------------------------------------------------
@@ -2298,6 +2770,25 @@ def BuildDocumentPackage(
                 all_footnote_codes,
             )
             group_guidance = _fetch_group_guidance(cur, all_control_group_ids)
+            group_a2m_codes = sorted({
+                (guidance.get("a2m_code") or "").strip()
+                for guidance in group_guidance.values()
+                if (guidance.get("a2m_code") or "").strip()
+            })
+            group_a2m_guidelines = _fetch_a2m_guidelines_by_code(cur, group_a2m_codes)
+            a2m_guidelines = _fetch_a2m_guidelines(
+                cur,
+                candidate_codes,
+                group_a2m_codes,
+                code,
+            )
+            duty_priority = _fetch_duty_priority(cur, rows, code)
+            if a2m_guidelines:
+                notes.append(
+                    "Included Access2Markets import requirement guidelines: "
+                    + str(len(a2m_guidelines))
+                    + " items"
+                )
 
             # 5. Requirement 객체 구성
             requirements: list[Requirement] = []
@@ -2324,6 +2815,9 @@ def BuildDocumentPackage(
                     group_id = (guidance.get("control_document_group_id") or "").strip()
                     if group_id:
                         guidance.update(group_guidance.get(group_id, {}))
+                        a2m_code = (guidance.get("a2m_code") or "").strip()
+                        if a2m_code:
+                            guidance.update(group_a2m_guidelines.get(a2m_code, {}))
                         guidance["footnote_guidelines"] = [
                             guideline
                             for guideline in (
@@ -2463,6 +2957,8 @@ def BuildDocumentPackage(
             if binding_cards:
                 checklist_summary['document_binding_cards'] = binding_cards
                 checklist_summary['document_binding_count'] = len(binding_cards)
+            if a2m_guidelines:
+                checklist_summary['a2m_guidelines_count'] = len(a2m_guidelines)
 
             return DocumentPackage(
                 taric10=code, cn8=cn8, total_measure_rows=len(rows),
@@ -2470,6 +2966,8 @@ def BuildDocumentPackage(
                 verification_urls=_verification_urls(code), data_source=DB_SOURCE_NAME,
                 notes=notes, product_facts=product_facts,
                 checklist_summary=checklist_summary,
+                a2m_guidelines=a2m_guidelines,
+                duty_priority=duty_priority,
             )
 
 
