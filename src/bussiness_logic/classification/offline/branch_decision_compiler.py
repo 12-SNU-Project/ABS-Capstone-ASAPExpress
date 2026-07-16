@@ -93,6 +93,19 @@ _COND_CLAUSE = re.compile(r"whether\s+or\s+not[^,;.)]*", re.I)
 _NEG_VALUE = re.compile(
     r"\b(?:other\s+than|excluding|except|does\s+not\s+include|not\s+including|"
     r"not\s+containing|without|no|not)\s+([a-z][a-z ,\-]{2,60})", re.I)
+# 수량 부정("not more than 20 %", "not exceeding 500 g")은 배제 조건이
+# 아니라 수량 게이트다 — 캡처가 숫자 앞에서 끊겨 'more/than' 같은 만능
+# 토큰이 not_contains 값이 되면 "more than" 포함 서술 전부에 오발동하는
+# 자충수(재컴파일 로그 실측: source 'not more than ' → not_contains
+# ["more","than"]). 판정은 두 갈래: 캡처 선두어가 수량 비교어이거나,
+# 캡처 토큰 전부가 수량·불용 토큰뿐일 때. 일반 부정("not stuffed")은
+# 어느 쪽에도 안 걸려 배제 캡처가 그대로 유지된다.
+_QUANT_NEG_HEAD = frozenset({"more", "less", "exceeding"})
+_QUANT_NEG_TOKENS = frozenset({
+    "more", "less", "than", "exceed", "exceeding", "least", "most",
+    "over", "under", "weigh", "weighing", "contain", "containing",
+    "and", "the", "for", "with", "not", "its", "this", "that", "but",
+})
 
 
 def _load_taxonomy() -> list[dict[str, Any]]:
@@ -113,6 +126,39 @@ def _load_taxonomy() -> list[dict[str, Any]]:
 
 _TAXONOMY = _load_taxonomy()
 _RESIDUAL_RX = next((t["pattern"] for t in _TAXONOMY if t["criterion_type"] == "residual_other"), None)
+
+
+def _grounded_source(source: str, values) -> str:
+    """source_text 기록 — 채택 값 토큰의 원문 등장 보장 (정합 (c) 원칙).
+
+    quant_gate(values=None) 행은 120자 컷 유지 — source_text가 런타임
+    quant_verdict_fn(evaluator L164)의 파싱 입력이라 길이 변경이 수량
+    판정에 영향을 준다. 값 보유 행은 400자로 상향하고(2916/2918류 장문
+    화학 헤딩에서 값 토큰이 120자 밖이라 정합 위반 26행 실측), 그래도
+    컷 밖에 남는 값 토큰은 포함 구간을 ' … ' 병기로 등장을 보장한다.
+    """
+    source = str(source or "")
+    if not values:
+        return source[:120]
+    src = source[:400]
+    have = {_stem(t) for t in _TOKEN.findall(src.lower())}
+    need = {t for phrase in values for t in str(phrase).split() if t not in have}
+    if not need:
+        return src
+    extras: list[str] = []
+    for m in _TOKEN.finditer(source.lower()):
+        stemmed = _stem(m.group(0))
+        if stemmed in need:
+            snippet = source[max(0, m.start() - 20):m.end() + 40].strip()
+            if snippet:
+                extras.append(snippet)
+                # 스니펫에 같이 실려 온 나머지 필요 토큰도 해소 — 중복 병기 방지
+                need -= {_stem(t) for t in _TOKEN.findall(snippet.lower())}
+            else:
+                need.discard(stemmed)
+        if not need:
+            break
+    return (src + " … " + " … ".join(extras)) if extras else src
 
 
 def CompileGroupDecisions(
@@ -177,6 +223,16 @@ def CompileGroupDecisions(
                 unit = " ".join(toks[:4])
                 if unit and unit not in units:
                     units.append(unit)
+            # [Phase 1.5] 원문 홑 대문자 지시 기호 보존 — 'L sections' vs
+            # 'T sections'(721640)처럼 판별자가 낱글자 기호일 때 길이 필터
+            # (≥3)로 소실돼 분기가 bare가 된다. 원문에 독립 대문자로 등장한
+            # 글자만 값으로 승격 (소문자 관사·전치사 of/or 등은 해당 없음).
+            # 형제 전원이 공유하는 기호(U/I/H 병기 등)는 post-pass 정화가
+            # 그대로 제거하므로 잡음 재유입 없음.
+            for c in re.findall(r"(?<![\w.])([A-Z])(?![\w.])", str(text or "")):
+                low = c.lower()
+                if _discriminative(low) and low not in units:
+                    units.append(low)
             return units[:8]
 
         def add(cond_type: str, op: str, values, source: str) -> None:
@@ -186,7 +242,7 @@ def CompileGroupDecisions(
                 "dto_field": CRITERION_FIELD_BINDING.get(cond_type, "*tokens*"),
                 "op": op,
                 "value": json.dumps(values, ensure_ascii=False) if values is not None else "null",
-                "source_text": source[:120], "version": "parser-v1",
+                "source_text": _grounded_source(source, values), "version": "parser-v1",
             })
 
         emitted_types: set[str] = set()
@@ -196,11 +252,20 @@ def CompileGroupDecisions(
         # 수준 토큰에 정답이 위반당한다(실측). 그래서 부정 캡처는 leaf
         # 세그먼트(';' 뒤 마지막)에서만, dash 세그먼트는 긍정 조건만 낸다.
         leaf_segment = clean.rsplit(";", 1)[-1]
+        quant_neg_source = ""
         for neg in _NEG_VALUE.finditer(leaf_segment):
             values = [w for w in _toks(neg.group(1)) if w][:4]
-            if values:
-                add("exclusion_boundary", "not_contains", sorted(values), neg.group(0))
-                emitted_types.add("exclusion_boundary")
+            if not values:
+                continue
+            head_words = neg.group(1).lower().split()
+            if (head_words and head_words[0] in _QUANT_NEG_HEAD) or all(
+                    v in _QUANT_NEG_TOKENS for v in values):
+                # 수량 부정 → 배제 대신 quantitative_threshold로 라우팅
+                # (taxonomy 탐지기가 못 잡는 경우의 안전망 — 아래 emit부).
+                quant_neg_source = quant_neg_source or neg.group(0)
+                continue
+            add("exclusion_boundary", "not_contains", sorted(values), neg.group(0))
+            emitted_types.add("exclusion_boundary")
         positive_side = _NEG_VALUE.sub(" ", clean)
         # dash(중간) 세그먼트는 상태축 전용: 'Molluscs' 같은 dash 명사(류
         # 정의)가 조건 값이 되면 그 류의 전 형제가 같은 값으로 확정된다
@@ -237,16 +302,31 @@ def CompileGroupDecisions(
                 if len(window) == 80 and not window[-1].isspace():
                     window = window.rsplit(" ", 1)[0] if " " in window else window
                 span_source = window.split(";")[0].split(".")[0]
+                # 근거 기록은 match+채택 창 전체 — 값은 창에서 뽑으면서
+                # source_text에 match.group(0)만 적으면 값이 원문 근거와
+                # 어긋난 행이 남는다("articles of leather"에서 값 ["article"]
+                # ·근거 'leather' 실측). span_source는 match 직후 연속
+                # 구간이라 이어붙이면 원문 그대로다. 값 추출 창(80자/상한 8)
+                # 은 1605·1902·160249 실측 사연으로 불변.
+                source_span = match.group(0) + span_source
             else:
                 span_source = match.group(0)
+                source_span = match.group(0)
             # 값 상한 8: 법조문 열거("such as spaghetti, macaroni, noodles,
             # lasagne, gnocchi, ravioli, cannelloni")가 4에서 잘리면 정작
             # 판별력 있는 꼬리 단어(noodle)가 소실된다 — 1902 실측.
             # 배제(not_contains)는 차단 시맨틱이라 4 유지(보수).
             span_tokens = _phrase_units(span_source)
             if span_tokens:
-                add(cond_type, "has_token", span_tokens, match.group(0))
+                add(cond_type, "has_token", span_tokens, source_span)
                 emitted_types.add(cond_type)
+        # 수량 부정에서 라우팅된 quant_gate — taxonomy 수량 탐지기는
+        # positive_side(부정 스팬 제거 후)를 보므로 "not more than 20 %"는
+        # 비교어가 지워진 채 숫자만 남아 못 잡는다. 이미 잡혔으면 중복
+        # emit 금지 (quant_gate value=null 설계는 기존 그대로).
+        if quant_neg_source and "quantitative_threshold" not in emitted_types:
+            add("quantitative_threshold", "quant_gate", None, quant_neg_source)
+            emitted_types.add("quantitative_threshold")
         # 아무 유형도 안 잡힌 순수 명사 라벨 -> product_identity 폴백
         if not emitted_types:
             nouns = _phrase_units(positive_side)
@@ -257,6 +337,32 @@ def CompileGroupDecisions(
                 # (실측: fallback 4,575/named 0 — 면류 confirm 전멸 위험).
                 # named/fallback 판별 기준은 dry-run diff로 검증 후 도입.
                 add("product_identity", "has_token", nouns, clean)
+        # [Phase 1.5] 최후 상태어 보존 — 위 폴백까지 전멸한 코드 중 leaf
+        # 라벨이 taxonomy 상태 매치 토큰(_VALUE_STOP 관용어) 1~2개로만
+        # 구성된 경우('Used' 63051010 실측: 값 필터 소실 → bare). 관용구가
+        # 라벨 일부로 등장하는 일반 케이스는 다른 값이 살아 있어 여기 오지
+        # 않는다. 값은 leaf 원문 토큰 그대로 — 정합 검사 (c) 통과 보장.
+        if not emitted_types and not any(r["then_code"] == code for r in rows):
+            leaf_toks = sorted({
+                w for w in (_stem(x) for x in _TOKEN.findall(leaf_positive.lower()))
+                if len(w) >= 3})
+            if leaf_toks and len(leaf_toks) <= 2 and all(
+                    _discriminative(w) for w in leaf_toks):
+                for entry in _TAXONOMY:
+                    if entry["criterion_type"] in (
+                            "residual_other", "exclusion_boundary",
+                            "quantitative_threshold"):
+                        continue
+                    m = entry["pattern"].search(leaf_positive)
+                    if not m:
+                        continue
+                    match_toks = {_stem(x) for x in
+                                  _TOKEN.findall(m.group(0).lower())}
+                    if set(leaf_toks) <= match_toks:
+                        add(entry["criterion_type"], "has_token", leaf_toks,
+                            leaf_positive.strip())
+                        emitted_types.add(entry["criterion_type"])
+                        break
     # ── 그룹 수준 값 정화 (post-pass) ──
     # "형제 과반이 값으로 공유하는 토큰"은 판별 자격이 없다 — 류 정의어
     # (mollusc 7/14), 법조 관용구(containing 10/10), 문법 잡토큰(and 9/9)이
@@ -293,6 +399,23 @@ def CompileGroupDecisions(
                 r = dict(r)
                 r["value"] = json.dumps(kept, ensure_ascii=False)
                 cleaned.append(r)
+        # [Phase 1.5] 정화가 분기의 전 행을 죽이면 그 분기는 질문 자체가
+        # 없는 커버리지 구멍(bare)이 된다 — 분기 국소 예외로 원문 근거가
+        # 가장 강한 행 1개만 원값 그대로 보존한다 (전역 정화 기준은 불변:
+        # 다른 행이 하나라도 살면 이 예외는 발동하지 않는다). '가장 강한'
+        # = 값 구문 총 길이 최대(구체 구문 우선), 동률이면 법조 순서 앞.
+        if not cleaned:
+            def _strength(r: dict[str, Any]) -> tuple:
+                try:
+                    vals = json.loads(r["value"]) or []
+                except Exception:  # noqa: BLE001
+                    vals = []
+                return (sum(len(str(v)) for v in vals), -int(r["seq"]))
+
+            keep = max((r for r in rows if r["op"] == "has_token"),
+                       key=_strength, default=None)
+            if keep is not None:
+                cleaned = [keep]
         rows = cleaned
     return rows
 
@@ -382,24 +505,27 @@ def _cnen_rows(note_by_cn8: dict[str, str]) -> list[dict[str, Any]]:
     for cn8, note in note_by_cn8.items():
         if not note:
             continue
-        inc_vals: list[str] = []
+        # 값을 만든 매치 문장을 source로 동반 — note[:100] 고정 컷은 값이
+        # 100자 이후 문장에서 수확되면 정합 (c) 위반이 된다 (값 등장 보장).
+        inc_vals: list[tuple[str, str]] = []
         for m in _CNEN_INCLUDE_RX.finditer(note):
-            inc_vals += units(m.group(1), 2)
-        exc_vals: list[str] = []
+            inc_vals += [(v, m.group(0)) for v in units(m.group(1), 2)]
+        exc_vals: list[tuple[str, str]] = []
         for m in _CNEN_EXCLUDE_RX.finditer(note):
-            exc_vals += units(m.group(1), 2)
+            exc_vals += [(v, m.group(0)) for v in units(m.group(1), 2)]
         # 배제는 2토큰 이상 구문만 — 1토큰('meat') 광역 배제는 자기 정체를
         # 배제하는 자충수가 된다(02089030 실측: 사냥육에 not_contains meat).
-        exc_vals = [v for v in exc_vals if len(v.split()) >= 2]
+        exc_vals = [(v, s) for v, s in exc_vals if len(v.split()) >= 2]
         for op, ctype, vals in (("has_token", "product_identity", inc_vals[:2]),
                                 ("not_contains", "exclusion_boundary", exc_vals[:2])):
-            for v in vals:
+            for v, snippet in vals:
                 out.append({
                     "level": "cn8", "branch_id": cn8[:6], "seq": 90,
                     "then_code": cn8, "cond_type": ctype,
                     "dto_field": CRITERION_FIELD_BINDING.get(ctype, "*tokens*"),
                     "op": op, "value": json.dumps([v], ensure_ascii=False),
-                    "source_text": ("CNEN: " + note[:100]), "version": "parser-v1",
+                    "source_text": _grounded_source("CNEN: " + snippet, [v]),
+                    "version": "parser-v1",
                 })
     return out
 
