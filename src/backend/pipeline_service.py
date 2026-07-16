@@ -8,6 +8,7 @@ import threading
 import time
 import traceback
 from collections.abc import Callable, Iterator, Mapping
+from dataclasses import asdict
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,6 +20,7 @@ from backend.api_contract import (
     RunNotFoundSsePayload,
 )
 from backend.pipeline_projection import PipelineResultProjector
+from bussiness_logic.document.document_package_builder import BuildDocumentPackage
 from bussiness_logic.utils.json_types import JsonMapping, JsonObject, JsonValue
 
 
@@ -150,12 +152,54 @@ class RunRegistry:
                 str(package.get("document_package_id") or ""),
                 str(package.get("taric10") or ""),
             }:
+                package = self._EnrichDocumentPackageForDetail(package)
                 return DocumentPackageDetailResponse(
                     job_id=jobId,
                     run_id=resultData.get("run_id"),
                     document_package=package,
                 ).ToDict()
         return {}
+
+    def _EnrichDocumentPackageForDetail(self, package: JsonMapping) -> JsonObject:
+        publicPackage = dict(package)
+        taric10 = str(publicPackage.get("taric10") or "").strip()
+        if not taric10:
+            return publicPackage
+
+        try:
+            rebuilt = asdict(BuildDocumentPackage(taric10))
+        except Exception as exc:  # noqa: BLE001
+            summary = dict(publicPackage.get("checklist_summary") or {})
+            summary["a2m_enrichment_error"] = str(exc)
+            publicPackage["checklist_summary"] = summary
+            return publicPackage
+
+        preserved = {
+            key: publicPackage.get(key)
+            for key in (
+                "object_type",
+                "created_by",
+                "created_at",
+                "document_package_id",
+                "candidate_id",
+                "taric10_branch",
+                "taric10_branch_index",
+                "taric10_branch_count",
+                "taric10_resolution_mode",
+                "taric10_is_recommended",
+            )
+            if key in publicPackage
+        }
+        publicPackage.update({
+            key: value
+            for key, value in rebuilt.items()
+            if key not in {"object_type", "created_by", "created_at", "document_package_id", "candidate_id"}
+        })
+        publicPackage.update(preserved)
+        summary = dict(publicPackage.get("checklist_summary") or {})
+        summary["a2m_guidelines_count"] = len(publicPackage.get("a2m_guidelines") or [])
+        publicPackage["checklist_summary"] = summary
+        return publicPackage
 
     def _DocumentPackagesFromSnapshot(
         self,

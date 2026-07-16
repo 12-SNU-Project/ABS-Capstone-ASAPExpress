@@ -73,10 +73,120 @@ function joinList(value) {
 }
 
 function splitTokens(value) {
-  return asList(value)
+  const values = Array.isArray(value) ? value : [value];
+  return values
     .flatMap((item) => String(item ?? "").split(/[;,]/))
     .map((item) => clean(item))
     .filter(Boolean);
+}
+
+function splitLines(value) {
+  const values = Array.isArray(value) ? value : [value];
+  return values
+    .flatMap((item) => String(item ?? "").split(/\n+|\s+[−-]\s+/))
+    .map((item) => clean(item).replace(/^[-•]\s*/, ""))
+    .filter(Boolean);
+}
+
+function stripListMarker(value) {
+  return clean(value).replace(/^(\d+|[A-Za-z])[\.)]\s+/, "").replace(/^[-•]\s*/, "");
+}
+
+function normalizedKey(value) {
+  return clean(value).toLowerCase().replace(/\s+/g, " ");
+}
+
+function addEvidenceItem(target, seen, value) {
+  const text = stripListMarker(value);
+  if (!text) {
+    return;
+  }
+  const key = normalizedKey(text);
+  if (!key || seen.has(key)) {
+    return;
+  }
+  seen.add(key);
+  target.push(text);
+}
+
+function splitEvidenceSource(value) {
+  const text = stripListMarker(value);
+  if (!text) {
+    return [];
+  }
+  const a2mMatch = text.match(/^A2M\s*원문\s*:\s*(.+?)(?:\s*섹션)?$/i);
+  if (a2mMatch) {
+    return a2mMatch[1].split(/\s*,\s*/).map((item) => `${item} 섹션`);
+  }
+  return [text];
+}
+
+function buildEvidenceSourceGroups(group, regulationItems) {
+  const categories = {
+    sections: [],
+    regulations: [],
+    systems: [],
+    other: [],
+  };
+  const seen = {
+    sections: new Set(),
+    regulations: new Set(),
+    systems: new Set(),
+    other: new Set(),
+  };
+
+  asList(group.sourceSections).forEach((item) => addEvidenceItem(categories.sections, seen.sections, item));
+  asList(regulationItems).forEach((item) => addEvidenceItem(categories.regulations, seen.regulations, item));
+  asList(group.systems).forEach((item) => addEvidenceItem(categories.systems, seen.systems, item));
+  asList(group.officialLinks).forEach((item) => addEvidenceItem(categories.systems, seen.systems, item));
+
+  asList(group.verificationSources).forEach((source) => {
+    splitEvidenceSource(source).forEach((item) => {
+      const text = stripListMarker(item);
+      const lower = text.toLowerCase();
+      if (!text) {
+        return;
+      }
+      if (lower.includes("섹션") || lower.includes("a2m 원문")) {
+        addEvidenceItem(categories.sections, seen.sections, text);
+        return;
+      }
+      if (
+        lower.includes("regulation")
+        || lower.includes("celex")
+        || lower.includes("annex")
+        || lower.includes("article")
+        || lower.includes("legal")
+        || lower.includes("법령")
+        || lower.includes("근거")
+      ) {
+        addEvidenceItem(categories.regulations, seen.regulations, text);
+        return;
+      }
+      if (
+        lower.includes("traces")
+        || lower.includes("imsoc")
+        || lower.includes("ched")
+        || lower.includes("bcp")
+        || lower.includes("catch")
+        || lower.includes("flis")
+        || lower.includes("echa")
+        || lower.includes("dg sante")
+        || lower.includes("cbam")
+        || lower.includes("portal")
+        || lower.includes("registry")
+        || lower.includes("competent authorit")
+        || lower.includes("담당기관")
+        || lower.includes("관할기관")
+      ) {
+        addEvidenceItem(categories.systems, seen.systems, text);
+        return;
+      }
+      addEvidenceItem(categories.other, seen.other, text);
+    });
+  });
+
+  return categories;
 }
 
 function unique(values) {
@@ -85,6 +195,29 @@ function unique(values) {
 
 function firstNonEmpty(...values) {
   return values.map((value) => clean(value)).find(Boolean) || "";
+}
+
+function firstParagraph(value) {
+  return splitLines(value)[0] || "";
+}
+
+function parseJsonList(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (value && typeof value === "object") {
+    return [value];
+  }
+  const text = clean(value);
+  if (!text) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : asList(parsed);
+  } catch {
+    return [];
+  }
 }
 
 function formatRate(value) {
@@ -248,14 +381,31 @@ function buildCertificateGroups(pkg) {
       );
       const group = groups.get(groupName) || {
         groupName,
+        a2mCode: clean(guidance.a2m_code),
+        sourceType: "taric",
         measureTypes: new Set(),
         sourceCodes: new Set(),
         legalBases: new Set(),
+        regulationReferences: new Set(),
+        celexIds: new Set(),
+        officialLinks: [],
+        sourceSections: [],
+        summaries: new Set(),
+        actionSteps: new Set(),
+        requiredEvidenceItems: new Set(),
+        verificationSources: new Set(),
         exporterGuidance: new Set(),
+        prepareItems: new Set(),
+        checkItems: new Set(),
         verificationDetails: new Set(),
+        brokerReview: new Set(),
+        systems: new Set(),
         codes: [],
         footnoteGuidelines: new Map(),
       };
+      if (!group.a2mCode && clean(guidance.a2m_code)) {
+        group.a2mCode = clean(guidance.a2m_code);
+      }
       group.measureTypes.add(clean(req.measure_type));
       asList(req.source_goods_codes).forEach((sourceCode) => group.sourceCodes.add(clean(sourceCode)));
       if (clean(req.legal_base)) {
@@ -267,6 +417,44 @@ function buildCertificateGroups(pkg) {
       if (clean(guidance.verification_detail_ko)) {
         group.verificationDetails.add(clean(guidance.verification_detail_ko));
       }
+      splitLines(guidance.exporter_summary_ko).forEach((item) => group.summaries.add(item));
+      splitLines(guidance.exporter_action_steps_ko).forEach((item) => group.actionSteps.add(item));
+      splitLines(guidance.exporter_required_evidence_ko).forEach((item) => group.requiredEvidenceItems.add(item));
+      splitLines(guidance.exporter_verification_sources_ko).forEach((item) => group.verificationSources.add(item));
+      splitLines(guidance.broker_review_detail_ko).forEach((item) => {
+        group.verificationDetails.add(item);
+        group.brokerReview.add(item);
+      });
+      splitLines(guidance.a2m_exporter_summary_ko).forEach((item) => group.summaries.add(item));
+      splitLines(guidance.a2m_exporter_action_steps_ko).forEach((item) => group.actionSteps.add(item));
+      splitLines(guidance.a2m_exporter_required_evidence_ko).forEach((item) => group.requiredEvidenceItems.add(item));
+      splitLines(guidance.a2m_exporter_verification_sources_ko).forEach((item) => group.verificationSources.add(item));
+      splitLines(guidance.a2m_broker_review_detail_ko).forEach((item) => {
+        group.verificationDetails.add(item);
+        group.brokerReview.add(item);
+      });
+      if (clean(guidance.a2m_exporter_guideline_ko)) {
+        splitLines(guidance.a2m_exporter_guideline_ko).forEach((item) => group.exporterGuidance.add(item));
+      }
+      splitLines(guidance.a2m_broker_review_ko).forEach((item) => {
+        group.verificationDetails.add(item);
+        group.brokerReview.add(item);
+      });
+      splitTokens(guidance.a2m_systems).forEach((system) => group.systems.add(system));
+      splitTokens(guidance.a2m_regulation_refs).forEach((reference) => group.regulationReferences.add(reference));
+      splitTokens(guidance.a2m_celex_ids).forEach((celexId) => group.celexIds.add(celexId));
+      parseJsonList(guidance.a2m_official_links_json)
+        .map((link) => asObject(link))
+        .map((link) => firstNonEmpty(link.text, link.href))
+        .filter(Boolean)
+        .slice(0, 8)
+        .forEach((link) => group.officialLinks.push(link));
+      parseJsonList(guidance.a2m_key_sections_json)
+        .map((section) => asObject(section))
+        .map((section) => firstNonEmpty(section.heading_ko, section.heading_en))
+        .filter(Boolean)
+        .slice(0, 8)
+        .forEach((section) => group.sourceSections.push(section));
       group.codes.push({
         code,
         category: clean(cert.category || guidance.certificate_category),
@@ -295,6 +483,7 @@ function buildCertificateGroups(pkg) {
         if (verificationDetail) {
           group.verificationDetails.add(verificationDetail);
         }
+        splitTokens(legalReference).forEach((reference) => group.regulationReferences.add(reference));
         if (!footnoteCode || (!summary && !importerCheck && !legalReference && !footnoteDescription)) {
           return;
         }
@@ -316,14 +505,91 @@ function buildCertificateGroups(pkg) {
       measureTypes: unique(Array.from(group.measureTypes)),
       sourceCodes: unique(Array.from(group.sourceCodes)),
       legalBases: unique(Array.from(group.legalBases)),
+      regulationReferences: unique(Array.from(group.regulationReferences)),
+      celexIds: unique(Array.from(group.celexIds)),
+      officialLinks: unique(Array.from(group.officialLinks)),
+      sourceSections: unique(Array.from(group.sourceSections)),
+      summaries: unique(Array.from(group.summaries)),
+      actionSteps: unique(Array.from(group.actionSteps)),
+      requiredEvidenceItems: unique(Array.from(group.requiredEvidenceItems)),
+      verificationSources: unique(Array.from(group.verificationSources)),
       exporterGuidance: unique(Array.from(group.exporterGuidance)),
+      prepareItems: unique(Array.from(group.prepareItems)),
+      checkItems: unique(Array.from(group.checkItems)),
       verificationDetails: unique(Array.from(group.verificationDetails)),
+      brokerReview: unique(Array.from(group.brokerReview)),
+      systems: unique(Array.from(group.systems)),
       codes: group.codes.sort((a, b) => a.code.localeCompare(b.code)),
       footnoteGuidelines: Array.from(group.footnoteGuidelines.values()).sort((a, b) =>
         a.footnoteCode.localeCompare(b.footnoteCode),
       ),
     }))
     .sort((a, b) => a.groupName.localeCompare(b.groupName));
+}
+
+function buildA2mGuidelineGroups(pkg) {
+  const guidelineRows = [
+    ...asList(pkg.a2m_guidelines),
+    ...asList(pkg.additional_a2m_guidelines),
+    ...asList(asObject(pkg.checklist_summary).a2m_guidelines),
+  ];
+  const seenCodes = new Set();
+  return guidelineRows.map((item) => {
+    const source = asObject(item);
+    const a2mCode = clean(source.a2m_code);
+    if (!a2mCode || seenCodes.has(a2mCode)) {
+      return null;
+    }
+    seenCodes.add(a2mCode);
+    const sections = parseJsonList(source.key_sections_json)
+      .map((section) => asObject(section))
+      .filter((section) => clean(section.summary_ko));
+    const officialLinks = parseJsonList(source.official_links_json)
+      .map((link) => asObject(link))
+      .map((link) => firstNonEmpty(link.text, link.href))
+      .filter(Boolean)
+      .slice(0, 8);
+    const sourceSections = sections
+      .map((section) => firstNonEmpty(section.heading_ko, section.heading_en))
+      .filter(Boolean)
+      .slice(0, 8);
+    return {
+      groupName: firstNonEmpty(source.title_ko, source.title_en, source.a2m_code),
+      a2mCode,
+      sourceType: "a2m",
+      measureTypes: ["Access2Markets"],
+      sourceCodes: unique([source.goods_code_10]),
+      legalBases: [],
+      regulationReferences: splitTokens(source.regulation_refs),
+      celexIds: splitTokens(source.celex_ids),
+      officialLinks,
+      sourceSections,
+      summaries: splitLines(source.exporter_summary_ko),
+      actionSteps: splitLines(source.exporter_action_steps_ko),
+      requiredEvidenceItems: splitLines(source.exporter_required_evidence_ko),
+      verificationSources: splitLines(source.exporter_verification_sources_ko),
+      exporterGuidance: unique([
+        ...splitLines(source.exporter_summary_ko),
+        ...splitLines(source.exporter_guideline_ko),
+      ]),
+      prepareItems: splitLines(source.exporter_required_evidence_ko),
+      checkItems: splitLines(source.exporter_verification_sources_ko),
+      verificationDetails: unique([
+        ...splitLines(source.broker_review_detail_ko),
+        ...splitLines(source.broker_review_ko),
+      ]),
+      codes: [],
+      footnoteGuidelines: [],
+      systems: splitTokens(source.systems),
+      brokerReview: unique([
+        ...splitLines(source.broker_review_detail_ko),
+        ...splitLines(source.broker_review_ko),
+      ]),
+    };
+  }).filter((group) =>
+    group &&
+    group.groupName && (group.exporterGuidance.length || group.verificationDetails.length)
+  );
 }
 
 function buildDutyRows(pkg) {
@@ -395,6 +661,57 @@ function buildDutyRows(pkg) {
   });
 }
 
+function normalizeDutyPriorityItem(row, bucket) {
+  const source = asObject(row);
+  const scope = clean(source.source_scope) === "direct" ? "해당 TARIC 직접 적용" : "상위계층 적용";
+  const branches = asList(source.branches).map((branch) => {
+    const item = asObject(branch);
+    return {
+      rowSeq: item.row_seq,
+      condition: clean(item.condition_label || item.condition_expression),
+      expression: clean(item.condition_expression),
+      rate: formatRate(item.rate_text),
+      rateKind: clean(item.rate_kind),
+      unitCode: clean(item.unit_code),
+    };
+  }).filter((branch) => branch.rate);
+  return {
+    bucket,
+    measure: clean(source.measure_type_description),
+    measureCode: clean(source.measure_type_code),
+    sourceCode: clean(source.goods_code_10),
+    sourceScope: scope,
+    origin: clean(source.origin_description || source.origin_code),
+    rate: formatRate(source.rate_text || source.rate || source.duty_text),
+    branches,
+    condition: clean(source.condition_label || source.condition_expression),
+    certificateCode: clean(source.certificate_code),
+    actionCode: clean(source.action_code),
+    legalBase: clean(source.legal_base),
+    rateKind: clean(source.rate_kind),
+    unitCodes: unique([
+      ...asList(source.unit_codes).map(clean),
+      ...branches.map((branch) => branch.unitCode),
+      ...extractUnitCodes(source.rate_text || source.duty_text),
+      ...branches.flatMap((branch) => extractUnitCodes(`${branch.expression} ${branch.rate}`)),
+    ].filter(Boolean)),
+  };
+}
+
+function buildDutyPriority(pkg) {
+  const priority = asObject(pkg.duty_priority);
+  const hasRateOrBranches = (row) => row.rate || row.branches.length;
+  return {
+    fta: asList(priority.fta).map((row) => normalizeDutyPriorityItem(row, "fta")).filter(hasRateOrBranches),
+    conditional: asList(priority.conditional).map((row) => normalizeDutyPriorityItem(row, "conditional")).filter(hasRateOrBranches),
+    basic: asList(priority.basic).map((row) => normalizeDutyPriorityItem(row, "basic")).filter(hasRateOrBranches),
+  };
+}
+
+function dutyPriorityCount(priority) {
+  return asList(priority.fta).length + asList(priority.conditional).length + asList(priority.basic).length;
+}
+
 function buildDutyBranches(rows) {
   const dutyRows = asList(rows);
   const fta = dutyRows.find((row) => row.type === "FTA/특혜");
@@ -464,7 +781,126 @@ function buildPreArrivalRows(certificateGroups) {
   });
 }
 
-function DutyBranchView({ rows }) {
+const DUTY_UNIT_LABELS = {
+  DTN: "100kg 기준",
+  "DTN R": "100kg 기준",
+  TNE: "1,000kg 기준",
+  KGM: "kg 기준",
+  HLT: "100L 기준",
+  LTR: "L 기준",
+  NAR: "개수 기준",
+  GRM: "g 기준",
+  EA: "농산물 구성요소",
+  ADFM: "밀가루 구성요소",
+  ADSZ: "설탕 구성요소",
+  AC: "농산물 구성요소",
+};
+
+function extractUnitCodes(value) {
+  const text = clean(value).toUpperCase();
+  if (!text) {
+    return [];
+  }
+  return Object.keys(DUTY_UNIT_LABELS).filter((unit) => {
+    const escaped = unit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|[^A-Z])${escaped}([^A-Z]|$)`).test(text);
+  });
+}
+
+function UnitLegend({ unitCodes }) {
+  const units = unique(unitCodes).filter((unit) => DUTY_UNIT_LABELS[unit]);
+  if (!units.length) {
+    return null;
+  }
+  return (
+    <div className="ddv-duty-units">
+      <span>단위</span>
+      {units.map((unit) => (
+        <em key={unit}>{unit} = {DUTY_UNIT_LABELS[unit]}</em>
+      ))}
+    </div>
+  );
+}
+
+function DutyPriorityCard({ row, tone = "default" }) {
+  const badges = [
+    row.measureCode ? `Measure ${row.measureCode}` : "",
+  ].filter(Boolean);
+  const hasBranches = row.branches.length > 0;
+  return (
+    <article className={`ddv-branch-card ${tone}`}>
+      <span>{row.measure || "세율"}</span>
+      <strong>{hasBranches ? `조건 분기 ${row.branches.length}개` : row.rate || "-"}</strong>
+      <div className="ddv-duty-badges">
+        {badges.map((badge) => <em key={badge}>{badge}</em>)}
+      </div>
+      {hasBranches ? (
+        <div className="ddv-duty-branches">
+          {row.branches.map((branch, index) => (
+            <div className="ddv-duty-branch-row" key={`${branch.expression}_${branch.rate}_${index}`}>
+              <span>{branch.expression || branch.condition || "조건"}</span>
+              <strong>{branch.rate}</strong>
+            </div>
+          ))}
+        </div>
+      ) : row.condition ? <p>{row.condition}</p> : null}
+      {row.legalBase ? <small>{row.legalBase}</small> : null}
+      <UnitLegend unitCodes={row.unitCodes} />
+    </article>
+  );
+}
+
+function DutyPrioritySection({ title, description, rows, tone }) {
+  return (
+    <section className="ddv-duty-priority-section">
+      <div className="ddv-duty-priority-head">
+        <strong>{title}</strong>
+        <span>{description}</span>
+      </div>
+      {rows.length ? (
+        <div className="ddv-duty-priority-grid">
+          {rows.map((row, index) => (
+            <DutyPriorityCard
+              key={`${row.bucket}_${row.measureCode}_${row.sourceCode}_${row.rate}_${row.condition}_${index}`}
+              row={row}
+              tone={tone}
+            />
+          ))}
+        </div>
+      ) : (
+        <EmptyBlock message="해당 세율 후보가 없습니다." />
+      )}
+    </section>
+  );
+}
+
+function DutyBranchView({ priority, rows }) {
+  const priorityCount = dutyPriorityCount(priority);
+  if (priorityCount) {
+    return (
+      <div className="ddv-duty-priority-flow">
+        <DutyPrioritySection
+          title="1. FTA / 특혜세율"
+          description="한국 원산지 요건과 특혜 증빙을 충족할 때 우선 확인합니다."
+          rows={priority.fta}
+          tone="success"
+        />
+        <div className="ddv-duty-arrow">다음 확인</div>
+        <DutyPrioritySection
+          title="2. Suspension / Quota / End-use"
+          description="쿼터, suspension, end-use처럼 별도 적용 요건이 있는 세율 후보입니다."
+          rows={priority.conditional}
+          tone="conditional"
+        />
+        <div className="ddv-duty-arrow">적용 불가 시</div>
+        <DutyPrioritySection
+          title="3. 기본세율"
+          description="위 조건을 적용하지 못하는 경우 확인하는 MFN 또는 비특혜 세율입니다."
+          rows={priority.basic}
+        />
+      </div>
+    );
+  }
   const { fta, basic, conditional } = buildDutyBranches(rows);
   if (!fta && !basic && !conditional.length) {
     return <EmptyBlock message="표시할 세율 정보가 없습니다." />;
@@ -485,7 +921,7 @@ function DutyBranchView({ rows }) {
       />
       {conditional.length ? (
         <>
-          <div className="ddv-duty-split">조건부 세율</div>
+          <div className="ddv-duty-split">기타 세율</div>
           <div className="ddv-duty-conditions">
             {conditional.map((row) => (
               <BranchCard
@@ -528,25 +964,47 @@ function RequirementViewSwitch({ activeView, onChange }) {
   );
 }
 
+function GuidanceSection({ title, items, ordered = false }) {
+  const rows = unique(items);
+  if (!rows.length) {
+    return null;
+  }
+  const ListTag = ordered ? "ol" : "ul";
+  return (
+    <div className="ddv-guidance-section">
+      <strong>{title}</strong>
+      <ListTag>
+        {rows.map((item) => <li key={item}>{ordered ? stripListMarker(item) : item}</li>)}
+      </ListTag>
+    </div>
+  );
+}
+
 function ExporterRequirementCard({ group }) {
+  const summaryItems = group.summaries?.length ? group.summaries : group.exporterGuidance;
+  const fallbackItems = !group.actionSteps?.length && !group.requiredEvidenceItems?.length
+    ? group.verificationDetails
+    : [];
   return (
     <article className="ddv-procedure-card exporter">
       <div className="ddv-procedure-card-head">
         <strong>{group.groupName}</strong>
-        <span>{group.codes.length} codes</span>
+        <span>{group.codes.length ? `${group.codes.length} codes` : group.a2mCode || "guideline"}</span>
       </div>
       <div className="ddv-group-guidance">
-        <h3>사용자 가이드라인</h3>
-        {group.exporterGuidance.length ? (
-          group.exporterGuidance.map((item) => <p key={item}>{item}</p>)
+        <h3>수출자 가이드</h3>
+        {summaryItems.length ? (
+          summaryItems.map((item) => <p key={item}>{item}</p>)
         ) : (
           <p>이 TARIC 수입요건 묶음의 적용 여부를 먼저 확인하고, 연결된 certificate/declaration code와 footnote를 기준으로 세부 신고 경로를 검토합니다.</p>
         )}
-        {group.verificationDetails.length ? (
+        <GuidanceSection title="진행 순서" items={group.actionSteps} ordered />
+        <GuidanceSection title="준비할 자료" items={group.requiredEvidenceItems} />
+        {fallbackItems.length ? (
           <div className="ddv-guidance-checkpoints">
             <strong>확인할 사항</strong>
             <ul>
-              {group.verificationDetails.map((item) => <li key={item}>{item}</li>)}
+              {fallbackItems.map((item) => <li key={item}>{item}</li>)}
             </ul>
           </div>
         ) : null}
@@ -555,7 +1013,25 @@ function ExporterRequirementCard({ group }) {
   );
 }
 
+function BrokerEvidenceList({ items, emptyMessage }) {
+  const rows = unique(items);
+  if (!rows.length) {
+    return emptyMessage ? <EmptyBlock message={emptyMessage} /> : null;
+  }
+  return (
+    <ul className="ddv-evidence-list">
+      {rows.map((item) => <li key={item}>{item}</li>)}
+    </ul>
+  );
+}
+
 function BrokerRequirementCard({ group }) {
+  const regulationItems = unique([
+    ...asList(group.legalBases),
+    ...asList(group.regulationReferences),
+    ...asList(group.celexIds).map((id) => `CELEX ${id}`),
+  ]);
+  const evidenceSources = buildEvidenceSourceGroups(group, regulationItems);
   return (
     <article className="ddv-procedure-card broker">
       <div className="ddv-procedure-card-head">
@@ -577,47 +1053,91 @@ function BrokerRequirementCard({ group }) {
         </div>
       </div>
 
-      <div className="ddv-broker-section">
-        <h3>Certificate / declaration code</h3>
-        <div className="ddv-cert-list">
-          {group.codes.map((code) => (
-            <div className="ddv-cert-row" key={`${group.groupName}_broker_${code.code}`}>
-              <span>{code.code}</span>
-              <div>
-                <strong>{code.title}</strong>
-                {code.description ? <p>{code.description}</p> : null}
-                {code.whenRequired ? <em>적용 조건: {code.whenRequired}</em> : null}
-                {code.notApplicableCondition ? <em>비대상/면제: {code.notApplicableCondition}</em> : null}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="ddv-broker-section">
-        <h3>Footnote / regulation 확인</h3>
-        {group.footnoteGuidelines.length ? (
-          <div className="ddv-footnote-guidelines broker">
-            {group.footnoteGuidelines.map((guideline) => (
-              <div className="ddv-footnote-guide" key={`${group.groupName}_broker_${guideline.footnoteCode}`}>
-                <span>{guideline.footnoteCode}</span>
+      {group.codes.length ? (
+        <div className="ddv-broker-section">
+          <h3>Certificate / declaration code</h3>
+          <div className="ddv-cert-list">
+            {group.codes.map((code) => (
+              <div className="ddv-cert-row" key={`${group.groupName}_broker_${code.code}`}>
+                <span>{code.code}</span>
                 <div>
-                  {guideline.footnoteDescription ? <p>{guideline.footnoteDescription}</p> : null}
-                  {guideline.summary ? <p>{guideline.summary}</p> : null}
-                  {guideline.importerCheck ? <p>{guideline.importerCheck}</p> : null}
-                  {guideline.legalReference ? <em>{guideline.legalReference}</em> : null}
+                  <strong>{code.title}</strong>
+                  {code.description ? <p>{code.description}</p> : null}
                 </div>
               </div>
             ))}
           </div>
-        ) : (
-          <EmptyBlock message="연결된 footnote 또는 legal reference가 없습니다." />
-        )}
+        </div>
+      ) : null}
+
+      {group.sourceType === "taric" || group.footnoteGuidelines.length ? (
+        <div className="ddv-broker-section">
+          <h3>Group footnote 확인</h3>
+          {group.footnoteGuidelines.length ? (
+            <div className="ddv-footnote-guidelines broker">
+              {group.footnoteGuidelines.map((guideline) => (
+                <div className="ddv-footnote-guide" key={`${group.groupName}_broker_${guideline.footnoteCode}`}>
+                  <span>{guideline.footnoteCode}</span>
+                  <div>
+                    {guideline.footnoteDescription ? <p>{guideline.footnoteDescription}</p> : null}
+                    {guideline.summary ? <p>{guideline.summary}</p> : null}
+                    {guideline.importerCheck ? <p>{guideline.importerCheck}</p> : null}
+                    {guideline.legalReference ? <em>{guideline.legalReference}</em> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyBlock message="연결된 TARIC footnote가 없습니다." />
+          )}
+        </div>
+      ) : null}
+
+      <div className="ddv-broker-section">
+        <h3>검토 포인트</h3>
+        {group.brokerReview?.length ? (
+          <div className="ddv-broker-review-list">
+            {group.brokerReview.map((item) => <p key={item}>{item.replace(/^[-•]\s*/, "")}</p>)}
+          </div>
+        ) : null}
       </div>
 
-      <div className="ddv-review-note">
-        TARIC measure, certificate/declaration code, footnote 및 legal reference를 기준으로 대상/비대상 여부와 제출 경로를 최종 검토하세요.
+      <div className="ddv-broker-section">
+        <h3>근거 및 확인처</h3>
+        <div className="ddv-source-grid">
+          {evidenceSources.sections.length ? (
+            <div className="ddv-source-section-list">
+              <strong>원문 섹션</strong>
+              <BrokerEvidenceList items={evidenceSources.sections} />
+            </div>
+          ) : null}
+          {evidenceSources.regulations.length ? (
+            <div className="ddv-source-section-list">
+              <strong>규정/CELEX</strong>
+              <BrokerEvidenceList items={evidenceSources.regulations} />
+            </div>
+          ) : null}
+          {evidenceSources.systems.length ? (
+            <div className="ddv-source-section-list">
+              <strong>시스템/기관</strong>
+              <BrokerEvidenceList items={evidenceSources.systems} />
+            </div>
+          ) : null}
+          {evidenceSources.other.length ? (
+            <div className="ddv-source-section-list">
+              <strong>기타 확인자료</strong>
+              <BrokerEvidenceList items={evidenceSources.other} />
+            </div>
+          ) : null}
+        </div>
+        {!evidenceSources.sections.length
+          && !evidenceSources.regulations.length
+          && !evidenceSources.systems.length
+          && !evidenceSources.other.length ? (
+            <EmptyBlock message="연결된 Regulation, CELEX 또는 확인처가 없습니다." />
+          ) : null}
       </div>
+
     </article>
   );
 }
@@ -691,10 +1211,15 @@ export default function DocumentPackageDetail({ packageData }) {
 
   const viewModel = useMemo(() => {
     const certificateGroups = buildCertificateGroups(pkg);
+    const requirementGroups = [
+      ...certificateGroups,
+      ...buildA2mGuidelineGroups(pkg),
+    ];
     const dutyRows = buildDutyRows(pkg);
+    const dutyPriority = buildDutyPriority(pkg);
     const baselineRows = buildBaselineRows(pkg, certificateGroups);
     const preArrivalRows = buildPreArrivalRows(certificateGroups);
-    return { certificateGroups, dutyRows, baselineRows, preArrivalRows };
+    return { certificateGroups, requirementGroups, dutyRows, dutyPriority, baselineRows, preArrivalRows };
   }, [pkg]);
 
   if (!Object.keys(pkg).length) {
@@ -702,8 +1227,8 @@ export default function DocumentPackageDetail({ packageData }) {
   }
 
   const counts = {
-    [FLOW_KEYS.REQUIREMENTS]: viewModel.certificateGroups.length,
-    [FLOW_KEYS.DUTY]: viewModel.dutyRows.length,
+    [FLOW_KEYS.REQUIREMENTS]: viewModel.requirementGroups.length,
+    [FLOW_KEYS.DUTY]: dutyPriorityCount(viewModel.dutyPriority) || viewModel.dutyRows.length,
     [FLOW_KEYS.BASELINE]: viewModel.baselineRows.length,
     [FLOW_KEYS.PRE_ARRIVAL]: viewModel.preArrivalRows.length,
   };
@@ -722,7 +1247,7 @@ export default function DocumentPackageDetail({ packageData }) {
         </div>
         <div>
           <span>수입요건 묶음</span>
-          <strong>{viewModel.certificateGroups.length}건</strong>
+          <strong>{viewModel.requirementGroups.length}건</strong>
         </div>
         <div>
           <span>기본서류</span>
@@ -737,16 +1262,16 @@ export default function DocumentPackageDetail({ packageData }) {
           title={activeItem.title}
           description="taric_master_table의 한국 적용 measure에서 certificate/declaration code를 추출하고, taric_cert_table의 묶음명과 표시 설명으로 정리합니다."
         >
-          <CertificateGroupCards groups={viewModel.certificateGroups} />
+          <CertificateGroupCards groups={viewModel.requirementGroups} />
         </FlowPanel>
       ) : null}
 
       {activeFlow === FLOW_KEYS.DUTY ? (
         <FlowPanel
           title={activeItem.title}
-          description="기본세율과 FTA/특혜세율을 분리하고, 통제 조건만 있는 certificate/fallback row는 세율 목록에서 제외합니다."
+          description="FTA/특혜세율, suspension·quota·end-use, 기본세율 순서로 적용 후보를 정리합니다."
         >
-          <DutyBranchView rows={viewModel.dutyRows} />
+          <DutyBranchView priority={viewModel.dutyPriority} rows={viewModel.dutyRows} />
         </FlowPanel>
       ) : null}
 
