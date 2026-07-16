@@ -337,15 +337,28 @@ def _BuildOpenAiChatPayload(
     request: LlmRequest,
     includeResponseFormat: bool,
 ) -> Dict[str, object]:
+    # reasoning 계열(OpenAI gpt-5.x/o-시리즈)은 legacy 파라미터를 400으로
+    # 거부한다: max_tokens → max_completion_tokens, temperature 미지원.
+    # 모델명 하드코딩 대신 reasoning_effort 설정 유무로 판별 (설정 기반).
+    _reasoning = _ReadReasoningEffort(runtimeConfig) is not None
     payload: Dict[str, object] = {
         "model": _ReadModelName(runtimeConfig),
         "messages": _BuildChatMessages(request),
         "stream": False,
-        "temperature": request.generationOptions.temperature,
     }
+    if not _reasoning:
+        payload["temperature"] = request.generationOptions.temperature
+    # 재현성: reasoning 모델은 temperature를 거부해 고정이 불가능하다 —
+    # seed(best-effort 결정성)를 opt-in으로 전송. ASAP_LLM_SEED=<정수>.
+    _seed_raw = (os.environ.get("ASAP_LLM_SEED") or "").strip()
+    if _seed_raw.isdigit():
+        payload["seed"] = int(_seed_raw)
 
     if request.generationOptions.maxTokens is not None:
-        payload["max_tokens"] = request.generationOptions.maxTokens
+        if _reasoning:
+            payload["max_completion_tokens"] = request.generationOptions.maxTokens
+        else:
+            payload["max_tokens"] = request.generationOptions.maxTokens
     if request.generationOptions.topP is not None:
         payload["top_p"] = request.generationOptions.topP
     if request.generationOptions.stopSequences:
@@ -560,13 +573,23 @@ def _BuildOpenAiSdkChatArgs(
     runtimeConfig: LlmRuntimeConfig,
     request: LlmRequest,
 ) -> Dict[str, object]:
+    _reasoning = _ReadReasoningEffort(runtimeConfig) is not None
     args: Dict[str, object] = {
         "model": _ReadModelName(runtimeConfig),
         "messages": _BuildChatMessages(request),
-        "temperature": request.generationOptions.temperature,
     }
+    if not _reasoning:
+        args["temperature"] = request.generationOptions.temperature
+    # 재현성: reasoning 모델은 temperature를 거부해 고정이 불가능하다 —
+    # seed(best-effort 결정성)를 opt-in으로 전송. ASAP_LLM_SEED=<정수>.
+    _seed_raw = (os.environ.get("ASAP_LLM_SEED") or "").strip()
+    if _seed_raw.isdigit():
+        args["seed"] = int(_seed_raw)
     if request.generationOptions.maxTokens is not None:
-        args["max_tokens"] = request.generationOptions.maxTokens
+        if _reasoning:
+            args["max_completion_tokens"] = request.generationOptions.maxTokens
+        else:
+            args["max_tokens"] = request.generationOptions.maxTokens
     if request.generationOptions.topP is not None:
         args["top_p"] = request.generationOptions.topP
     if request.generationOptions.stopSequences:

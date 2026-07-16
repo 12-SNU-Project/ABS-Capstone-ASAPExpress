@@ -187,6 +187,12 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             encyclopediaEvidence=encyclopediaEvidence,
             factTexts=factTexts,
         )
+        # 식품유형 결정론 전사: 라벨의 법정 표기('식품유형: 어묵(...)')를
+        # identity에 그대로 병기 — LLM 산출이 런마다 이 fact를 뽑다 말다
+        # 하는 실측(22건 중 변형/누락 10) 때문에 출력 보장은 전사가 담당.
+        # 한→영은 법정 유한 어휘 사전(data/food_type_dictionary.json,
+        # 수기 교정 우선). 창작 0 — 존재할 때만.
+        identity = self._TranscribeFoodTypeFact(identity, factTexts=factTexts)
         composition = self._BuildCompositionLane(
             factTexts=factTexts,
             productFacts=productFacts,
@@ -226,6 +232,26 @@ class ProductUnderstandingComponent(BasePipelineComponent):
                 createdAt=now_iso(),
             ),
         )
+        # 정규화 COI 폼 가산 주입 (ASAP_COI_FORM_DIR 설정 시에만 — 기본 no-op).
+        # 주입 규칙·방어(교차 합의제, sauce_only 주성분 금지)는 coi_form_injector.
+        try:
+            from bussiness_logic.product.services.coi_loader import (
+                InjectIntoProductUnderstanding,
+            )
+            bb = store.load()
+            pu_dict = bb.get("product_understanding")
+            if isinstance(pu_dict, dict):
+                injected = InjectIntoProductUnderstanding(pu_dict)
+                # 용어 브리지 — COI 유무와 무관하게 entries 완성 직후 1회
+                # (자유어→법정어 수렴, ASAP_TERM_BRIDGE 게이트)
+                from bussiness_logic.product.services.term_bridge import ApplyTermBridge
+                bridged = ApplyTermBridge(pu_dict)
+                if injected or bridged:
+                    bb["product_understanding"] = pu_dict
+                    store.save(bb)
+                    self.reason(f"정규화 COI 주입: {injected} | 브리지: {bridged}")
+        except Exception as error:  # noqa: BLE001 — 주입 실패는 파이프라인 무영향
+            self.reason(f"정규화 COI 주입 생략: {type(error).__name__}")
         self.WriteBlackBoard(understandingId)
         self.reason(
             "ProductUnderstandingPackage 생성: "
@@ -233,6 +259,34 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             f"encyclopedia={encyclopediaEvidence.qualityStatus}, "
             f"composition_terms={len(composition.compositionTerms)}."
         )
+
+    @staticmethod
+    def _TranscribeFoodTypeFact(identity, *, factTexts):
+        import unicodedata as _ud
+        from dataclasses import replace as _replace
+        for raw in factTexts or ():
+            s = _ud.normalize("NFC", str(raw))
+            m = re.match(r"^\s*(?:식품유형|제품유형|품목보고[^:：]*)[^:：]*[:：]\s*(.+)", s)
+            if not m:
+                continue
+            main = re.split(r"[\(（/,;]", m.group(1))[0].strip()
+            if not main or len(main) > 20:
+                continue
+            en = ""
+            try:
+                import json as _json
+                from pathlib import Path as _Path
+                dict_path = _Path(__file__).resolve().parents[4] / "data" / "food_type_dictionary.json"
+                en = str(_json.loads(dict_path.read_text(encoding="utf-8")).get(main) or "")
+            except Exception:  # noqa: BLE001 — 사전 부재는 한글 전사만
+                en = ""
+            toks = [w for w in (main, en) if w]
+            terms = tuple(dict.fromkeys([*identity.identityTerms, *toks]))
+            food_form = identity.foodForm
+            if en and (not food_form or food_form in ("other", "unknown")):
+                food_form = en
+            return _replace(identity, identityTerms=terms, foodForm=food_form)
+        return identity
 
     def _BuildCoiEvidenceSet(
         self,

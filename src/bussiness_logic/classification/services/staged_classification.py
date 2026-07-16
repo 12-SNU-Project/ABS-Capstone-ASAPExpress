@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from pathlib import Path
 import re
 from typing import Any
 from sqlalchemy import bindparam, text
@@ -998,6 +999,17 @@ class StagedClassificationTool:
                     code_conditions, product_facts, fact_tokens, percentages,
                     _quantitative_verdict,
                 )
+                # 치환 스프린트 섀도(기본 off): 표 해석 집계기를 병렬 실행해
+                # 서명 불일치만 기록 — 판정·점수 무영향 (도면 §C).
+                if (os.environ.get("ASAP_DECISION_PRINCIPLED", "") or "")\
+                        .strip().lower() == "shadow":
+                    from bussiness_logic.classification.rules.decision_tables import ShadowCompare
+
+                    ShadowCompare(
+                        decision_status, decision_detail, product_facts,
+                        level={4: "hs4", 6: "hs6", 8: "cn8"}.get(prefix_len, str(prefix_len)),
+                        code=code,
+                    )
                 if decision_status == "confirmed":
                     score += DECISION_CONFIRM
                 elif decision_status == "violated":
@@ -1110,6 +1122,26 @@ class StagedClassificationTool:
         return residuals + specific if residuals else specific
 
     # ---- weighted lexical rank + quantitative gate ------------------------
+    @staticmethod
+    def _heading_vocab() -> dict:
+        """DB/artifacts/heading_vocab.json — pair_rows including/excluding
+        수확분(HS 해설서 유래, 원문 보존). 부재/오류 = 빈 dict no-op.
+        ASAP_HEADING_VOCAB=0 비활성."""
+        global _HEADING_VOCAB_CACHE
+        try:
+            return _HEADING_VOCAB_CACHE
+        except NameError:
+            pass
+        vocab: dict = {}
+        try:
+            path = Path(__file__).resolve().parents[4] / "DB" / "artifacts" / "heading_vocab.json"
+            with open(path, encoding="utf-8") as f:
+                vocab = json.load(f)
+        except Exception:  # noqa: BLE001 — 아티팩트 부재는 기능 OFF와 동일
+            vocab = {}
+        globals()["_HEADING_VOCAB_CACHE"] = vocab
+        return vocab
+
     def _lexical_rank(
         self,
         children: list[dict[str, Any]],
@@ -1135,8 +1167,26 @@ class StagedClassificationTool:
         # and must score zero — otherwise generic-word piles outrank the one
         # species-deciding word (octopus, cockles). Runtime counterpart of the
         # branch_index positive_terms idea; no hardcoded word list.
+        # 어휘 수확 소비(기본 ON): 당국 저자(HS 해설서 유래) including/
+        # excluding 구문을 형제 비교 어휘에 합류. 같은 부모를 공유하는
+        # 형제들이 동일 어휘를 받으면 sibling-IDF가 자동 0점 처리하므로
+        # 판별에 기여하는 것은 형제 간 서로 다른 heading 어휘뿐이다.
+        vocab_on = (os.environ.get("ASAP_HEADING_VOCAB", "1") or "1").strip() != "0"
+        hv = self._heading_vocab() if vocab_on else {}
+
+        def _hv_terms(code: str, kind: str) -> set[str]:
+            if not hv:
+                return set()
+            out: set[str] = set()
+            for lvl_key, width in (("chapter", 2), ("heading", 4), ("subheading", 6)):
+                bucket = (hv.get(lvl_key) or {}).get(str(code)[:width])
+                if bucket:
+                    for phrase in bucket.get(kind) or ():
+                        out |= _tokens(phrase)
+            return out
+
         node_term_sets = [
-            (row, _tokens(row["descr"]) | _tokens(row["incl"]))
+            (row, _tokens(row["descr"]) | _tokens(row["incl"]) | _hv_terms(str(row["code"]), "including"))
             for row in children
         ]
         doc_freq: dict[str, int] = {}
@@ -1152,7 +1202,7 @@ class StagedClassificationTool:
 
         scored = []
         for row, node_terms in node_term_sets:
-            excl_terms = _tokens(row["excl"])
+            excl_terms = _tokens(row["excl"]) | _hv_terms(str(row["code"]), "excluding")
             score = sum(
                 discriminative_weight[tok]
                 for tok in node_terms

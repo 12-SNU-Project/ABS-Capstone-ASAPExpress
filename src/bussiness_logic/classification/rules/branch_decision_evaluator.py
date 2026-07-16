@@ -192,6 +192,16 @@ def EvaluateCodeDecision(
                 for leaf, register in _BOOLEAN_REGISTER.items():
                     if not (all_value_toks & register):
                         continue
+                    # sauce/broth '함유'는 정체가 아니다 — 조리식품 대부분이
+                    # sauce=True라 판별력 0인데 2104(수프)의 정체 조건 'broth'
+                    # 를 확정해 비빔장을 수프로 만들었다(실측). 정체 축에서는
+                    # 이 레지스터의 승격·위반 모두 미적용(lexical 폴백).
+                    # wrapper↔stuffed는 구조=정체라 유지(190220 정답 경로).
+                    if (
+                        leaf == "contains_sauce_or_broth"
+                        and cond_type in ("product_identity", "intended_use_function")
+                    ):
+                        continue
                     flag = _dig(product_facts, f"composition_facts.{leaf}")
                     # wrapper 의미 분리(팀장 안건 적용): '도우로 만듦'과 '속을
                     # 채움'은 다른 사실인데 wrapper=True가 stuffed/filled로
@@ -255,17 +265,36 @@ def EvaluateCodeDecision(
                 verdict = "true"
                 # 확정 자격 심사용: 바인딩의 어느 '경로'가 실제로 답했는가
                 # (identity_terms 단독 히트인지 typed 필드 히트인지 구분)
+                # alias 상위어 확정 금지(기본 ON): capsicum→'vegetable' 같은
+                # 상위어 확장 매치가 binding 자격쌍을 타고 +50 확정을 만든다
+                # (청양고추 0703 confirmed 51 실측). 직접 매치만 field_hit로
+                # 자격을 얻고, alias 경유 매치는 alias_hit로 표기되어 확정
+                # 자격에서 자동 탈락(+3 증거는 유지).
+                # ASAP_ALIAS_CONFIRM_GUARD=0 복귀.
+                alias_guard = (os.environ.get(
+                    "ASAP_ALIAS_CONFIRM_GUARD", "1") or "1").strip() != "0"
                 hit_paths = []
+                alias_paths = []
                 for path in dto_field.split(";"):
                     path = path.strip()
                     ptoks = _field_tokens(product_facts, path)
+                    expanded = ptoks
                     if cond_type in _ALIAS_AXES:
-                        ptoks = ptoks | {c for t in ptoks for c in _aliases().get(t, ())}
+                        expanded = ptoks | {c for t in ptoks for c in _aliases().get(t, ())}
                     if any(p <= ptoks for p in phrases):
                         hit_paths.append(path.rsplit(".", 1)[-1])
+                    elif any(p <= expanded for p in phrases):
+                        alias_paths.append(path.rsplit(".", 1)[-1])
+                if not alias_guard:
+                    hit_paths, alias_paths = hit_paths + alias_paths, []
                 # 단일 경로로는 부분 매치뿐인데 합집합으로만 성립한 히트는
                 # 'union'으로 표시 — 서로 다른 필드의 파편이 합쳐진 약한 근거
-                why = "field_hit:" + (",".join(hit_paths[:3]) or "union")
+                if hit_paths:
+                    why = "field_hit:" + ",".join(hit_paths[:3])
+                elif alias_paths:
+                    why = "alias_hit:" + ",".join(alias_paths[:3])
+                else:
+                    why = "field_hit:union"
             elif not bound:
                 why = "field_empty"       # 답안지 부재 — DTO가 이 질문에 침묵
             else:

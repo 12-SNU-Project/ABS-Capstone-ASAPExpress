@@ -33,7 +33,7 @@ from typing import Any
 
 import csv
 
-from bussiness_logic.classification.offline.cn_predicate_llm_compiler import _build_groups, _toks
+from bussiness_logic.classification.offline.cn_predicate_llm_compiler import _TOKEN, _build_groups, _stem, _toks
 
 # ── 기준 유형 taxonomy (7/2 설계 사양서) ─────────────────────────────
 # data/classification_criterion_taxonomy_20260702.csv 가 유일한 축 정의다:
@@ -46,6 +46,13 @@ CRITERION_FIELD_BINDING = {
     "product_identity": (
         # food_form 추가: 'noodle/rice cake' 같은 판별형 typed 값이 identity
         # 질문의 정답 필드인데 빠져 있었다 — 칼국수 1902 확정 불가 실측.
+        "identity_hints.normalized_tariff_description;identity_hints.identity_terms;"
+        "identity_hints.food_form;identity_hints.ingredient_class;"
+        "composition_facts.principal_ingredient"
+    ),
+    # 폴백 축 — named 정체와 같은 필드를 보되 binding-v1 자격쌍 밖이라
+    # 확정 불가(+3 증거만). 폴백 잡음의 확정 독식(청양고추 0703류) 차단.
+    "identity_fallback": (
         "identity_hints.normalized_tariff_description;identity_hints.identity_terms;"
         "identity_hints.food_form;identity_hints.ingredient_class;"
         "composition_facts.principal_ingredient"
@@ -128,6 +135,11 @@ def CompileGroupDecisions(
         "heading", "subheading", "chapter", "note", "other", "otherwise",
         "including", "included", "containing", "mixture", "weigh", "whether",
         "kind", "use", "used", "but", "less", "more", "than",
+        # ch16/19/20 법조문 만능 꼬리 — 거의 모든 조제품 라벨에 등장해
+        # 값으로서의 판별력이 없고 DTO processing_state와 오발동만 만든다
+        # (달래꼬막장 'prepared' 실측). 상태 판별은 uncooked/frozen 등
+        # 구체 상태어와 preservation_state 축이 담당.
+        "prepared", "preserved",
     })
     for seq, (code, label) in enumerate(ordered):
         clean = _COND_CLAUSE.sub(" ", str(label or ""))
@@ -147,6 +159,25 @@ def CompileGroupDecisions(
 
         def _discriminative(w: str) -> bool:
             return sum(1 for s in sib_tok_sets if w in s) <= half
+
+        def _phrase_units(text: str) -> list[str]:
+            """구문 단위 값 추출 — 낱토큰 분해의 처방.
+
+            법조문 "other aquatic invertebrates"가 ['aquatic','invertebrat']
+            낱토큰으로 쪼개지면 'aquatic' 하나로 성립해 어묵·돼지갈비가
+            1605로 오발동한다(실측 hs4 사인 5건: form·prepared·sweet·
+            aquatic·vegetable). 쉼표·and/or 열거 경계로만 나누고 경계 안의
+            인접 토큰은 한 phrase 문자열로 묶는다 — 평가기 _phrase_sets가
+            phrase 내 전 토큰 동시 존재를 요구하므로 통짜 의미가 복원된다.
+            """
+            units: list[str] = []
+            for seg in re.split(r"[,;:()]|\band\b|\bor\b", str(text or "").lower()):
+                toks = [w for w in (_stem(x) for x in _TOKEN.findall(seg))
+                        if len(w) >= 3 and w not in _VALUE_STOP and _discriminative(w)]
+                unit = " ".join(toks[:4])
+                if unit and unit not in units:
+                    units.append(unit)
+            return units[:8]
 
         def add(cond_type: str, op: str, values, source: str) -> None:
             rows.append({
@@ -196,10 +227,14 @@ def CompileGroupDecisions(
             # 목적어가 값이다 (연산어를 값으로 쓰면 모든 라벨에 오발동).
             if cond_type in ("material_composition", "intended_use_function",
                              "packaging_presentation"):
-                window = search_text[match.end():match.end() + 40]
+                # 창 80자: 40자는 "other aquatic inverteb…"를 중간 절단해
+                # 구문 캡처가 'aquatic' 낱토큰으로 퇴화한다(1605 실측).
+                # 구문 단위 캡처가 열거 경계로 나누므로 넓혀도 잡음은
+                # _phrase_units의 스톱·판별 필터가 막는다.
+                window = search_text[match.end():match.end() + 80]
                 # 창 경계가 단어 중간을 자르면 파편 토큰('mea','of')이 값이
                 # 된다(트리 원천 160249 실측: 'meat'→'mea'). 꼬리 미완 단어 제거.
-                if len(window) == 40 and not window[-1].isspace():
+                if len(window) == 80 and not window[-1].isspace():
                     window = window.rsplit(" ", 1)[0] if " " in window else window
                 span_source = window.split(";")[0].split(".")[0]
             else:
@@ -208,16 +243,19 @@ def CompileGroupDecisions(
             # lasagne, gnocchi, ravioli, cannelloni")가 4에서 잘리면 정작
             # 판별력 있는 꼬리 단어(noodle)가 소실된다 — 1902 실측.
             # 배제(not_contains)는 차단 시맨틱이라 4 유지(보수).
-            span_tokens = sorted(
-                w for w in _toks(span_source) if _discriminative(w)
-            )[:8]
+            span_tokens = _phrase_units(span_source)
             if span_tokens:
                 add(cond_type, "has_token", span_tokens, match.group(0))
                 emitted_types.add(cond_type)
         # 아무 유형도 안 잡힌 순수 명사 라벨 -> product_identity 폴백
         if not emitted_types:
-            nouns = sorted(w for w in _toks(positive_side) if _discriminative(w))[:8]
+            nouns = _phrase_units(positive_side)
             if nouns:
+                # [보류] identity_fallback 분해 — product_identity 축은
+                # 패턴 없는 폴백 전용이라 여기가 named 정체(Cheese/Pasta)의
+                # 유일한 생산자다. 전면 교체 시 binding 자격쌍이 공집합화
+                # (실측: fallback 4,575/named 0 — 면류 confirm 전멸 위험).
+                # named/fallback 판별 기준은 dry-run diff로 검증 후 도입.
                 add("product_identity", "has_token", nouns, clean)
     # ── 그룹 수준 값 정화 (post-pass) ──
     # "형제 과반이 값으로 공유하는 토큰"은 판별 자격이 없다 — 류 정의어
@@ -309,6 +347,63 @@ def _rows_from_tree(tree_path: str, allow_cn8: set | None) -> list[dict[str, Any
     return rows
 
 
+_CNEN_INCLUDE_RX = re.compile(
+    r"([A-Z][A-Za-z \-']{4,70}?)[,\s]+(?:is|are)\s+(?:also\s+)?(?:included|classified)\s+in\s+th(?:is|ese)\s+subheading",
+)
+_CNEN_EXCLUDE_RX = re.compile(
+    r"(?:does not cover|excludes?|are not included|not covered by)[:\s]+([^.;]{4,90})",
+    re.IGNORECASE,
+)
+
+
+def _cnen_rows(note_by_cn8: dict[str, str]) -> list[dict[str, Any]]:
+    """CN 해설서(cn_explanatory_note) → 코드 단위 조건 수확.
+
+    당국 저자 텍스트의 include 문장('Wild horses … are included in these
+    subheadings')을 named 정체의 긍정 조건으로, 'does not cover/excludes'
+    절을 배제 조건으로. 형제 비교 문맥이 없으므로 판별 필터 대신
+    보수 캡: 코드당 각 2건, phrase ≤3 토큰.
+    """
+    out: list[dict[str, Any]] = []
+    stop = {"and", "the", "for", "with", "this", "these", "subheading",
+            "subheadings", "heading", "other", "such", "which", "their"}
+    def units(text: str, cap: int) -> list[str]:
+        segs = re.split(r"[,;:()]|\bor\b|\band\b", text)
+        found = []
+        for seg in segs:
+            toks = [_stem(w) for w in _TOKEN.findall(seg.lower())
+                    if len(w) >= 3 and w not in stop]
+            unit = " ".join(toks[:3])
+            if unit and unit not in found:
+                found.append(unit)
+            if len(found) >= cap:
+                break
+        return found
+    for cn8, note in note_by_cn8.items():
+        if not note:
+            continue
+        inc_vals: list[str] = []
+        for m in _CNEN_INCLUDE_RX.finditer(note):
+            inc_vals += units(m.group(1), 2)
+        exc_vals: list[str] = []
+        for m in _CNEN_EXCLUDE_RX.finditer(note):
+            exc_vals += units(m.group(1), 2)
+        # 배제는 2토큰 이상 구문만 — 1토큰('meat') 광역 배제는 자기 정체를
+        # 배제하는 자충수가 된다(02089030 실측: 사냥육에 not_contains meat).
+        exc_vals = [v for v in exc_vals if len(v.split()) >= 2]
+        for op, ctype, vals in (("has_token", "product_identity", inc_vals[:2]),
+                                ("not_contains", "exclusion_boundary", exc_vals[:2])):
+            for v in vals:
+                out.append({
+                    "level": "cn8", "branch_id": cn8[:6], "seq": 90,
+                    "then_code": cn8, "cond_type": ctype,
+                    "dto_field": CRITERION_FIELD_BINDING.get(ctype, "*tokens*"),
+                    "op": op, "value": json.dumps([v], ensure_ascii=False),
+                    "source_text": ("CNEN: " + note[:100]), "version": "parser-v1",
+                })
+    return out
+
+
 def _main() -> int:  # pragma: no cover — designer-run CLI
     args = sys.argv[1:]
     apply_mode = "--apply" in args
@@ -367,6 +462,16 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
         per_level[level] = per_level.get(level, 0) + len(decision_rows)
         if decision_rows:
             branches_covered.setdefault(level, set()).add(parent)
+    # --cnen: CN 해설서 조건 수확 합류 (당국 저자 — 어휘 갭 4번째 후보)
+    if "--cnen" in args:
+        note_rows = manager.FetchRows(text(
+            "SELECT cn8, cn_explanatory_note FROM cn_table"
+            " WHERE coalesce(cn_explanatory_note,'') <> ''"), {})
+        note_by_cn8 = {str(r["cn8"]): str(r["cn_explanatory_note"] or "") for r in (dict(x) for x in note_rows)}
+        cnen = _cnen_rows(note_by_cn8)
+        out.extend(cnen)
+        per_level["cn8"] = per_level.get("cn8", 0) + len(cnen)
+        print(f"CNEN 수확: {len(cnen)}행 (해설 보유 {len(note_by_cn8)}코드)")
     total_branches = {}
     for level, parent, _pl, _m in groups:
         total_branches[level] = total_branches.get(level, 0) + 1
@@ -386,17 +491,26 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
                 "level text, branch_id text, seq int, then_code text,"
                 "cond_type text, dto_field text, op text, value text,"
                 "source_text text, version text)"))
-            # 반복 재기록으로 테이블이 부풀면 일괄 DELETE가 statement
-            # timeout에 걸린다(실측). 트랜잭션 한정 타임아웃 완화 + ctid
-            # 청크 삭제로 문장 하나하나를 짧게 유지한다.
+            # 반복 재기록으로 테이블이 부풀면 DELETE가 statement timeout에
+            # 걸린다(실측 2회: 일괄 → ctid 청크 300s까지 실패). 다른 버전
+            # 행이 없으면 TRUNCATE — 튜플 단위 작업이 없어 즉시 끝나고
+            # 죽은 튜플 부풀림도 함께 청소된다. 락 대기는 10s에서 명확히
+            # 끊는다(무한 대기 대신 원인 노출 — 백엔드 세션 점유 등).
             session.execute(text("SET LOCAL statement_timeout = '300s'"))
-            while True:
-                deleted = session.execute(text(
-                    'DELETE FROM "branch_decision_index" WHERE ctid IN ('
-                    'SELECT ctid FROM "branch_decision_index"'
-                    " WHERE version = :v LIMIT 2000)"), {"v": "parser-v1"})
-                if (deleted.rowcount or 0) == 0:
-                    break
+            session.execute(text("SET LOCAL lock_timeout = '10s'"))
+            other_versions = session.execute(text(
+                'SELECT count(*) FROM "branch_decision_index"'
+                " WHERE version <> :v"), {"v": "parser-v1"}).scalar() or 0
+            if other_versions == 0:
+                session.execute(text('TRUNCATE TABLE "branch_decision_index"'))
+            else:
+                while True:
+                    deleted = session.execute(text(
+                        'DELETE FROM "branch_decision_index" WHERE ctid IN ('
+                        'SELECT ctid FROM "branch_decision_index"'
+                        " WHERE version = :v LIMIT 2000)"), {"v": "parser-v1"})
+                    if (deleted.rowcount or 0) == 0:
+                        break
             # 9,296행 개별 INSERT는 원거리 DB에서 순단에 취약(실측 1회 실패)
             # — executemany 일괄 전송으로 왕복을 청크당 1회로 줄인다.
             insert_sql = text(

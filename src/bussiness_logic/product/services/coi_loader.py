@@ -1,4 +1,17 @@
-"""COI xlsx evidence loader."""
+"""COI 로더 — 정규화 COI 폼(asap-coi-v1)의 로딩·주입이 주 기능.
+
+[신형 — 주 경로] 서비스 전제는 "COI를 입력 서류로 받는다":
+  업로드 COI → DB/sources/coi_normalize.py(정규화·번역) → 폼 JSON
+  → 본 모듈이 product_map으로 찾아 composition_lane에 가산 주입.
+  게이트: ASAP_COI_FORM_DIR. 주입 규칙(교차 합의제·기존값 보존·
+  sauce_only 주성분 금지)은 coi50 스모크에서 실측 검증.
+
+[파싱 유틸] ParseCoiComposition/_FindTableSheet 등은 정규화기의 원료.
+
+[구식 — deprecated] LoadCoiEvidence(ASAP_COI_ROOT 디렉토리 스캔)는
+  "COI를 미리 보유"하던 시절의 경로. 기존 수출품 개정 재검토 때만
+  쓰일 수 있어 게이트 잠김 상태로만 유지한다.
+"""
 
 from __future__ import annotations
 
@@ -297,3 +310,254 @@ def SummarizeCoiMatches(
         }
         for caseIndex, productName in rows
     ]
+
+
+# ══════════════════════════════
+# 신형: 정규화 COI 폼 로딩·주입 (주 경로)
+# ══════════════════════════════
+import csv
+import json
+from typing import Any
+
+_MAP_CACHE: dict[str, list[str]] | None = None
+_FORM_CACHE: dict[str, dict] = {}
+
+
+def _form_dir() -> Path | None:
+    raw = (os.environ.get("ASAP_COI_FORM_DIR") or "").strip()
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    return path if path.exists() else None
+
+
+def _nfc(t: object) -> str:
+    return unicodedata.normalize("NFC", str(t or "")).replace("\xa0", " ").strip()
+
+
+def _load_map(root: Path) -> dict[str, list[str]]:
+    global _MAP_CACHE
+    if _MAP_CACHE is not None:
+        return _MAP_CACHE
+    out: dict[str, list[str]] = {}
+    try:
+        for r in csv.DictReader(open(root / "product_map.csv", encoding="utf-8-sig")):
+            name, fnames = _nfc(r.get("제품명")), str(r.get("coi_file") or "").strip()
+            if name and fnames:
+                out[name] = [f.strip() for f in fnames.split(";") if f.strip()]
+    except Exception:  # noqa: BLE001 — 매핑 부재 = 전부 no-op
+        out = {}
+    _MAP_CACHE = out
+    return out
+
+
+def _load_form(root: Path, fname: str) -> dict | None:
+    if fname in _FORM_CACHE:
+        return _FORM_CACHE[fname]
+    try:
+        form = json.loads((root / fname).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        form = None
+    if form is not None:
+        _FORM_CACHE[fname] = form
+    return form
+
+
+def _merge_forms(forms: list[dict]) -> dict:
+    merged = {
+        "sections": [], "entries": [],
+        "principal_candidates": [], "principal_candidates_en": [],
+        "accessory_ingredients": [],
+        "coverage": "full" if any(f.get("coverage") == "full" for f in forms) else "sauce_only",
+    }
+    order = 0
+    for f in forms:
+        hint = str(f.get("product_name_hint") or "")[:14]
+        for e in f.get("entries") or []:
+            order += 1
+            e2 = dict(e)
+            e2["order_index"] = order
+            e2["section"] = f"{hint}:{e.get('section') or ''}".strip(":")
+            merged["entries"].append(e2)
+        if f.get("coverage") == "full":
+            cands = f.get("principal_candidates") or []
+            cands_en = f.get("principal_candidates_en") or []
+            for i, c in enumerate(cands):
+                if c not in merged["principal_candidates"]:
+                    merged["principal_candidates"].append(c)
+                    merged["principal_candidates_en"].append(
+                        cands_en[i] if i < len(cands_en) else "")
+        for a in f.get("accessory_ingredients") or []:
+            if a not in merged["accessory_ingredients"]:
+                merged["accessory_ingredients"].append(a)
+    merged["principal_candidates"] = merged["principal_candidates"][:4]
+    merged["principal_candidates_en"] = merged["principal_candidates_en"][:4]
+    merged["accessory_ingredients"] = merged["accessory_ingredients"][:8]
+    return merged
+
+
+def _pipeline_entries(form: dict) -> list[dict]:
+    rows = []
+    for e in form.get("entries") or []:
+        name = str(e.get("name_ko") or e.get("name_raw") or "")
+        subs = [s for s in (e.get("sub_ingredients") or []) if s]
+        display = name if not subs else f"{name} ({', '.join(subs)})"
+        en = str(e.get("name_en") or "").strip()
+        if en:
+            display = f"{display} / {en}"
+        pct = e.get("percent")
+        try:
+            pct = float(pct) if pct not in (None, "") else None
+        except (TypeError, ValueError):
+            pct = None
+        rows.append({
+            "ingredient_name": display,
+            "component": e.get("section") or "",
+            "role": e.get("role") or "other",
+            "percent": pct,
+            "order_index": e.get("order_index"),
+            "origin": e.get("origin") or "",
+            "source": "coi_normalized",
+        })
+    return rows
+
+
+def FindFormForProduct(product_name: str) -> dict | None:
+    root = _form_dir()
+    if root is None:
+        return None
+    mapping = _load_map(root)
+    fnames = mapping.get(_nfc(product_name))
+    if not fnames:
+        # 퍼지 폴백: 표기 차('다진 새우살' vs '다짐살 9종')로 exact 실패 시
+        # 비제네릭 토큰 겹침 최다 키 (2토큰 이상일 때만 — 오매칭 방지)
+        generic = {"냉동", "국산", "간편", "이유식용", "프리미엄", "오리지널"}
+        ptoks = {w for w in re.findall(r"[가-힣A-Za-z]{2,}", _nfc(product_name))} - generic
+        best, best_score = None, 1
+        for key, fs in mapping.items():
+            ktoks = {w for w in re.findall(r"[가-힣A-Za-z]{2,}", key)} - generic
+            score = sum(1 for tk in ptoks if any(tk in k or k in tk for k in ktoks))
+            if score > best_score:
+                best, best_score = fs, score
+        fnames = best
+    if not fnames:
+        return None
+    forms = [f for f in (_load_form(root, fn) for fn in fnames) if f]
+    if not forms:
+        return None
+    return forms[0] if len(forms) == 1 else _merge_forms(forms)
+
+
+def InjectIntoProductUnderstanding(pu: dict[str, Any]) -> dict[str, Any] | None:
+    """PU dict에 정규화 COI를 가산 주입. 주입 시 요약 dict, 아니면 None."""
+    form = FindFormForProduct(str(pu.get("product_name") or ""))
+    if not form:
+        return None
+    entries = _pipeline_entries(form)
+    if not entries:
+        return None
+    cf = dict(pu.get("composition_facts") or {})
+    ih = pu.get("identity_hints") or {}
+    existing = [e for e in (cf.get("ingredient_entries") or []) if isinstance(e, dict)]
+    seen = {str(e.get("ingredient_name") or "").strip() for e in existing}
+    added = [e for e in entries if str(e.get("ingredient_name") or "").strip() not in seen]
+    cf["ingredient_entries"] = existing + added
+
+    cands = [str(c) for c in (form.get("principal_candidates") or []) if c]
+    cands_en = [str(c) for c in (form.get("principal_candidates_en") or [])]
+    principal = ""
+    if cands:
+        id_text = " ".join([
+            str(ih.get("principal_ingredient_guess") or ""),
+            *[str(x) for x in (ih.get("identity_terms") or [])],
+            str(ih.get("normalized_tariff_description") or ""),
+            str(pu.get("product_name") or ""),
+        ]).lower()
+        # 정체 교차가 %보다 우선 — 함량 1위(고춧가루 40%)가 본질(꼬막)을
+        # 이기면 GIR 3(b)에 역행한다(꼬막장 실측). %는 교차 무성립 시의
+        # 보조 신호로만, 그것도 유의미 함량(≥10%) 2개 이상 비교일 때만.
+        # 한글은 복합어 표기 편차('새꼬막'/'꼬막장'/'꼬막')가 커서 토큰
+        # 포함으로는 어긋난다 — 2-gram 교집합으로 판정. 영문은 토큰 포함.
+        def _bigrams(text: str) -> set[str]:
+            ko = re.sub(r"[^가-힣]", "", text)
+            return {ko[i:i + 2] for i in range(len(ko) - 1)}
+
+        # 구식 coi_cross_check 등가: 라벨(재구성) 1위 성분도 교차 원천에
+        # 포함 — identity 서술이 흔들려도(꼬마바 'vegetable bar') 라벨
+        # 1위('연육')×COI 후보('연육') 일치라는 독립 2근거가 살아남는다.
+        label_first = next(
+            (str(e.get("ingredient_name") or "") for e in existing
+             if int(e.get("order_index") or 0) == 1),
+            "",
+        )
+        if label_first:
+            id_text = id_text + " " + label_first.lower()
+        id_bi = _bigrams(id_text)
+        id_en = {w for w in re.findall(r"[a-z]{3,}", id_text)}
+        for ci, c in enumerate(cands):
+            en = cands_en[ci] if ci < len(cands_en) else ""
+            cl = (c + " " + en).lower()
+            ko_hit = bool(_bigrams(cl) & id_bi)
+            en_hit = any(w in id_en for w in re.findall(r"[a-z]{3,}", cl))
+            if ko_hit or en_hit:
+                principal = c
+                break
+        if not principal:
+            by_pct = [(e.get("percent") or 0, str(e.get("ingredient_name") or ""))
+                      for e in entries
+                      if any(str(c) in str(e.get("ingredient_name") or "") for c in cands)]
+            by_pct = [x for x in by_pct if x[0] and x[0] >= 10]
+            if len(by_pct) >= 2:
+                principal = max(by_pct)[1]
+        cf["coi_principal_candidates"] = cands
+    # 기존 값 보존: 구식 로더·재구성이 이미 채운 주성분은 덮지 않는다 —
+    # 교차 확정값은 빈자리만 채우고, 불일치는 후보 병기로만 남는다.
+    if principal and not str(cf.get("principal_ingredient") or "").strip():
+        cf["principal_ingredient"] = principal
+    if form.get("accessory_ingredients"):
+        cf["accessory_ingredients"] = form["accessory_ingredients"]
+    roles = {e.get("role") for e in entries}
+    if "wrapper" in roles:
+        cf["contains_wrapper_or_dough"] = True
+    if roles & {"sauce", "broth"}:
+        cf["contains_sauce_or_broth"] = True
+    # 파생 필드 재계산 — 구식 로더는 lane 내부 시점이라 percentages 등이
+    # COI를 반영해 계산됐지만, 본 훅은 기록 후 시점이라 재계산 없이는
+    # quant 연료(ingredient_percentages)가 COI 없던 값으로 굳는다(대체런
+    # 실측: 구식 OFF에서 %형 분기 연료 소실). PU의 계산기를 그대로 호출.
+    try:
+        from bussiness_logic.product.components.product_understanding import (
+            ProductUnderstandingComponent as _PU,
+        )
+        cf["ingredient_percentages"] = _PU._IngredientPercentagesFromEntries(
+            cf["ingredient_entries"],
+        )
+        # ingredient_classes도 lane 내부 시점 계산이라 신폼 entries 미반영
+        # (실측: 꼬마바 4→1, 산채 2→0 — hs2/hs4 지지 실탄 소실). 재계산.
+        merged_classes = _PU._BuildIngredientClasses(
+            ingredientEntries=cf["ingredient_entries"],
+            compositionTerms=tuple(cf.get("composition_terms") or ()),
+        )
+        if merged_classes:
+            cf["ingredient_classes"] = list(merged_classes)
+        # 소비처 전수(2026-07-15)에서 확인된 나머지 파생 2종도 재계산 —
+        # 팀장 후보 필드(dict 계약)와 status는 PU 계산기로 형식 보존.
+        cand2 = _PU._BuildPrincipalCandidates(cf["ingredient_entries"])
+        if cand2:
+            cf["principal_ingredient_candidates"] = [dict(c) for c in cand2]
+            status2 = _PU._PrincipalStatus(cand2)
+            if principal:
+                status2 = "confirmed"
+            cf["principal_ingredient_status"] = status2
+        comp2 = _PU._BuildComponentCompositions(
+            productFacts=pu.get("reconstructed_product_facts") or [],
+            reconstructedTables=(),
+            ingredientEntries=cf["ingredient_entries"],
+        )
+        if comp2:
+            cf["component_compositions"] = [dict(c) for c in comp2]
+    except Exception:  # noqa: BLE001 — 재계산 실패는 기존 값 유지
+        pass
+    pu["composition_facts"] = cf
+    return {"coi_form_injected": True, "entries_added": len(added),
+            "principal": principal or "(후보 병기)"}
