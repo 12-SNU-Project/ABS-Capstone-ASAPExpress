@@ -93,10 +93,49 @@ def _exact_index() -> dict[str, list[int]]:
         idx: dict[str, list[int]] = {}
         for i, r in enumerate(rows):
             k = _norm_key(r.get("ko") or "")
-            if len(k) >= 2:
+            # [메인 병합 보존] 1자 품명('밤'→Chestnuts, '김'→Laver)도 등재 —
+            # 정밀 '완전 일치'에서만 쓰이고, 포함·토큰 계층은 각자 ≥2 필터
+            # 유지('김'⊂'김치' 오염 금지).
+            if len(k) >= 1:
                 idx.setdefault(k, []).append(i)
         _EXACT_INDEX = idx
     return _EXACT_INDEX
+
+
+# ── curated 파생층 (Track 2) ────────────────────────────────────────
+# 원천(관세청) 사전은 불변 잠금 — 원천 부재 어휘의 다리는 별도 파생층
+# (data/curated_term_bridge.jsonl)에서만 온다. 행 자격: source='curated'
+# ∧ approved_by 비어있지 않음(설계자 승인분만 유효). 조회는 원천 우선,
+# 파생은 폴백이며 산출에 grade='derived'가 표기된다 — 소비부는 파생
+# 매치에 ingredient_name 영문 병기를 하지 않아(원천 전용 특권) typed
+# 게이트(field_hit 확정) 경로에 구조적으로 진입 불가, term_aliases
+# (quant 슬롯) 지지만 가능한 2급 증거다. 생성·승인 공정은
+# DB/curate_term_bridge.py (폐쇄 후보 집합 밖 en 등록 거부).
+_CURATED_INDEX: dict[str, list[dict]] | None = None
+
+
+def _curated_index() -> dict[str, list[dict]]:
+    global _CURATED_INDEX
+    if _CURATED_INDEX is None:
+        idx: dict[str, list[dict]] = {}
+        try:
+            path = (Path(__file__).resolve().parents[4]
+                    / "data" / "curated_term_bridge.jsonl")
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    r = json.loads(line)
+                except Exception:  # noqa: BLE001
+                    continue
+                if (str(r.get("source") or "") != "curated"
+                        or not str(r.get("approved_by") or "").strip()):
+                    continue  # 승인된 curated 행만 유효
+                k = _norm_key(r.get("ko") or "")
+                if len(k) >= 2 and str(r.get("en") or "").strip():
+                    idx.setdefault(k, []).append(r)
+        except Exception:  # noqa: BLE001 — 파생층 부재 = 폴백 없음(무해)
+            idx = {}
+        _CURATED_INDEX = idx
+    return _CURATED_INDEX
 
 
 def LookupAliases(name_ko: str, top: int = 2) -> list[dict]:
@@ -122,6 +161,37 @@ def LookupAliases(name_ko: str, top: int = 2) -> list[dict]:
             hit_rows = idx[k][:top]
             break
     if not hit_rows:
+        # [메인 병합 보존] 완전 포함 계층: 사전 키(관세청 품명 원형)가
+        # 질의 안에 통째로 등장하면 인정 — '재첩살'⊇'재첩', '대구살'⊇'대구'.
+        # 유사도가 아니라 키 원형의 부분 문자열 판정(결정론·창작 0 — 근사
+        # 2-gram 사고와 다른 계층). 최장 키 1개 채택. 원천 유래이므로
+        # curated 파생층보다 우선. 형태 접미어는 정체가 아니라 차단
+        # ('밀가루'→'가루'="Powder; Flour" 오염 실측).
+        form_generic = {"가루", "분말", "원액", "농축액", "엑기스",
+                        "오일", "기름", "시럽", "소스"}
+        best = ""
+        for query in keys:
+            for k in idx:
+                if (len(k) >= 2 and k not in form_generic
+                        and k in query and len(k) > len(best)):
+                    best = k
+        if best:
+            hit_rows = idx[best][:top]
+    if not hit_rows:
+        # [Track 2] 원천 미등재 → curated 파생층 폴백 (승인분만, grade 표기)
+        cidx = _curated_index()
+        for k in keys:
+            if k in cidx:
+                out = []
+                for r in cidx[k][:top]:
+                    hs6 = str(r.get("hs6") or "")
+                    out.append({
+                        "en": str(r.get("en") or ""),
+                        "hs6": hs6,
+                        "chapter_terms": _chapter_tokens(hs6[:2]) if hs6 else [],
+                        "grade": "derived",
+                    })
+                return out
         _enqueue_review(name_ko)
         return []
     out = []
@@ -131,6 +201,7 @@ def LookupAliases(name_ko: str, top: int = 2) -> list[dict]:
             "en": r.get("en") or "",
             "hs6": r.get("hs6") or "",
             "chapter_terms": _chapter_tokens(str(r.get("hs6") or "")[:2]),
+            "grade": "source",
         })
     return out
 
@@ -178,7 +249,15 @@ def ApplyTermBridge(pu: dict[str, Any]) -> dict[str, Any] | None:
             continue
         e["term_aliases"] = aliases
         e["term_aliases_hs6"] = [h["hs6"] for h in hits if h["hs6"]][:2]
-        if " / " not in name and hits[0]["en"]:
+        derived = all(h.get("grade") == "derived" for h in hits)
+        if derived:
+            # [Track 2] 파생 매치는 2급 — ingredient_name 영문 병기는 원천
+            # 전용 특권이다. 병기된 영문은 _field_tokens(ingredient_name만
+            # 읽음)를 타고 typed 게이트(field_hit 확정)에 진입하므로, 파생
+            # en을 병기하면 파생이 확정을 만들 수 있다. term_aliases(quant
+            # 슬롯)만 태워 지지 자격으로 제한한다 — alias 계열과 동급.
+            e["term_aliases_grade"] = "derived"
+        elif " / " not in name and hits[0]["en"]:
             e["ingredient_name"] = f"{name} / {hits[0]['en']}"
         bridged += 1
     if not bridged:

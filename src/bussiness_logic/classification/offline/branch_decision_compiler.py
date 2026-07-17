@@ -90,9 +90,27 @@ CRITERION_FIELD_BINDING = {
 }
 
 _COND_CLAUSE = re.compile(r"whether\s+or\s+not[^,;.)]*", re.I)
+# 상태축 — dash 헤더 소비가 정당한 유형(R1 원형). 값 추출·거울 배제에서
+# 명사(정체) 계열과 다른 규칙을 탄다.
+_STATE_TYPES = frozenset({"preservation_state", "processing_method",
+                          "physical_form", "condition_quality"})
+# 상태 어휘 lane — 상태어는 상태축(preservation/processing)이 소유한다.
+# 비상태 축(material 등)의 값 창에 상태 열거("…frozen, dried, salted…")가
+# 새어 들면 절반-경계 공유에서 살아남아 교차 오발동을 만든다 (실측:
+# 0306 material 행의 'frozen'이 냉동 대구살을 0304에서 탈취 — 스크럽
+# 수리로 leaf가 넓어지며 표면화). _QUANT_OPERATOR_TOKENS 선례와 동일 원칙.
+_STATE_LEXICON = frozenset({
+    # 상태축 taxonomy 패턴이 '실제 소유'한 어휘만 — 소유자 없는 토큰
+    # (raw/live: 어느 상태 패턴에도 없음)을 lane에서 빼앗으면 그 라벨은
+    # 어디서도 수확되지 않는다 (05051010 'Raw' bare 재발 실측).
+    "frozen", "fresh", "chilled", "dried", "dehydrated", "salted",
+    "brine", "smoked", "cooked", "uncooked", "boiled", "steamed",
+})
 _NEG_VALUE = re.compile(
     r"\b(?:other\s+than|excluding|except|does\s+not\s+include|not\s+including|"
-    r"not\s+containing|without|no|not)\s+([a-z][a-z ,\-]{2,60})", re.I)
+    # 꼬리 [a-z]*: 캡처 60자 상한이 단어 중간에서 끊기지 않게 잔여 문자까지
+    # 소비 — 'known'의 'k'만 지워져 'nown' 파편이 값으로 남던 실측(0207).
+    r"not\s+containing|without|no|not)\s+([a-z][a-z ,\-]{2,60}[a-z]*)", re.I)
 # 수량 부정("not more than 20 %", "not exceeding 500 g")은 배제 조건이
 # 아니라 수량 게이트다 — 캡처가 숫자 앞에서 끊겨 'more/than' 같은 만능
 # 토큰이 not_contains 값이 되면 "more than" 포함 서술 전부에 오발동하는
@@ -161,6 +179,48 @@ def _grounded_source(source: str, values) -> str:
     return (src + " … " + " … ".join(extras)) if extras else src
 
 
+_LEDGER_PATH = (Path(__file__).resolve().parents[4] / "DB" / "artifacts"
+                / "condition_ledger.jsonl")
+_LEDGER_CACHE: dict[str, dict[str, list[str]]] | None = None
+
+
+def _condition_ledger() -> dict[str, dict[str, list[str]]]:
+    """condition_ledger.jsonl → {scope: {kind: [원문 텍스트]}} (지연 로드).
+
+    Phase A 산출물(법정 주 원장). 부재·오류 = 빈 dict no-op — 원장 없이도
+    라벨 수확만으로 컴파일이 성립해야 한다(원천 의존 하드 실패 금지).
+    """
+    global _LEDGER_CACHE
+    if _LEDGER_CACHE is not None:
+        return _LEDGER_CACHE
+    out: dict[str, dict[str, list[str]]] = {}
+    try:
+        with open(_LEDGER_PATH, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except Exception:  # noqa: BLE001
+                    continue
+                scope = str(rec.get("scope") or "")
+                kind = str(rec.get("kind") or "")
+                text = str(rec.get("text") or "").strip()
+                if scope and kind and text:
+                    out.setdefault(scope, {}).setdefault(kind, []).append(text)
+    except OSError:
+        out = {}
+    _LEDGER_CACHE = out
+    return out
+
+
+# 법정 주의 배제 절 — CNEN 수확기와 같은 어휘, 주(note) 문장 형태 포함
+# ("This heading excludes …", "The heading does not cover …").
+_NOTE_EXCLUDE_RX = re.compile(
+    r"(?:does not cover|do not cover|excludes?|excluding|are not included|"
+    r"is not included|not covered by)[:\s]+([^.;(]{4,90})",
+    re.IGNORECASE,
+)
+
+
 def CompileGroupDecisions(
     level: str,
     parent: str,
@@ -181,19 +241,69 @@ def CompileGroupDecisions(
         "heading", "subheading", "chapter", "note", "other", "otherwise",
         "including", "included", "containing", "mixture", "weigh", "whether",
         "kind", "use", "used", "but", "less", "more", "than",
+        # 수량 비교 문법은 quant lane 소유 — 값 자격 없음 (more/less/than과
+        # 동일 계보; 'at least 31,8 %'의 least가 값·거울 배제로 새던 실측)
+        "least",
         # ch16/19/20 법조문 만능 꼬리 — 거의 모든 조제품 라벨에 등장해
         # 값으로서의 판별력이 없고 DTO processing_state와 오발동만 만든다
         # (달래꼬막장 'prepared' 실측). 상태 판별은 uncooked/frozen 등
         # 구체 상태어와 preservation_state 축이 담당.
         "prepared", "preserved",
     })
+    residual_members: list[tuple[int, str]] = []  # [P1-C] 거울 배제 대상
+    ancestor_by_code: dict[str, str] = {}         # [P3] arm(조상) 경계 지도
+    # [B2] 그룹 leaf 토큰 합집합 — 차분 정밀화의 기준선. 열거형 dash 헤더
+    # (0303.5x "Herrings, …, cobia ; Cobia")는 형제들의 leaf 판별자를 전부
+    # 나열하므로 '조상 − 형제 leaf 합집합'만이 순수 류 정의어다. 이 차분
+    # 없이는 열거형 조상이 leaf 판별자(cobia)를 삼킨다 (3회차 (e′) 표본
+    # 77%의 단일 사인 — 열거형 조상 차분).
+    leaf_union: set[str] = set()
+    for _c, _l in ordered:
+        _raw = [s.strip() for s in str(_l or "").split(" ; ") if s.strip()]
+        if _raw:
+            leaf_union |= {_stem(t) for t in _TOKEN.findall(
+                _COND_CLAUSE.sub(" ", _raw[-1]).lower())}
     for seq, (code, label) in enumerate(ordered):
-        clean = _COND_CLAUSE.sub(" ", str(label or ""))
+        # [B2·스크럽 수리 — 3회차 인계분, 축-조합과 동반 적용 승인] 계층
+        # 분리는 '원본 라벨'의 ' ; '로 먼저 한다 — _COND_CLAUSE 스크럽을
+        # 먼저 하면 "wares, whether or not containing cocoa; communion"이
+        # "wares,  ; communion"으로 변해 인공 계층 구분자가 생기고, 1905의
+        # 진짜 정체('Bread, pastry, cakes, biscuits')가 조상으로 오인돼
+        # qualifier로 유출된다 (설기·콩찰떡 1905 미도달의 직접 사인).
+        raw_segs = [s.strip() for s in str(label or "").split(" ; ") if s.strip()]
+        segs_all = [t for t in (_COND_CLAUSE.sub(" ", s).strip()
+                                for s in raw_segs) if t]
+        clean = " ; ".join(segs_all)
         # residual 판정은 leaf 세그먼트에서만 — 경로(dash 헤더)에 낀 'Other'
         # 가 라벨 전체 검사에 걸리면 실 조건 보유 코드가 else로 오인된다.
-        if _RESIDUAL_RX is not None and _RESIDUAL_RX.search(
-                clean.rsplit(";", 1)[-1].strip().lower()):
-            continue  # else 분기
+        # leaf 분리도 ' ; '(트리 헤더 조립 구분자) 기준 — 서술 자체의 ';'
+        # 열거("…structure; salts thereof", 2941 실측)가 leaf로 오인되면
+        # 공유 꼬리('salts thereof')만 남아 분기가 전멸한다.
+        # leaf = '원본' 마지막 세그먼트의 스크럽본(segs_all[-1]) — clean의
+        # rsplit을 쓰면 스크럽이 만든 인공 ' ; '가 재유입되어 leaf가 중간
+        # 절단된다 (1905 leaf가 'communion…'으로 잘려 bread/pastry/cakes
+        # 정체 수확 실패 실측 — 스크럽 수리의 잔여 경로).
+        is_residual = bool(_RESIDUAL_RX is not None and _RESIDUAL_RX.search(
+            (segs_all[-1] if segs_all else "").strip().lower()))
+        if is_residual:
+            residual_members.append((seq, code))
+        # [P1-B] 조상(dash 헤더) 토큰 — 형제 전원이 공유하는 류(類) 정의라
+        # 판별 값 자격이 없다 (청양고추 R5: 'fruit genu capsicum'이 51의
+        # 조건 값이 되어 고추속이기만 하면 51이 이겼다). 판별 값 추출에서
+        # 차분하고, 대신 role='qualifier' 층으로 분리 emit한다.
+        # 분리 구분자는 ' ; '(공백 포함) — _rows_from_tree가 계층 헤더를
+        # 이 형태로 조립한다. 헤딩 서술 자체의 ';'(열거, hs4 0306/7104류)
+        # 는 계층이 아니므로 조상으로 오인하면 자기 서술이 차분당한다.
+        # 토큰은 무필터 스템 — 'U 235'의 'u' 같은 홑글자 기호도 조상이면
+        # 판별 자격이 없다 (len≥3 _toks만 쓰면 홑 대문자 승격 규칙과 어긋남).
+        ancestor_text = " ; ".join(segs_all[:-1])
+        ancestor_by_code[code] = ancestor_text
+        # [B2] 차분 배제 집합 = 조상 − 형제 leaf 합집합. 열거형 헤더 토큰은
+        # 형제 leaf에도 각각 등장하므로 자동 면제되고(cobia 생존), 순수 류
+        # 정의어('molluscs')만 차분된다 — R1 원칙 불변, 국소 정밀화.
+        ancestor_toks = frozenset(
+            {_stem(t) for t in _TOKEN.findall(ancestor_text.lower())}
+            - leaf_union)
         siblings = tuple(l for c, l in ordered if c != code)
         sibling_toks = _toks(" ".join(siblings))
         # 형제 '배타' 필터는 상태×종 행렬 그룹(0203/0306: fresh·frozen 쌍이
@@ -206,8 +316,14 @@ def CompileGroupDecisions(
         def _discriminative(w: str) -> bool:
             return sum(1 for s in sib_tok_sets if w in s) <= half
 
-        def _phrase_units(text: str) -> list[str]:
+        def _phrase_units(text: str, exclude: frozenset = frozenset(),
+                          check_disc: bool = True) -> list[str]:
             """구문 단위 값 추출 — 낱토큰 분해의 처방.
+
+            exclude: 조상(dash 헤더) 토큰 차분 — 판별 값에서 류 정의어 제거
+            ([P1-B] leaf 판별 값 = leaf − 조상 − 과반공유).
+            check_disc=False: qualifier 층 전용 — 공유가 본질이므로 형제
+            판별 필터를 걸지 않는다.
 
             법조문 "other aquatic invertebrates"가 ['aquatic','invertebrat']
             낱토큰으로 쪼개지면 'aquatic' 하나로 성립해 어묵·돼지갈비가
@@ -219,7 +335,9 @@ def CompileGroupDecisions(
             units: list[str] = []
             for seg in re.split(r"[,;:()]|\band\b|\bor\b", str(text or "").lower()):
                 toks = [w for w in (_stem(x) for x in _TOKEN.findall(seg))
-                        if len(w) >= 3 and w not in _VALUE_STOP and _discriminative(w)]
+                        if len(w) >= 3 and w not in _VALUE_STOP
+                        and w not in exclude
+                        and (not check_disc or _discriminative(w))]
                 unit = " ".join(toks[:4])
                 if unit and unit not in units:
                     units.append(unit)
@@ -231,11 +349,17 @@ def CompileGroupDecisions(
             # 그대로 제거하므로 잡음 재유입 없음.
             for c in re.findall(r"(?<![\w.])([A-Z])(?![\w.])", str(text or "")):
                 low = c.lower()
-                if _discriminative(low) and low not in units:
+                if low in exclude:
+                    continue
+                if (not check_disc or _discriminative(low)) and low not in units:
                     units.append(low)
             return units[:8]
 
-        def add(cond_type: str, op: str, values, source: str) -> None:
+        def add(cond_type: str, op: str, values, source: str,
+                role: str = "discriminator", grade: str = "named") -> None:
+            # grade: 'named'=원문 판별 서술 수확 / 'fallback'=패턴 불발 시
+            # 명사 덤핑 (컴파일 2.0 B-5 — 폴백 구분은 축 이름이 아니라
+            # 컬럼으로: binding 자격쌍 무접촉, 평가기 하위호환).
             rows.append({
                 "level": level, "branch_id": parent, "seq": seq,
                 "then_code": code, "cond_type": cond_type,
@@ -243,7 +367,24 @@ def CompileGroupDecisions(
                 "op": op,
                 "value": json.dumps(values, ensure_ascii=False) if values is not None else "null",
                 "source_text": _grounded_source(source, values), "version": "parser-v1",
+                "role": role, "grade": grade,
             })
+
+        # [P1-B] 조상 헤더 = 그룹 공통 자격층(role='qualifier') — 특정 형제의
+        # 전유 금지가 원칙이지만 저장 키(then_code)상 코드마다 자기 조상
+        # 구문을 싣는다. 평가기가 순위 합산에서 role='qualifier'를 제외하므로
+        # 상대 우위는 생기지 않는다(전유 무력화). 잔반 꼬리 코드도 조상이
+        # 있으면 싣는다 — head 있는 조건부 잔반(292151 '…derivatives ;
+        # Other')이 이 층으로 bare를 면한다 (discriminator 창작 금지).
+        if ancestor_text and not (_RESIDUAL_RX is not None
+                                  and _RESIDUAL_RX.search(ancestor_text.lower())):
+            q_units = _phrase_units(_NEG_VALUE.sub(" ", ancestor_text),
+                                    check_disc=False)
+            if q_units:
+                add("product_identity", "has_token", q_units, ancestor_text,
+                    role="qualifier")
+        if is_residual:
+            continue  # else 분기 — 판별 조건은 emit하지 않는다 (소거로 정의)
 
         emitted_types: set[str] = set()
         # 배제 조건은 taxonomy 탐지기와 독립으로 캡처한다 — 단, dash(중간)
@@ -251,10 +392,14 @@ def CompileGroupDecisions(
         # 구성품 상태라 광역 풀 배제로 쓰면 밀키트의 'prepared' 같은 요리
         # 수준 토큰에 정답이 위반당한다(실측). 그래서 부정 캡처는 leaf
         # 세그먼트(';' 뒤 마지막)에서만, dash 세그먼트는 긍정 조건만 낸다.
-        leaf_segment = clean.rsplit(";", 1)[-1]
+        leaf_segment = segs_all[-1] if segs_all else ""
         quant_neg_source = ""
         for neg in _NEG_VALUE.finditer(leaf_segment):
-            values = [w for w in _toks(neg.group(1)) if w][:4]
+            # 정렬 후 절단 — _toks는 set이라 순회 순서가 PYTHONHASHSEED에
+            # 따라 달라진다. [:4]를 먼저 하면 프로세스마다 배제 값 구성이
+            # 바뀌어 같은 입력이 다른 테이블·다른 순위를 낸다 (실측: 같은
+            # 캐시의 대구살이 단독 실행 0304 top1, 전량 실행 0303 top1).
+            values = sorted(w for w in _toks(neg.group(1)) if w)[:4]
             if not values:
                 continue
             head_words = neg.group(1).lower().split()
@@ -272,13 +417,21 @@ def CompileGroupDecisions(
         # (실측: 1605.5x 일곱 형제 전원 확정 — ingredient_class='molluscs'
         # 하나로). 명사류 값 추출은 leaf 세그먼트에서만.
         leaf_positive = _NEG_VALUE.sub(" ", leaf_segment)
-        _STATE_TYPES = {"preservation_state", "processing_method",
-                        "physical_form", "condition_quality"}
         for entry in _TAXONOMY:
             cond_type = entry["criterion_type"]
             if cond_type in ("residual_other", "exclusion_boundary"):
                 continue
-            search_text = positive_side
+            # [P1-A] R1 원형 복원 (b551573 → c594e41 사유 없는 회귀의 원복):
+            # 상태축만 full 텍스트(dash의 'Frozen:' 헤더는 정당한 상태 조건),
+            # 명사류(정체·종·재질)는 leaf 세그먼트만 — dash 명사(류 정의)가
+            # 조건 값이 되면 그 류의 전 형제가 같은 값으로 확정된다(1605.5x
+            # 전원 확정 실측). quantitative_threshold는 값 없는 게이트라
+            # 조상 오염이 불가능하고 dash 헤더 수량 조건이 실재하므로
+            # (160249 quant_gate 5코드 실측) full 텍스트를 유지한다.
+            search_text = (positive_side
+                           if cond_type in _STATE_TYPES
+                           or cond_type == "quantitative_threshold"
+                           else leaf_positive)
             match = entry["pattern"].search(search_text)
             if not match:
                 continue
@@ -310,16 +463,56 @@ def CompileGroupDecisions(
                 # 은 1605·1902·160249 실측 사연으로 불변.
                 source_span = match.group(0) + span_source
             else:
+                # [5회차 인계 — 상태 열거 공백] 상태축은 첫 매치만 값이 된다:
+                # "fresh, chilled or frozen" 라벨에서 value=['fresh']뿐이라
+                # frozen 제품이 그 코드와 못 만난다 (대구살 0304 실측 — 종전
+                # 에는 material 행에 얹힌 'frozen'이 우연히 대신 맞았고, lane
+                # 정리로 정직하게 소실). 수리 시도 2종 실측 기각: ①전 매치
+                # 열거 — 상태 공유 코드 전반 +3(0714가 청양고추 탈취·bare
+                # 재발) ②소수(멤버 절반 미만) 한정 열거 — 구조 역설: 정작
+                # 필요한 ch03 frozen은 5/9 과반이라 제외되어 0304 미회복,
+                # ch07 frozen은 2/14 소수라 0714가 열려 청양고추 탈취.
+                # 상태 판별은 '토큰 등장'이 아니라 '상태 행렬(형제 상태
+                # 집합 대비 자기 상태 집합)의 차분' 재설계가 필요 — B-3.
                 span_source = match.group(0)
                 source_span = match.group(0)
             # 값 상한 8: 법조문 열거("such as spaghetti, macaroni, noodles,
             # lasagne, gnocchi, ravioli, cannelloni")가 4에서 잘리면 정작
             # 판별력 있는 꼬리 단어(noodle)가 소실된다 — 1902 실측.
             # 배제(not_contains)는 차단 시맨틱이라 4 유지(보수).
-            span_tokens = _phrase_units(span_source)
+            # [P1-B] 판별 값 = leaf − 조상 토큰 − 과반공유(기존 필터) 차분.
+            # 상태축은 dash 헤더 소비가 정당하므로 조상 차분 제외.
+            span_tokens = _phrase_units(
+                span_source,
+                exclude=(frozenset() if cond_type in _STATE_TYPES
+                         else frozenset(ancestor_toks | _STATE_LEXICON)))
             if span_tokens:
                 add(cond_type, "has_token", span_tokens, source_span)
                 emitted_types.add(cond_type)
+        # [B-3] 상태 집합 qualifier — 라벨의 '전' 상태 매치를 집합으로
+        # 실은 그룹 자격층. 4회차 기각 2종(전 매치 가산·소수 한정 가산)과
+        # 달리 순위 가산이 아니라 '모순 자격 심사'(P3-b arm 기계의 일반화)
+        # 전용이다: 제품 typed 상태가 형제 집합에 있는데 자기 집합에 없으면
+        # confirmed 강등+proof 박탈(감점·전멸 없음). 대구살 실측: frozen
+        # 제품에 0302(fresh·chilled만)가 정합인 척 경쟁하던 지대의 처방.
+        state_set: list[str] = []
+        state_srcs: list[str] = []
+        for entry_s in _TAXONOMY:
+            if entry_s["criterion_type"] not in _STATE_TYPES:
+                continue
+            for m_s in entry_s["pattern"].finditer(positive_side):
+                tok_s = m_s.group(0)
+                st_s = _stem(tok_s.lower())
+                if st_s in _STATE_LEXICON and st_s not in state_set:
+                    state_set.append(st_s)
+                    state_srcs.append(tok_s)
+        if state_set:
+            # source 접두 'STATESET: ' — staged가 dash arm(입증 판정용)과
+            # 라벨 집합(모순 심사용)을 구분하는 채널 표지. 합치면 자기
+            # 라벨의 판별 상태(0710 frozen)가 'arm 공통'으로 오분류되어
+            # 입증이 박탈된다 (실측: 잔반 0709 소거 승격 회귀).
+            add("preservation_state", "has_token", sorted(state_set),
+                "STATESET: " + ", ".join(state_srcs), role="qualifier")
         # 수량 부정에서 라우팅된 quant_gate — taxonomy 수량 탐지기는
         # positive_side(부정 스팬 제거 후)를 보므로 "not more than 20 %"는
         # 비교어가 지워진 채 숫자만 남아 못 잡는다. 이미 잡혔으면 중복
@@ -327,16 +520,38 @@ def CompileGroupDecisions(
         if quant_neg_source and "quantitative_threshold" not in emitted_types:
             add("quantitative_threshold", "quant_gate", None, quant_neg_source)
             emitted_types.add("quantitative_threshold")
-        # 아무 유형도 안 잡힌 순수 명사 라벨 -> product_identity 폴백
-        if not emitted_types:
-            nouns = _phrase_units(positive_side)
+        # 정체축 미보유 라벨 -> product_identity 폴백
+        # [P1-A] 폴백 명사도 leaf만 + 조상 차분 (R1 원형: 청양고추 R5의
+        # 'fruit genu capsicum' 조상 구문이 여기 full 텍스트로 유입됐다)
+        # [B2] 게이트 정밀화: '아무 유형도 안 잡힘'이 아니라 '정체축
+        # (product_identity/species_source) 부재'가 기준 — 1905처럼 부차
+        # 축(material 'similar product'·intended_use)만 잡히는 라벨은 정작
+        # 정체 열거('Bread, pastry, cakes, biscuits')를 잃어 rice cake류가
+        # 1905를 이길 값이 없었다 (설기·콩찰떡 실측, R3 1604와 같은 계보).
+        if not (emitted_types & {"product_identity", "species_source"}):
+            # [B2] lane 중복 금지: 이 코드의 축 행이 이미 소유한 값 토큰
+            # (frozen 등 상태어)은 폴백이 재수확하지 않는다 — 중복 수확이
+            # post-pass 구문 충돌을 일으켜 정작 축 행을 죽였다 (게이트
+            # 확장 직후 실측: hs6 판별 1619→1522, 정체만 +209).
+            own_vals: set = set()
+            for r in rows:
+                if r["then_code"] == code and r["op"] == "has_token":
+                    try:
+                        for v in json.loads(r["value"]) or []:
+                            own_vals |= set(str(v).split())
+                    except Exception:  # noqa: BLE001
+                        continue
+            nouns = _phrase_units(
+                leaf_positive,
+                exclude=frozenset(ancestor_toks | own_vals | _STATE_LEXICON))
             if nouns:
                 # [보류] identity_fallback 분해 — product_identity 축은
                 # 패턴 없는 폴백 전용이라 여기가 named 정체(Cheese/Pasta)의
                 # 유일한 생산자다. 전면 교체 시 binding 자격쌍이 공집합화
                 # (실측: fallback 4,575/named 0 — 면류 confirm 전멸 위험).
                 # named/fallback 판별 기준은 dry-run diff로 검증 후 도입.
-                add("product_identity", "has_token", nouns, clean)
+                add("product_identity", "has_token", nouns, clean,
+                    grade="fallback")
         # [Phase 1.5] 최후 상태어 보존 — 위 폴백까지 전멸한 코드 중 leaf
         # 라벨이 taxonomy 상태 매치 토큰(_VALUE_STOP 관용어) 1~2개로만
         # 구성된 경우('Used' 63051010 실측: 값 필터 소실 → bare). 관용구가
@@ -347,7 +562,8 @@ def CompileGroupDecisions(
                 w for w in (_stem(x) for x in _TOKEN.findall(leaf_positive.lower()))
                 if len(w) >= 3})
             if leaf_toks and len(leaf_toks) <= 2 and all(
-                    _discriminative(w) for w in leaf_toks):
+                    _discriminative(w) and w not in ancestor_toks
+                    for w in leaf_toks):
                 for entry in _TAXONOMY:
                     if entry["criterion_type"] in (
                             "residual_other", "exclusion_boundary",
@@ -369,20 +585,30 @@ def CompileGroupDecisions(
     # 모두 이 한 규칙으로 죽는다 (전수 스캔 547건 실측). 코드별 고유 값
     # (stuffed: 190220 단독)은 살아남는다. 빈 조건은 행 자체를 제거.
     if rows:
+        # [P1-B] 정화는 판별층(role='discriminator')에만 적용 — qualifier는
+        # 공유가 본질(류 정의)이라 과반공유 박탈 대상이 아니다.
         value_share: dict[str, set] = {}
         for r in rows:
-            if r["op"] != "has_token":
+            if r["op"] != "has_token" or r.get("role") != "discriminator":
                 continue
             try:
                 for v in json.loads(r["value"]) or []:
                     value_share.setdefault(str(v).lower(), set()).add(r["then_code"])
             except Exception:
                 continue
-        n_codes = len({r["then_code"] for r in rows}) or 1
+        # 분모는 '판별 값을 낸 코드' 수 — 정화 기준(형제 과반)이 측정되는
+        # 모집단이다. 전체 행의 then_code로 세면 qualifier·배제 전용 행을 가진
+        # 코드가 분모를 부풀려 limit_share가 올라가고, 그만큼 전역 정화가
+        # 조용히 완화된다 (B1 원장 수확 도입 시 실측: 0303이 무관하게 값을
+        # 추가 획득해 대구살 hs4 top1을 0304에서 탈취 — '전역 정화 기준 완화
+        # 금지' 불변 제약의 우회 경로였다).
+        n_codes = len({r["then_code"] for r in rows
+                       if r["op"] == "has_token"
+                       and r.get("role") == "discriminator"}) or 1
         limit_share = max(2, n_codes / 2)
         cleaned: list[dict[str, Any]] = []
         for r in rows:
-            if r["op"] != "has_token":
+            if r["op"] != "has_token" or r.get("role") != "discriminator":
                 cleaned.append(r)
                 continue
             try:
@@ -399,24 +625,325 @@ def CompileGroupDecisions(
                 r = dict(r)
                 r["value"] = json.dumps(kept, ensure_ascii=False)
                 cleaned.append(r)
-        # [Phase 1.5] 정화가 분기의 전 행을 죽이면 그 분기는 질문 자체가
-        # 없는 커버리지 구멍(bare)이 된다 — 분기 국소 예외로 원문 근거가
-        # 가장 강한 행 1개만 원값 그대로 보존한다 (전역 정화 기준은 불변:
-        # 다른 행이 하나라도 살면 이 예외는 발동하지 않는다). '가장 강한'
-        # = 값 구문 총 길이 최대(구체 구문 우선), 동률이면 법조 순서 앞.
-        if not cleaned:
-            def _strength(r: dict[str, Any]) -> tuple:
-                try:
-                    vals = json.loads(r["value"]) or []
-                except Exception:  # noqa: BLE001
-                    vals = []
-                return (sum(len(str(v)) for v in vals), -int(r["seq"]))
+        # [Phase 1.5→P1] 정화가 어느 비잔반 '코드'의 전 판별 행을 죽이면 그
+        # 코드는 판별 질문 0(bare)이 된다 — 코드 국소 예외로 원문 근거가
+        # 가장 강한 판별 행 1개만 원값 그대로 보존한다 (전역 정화 기준은
+        # 불변: 그 코드의 판별 행이 하나라도 살면 발동하지 않는다).
+        # 실측: hs4 1604의 유일 판별값 'fish'가 1603(Extracts of …, fish,
+        # …)과 정확히 절반 공유되어 경계에서 전멸 — R3의 최다 빈출 헤딩
+        # 무질문이 이 경로였다. 1605.5x류 류-정의 폭주는 조상(dash 헤더)
+        # 차분이 추출 단계에서 이미 막으므로 여기서 재발하지 않는다.
+        # '가장 강한' = 값 구문 총 길이 최대(구체 구문 우선), 동률이면
+        # 법조 순서 앞. qualifier는 순위 기여 0이라 판별을 대신 못 한다.
+        residual_set = {c for _s, c in residual_members}
 
-            keep = max((r for r in rows if r["op"] == "has_token"),
-                       key=_strength, default=None)
-            if keep is not None:
-                cleaned = [keep]
+        def _strength(r: dict[str, Any]) -> tuple:
+            try:
+                vals = json.loads(r["value"]) or []
+            except Exception:  # noqa: BLE001
+                vals = []
+            return (sum(len(str(v)) for v in vals), -int(r["seq"]))
+
+        disc_pre: dict[str, list] = {}
+        for r in rows:
+            if r["op"] == "has_token" and r.get("role") == "discriminator":
+                disc_pre.setdefault(r["then_code"], []).append(r)
+        disc_post = {r["then_code"] for r in cleaned
+                     if r.get("role") == "discriminator"}
+        for code_p, pre_rows in disc_pre.items():
+            if code_p in disc_post or code_p in residual_set:
+                continue
+            cleaned.append(max(pre_rows, key=_strength))
         rows = cleaned
+    # ── [B2] 형제-대조 축-조합 판별 ──
+    # arm(dash 조상)이 그룹을 분할할 때, 판별자는 단독 토큰이 아니라
+    # arm×leaf '조합'이다 (0102: leaf 'pure bred'는 buffalo 형제와 공유,
+    # arm 'cattle'은 qualifier라 순위 불참 — 단독 토큰 차분의 사각).
+    # 한 구문에 arm+leaf 토큰을 함께 요구하므로(평가기 _phrase_sets가 구문
+    # 내 전 토큰 동시 존재 요구) arm 단독으론 성립 불가 — R5(조상 단독
+    # 매치 승리)가 구조적으로 재발하지 않는다. 값 토큰은 전부 원문
+    # (arm·leaf 실등장분) — 조합은 법조 구조(0102.21 = Cattle ∧ Pure-bred)
+    # 의 기계화이지 값 창작이 아니다.
+    if len(ordered) >= 2:
+        residual_set_b2 = {c for _s, c in residual_members}
+        phrase_owner: dict[str, set] = {}
+        disc_rows_by_code: dict[str, list] = {}
+        for r in rows:
+            if r.get("role") == "discriminator" and r["op"] == "has_token":
+                disc_rows_by_code.setdefault(r["then_code"], []).append(r)
+                try:
+                    for v in json.loads(r["value"]) or []:
+                        phrase_owner.setdefault(str(v), set()).add(r["then_code"])
+                except Exception:  # noqa: BLE001
+                    continue
+        # 형제별 전체 라벨 토큰 집합 — 쌍(pair) 공출현 고유성의 비교 기준
+        toks_by_code: dict[str, set] = {}
+        for code_t, label_t in ordered:
+            toks_by_code[code_t] = {
+                _stem(t) for t in _TOKEN.findall(
+                    _COND_CLAUSE.sub(" ", str(label_t or "")).lower())
+                if len(t) >= 3}
+        for seq_c, (code_c, label_c) in enumerate(ordered):
+            if code_c in residual_set_b2:
+                continue  # 잔반의 몫은 거울 배제
+            own_rows = disc_rows_by_code.get(code_c, [])
+            own_phrases: list[str] = []
+            for r in own_rows:
+                try:
+                    own_phrases += [str(v) for v in json.loads(r["value"]) or []]
+                except Exception:  # noqa: BLE001
+                    continue
+            # 충전 대상 = 고유 판별 구문이 하나도 없는 코드 (전 구문이 형제와
+            # 공유 = 쌍 모호, 또는 판별 행 0). 이미 고유 구문 보유면 무접촉
+            # — diff가 부족 지대에 국한된다.
+            if any(len(phrase_owner.get(p, ())) == 1 for p in own_phrases):
+                continue
+            own_toks = sorted(
+                t for t in toks_by_code.get(code_c, ())
+                if t not in _VALUE_STOP and t not in _QUANT_NEG_TOKENS)
+            if len(own_toks) < 2:
+                continue
+            sib_sets = [s for c2, s in toks_by_code.items() if c2 != code_c]
+            leaf_raw_c = [s.strip() for s in str(label_c or "").split(" ; ")
+                          if s.strip()]
+            leaf_toks_c = {_stem(t) for t in _TOKEN.findall(
+                _COND_CLAUSE.sub(" ", leaf_raw_c[-1]).lower())} if leaf_raw_c else set()
+            # 희소한 토큰 우선(형제 등장 수 오름차순) — 판별 쌍을 빨리 찾는다
+            own_toks.sort(key=lambda t: sum(1 for s in sib_sets if t in s))
+            combos: list[str] = []
+            for i, a in enumerate(own_toks[:8]):
+                for b in own_toks[i + 1:10]:
+                    # 쌍 (a,b): 자기 라벨엔 둘 다 실등장(원문 조건 충족),
+                    # 어떤 형제도 둘을 동시에 갖지 않으면 조합-판별이다.
+                    # 최소 한 토큰은 leaf 소속이어야 한다 — 조상 전유 쌍은
+                    # 그룹 자격만으로 이기는 R5 유형이라 금지((e)와 동일 기준).
+                    if a not in leaf_toks_c and b not in leaf_toks_c:
+                        continue
+                    if not any(a in s and b in s for s in sib_sets):
+                        combos.append(f"{a} {b}")
+                        break
+                if combos:
+                    break
+            # 쌍 탐색 불발 시 arm×leaf 폴백 — arm(dash 조상)이 그룹을 분할하면
+            # arm 핵심어와 leaf 구문의 조합이 판별자다 (0102형 원형 규칙,
+            # 쌍 고유성 판정이 관용구 공유로 막힌 코드의 커버 경로).
+            if not combos:
+                arm_c = ancestor_by_code.get(code_c, "")
+                arm_partitions = len({ancestor_by_code.get(c2, "")
+                                      for c2, _l2 in ordered}) >= 2
+                if (arm_c and arm_partitions
+                        and not (_RESIDUAL_RX is not None
+                                 and _RESIDUAL_RX.search(arm_c.lower()))):
+                    arm_toks = [w for w in (_stem(x) for x in
+                                            _TOKEN.findall(arm_c.lower()))
+                                if len(w) >= 3 and w not in _VALUE_STOP]
+                    base = own_phrases[:2] or _cnen_units(
+                        _NEG_VALUE.sub(" ", " ".join(leaf_raw_c[-1:])), 2)
+                    arm_core = " ".join(arm_toks[:2])
+                    for p in base:
+                        head = " ".join(str(p).split()[:2])
+                        if head and arm_core and not (set(arm_core.split())
+                                                      & set(head.split())):
+                            combos.append(f"{arm_core} {head}")
+                            break
+            if not combos:
+                continue
+            src_row = own_rows[0] if own_rows else None
+            rows.append({
+                "level": level, "branch_id": parent, "seq": seq_c,
+                "then_code": code_c,
+                "cond_type": (str(src_row["cond_type"]) if src_row
+                              else "product_identity"),
+                "dto_field": (str(src_row["dto_field"]) if src_row
+                              else CRITERION_FIELD_BINDING.get(
+                                  "product_identity", "*tokens*")),
+                "op": "has_token",
+                "value": json.dumps(combos[:2], ensure_ascii=False),
+                "source_text": _grounded_source(str(label_c or ""), combos[:2]),
+                "version": "parser-v1", "role": "discriminator",
+                "grade": "named",
+            })
+    # ── [6회차 B] BTI 판례 어휘 수확 (cn8 레벨 전용, grade='precedent') ──
+    # 당국 판정문의 Keywords 구문 → 해당 cn8의 판별 어휘. 2급 증거:
+    # 평가기에서 precedent true는 확정(+50) 자격 없음(why=precedent_hit —
+    # enc/alias 선례와 동일 기계), 지지(+3)만. 구문 단위·lane 필터는
+    # 로더에서, 형제 과반 정화는 여기서 판례 풀 자체로 수행(본 post-pass
+    # 분모를 오염시키지 않음 — B1의 n_codes 부풀림 교훈). 사건ID는
+    # source_text 'BTI:<refs>' 서명으로 보존 — [A] 동점 해소의 원료.
+    if level == "cn8":
+        bti = _bti_index()
+        cases_by_code = {c: bti.get(c, []) for c, _l in ordered}
+        if any(cases_by_code.values()):
+            phrase_codes: dict[str, set] = {}
+            for c_b, cases in cases_by_code.items():
+                for case in cases:
+                    for ph in case["phrases"]:
+                        phrase_codes.setdefault(ph, set()).add(c_b)
+            n_bti_codes = len([c for c, cs in cases_by_code.items() if cs]) or 1
+            residual_set_b = {c for _s, c in residual_members}
+            for seq_b, (code_b, _lb) in enumerate(ordered):
+                cases = cases_by_code.get(code_b) or []
+                if not cases or code_b in residual_set_b:
+                    continue  # 잔반의 판례 어휘는 판별이 아니라 소거 몫
+                freq: dict[str, int] = {}
+                refs_by_phrase: dict[str, list[str]] = {}
+                for case in cases:
+                    for ph in case["phrases"]:
+                        # 형제 과반 정화 — 판례 보유 형제 절반 이상이 공유
+                        # 하는 구문은 류 공통어라 판별 자격 없음
+                        if len(phrase_codes.get(ph, ())) * 2 > n_bti_codes:
+                            continue
+                        freq[ph] = freq.get(ph, 0) + 1
+                        refs_by_phrase.setdefault(ph, []).append(case["ref"])
+                # (e) 원칙 동일 적용 — 구문 전 토큰이 자기 조상(dash) 전유면
+                # 그룹 공통 자격이지 판별이 아니다 (판례 서술도 예외 없음)
+                anc_b = {_stem(t) for t in _TOKEN.findall(
+                    ancestor_by_code.get(code_b, "").lower())}
+                top_ph = [ph for ph in sorted(freq, key=lambda x: (-freq[x], x))
+                          if not (set(ph.split()) and set(ph.split()) <= anc_b)][:4]
+                for ph in top_ph:
+                    refs = list(dict.fromkeys(refs_by_phrase[ph]))[:4]
+                    rows.append({
+                        "level": level, "branch_id": parent, "seq": seq_b,
+                        "then_code": code_b, "cond_type": "product_identity",
+                        "dto_field": CRITERION_FIELD_BINDING.get(
+                            "product_identity", "*tokens*"),
+                        "op": "has_token",
+                        "value": json.dumps([ph], ensure_ascii=False),
+                        "source_text": _grounded_source(
+                            f"BTI:{','.join(refs)}: {ph}", [ph]),
+                        "version": "parser-v1", "role": "discriminator",
+                        "grade": "precedent",
+                    })
+    # ── [B1] 법정 주(note) 수확 — condition_ledger 원장 소비 ──
+    # 원천: pair_rows 파싱본(heading incl 94%/excl 71%). 라벨은 '무엇인가'만
+    # 말하지만 주는 '무엇이 아닌가'를 말한다 — 소거 완결성의 원료.
+    #   note_excl/rule_excl → exclusion_boundary(구문 단위, ≥2토큰: 1토큰
+    #     광역 배제는 자기 정체를 배제하는 자충수 계보 — 02089030 실측)
+    #   note_incl → qualifier(그룹 공통 자격층): 주의 포섭 서술은 그 코드의
+    #     소속 정의라 순위 판별자가 아니다 (조상 헤더와 동격 — R5 계보).
+    # 자기배제 가드: 배제 값이 그 코드 자신의 leaf 정체 토큰과 겹치면 기각
+    # ("0307 does not cover MOLLUSCS prepared by…"의 mollusc은 0307의 정체).
+    ledger = _condition_ledger()
+    if ledger:
+        for seq_n, (code_n, label_n) in enumerate(ordered):
+            scoped = ledger.get(str(code_n))
+            if not scoped:
+                continue
+            clean_n = _COND_CLAUSE.sub(" ", str(label_n or ""))
+            own_toks = _toks(clean_n.rsplit(" ; ", 1)[-1])
+            is_res_n = bool(_RESIDUAL_RX is not None and _RESIDUAL_RX.search(
+                clean_n.rsplit(" ; ", 1)[-1].strip().lower()))
+            # 배제 수확 (잔반 포함 — 잔반도 '무엇이 아닌지'는 말할 수 있다)
+            exc_seen: list[str] = []
+            for kind in ("note_excl", "rule_excl"):
+                for text_n in scoped.get(kind, ())[:4]:
+                    for m_n in _NOTE_EXCLUDE_RX.finditer(text_n):
+                        for unit in _cnen_units(m_n.group(1), 2):
+                            if len(unit.split()) < 2:
+                                continue  # 1토큰 광역 배제 금지
+                            if set(unit.split()) & own_toks:
+                                continue  # 자기배제 가드
+                            if all(t in _QUANT_NEG_TOKENS
+                                   for t in unit.split()):
+                                continue  # 수량·불용 문법은 quant lane 소유
+                                          # (7804 'not exceeding' 실측 — 픽스 B 계보)
+                            if unit not in exc_seen:
+                                exc_seen.append(unit)
+                                rows.append({
+                                    "level": level, "branch_id": parent,
+                                    "seq": seq_n, "then_code": code_n,
+                                    "cond_type": "exclusion_boundary",
+                                    "dto_field": CRITERION_FIELD_BINDING.get(
+                                        "exclusion_boundary", "*tokens*"),
+                                    "op": "not_contains",
+                                    "value": json.dumps([unit], ensure_ascii=False),
+                                    "source_text": _grounded_source(
+                                        "NOTE: " + m_n.group(0), [unit]),
+                                    "version": "parser-v1",
+                                    "role": "discriminator", "grade": "named",
+                                })
+                    if len(exc_seen) >= 4:
+                        break
+            # 포섭 수확 → qualifier (잔반은 제외 — 잔반의 소속은 소거로 정의)
+            if is_res_n:
+                continue
+            inc_seen: list[str] = []
+            for text_n in scoped.get("note_incl", ())[:2]:
+                for unit in _cnen_units(text_n, 3):
+                    if unit and unit not in inc_seen:
+                        inc_seen.append(unit)
+            if inc_seen:
+                rows.append({
+                    "level": level, "branch_id": parent, "seq": seq_n,
+                    "then_code": code_n, "cond_type": "product_identity",
+                    "dto_field": CRITERION_FIELD_BINDING.get(
+                        "product_identity", "*tokens*"),
+                    "op": "has_token",
+                    "value": json.dumps(inc_seen[:3], ensure_ascii=False),
+                    "source_text": _grounded_source(
+                        "NOTE: " + scoped["note_incl"][0], inc_seen[:3]),
+                    "version": "parser-v1", "role": "qualifier", "grade": "named",
+                })
+    # [P1-C] 거울 배제 — named 형제의 leaf 판별자 '구문'을 잔반(Other)의
+    # 배제 조건으로 싣는다 (role='eliminator', op=not_contains, 구문 단위
+    # 그대로 — 낱토큰 분해 금지: "aquatic invertebrates"류 낱토큰 오발동
+    # 계보와 동일한 병을 막는다). 잔반의 승리 경로: "형제들이 아닌 것으로
+    # 판명"을 만들 증거 구조 — 제품이 named 판별자를 들면 잔반 위반(-100),
+    # 아무 판별자도 안 들면 배제 충족(true)이 소거 판정의 근거가 된다.
+    # 값은 정화 후 최종 판별 값의 거울이라 원문 실등장분이며(값 창작 없음),
+    # source_text는 그 판별 행들의 근거 원문을 그대로 동반한다.
+    if residual_members:
+        # [P3] 거울의 범위는 '같은 arm(동일 조상)'의 named 형제로 한정한다 —
+        # 잔반의 소거 범위는 자기 분기점(arm) 안이다. 평면 그룹 전체를
+        # 실으면 ①타 arm의 상태값('frozen')이 잔반 자신을 위반시키고(자충수
+        # 상태축판) ②동종 잔반('Other SHRIMPS')이 타 arm의 동종 판별자
+        # ('shrimp')에 자기부정당한다 (030617 실측 2건). 상태축 판별값은
+        # arm 무관하게 거울 대상이 아니다 (원리 2: 거울 배제는 정체 질문).
+        disc_by_arm: dict[str, tuple[list[str], list[str]]] = {}
+        for r in rows:
+            if r.get("role") != "discriminator" or r["op"] != "has_token":
+                continue
+            if str(r.get("cond_type") or "") in _STATE_TYPES:
+                continue
+            if str(r.get("grade") or "") == "precedent":
+                continue  # 판례(2급)는 거울 배제 자격 없음 — 위반 확정 금지
+            arm = ancestor_by_code.get(str(r["then_code"]), "")
+            phrases, sources = disc_by_arm.setdefault(arm, ([], []))
+            try:
+                vals = json.loads(r["value"]) or []
+            except Exception:  # noqa: BLE001
+                vals = []
+            for v in vals:
+                v = str(v)
+                if v and v not in phrases:
+                    phrases.append(v)
+            src = str(r.get("source_text") or "")
+            if src and src not in sources:
+                sources.append(src)
+        for seq_r, code_r in residual_members:
+            arm = ancestor_by_code.get(code_r, "")
+            mirror_phrases, mirror_sources = disc_by_arm.get(arm, ([], []))
+            # 배제 캡 8: 기존 배제 4(보수)보다 넓다 — 거울은 'arm의 형제
+            # 전부가 아님'의 판명이 목적이라 누락이 곧 오판정이기 때문.
+            # 구문 단위라 낱토큰 광역 오발동은 구조적으로 없다.
+            mirror_phrases = mirror_phrases[:8]
+            if not mirror_phrases:
+                continue  # arm에 named 판별자가 없으면 거울 없음
+            rows.append({
+                "level": level, "branch_id": parent, "seq": seq_r,
+                "then_code": code_r, "cond_type": "exclusion_boundary",
+                # [P2-1] 거울 배제는 정체 필드에 묻는다 (원리 2) — 광역
+                # '*tokens*' 풀은 백과·페이지 잡음 토큰에 위반당한다
+                # (청양고추 59 미승격 실측). 평가기 이중 가드와 한 쌍.
+                "dto_field": CRITERION_FIELD_BINDING.get(
+                    "product_identity", "*tokens*"),
+                "op": "not_contains",
+                "value": json.dumps(mirror_phrases, ensure_ascii=False),
+                "source_text": _grounded_source(
+                    " ; ".join(mirror_sources), mirror_phrases),
+                "version": "parser-v1", "role": "eliminator", "grade": "named",
+            })
     return rows
 
 
@@ -479,6 +1006,88 @@ _CNEN_EXCLUDE_RX = re.compile(
 )
 
 
+_CNEN_STOP = frozenset({
+    "and", "the", "for", "with", "this", "these", "subheading",
+    "subheadings", "heading", "other", "such", "which", "their",
+})
+
+
+# ── [6회차 B] BTI 판례 어휘 원장 (원천 4호 — 당국 판정문, 임의 저작 0) ──
+_BTI_PATH = Path(__file__).resolve().parents[4] / "data" / "bti_case_chunks.csv"
+_BTI_CACHE: dict[str, list[dict]] | None = None
+
+
+def _bti_index() -> dict[str, list[dict]]:
+    """bti_case_chunks(ch16-21 정제본 9,063건) → {cn8: [사건]}.
+
+    사건 = {ref, country, phrases(키워드 구문 — 정규화 스템)}. 부재 = no-op.
+    [A 전제 ②] 사건 중복 제거: 동일 (cn8, 발급국, 구문 서명) 뭉치는 1건
+    — 같은 신청상품군의 다국 복제·재발급이 반례 0 판정을 왜곡하지 않게
+    (설계자 지시). case_summary 청크의 'Keywords:' 정형 라인만 소비.
+    """
+    global _BTI_CACHE
+    if _BTI_CACHE is not None:
+        return _BTI_CACHE
+    import csv as _csv
+    idx: dict[str, list[dict]] = {}
+    seen: set = set()
+    try:
+        _csv.field_size_limit(10_000_000)
+        with open(_BTI_PATH, encoding="utf-8", newline="") as f:
+            for r in _csv.DictReader(f):
+                if str(r.get("chunk_type") or "") != "case_summary":
+                    continue
+                cn8 = re.sub(r"\D", "", str(r.get("cn8") or ""))[:8]
+                if len(cn8) != 8:
+                    continue
+                m = re.search(r"^Keywords:\s*(.+)$",
+                              str(r.get("chunk_text") or ""), re.M)
+                if not m:
+                    continue
+                phrases: list[str] = []
+                for seg in m.group(1).split(";"):
+                    toks = [_stem(w) for w in _TOKEN.findall(seg.lower())
+                            if len(w) >= 3 and w not in _CNEN_STOP
+                            and w not in _QUANT_NEG_TOKENS]
+                    unit = " ".join(toks[:3])
+                    if unit and unit not in phrases:
+                        phrases.append(unit)
+                if not phrases:
+                    continue
+                sig = (cn8, str(r.get("issuing_country") or ""),
+                       frozenset(phrases))
+                if sig in seen:
+                    continue  # dedupe — 동일 상품군·발급국 뭉치
+                seen.add(sig)
+                idx.setdefault(cn8, []).append({
+                    "ref": str(r.get("bti_reference") or ""),
+                    "country": str(r.get("issuing_country") or ""),
+                    "phrases": phrases,
+                })
+    except OSError:
+        idx = {}
+    _BTI_CACHE = idx
+    return idx
+
+
+def _cnen_units(text: str, cap: int) -> list[str]:
+    """당국 저자 텍스트 → 구문 단위 값 (열거 경계로만 분할, ≤3토큰).
+
+    CNEN·법정 주 공용 — 낱토큰 분해 금지 계보(원리 6)의 보수 캡 버전.
+    형제 비교 문맥이 없는 원천이라 판별 필터 대신 캡으로 잡음을 막는다.
+    """
+    found: list[str] = []
+    for seg in re.split(r"[,;:()]|\bor\b|\band\b", str(text or "")):
+        toks = [_stem(w) for w in _TOKEN.findall(seg.lower())
+                if len(w) >= 3 and w not in _CNEN_STOP]
+        unit = " ".join(toks[:3])
+        if unit and unit not in found:
+            found.append(unit)
+        if len(found) >= cap:
+            break
+    return found
+
+
 def _cnen_rows(note_by_cn8: dict[str, str]) -> list[dict[str, Any]]:
     """CN 해설서(cn_explanatory_note) → 코드 단위 조건 수확.
 
@@ -488,20 +1097,7 @@ def _cnen_rows(note_by_cn8: dict[str, str]) -> list[dict[str, Any]]:
     보수 캡: 코드당 각 2건, phrase ≤3 토큰.
     """
     out: list[dict[str, Any]] = []
-    stop = {"and", "the", "for", "with", "this", "these", "subheading",
-            "subheadings", "heading", "other", "such", "which", "their"}
-    def units(text: str, cap: int) -> list[str]:
-        segs = re.split(r"[,;:()]|\bor\b|\band\b", text)
-        found = []
-        for seg in segs:
-            toks = [_stem(w) for w in _TOKEN.findall(seg.lower())
-                    if len(w) >= 3 and w not in stop]
-            unit = " ".join(toks[:3])
-            if unit and unit not in found:
-                found.append(unit)
-            if len(found) >= cap:
-                break
-        return found
+    units = _cnen_units
     for cn8, note in note_by_cn8.items():
         if not note:
             continue
@@ -525,7 +1121,7 @@ def _cnen_rows(note_by_cn8: dict[str, str]) -> list[dict[str, Any]]:
                     "dto_field": CRITERION_FIELD_BINDING.get(ctype, "*tokens*"),
                     "op": op, "value": json.dumps([v], ensure_ascii=False),
                     "source_text": _grounded_source("CNEN: " + snippet, [v]),
-                    "version": "parser-v1",
+                    "version": "parser-v1", "role": "discriminator", "grade": "named",
                 })
     return out
 
@@ -616,7 +1212,17 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
                 'CREATE TABLE IF NOT EXISTS "branch_decision_index" ('
                 "level text, branch_id text, seq int, then_code text,"
                 "cond_type text, dto_field text, op text, value text,"
-                "source_text text, version text)"))
+                "source_text text, version text,"
+                " role text DEFAULT 'discriminator',"
+                " grade text DEFAULT 'named')"))
+            # [P1-B] 기존 테이블엔 CREATE IF NOT EXISTS가 컬럼을 못 더한다
+            # — role 층(discriminator/qualifier/eliminator) 소급 추가.
+            session.execute(text(
+                'ALTER TABLE "branch_decision_index"'
+                " ADD COLUMN IF NOT EXISTS role text DEFAULT 'discriminator'"))
+            session.execute(text(
+                'ALTER TABLE "branch_decision_index"'
+                " ADD COLUMN IF NOT EXISTS grade text DEFAULT 'named'"))
             # 반복 재기록으로 테이블이 부풀면 DELETE가 statement timeout에
             # 걸린다(실측 2회: 일괄 → ctid 청크 300s까지 실패). 다른 버전
             # 행이 없으면 TRUNCATE — 튜플 단위 작업이 없어 즉시 끝나고
@@ -640,9 +1246,11 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
             # 9,296행 개별 INSERT는 원거리 DB에서 순단에 취약(실측 1회 실패)
             # — executemany 일괄 전송으로 왕복을 청크당 1회로 줄인다.
             insert_sql = text(
-                'INSERT INTO "branch_decision_index" VALUES ('
+                'INSERT INTO "branch_decision_index" ('
+                "level, branch_id, seq, then_code, cond_type,"
+                " dto_field, op, value, source_text, version, role, grade) VALUES ("
                 ":level, :branch_id, :seq, :then_code, :cond_type,"
-                " :dto_field, :op, :value, :source_text, :version)")
+                " :dto_field, :op, :value, :source_text, :version, :role, :grade)")
             for start in range(0, len(out), 1000):
                 session.execute(insert_sql, out[start:start + 1000])
             session.commit()

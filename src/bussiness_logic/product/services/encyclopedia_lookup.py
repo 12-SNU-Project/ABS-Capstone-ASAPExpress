@@ -27,13 +27,15 @@ WIKI_REQUEST_HEADERS = {
 TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"\s+")
 HANGUL_RE = re.compile(r"[가-힣]")
+# 한글 대안은 \b 밖에 둔다 — \b는 한글 복합어 내부 경계에서 성립하지
+# 않아('군만두' 속 '만두', '떡볶이' 속 '떡볶') 힌트가 사실상 불발됐다.
 FOOD_RELATED_HINT_RE = re.compile(
     r"\b("
     r"food|edible|beverage|juice|rice|seafood|fish|shrimp|prawn|octopus|squid|meat|beef|pork|"
     r"vegetable|fruit|noodle|noodles|pasta|bread|soup|stew|broth|sauce|seasoning|sauce|fried|frozen|"
-    r"raw|cooked|grocery|ingredient|recipe|korean|chicken|lamb|cheese|milk|egg|dairy|meat|tuna|salmon|"
-    r"만두|떡볶|우동|라면|면|국|국물|조림|조리|냉동|냉장|생선|어류|새우|주꾸미|쭈꾸미"
-    r")\b",
+    r"raw|cooked|grocery|ingredient|recipe|korean|chicken|lamb|cheese|milk|egg|dairy|meat|tuna|salmon"
+    r")\b"
+    r"|(?:만두|떡볶|떡|우동|라면|국수|국물|조림|조리|냉동|냉장|생선|어류|새우|주꾸미|쭈꾸미)",
     re.I,
 )
 OFFTOPIC_RE = re.compile(
@@ -178,7 +180,17 @@ def _IsWikipediaRowRelevant(query: str, row: WikipediaSearchResult) -> tuple[boo
 def _HasKoreanOverlap(left: str, right: str) -> bool:
     leftTokens = _Tokenize(left)
     rightTokens = _Tokenize(right)
-    return bool(leftTokens.intersection(rightTokens))
+    if leftTokens.intersection(rightTokens):
+        return True
+    # 한글 복합어는 토큰 완전 일치가 안 된다 — '설기' 질의가 문서 제목
+    # '백설기'를 만나도 교집합이 비어 관련성 가드가 기각했다(실측).
+    # 어느 쪽이든 한쪽 토큰(≥2자)이 반대쪽 토큰에 통째로 포함되면 겹침.
+    for lt in leftTokens:
+        if HANGUL_RE.search(lt):
+            for rt in rightTokens:
+                if len(lt) >= 2 and len(rt) >= 2 and (lt in rt or rt in lt):
+                    return True
+    return False
 
 
 def _HasOverlap(left: str, right: str) -> bool:
@@ -201,7 +213,10 @@ def CleanEncyclopediaQuery(value: str) -> str:
     text = re.sub(r"\[[^\]]+\]", " ", str(value or ""))
     text = re.sub(r"\([^)]*\)", " ", text)
     text = re.sub(r"\b\d+(?:\.\d+)?\s*(?:g|kg|ml|l|개입|팩|종|인분)\b", " ", text, flags=re.I)
-    text = re.sub(r"\b(?:택\s*1|택1|냉동|냉장|상온|간편|프리미엄)\b", " ", text, flags=re.I)
+    text = re.sub(r"(?:택\s*1|택1|냉동|냉장|상온|간편|프리미엄)", " ", text)
+    # 수량 표기가 지워진 뒤 남는 홑 기호·1자 라틴 토큰("85g X 5개입"의
+    # 'X', '×') — 검색 잡음이라 제거. 한글 1자는 건드리지 않는다(밤·김).
+    text = re.sub(r"(?<!\S)[A-Za-z×*+&/-](?!\S)", " ", text)
     return re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip(" -_/|")
 
 
@@ -295,6 +310,7 @@ def _search_korean_wikipedia_as_english(
         payload = json.loads(response.read().decode("utf-8"))
 
     rows: list[WikipediaSearchResult] = []
+    koFallbackRows: list[WikipediaSearchResult] = []
     seenTitles: set[str] = set()
     for rawItem in _ReadSearchItems(payload):
         koreanTitle = _StripMarkup(str(rawItem.get("title") or "")).strip()
@@ -307,7 +323,22 @@ def _search_korean_wikipedia_as_english(
             koreanTitle,
             timeoutSeconds=timeoutSeconds,
         )
-        if not englishTitle or englishTitle in seenTitles:
+        if not englishTitle:
+            # en 문서 부재 = 폐기가 아니라 ko 원문 승선 — 백설기처럼 영문
+            # 인터위키가 없는 한식 문서의 제목·설명(주요 재료 서술)이
+            # identity LLM의 발산 증거가 된다 (닫힌 사상 번역은 하류
+            # term_bridge 몫 — 여기서 LLM 번역 금지 원칙 유지).
+            koFallbackRows.append(
+                WikipediaSearchResult(
+                    title=koreanTitle,
+                    description=koreanDescription,
+                    snippet=koreanDescription or koreanTitle,
+                    link="https://ko.wikipedia.org/wiki/"
+                    + urllib.parse.quote(koreanTitle.replace(" ", "_")),
+                ),
+            )
+            continue
+        if englishTitle in seenTitles:
             continue
         seenTitles.add(englishTitle)
         snippet = _fetch_summary_snippet(
@@ -327,7 +358,9 @@ def _search_korean_wikipedia_as_english(
                 link=link,
             ),
         )
-    return rows
+    # 번역(langlink) 행이 하나도 없을 때만 ko 원문 행으로 대체 — 영문
+    # 행이 있으면 그쪽이 항상 우선(기존 동작 보존).
+    return rows or koFallbackRows[:limit]
 
 
 def _fetch_english_langlink(title: str, *, timeoutSeconds: float) -> str:

@@ -110,15 +110,32 @@ def LoadBranchDecisions(
 
         from db.db_session_manager import DbSessionManager
 
-        rows = DbSessionManager.GetInstance().FetchRows(
-            text(
-                'SELECT branch_id, seq, then_code, cond_type, dto_field, op, value, source_text'
-                ' FROM "branch_decision_index"'
-                " WHERE level = :level AND branch_id IN :parents AND version = :version"
-                " ORDER BY branch_id, seq"
-            ).bindparams(bindparam("parents", expanding=True)),
-            {"level": level, "parents": tuple(parent_codes), "version": version},
-        )
+        manager = DbSessionManager.GetInstance()
+        params = {"level": level, "parents": tuple(parent_codes), "version": version}
+        try:
+            rows = manager.FetchRows(
+                text(
+                    'SELECT branch_id, seq, then_code, cond_type, dto_field, op,'
+                    ' value, source_text, role'
+                    ' FROM "branch_decision_index"'
+                    " WHERE level = :level AND branch_id IN :parents AND version = :version"
+                    " ORDER BY branch_id, seq"
+                ).bindparams(bindparam("parents", expanding=True)),
+                params,
+            )
+        except Exception:  # noqa: BLE001
+            # [P1-B] role 컬럼 이전(구판) 테이블 호환 — 컬럼 부재로 층이
+            # 통째로 꺼지는 것을 막는다. 구판 행은 전부 판별층으로 간주.
+            rows = manager.FetchRows(
+                text(
+                    'SELECT branch_id, seq, then_code, cond_type, dto_field, op,'
+                    ' value, source_text'
+                    ' FROM "branch_decision_index"'
+                    " WHERE level = :level AND branch_id IN :parents AND version = :version"
+                    " ORDER BY branch_id, seq"
+                ).bindparams(bindparam("parents", expanding=True)),
+                params,
+            )
     except Exception:  # noqa: BLE001 — sidecar absent = layer off
         return {}
     out: dict[str, dict[str, list[dict[str, Any]]]] = {}
@@ -154,10 +171,47 @@ def EvaluateCodeDecision(
     pool = set(fact_tokens)
     detail: list[dict[str, str]] = []
     answers: list[str] = []
+    # [P1-D3] 백과(encyclopedia) 유래 토큰 — 검색 API 잡음(무관 문서)이
+    # 지각 필드로 유입돼 확정을 만든 사고(전골 2104 confirmed 55 실측:
+    # 백과 서술의 soup/broth가 정체 조건을 확정). 원천 구분이 필드에서
+    # 소실되므로 근사한다: 백과 entries 텍스트 토큰 중 1차 원천(상품명·
+    # 상세·페이지 재구성 서술)에 등장하지 않는 것만 '백과 전유'로 본다.
+    # 백과 전유 토큰이 성립시킨 매치는 확정(+50) 자격을 잃고 지지(+3)만
+    # 유지 — typed_gate_blocked·alias_hit 선례와 동일 원칙.
+    # ASAP_DECISION_ENC_CAP=0 복귀.
+    enc_exclusive: frozenset = frozenset()
+    if product_facts and (os.environ.get(
+            "ASAP_DECISION_ENC_CAP", "1") or "1").strip() != "0":
+        enc_toks: set = set()
+        for e in _dig(product_facts, "encyclopedia_evidence.entries") or []:
+            if isinstance(e, dict):
+                for t in (e.get("title"), e.get("description")):
+                    enc_toks |= {_stem(w) for w in _TOKEN.findall(str(t or "").lower())
+                                 if len(w) >= 3}
+        if enc_toks:
+            primary: set = set()
+            for path in ("product_name", "short_description",
+                         "classification_text",
+                         "identity_hints.translated_product_name"):
+                primary |= _field_tokens(product_facts, path)
+            for t in _dig(product_facts, "reconstructed_fact_texts") or []:
+                primary |= {_stem(w) for w in _TOKEN.findall(str(t).lower())
+                            if len(w) >= 3}
+            enc_exclusive = frozenset(enc_toks - primary)
     for cond in conditions:
         cond_type = str(cond.get("cond_type") or "")
         op = str(cond.get("op") or "")
         dto_field = str(cond.get("dto_field") or "")
+        # [P1-D1] qualifier(그룹 공통 자격층)는 순위 합산 불참 — true 지지도
+        # violated 감점도 없다. 판별이 아니라 소속이기 때문(조상 헤더 텍스트
+        # 를 형제 개별 조건으로 실었던 R5 청양고추 사고의 구조적 처방).
+        # answers에 넣지 않으므로 확정/위반/미결 집계에 완전 불참.
+        if str(cond.get("role") or "").strip() == "qualifier":
+            detail.append({"cond": cond_type, "op": op, "verdict": "skipped",
+                           "field": dto_field.split(";")[0][:40],
+                           "why": "qualifier_rank_excluded",
+                           "value": str(cond.get("value") or "")[:80]})
+            continue
         verdict = "undecided"
         why = ""
         if op == "quant_gate":
@@ -174,11 +228,31 @@ def EvaluateCodeDecision(
                 why += ";quant_unparsed_guard"
         elif op == "not_contains":
             phrases = _phrase_sets(str(cond.get("value")))
-            if any(p <= pool for p in phrases):
+            judge_pool = pool
+            why_suffix = ""
+            if str(cond.get("role") or "").strip() == "eliminator":
+                # [P2-1] 거울 배제 이중 가드 — 잔반의 eliminator가 광역 풀
+                # 잡음에 위반당하면 승격 경로가 원천 봉쇄된다 (프로덕션
+                # 실측: 백과 유래 'sweet'가 청양고추 59의 not_contains
+                # ['sweet pepper']를 위반시켜 잔반 미승격).
+                # ② 판정 풀을 이 조건의 bound 정체 필드로 한정 — 정체
+                #    질문은 정체 필드가 답한다 (원리 2). 필드 침묵 시에도
+                #    광역 풀로 돌아가지 않는다(침묵은 위반 근거가 아니다).
+                # ① 그 풀에서 백과 전유 토큰 차감 — 3급 증거는 위반 확정
+                #    자격이 없다 (원리 1: 백과 잡음은 identity_terms까지
+                #    침투하므로 ②만으로는 부족 — 전골 실측).
+                if dto_field and dto_field != "*tokens*":
+                    judge_pool = set(_field_tokens(product_facts, dto_field))
+                judge_pool = judge_pool - enc_exclusive
+            if any(p <= judge_pool for p in phrases):
                 verdict = "false"
                 why = "exclusion_present_in_pool"
             else:
                 why = "exclusion_absent"
+                if judge_pool is not pool and any(p <= pool for p in phrases):
+                    # 가드가 광역 풀 위반을 실제로 막았음을 노출 (실증용)
+                    why_suffix = ";broad_pool_hit_guarded"
+            why += why_suffix
         elif op == "has_token":
             phrases = _phrase_sets(str(cond.get("value")))
             bound = _field_tokens(product_facts, str(cond.get("dto_field") or ""))
@@ -287,9 +361,31 @@ def EvaluateCodeDecision(
                         alias_paths.append(path.rsplit(".", 1)[-1])
                 if not alias_guard:
                     hit_paths, alias_paths = hit_paths + alias_paths, []
+                # [P1-D3] 매치를 성립시킨 구문 전부가 백과 전유 토큰에 기대는
+                # 히트는 확정 자격 경로(field_hit)를 박탈 — why가 field_hit로
+                # 시작하지 않으면 typed 게이트를 통과할 수 없어 +50이 원천
+                # 차단되고, verdict true의 지지(+3)만 남는다(상한은 staged).
+                enc_capped = False
+                # [6회차 B] 판례(grade=precedent) 매치는 2급 — 당국 판정문
+                # 어휘라도 개별 사건의 서술이지 법정 판별 조건이 아니다.
+                # why가 field_hit이 아니면 typed 게이트 통과 불가 → 확정
+                # 원천 차단, verdict true(+3 지지)는 유지 (enc/alias 계보).
+                if str(cond.get("grade") or "") == "precedent":
+                    why = "precedent_hit:" + ",".join(
+                        (hit_paths or alias_paths or ["pool"])[:3])
+                    enc_capped = True
+                if not enc_capped and enc_exclusive:
+                    matched_phrases = [p for p in phrases if p <= bound]
+                    if matched_phrases and all(
+                            p & enc_exclusive for p in matched_phrases):
+                        why = "encyclopedia_hit:" + ",".join(
+                            (hit_paths or alias_paths or ["pool"])[:3])
+                        enc_capped = True
                 # 단일 경로로는 부분 매치뿐인데 합집합으로만 성립한 히트는
                 # 'union'으로 표시 — 서로 다른 필드의 파편이 합쳐진 약한 근거
-                if hit_paths:
+                if enc_capped:
+                    pass
+                elif hit_paths:
                     why = "field_hit:" + ",".join(hit_paths[:3])
                 elif alias_paths:
                     why = "alias_hit:" + ",".join(alias_paths[:3])

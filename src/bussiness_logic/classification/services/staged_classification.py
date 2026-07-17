@@ -88,6 +88,13 @@ DECISION_CONFIRM = 50.0
 # lexical 1점 잡음에 정답을 내주던 구멍의 처방 (칼국수 1902 실측: 두 런
 # 모두 조건 true인데 지각 잡음 1점 차로 승패가 갈림). ASAP_DECISION_TRUE_SUPPORT=0 복귀.
 DECISION_TRUE_SUPPORT = 3.0
+# [P3-b] 상태 arm 어휘 — dash 계층이 그룹을 상태로 분할할 때 쓰는 전형
+# 상태어(qualifier 상태-모순 자격 심사 전용, 이 밖의 qualifier 값은 심사
+# 불참). 스템 표기.
+_STATE_ARM_LEXICON = frozenset({
+    "frozen", "fresh", "chilled", "live", "dried", "dehydrated", "salted",
+    "brine", "smoked", "cooked", "uncooked", "boiled", "steamed", "raw",
+})
 LEVELS = (("hs4", 4), ("hs6", 6), ("cn8", 8))
 _TOKEN = re.compile(r"[a-z0-9]+")
 
@@ -347,6 +354,7 @@ class StagedClassificationTool:
         level_score_maps: dict[str, dict[str, float]] = {}
         recovery_candidates: list[dict[str, Any]] = []
         route_disagreements: list[dict[str, Any]] = []
+        merge_gate_observations: list[dict[str, Any]] = []
         # chapter_hint_terms stay ON at hs4 (default): retiring them was
         # A/B-measured at staged-only hs4 36% -> 24% — the hints carry live
         # heading evidence ("noodles", "molluscs") alongside the chapter-
@@ -397,6 +405,12 @@ class StagedClassificationTool:
                     predicates_by_code=predicates_by_code,
                     decisions_by_parent=decisions_by_parent,
                 )
+                # [관측] 병합 게이트 observe 기록 수거 (순위 무영향 —
+                # 정렬로 부착 엔트리 위치가 바뀔 수 있어 전 엔트리 스캔)
+                for _e_obs in ranked:
+                    _obs = _e_obs.pop("_merge_gate_obs", None)
+                    if _obs:
+                        merge_gate_observations.append({"level": level, **_obs})
             else:
                 children = self._load_children(parents, prefix_len)
                 if not children:
@@ -577,6 +591,7 @@ class StagedClassificationTool:
             "paths": paths,
             "recovery_candidates": recovery_candidates,
             "route_disagreements": route_disagreements,
+            "merge_gate_observations": merge_gate_observations,
         }
 
     # ---- facts / route ----------------------------------------------------
@@ -804,17 +819,80 @@ class StagedClassificationTool:
         parent_rank = {p: i for i, p in enumerate(parent_order)}
         scores_by_parent = parent_scores or {}
         merged: list[dict[str, Any]] = []
+        fam_entries: dict[str, list[dict[str, Any]]] = {}
         for parent, items in groups.items():
             ranked_group = self._rank_sibling_group(
                 items, product_facts, fallback_tokens, percentages,
                 predicates_by_code=predicates_by_code or {},
                 group_decisions=(decisions_by_parent or {}).get(parent) or {},
             )
+            fam_entries[parent] = ranked_group
             for round_index, entry in enumerate(ranked_group):
                 entry["_parent_score"] = float(scores_by_parent.get(parent, 0.0))
                 entry["_round"] = round_index
                 entry["_parent_rank"] = parent_rank.get(parent, len(parent_rank))
+                entry["_fam"] = parent
                 merged.append(entry)
+
+        # [5회차-1] 가족 단위 증거 게이트 (설계자 조건부 승인 2026-07-17):
+        # '증거 0 가족은 부모 신뢰를 순위 근거로 승계할 수 없다'(원리 1의
+        # 병합판). 꼬마바 실측: ch14 가족 전원 0.0이 부모 신뢰 8.0을 승계해
+        # 타 가족의 1504(7.0, 'fish')를 눌렀다 — recovery 층이 기록만 하던
+        # 이견 신호를 선택에 반영하는 최소 규칙. [승인 조건 1] 대조 발동:
+        # 증거 보유 가족이 1개 이상일 때만 — 전 가족 0인 완비 미달 지대
+        # (면류형: 정답 가족 전원 0 + 상위 confirmed가 방어선)에선 no-op.
+        # 가족 내부 순서·잔반 소거 판정은 불변(가족 내 라운드 그대로).
+        # [관측 사이클 — 설계자 결정 2026-07-17] 기본 'observe': 게이트
+        # 판정을 전부 계산하되 순위 무영향, 마커·가정 순위 변화만 기록 —
+        # 등급 결합 발동안 설계의 실측 자료. '1'=강등 적용(옵트인),
+        # '0'=완전 OFF. (보류 사유: 산채 hs2 회귀 — 정답 가족 증거 0 vs
+        # 오답 진증거 지형에선 부모 신뢰가 정답의 방어선.)
+        _gate_mode = (os.environ.get("ASAP_MERGE_EVIDENCE_GATE",
+                                     "observe") or "observe").strip()
+        if _gate_mode in ("1", "observe"):
+            def _fam_has_evidence(entries: list[dict[str, Any]]) -> bool:
+                for e in entries:
+                    if float(e.get("score") or 0.0) > 0:
+                        return True
+                    if e.get("decision") == "confirmed":
+                        return True
+                    if any(d.get("verdict") == "true"
+                           for d in e.get("decision_detail") or []):
+                        return True
+                    if any(pr.get("verdict") == "true"
+                           for pr in e.get("predicate_results") or []):
+                        return True
+                return False
+            fam_ev = {p: _fam_has_evidence(es) for p, es in fam_entries.items()}
+            gated_fams = [p for p, ok in fam_ev.items() if not ok]
+            if any(fam_ev.values()) and gated_fams:
+                if _gate_mode == "1":
+                    for entry in merged:
+                        if not fam_ev.get(entry.get("_fam"), False):
+                            entry["_parent_score"] = 0.0
+                            entry["merge_evidence_gated"] = True  # 관측 마커
+                else:
+                    # observe: 실제 순위와 '강등했을' 가정 순위를 비교만
+                    def _key(gate: bool):
+                        return lambda r: (
+                            -(0.0 if gate and not fam_ev.get(r.get("_fam"), False)
+                              else r["_parent_score"]),
+                            r["_round"], -r["score"], r["_parent_rank"], r["code"])
+                    actual = sorted(merged, key=_key(False))
+                    hypo = sorted(merged, key=_key(True))
+                    obs = {
+                        "gated_families": sorted(gated_fams),
+                        "contrast_met": True,  # 증거 보유 가족 ≥1 (대조 조건)
+                        "top1_actual": actual[0]["code"] if actual else "",
+                        "top1_if_gated": hypo[0]["code"] if hypo else "",
+                        "top1_would_change": bool(
+                            actual and hypo and actual[0]["code"] != hypo[0]["code"]),
+                    }
+                    for entry in merged:
+                        if not fam_ev.get(entry.get("_fam"), False):
+                            entry["merge_evidence_gated_observed"] = True
+                    if merged:
+                        merged[0]["_merge_gate_obs"] = obs
 
         merged.sort(key=lambda r: (
             -r["_parent_score"], r["_round"], -r["score"], r["_parent_rank"], r["code"],
@@ -823,6 +901,7 @@ class StagedClassificationTool:
             entry.pop("_parent_score", None)
             entry.pop("_round", None)
             entry.pop("_parent_rank", None)
+            entry.pop("_fam", None)
         return merged
 
     # Fields whose tokens count as PROOF of a specific sibling's criterion.
@@ -901,6 +980,55 @@ class StagedClassificationTool:
                 if " " in value.strip():
                     continue
                 form_tokens |= _tokens(value)
+
+        # [P3-b] qualifier 상태-모순 자격 심사 준비 — 그룹의 '상태 arm 지도'.
+        # dash 계층이 그룹을 상태로 분할할 때(0306: Frozen/Live·fresh/Other),
+        # 제품의 typed 상태가 어느 arm과 일치하는지는 그룹 시야에서만 보인다.
+        # 제품 상태 토큰이 '다른 형제의 qualifier 상태값'에 있는데 자기 arm에
+        # 없으면 그 코드의 소속(조상)이 제품 상태와 모순 — confirmed만 강등
+        # (감점·분기 전멸 금지, 마커 qualifier_state_conflict 노출). 실측:
+        # frozen 새우살에서 비냉동 'Other' arm의 030695가 정체 단독 confirm
+        # +50으로 정답 030617(Frozen arm 잔반)의 승격을 봉쇄.
+        qual_state_by_code: dict[str, set] = {}
+        label_state_by_code: dict[str, set] = {}
+        for code_q, rows_q in (group_decisions or {}).items():
+            toks_q: set = set()
+            for row_q in rows_q:
+                if str(row_q.get("role") or "") != "qualifier":
+                    continue
+                # arm 지도는 '조상 dash' qualifier만 — NOTE(법정 주 포섭)·
+                # STATESET(자기 라벨 상태 집합)은 코드 자신의 서술이라 arm이
+                # 아니다 (실측 2건: 0710 노트/라벨의 frozen이 arm으로 오인돼
+                # frozen true 입증 박탈 → 잔반 0709 소거 승격). 라벨 집합은
+                # 아래 label_state 지도로 따로 모아 모순 심사에만 쓴다.
+                src_q = str(row_q.get("source_text") or "")
+                if src_q.startswith("NOTE:"):
+                    continue
+                if src_q.startswith("STATESET:"):
+                    try:
+                        vals_ls = json.loads(str(row_q.get("value") or "null")) or []
+                    except Exception:  # noqa: BLE001
+                        vals_ls = []
+                    ls = {t2 for v2 in vals_ls for t2 in str(v2).split()}                         & _STATE_ARM_LEXICON
+                    if ls:
+                        label_state_by_code[code_q] = (
+                            label_state_by_code.get(code_q, set()) | ls)
+                    continue
+                try:
+                    vals_q = json.loads(str(row_q.get("value") or "null")) or []
+                except Exception:  # noqa: BLE001
+                    vals_q = []
+                for v_q in vals_q:
+                    toks_q |= set(str(v_q).split()) & _STATE_ARM_LEXICON
+            if toks_q:
+                qual_state_by_code[code_q] = toks_q
+        product_state_toks: set = set()
+        if qual_state_by_code:
+            for path in ("identity_hints.processing_state",
+                         "composition_facts.processing_state"):
+                for value in _string_values(_dig(product_facts, path)):
+                    product_state_toks |= _tokens(value)
+            product_state_toks &= _STATE_ARM_LEXICON
 
         scored: list[dict[str, Any]] = []
         for entry in prepared:
@@ -999,17 +1127,36 @@ class StagedClassificationTool:
                     code_conditions, product_facts, fact_tokens, percentages,
                     _quantitative_verdict,
                 )
-                # 치환 스프린트 섀도(기본 off): 표 해석 집계기를 병렬 실행해
-                # 서명 불일치만 기록 — 판정·점수 무영향 (도면 §C).
-                if (os.environ.get("ASAP_DECISION_PRINCIPLED", "") or "")\
-                        .strip().lower() == "shadow":
-                    from bussiness_logic.classification.rules.decision_tables import ShadowCompare
-
-                    ShadowCompare(
-                        decision_status, decision_detail, product_facts,
-                        level={4: "hs4", 6: "hs6", 8: "cn8"}.get(prefix_len, str(prefix_len)),
-                        code=code,
-                    )
+                # (치환 1a 섀도 훅 07-17 폐기 — grade/role 컬럼이 진실원 승계,
+                #  원장 §4.3. decision_tables.py는 삭제됨.)
+                # [P3-b] 상태 arm 모순 자격 심사 (자격 박탈 계보 — 백과 상한·
+                # typed_gate_blocked과 동일 원칙: 감점 없음). 마커는 확정
+                # 여부와 무관하게 부착한다 — undecided true(+3)도 입증
+                # 자격(_proven)은 없어야 잔반 승격이 막히지 않는다 (실측:
+                # 030695가 confirmed가 아닐 때 마커 없이 proven 처리되어
+                # 정답 잔반 030617의 승격을 재봉쇄). 점수는 불변, confirmed
+                # 였을 때만 undecided로 강등.
+                if (product_state_toks
+                        and any(d.get("verdict") == "true"
+                                for d in decision_detail)
+                        and (os.environ.get(
+                            "ASAP_DECISION_QUAL_STATE_CONFLICT",
+                            "1") or "1").strip() != "0"):
+                    own_arm = (qual_state_by_code.get(code, set())
+                               | label_state_by_code.get(code, set()))
+                    other_arms: set = set()
+                    for c2 in set(qual_state_by_code) | set(label_state_by_code):
+                        if c2 != code:
+                            other_arms |= qual_state_by_code.get(c2, set())
+                            other_arms |= label_state_by_code.get(c2, set())
+                    if (product_state_toks & other_arms
+                            and not (product_state_toks & own_arm)):
+                        if decision_status == "confirmed":
+                            decision_status = "undecided"
+                        for d in decision_detail:
+                            if d.get("verdict") == "true":
+                                d["why"] = (str(d.get("why") or "")
+                                            + ";qualifier_state_conflict")
                 if decision_status == "confirmed":
                     score += DECISION_CONFIRM
                 elif decision_status == "violated":
@@ -1018,11 +1165,20 @@ class StagedClassificationTool:
                     os.environ.get("ASAP_DECISION_TRUE_SUPPORT", "1") or "1"
                 ).strip() != "0":
                     # 부분 충족 가산: true 조건당 +3, 상한 2개(과대 라벨 방지)
-                    n_true = sum(1 for d in decision_detail if d.get("verdict") == "true")
+                    # [P1-D3] 백과 유래 매치(encyclopedia_hit)는 합산에서
+                    # 집합적으로 1개(+3 상한)로만 친다 — 백과 잡음 여러 건이
+                    # 지지를 쌓아 확정 없이도 점수를 독식하는 것을 차단.
+                    trues = [d for d in decision_detail if d.get("verdict") == "true"]
+                    n_direct = sum(
+                        1 for d in trues
+                        if not str(d.get("why") or "").startswith("encyclopedia_hit"))
+                    n_true = n_direct + (1 if len(trues) > n_direct else 0)
                     score += DECISION_TRUE_SUPPORT * min(n_true, 2)
             if residual:
                 score = min(score, 0.0)  # residuals never win on wording
-                score_raw = min(score_raw, 0.0)
+                # score_raw는 캡하지 않는다 — 잔반 간 동률의 tie-break·관측
+                # 정보(캡은 named와의 경쟁 규율일 뿐). [D3] 071080('capsicum'
+                # raw 1.0)이 무증거 콩류 잔반에 코드순으로 밀리던 실측 처방.
 
             scored.append({
                 "code": code,
@@ -1051,7 +1207,58 @@ class StagedClassificationTool:
         # order: which sibling the product's FORM points at is evidence; code
         # order is not.
         specific.sort(key=lambda r: (r["score"], r["form_hits"]), reverse=True)
-        residuals.sort(key=lambda r: r["score"], reverse=True)
+        # [D3] 잔반 간 동률은 캡 전 원점수(score_raw)로 — 캡(0 상한)은
+        # named와의 경쟁 규율이지 잔반끼리의 증거 정보를 지울 이유가 없다
+        # (실측: 071080 'capsicum' 증거 보유가 콩류 잔반과 0.0 동률로
+        # 코드순에 밀려 정답 잔반 승격이 타 가족 잔반에 넘어감).
+        residuals.sort(key=lambda r: (r["score"], r.get("score_raw", r["score"])),
+                       reverse=True)
+        # [6회차 A] 판례 동점 해소 — 과도기 '이산 선택' 규칙(점수 가산 아님).
+        # 발동 3중 전제: ①비잔반 형제 전원 동점 ∧ 전원 미확정 ②공유 어휘
+        # (판례 구문 전 토큰이 fact에 존재 — AND) 판례 ≥k(기본 2)가 한
+        # 형제에만 ③타 형제의 판례 매치 0 (사건 dedupe는 컴파일 시 —
+        # 동일 상품군·발급국 뭉치 1건). confirmed/violated 서열 불가침
+        # (전원 미확정일 때만 발동 — 구조 보장). 서명 precedent_tiebreak
+        # (사건ID·공유어휘) 노출. ASAP_PRECEDENT_TIEBREAK=0 복귀.
+        if (specific and len(specific) >= 2
+                and (os.environ.get("ASAP_PRECEDENT_TIEBREAK",
+                                    "1") or "1").strip() != "0"
+                and len({r["score"] for r in specific}) == 1
+                and all(r.get("decision") in ("", "undecided")
+                        for r in specific)):
+            _K_MIN = 2
+            _pt_matches: dict[str, tuple[list[str], list[str]]] = {}
+            for r_t in specific:
+                refs_hit: list[str] = []
+                shared: list[str] = []
+                for row_t in (group_decisions or {}).get(r_t["code"], []):
+                    if str(row_t.get("grade") or "") != "precedent":
+                        continue
+                    try:
+                        vals_t = json.loads(str(row_t.get("value") or "null")) or []
+                    except Exception:  # noqa: BLE001
+                        vals_t = []
+                    for v_t in vals_t:
+                        toks_t = set(str(v_t).split())
+                        if toks_t and toks_t <= fallback_tokens:
+                            m_t = re.match(r"BTI:([^:]+):",
+                                           str(row_t.get("source_text") or ""))
+                            if m_t:
+                                refs_hit += [x for x in m_t.group(1).split(",") if x]
+                            shared.append(str(v_t))
+                refs_hit = list(dict.fromkeys(refs_hit))
+                if refs_hit:
+                    _pt_matches[r_t["code"]] = (refs_hit, shared)
+            if len(_pt_matches) == 1:  # 한 형제에만 존재 + 타 형제 반례 0
+                _code_w, (_refs_w, _shared_w) = next(iter(_pt_matches.items()))
+                if len(_refs_w) >= _K_MIN:
+                    for _i, r_t in enumerate(specific):
+                        if r_t["code"] == _code_w:
+                            r_t["precedent_tiebreak"] = {
+                                "refs": _refs_w[:4],
+                                "shared": list(dict.fromkeys(_shared_w))[:4]}
+                            specific.insert(0, specific.pop(_i))
+                            break
         # DECISION short-circuit (designer model): inside a branching point,
         # an answered condition IS the selection — a confirmed code heads the
         # group regardless of lexical order; several confirmed codes follow
@@ -1075,7 +1282,9 @@ class StagedClassificationTool:
             rest_specific = [r for r in rest if not r["residual"]]
             rest_residuals = [r for r in rest if r["residual"]]
             rest_specific.sort(key=lambda r: (r["score"], r["form_hits"]), reverse=True)
-            rest_residuals.sort(key=lambda r: r["score"], reverse=True)
+            rest_residuals.sort(
+                key=lambda r: (r["score"], r.get("score_raw", r["score"])),
+                reverse=True)
             return confirmed_entries + rest_specific + rest_residuals
 
         # PROOF-based elimination (tariff logic): a specific line only beats
@@ -1091,8 +1300,12 @@ class StagedClassificationTool:
         # (실측: 비식품 residual 안착 30건 중 정답 1건). 그룹에 평가된
         # 조건·술어가 하나도 없으면 승격하지 않고 lexical 순위 유지.
         # ASAP_ELIMINATION_NEEDS_QUESTIONS=0 복귀.
+        # [P1-D2] '질문 존재' 판정에서 qualifier(그룹 공통 자격층)는 제외 —
+        # qualifier만 있는 그룹의 잔반 승격은 여전히 소거가 아니라 추측이다.
         questions_existed = any(
-            (r.get("decision_detail") or r.get("predicate_results"))
+            any(str(d.get("why") or "") != "qualifier_rank_excluded"
+                for d in (r.get("decision_detail") or []))
+            or bool(r.get("predicate_results"))
             for r in [*specific, *residuals]
         )
         needs_q = (os.environ.get(
@@ -1100,19 +1313,106 @@ class StagedClassificationTool:
         if needs_q and not questions_existed:
             viable_residuals = []
         if viable_residuals and specific:
+            # [P1-D2] 잔반 승격을 막는 '입증'은 leaf 판별 직접 매치만 —
+            # qualifier(그룹 공통 자격층) 값 토큰은 형제 전원이 공유하는
+            # 류 정의라 특정 형제의 입증이 될 수 없다. lexical matched에서
+            # 차감한다. (alias 2급 매치는 confirmed 자격에서 이미 차단되고
+            # — ASAP_ALIAS_CONFIRM_GUARD — matched는 alias 확장이 없다.)
+            qualifier_toks: set[str] = set()
+            for rows_ in (group_decisions or {}).values():
+                for row_ in rows_:
+                    if str(row_.get("role") or "") != "qualifier":
+                        continue
+                    try:
+                        vals_ = json.loads(str(row_.get("value") or "null")) or []
+                    except Exception:  # noqa: BLE001
+                        vals_ = []
+                    for v_ in vals_:
+                        qualifier_toks |= set(str(v_).split())
+            # [D3 처방 2절] 잔반 형제가 '자기 서술로도 보유'한 어휘는 특정
+            # named 형제의 입증이 될 수 없다 — 51·59가 같은 계열이라 둘 다
+            # positive_terms에 지닌 'pepper'가 51의 lexical proof를 세워
+            # 잔반 소거 승격을 차단했다 (FULL 리플레이 확증, T03 run).
+            # 차감 집합에 잔반 형제들의 positive 토큰을 합류.
+            for r_res in residuals:
+                qualifier_toks |= _tokens(
+                    str(r_res.get("incl") or "").replace(";", " "))
+
             def _proven(r: dict[str, Any]) -> bool:
                 if r.get("decision") == "confirmed":
+                    return True
+                # [P1-D2] leaf 판별 조건의 '직접' field_hit true는 입증이다 —
+                # 확정(+50)까지는 못 가도(typed 게이트) 그 형제가 자기 조건에
+                # 답한 사실은 잔반 승격을 막아야 한다 (실측: 청양고추 hs4 —
+                # 0710이 frozen 직접 true×2인데 미입증 처리되어 잔반 0709가
+                # 소거 승격, 이후 전 경로가 fresh 쪽으로 이탈). alias_hit·
+                # encyclopedia_hit·field_hit:union(파편 합성)·qualifier는
+                # 직접 매치가 아니므로 입증 불인정.
+                _PROOF_STATE_TYPES = ("preservation_state", "processing_method",
+                                      "physical_form", "condition_quality")
+                for d in r.get("decision_detail") or []:
+                    why_ = str(d.get("why") or "")
+                    if (d.get("verdict") != "true"
+                            or not why_.startswith("field_hit:")
+                            or why_.startswith("field_hit:union")
+                            or "qualifier_state_conflict" in why_):
+                        continue
+                    # [P3-a 정밀화] 상태축 true의 입증 자격은 'arm 공통 여부'
+                    # 로 가른다 — 마커(state_alone_blocked)는 전 조건 true
+                    # 경로에서만 찍혀 미결 조건(B2 조합행)이 섞이면 우회된다.
+                    # 제품 상태가 자기 arm(조상 dash) 공통이면 같은 arm의
+                    # 잔반도 그 상태를 공유하므로 입증 불인정 (030611 frozen
+                    # — 잔반 030617도 Frozen arm); arm 밖 상태는 그 코드
+                    # 고유의 판별이라 입증 유효 (0710 frozen — 잔반 0709는
+                    # fresh, 미인정 시 fresh 잔반이 소거 승격하는 역사고 실측).
+                    if str(d.get("cond") or "") in _PROOF_STATE_TYPES:
+                        if product_state_toks & qual_state_by_code.get(
+                                str(r.get("code") or ""), set()):
+                            continue
                     return True
                 # Only a FIELD-answered predicate (verdict "true") certifies a
                 # branch. true_pool is a broad-pool match — the same floating-
                 # token risk the proof rule exists to guard against — so it is
                 # not proof on its own; it still needs a semantic-field match.
+                # [5회차 D3 처방] 술어 true의 입증 자격은 value '전 토큰 동시
+                # 존재'(AND 재검)일 때만 — 술어 판정은 ANY 교집합(OR)이라
+                # 'pepper,sweet'가 'pepper'만으로 true(+3)가 되고, 그 부분
+                # 매치가 proof를 세워 같은 계열 잔반(59)의 소거 승격을 차단
+                # 했다(FULL 리플레이 확증 — 사고 run 51:59=5:0). 부분·계열
+                # 매치는 판별 입증이 아니다 — 결정테이블 _phrase_sets(구문 전
+                # 토큰 동시 요구)와 동일 계보. 순위 +3은 불변, 자격만 재검.
                 if any(
                     pr.get("verdict") == "true"
+                    and all(t in fallback_tokens
+                            for t in str(pr.get("value") or "").split(",") if t)
                     for pr in r.get("predicate_results") or []
                 ):
                     return True
-                return bool(set(r.get("matched") or []) & proof)
+                # [D3 처방 3절 — 구문 동시성의 lexical판] 코드의 결정 판별
+                # 구문('sweet pepper')에 속한 토큰은 구문 '전체'가 충족될
+                # 때만 입증 자격 — 부분 토큰('pepper')만의 매치는 계열어
+                # 수준이라 같은 계열 잔반(59)의 소거를 막을 자격이 없다.
+                # 결정테이블 _phrase_sets(구문 내 전 토큰 동시 존재)와 동일
+                # 원칙의 proof 적용 (FULL 리플레이 확증: T03 run에서 'pepper'
+                # 단독 매치가 51 proof를 세워 59 승격 차단).
+                own_phrases: list[set] = []
+                for row_c in (group_decisions or {}).get(str(r.get("code") or ""), []):
+                    if (str(row_c.get("role") or "") != "discriminator"
+                            or str(row_c.get("op") or "") != "has_token"):
+                        continue
+                    try:
+                        for v_c in json.loads(str(row_c.get("value") or "null")) or []:
+                            toks_c = set(str(v_c).split())
+                            if toks_c:
+                                own_phrases.append(toks_c)
+                    except Exception:  # noqa: BLE001
+                        continue
+                eligible = (set(r.get("matched") or []) - qualifier_toks) & proof
+                for t_m in list(eligible):
+                    partial = [ph for ph in own_phrases if t_m in ph]
+                    if partial and not any(ph <= fallback_tokens for ph in partial):
+                        eligible.discard(t_m)  # 구문 부분 매치 — 무자격
+                return bool(eligible)
             if not any(_proven(r) for r in specific if r["score"] > 0):
                 return viable_residuals + specific + [
                     r for r in residuals if r not in viable_residuals
@@ -1413,6 +1713,7 @@ class StagedClassificationTool:
                     "predicate_results": r.get("predicate_results", []),
                     "decision": r.get("decision", ""),
                     "decision_detail": r.get("decision_detail", []),
+                    "precedent_tiebreak": r.get("precedent_tiebreak"),
                     "quantitative_verdict": (r.get("quantitative_verdict") or {}).get("verdict", "neutral"),
                 }
                 for r in ranked[:8]

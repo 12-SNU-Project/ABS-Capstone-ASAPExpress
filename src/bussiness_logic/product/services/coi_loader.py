@@ -324,11 +324,20 @@ _FORM_CACHE: dict[str, dict] = {}
 
 
 def _form_dir() -> Path | None:
+    """COI 폼 디렉토리 — 기본 ON (설계자 지시 07-16: 재구성 파서+COI 병용).
+
+    data/coi_normalized가 있으면 그게 기본이고, ASAP_COI_FORM_DIR로
+    경로 교체(값이 0/off면 명시 차단)한다 — 이전의 '설정 시에만' 기본은
+    스모크가 COI 없이 도는 사고를 만들었다(22건 캐시 런 실측).
+    """
     raw = (os.environ.get("ASAP_COI_FORM_DIR") or "").strip()
-    if not raw:
+    if raw.lower() in ("0", "off", "false"):
         return None
-    path = Path(raw).expanduser()
-    return path if path.exists() else None
+    if raw:
+        path = Path(raw).expanduser()
+        return path if path.exists() else None
+    default = Path(__file__).resolve().parents[4] / "data" / "coi_normalized"
+    return default if default.exists() else None
 
 
 def _nfc(t: object) -> str:
