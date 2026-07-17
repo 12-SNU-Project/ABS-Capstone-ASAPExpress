@@ -248,6 +248,29 @@ function statusLabel(value) {
   return clean(value) || "조건부";
 }
 
+function isRequiredLevel(value) {
+  const normalized = clean(value).toLowerCase();
+  return normalized === "required" || normalized === "mandatory";
+}
+
+function preparationItemKey(item) {
+  const source = asObject(item);
+  return firstNonEmpty(source.baseline_document_id, source.item_name_ko);
+}
+
+function preparationItemLabel(item, baselineById = new Map()) {
+  const source = asObject(item);
+  const baselineId = clean(source.baseline_document_id);
+  if (baselineId && baselineById.has(baselineId)) {
+    return baselineById.get(baselineId).documentName;
+  }
+  return clean(source.item_name_ko);
+}
+
+function groupKey(group) {
+  return `${firstNonEmpty(group.sourceType, "group")}::${firstNonEmpty(group.groupId, group.a2mCode, group.groupName)}`;
+}
+
 function evidenceLabelKo(value) {
   const text = clean(value);
   if (!text) {
@@ -372,6 +395,7 @@ function buildCertificateGroups(pkg) {
         return;
       }
       const guidance = asObject(cert.guidance);
+      const controlGroupId = clean(guidance.control_document_group_id);
       const groupName = firstNonEmpty(
         guidance.control_document_group_name_ko,
         guidance.display_title_ko,
@@ -381,6 +405,7 @@ function buildCertificateGroups(pkg) {
       );
       const group = groups.get(groupName) || {
         groupName,
+        groupId: controlGroupId,
         a2mCode: clean(guidance.a2m_code),
         sourceType: "taric",
         measureTypes: new Set(),
@@ -393,6 +418,8 @@ function buildCertificateGroups(pkg) {
         summaries: new Set(),
         actionSteps: new Set(),
         requiredEvidenceItems: new Set(),
+        preparationItems: new Set(),
+        preparationItemRows: new Map(),
         verificationSources: new Set(),
         exporterGuidance: new Set(),
         prepareItems: new Set(),
@@ -405,6 +432,9 @@ function buildCertificateGroups(pkg) {
       };
       if (!group.a2mCode && clean(guidance.a2m_code)) {
         group.a2mCode = clean(guidance.a2m_code);
+      }
+      if (!group.groupId && controlGroupId) {
+        group.groupId = controlGroupId;
       }
       group.measureTypes.add(clean(req.measure_type));
       asList(req.source_goods_codes).forEach((sourceCode) => group.sourceCodes.add(clean(sourceCode)));
@@ -419,7 +449,23 @@ function buildCertificateGroups(pkg) {
       }
       splitLines(guidance.exporter_summary_ko).forEach((item) => group.summaries.add(item));
       splitLines(guidance.exporter_action_steps_ko).forEach((item) => group.actionSteps.add(item));
-      splitLines(guidance.exporter_required_evidence_ko).forEach((item) => group.requiredEvidenceItems.add(item));
+      const preparationItems = [
+        ...asList(guidance.preparation_items),
+        ...asList(guidance.a2m_preparation_items),
+      ].map((item) => asObject(item)).filter((item) => clean(item.item_name_ko));
+      preparationItems.forEach((item) => {
+        const label = preparationItemLabel(item);
+        const itemKey = preparationItemKey(item);
+        if (label) {
+          group.preparationItems.add(label);
+        }
+        if (itemKey && !group.preparationItemRows.has(itemKey)) {
+          group.preparationItemRows.set(itemKey, item);
+        }
+      });
+      if (!preparationItems.length) {
+        splitLines(guidance.exporter_required_evidence_ko).forEach((item) => group.requiredEvidenceItems.add(item));
+      }
       splitLines(guidance.exporter_verification_sources_ko).forEach((item) => group.verificationSources.add(item));
       splitLines(guidance.broker_review_detail_ko).forEach((item) => {
         group.verificationDetails.add(item);
@@ -427,7 +473,9 @@ function buildCertificateGroups(pkg) {
       });
       splitLines(guidance.a2m_exporter_summary_ko).forEach((item) => group.summaries.add(item));
       splitLines(guidance.a2m_exporter_action_steps_ko).forEach((item) => group.actionSteps.add(item));
-      splitLines(guidance.a2m_exporter_required_evidence_ko).forEach((item) => group.requiredEvidenceItems.add(item));
+      if (!preparationItems.length) {
+        splitLines(guidance.a2m_exporter_required_evidence_ko).forEach((item) => group.requiredEvidenceItems.add(item));
+      }
       splitLines(guidance.a2m_exporter_verification_sources_ko).forEach((item) => group.verificationSources.add(item));
       splitLines(guidance.a2m_broker_review_detail_ko).forEach((item) => {
         group.verificationDetails.add(item);
@@ -511,7 +559,13 @@ function buildCertificateGroups(pkg) {
       sourceSections: unique(Array.from(group.sourceSections)),
       summaries: unique(Array.from(group.summaries)),
       actionSteps: unique(Array.from(group.actionSteps)),
-      requiredEvidenceItems: unique(Array.from(group.requiredEvidenceItems)),
+      requiredEvidenceItems: unique(
+        group.preparationItems.size
+          ? Array.from(group.preparationItems)
+          : Array.from(group.requiredEvidenceItems),
+      ),
+      preparationItems: unique(Array.from(group.preparationItems)),
+      preparationItemRows: Array.from(group.preparationItemRows.values()),
       verificationSources: unique(Array.from(group.verificationSources)),
       exporterGuidance: unique(Array.from(group.exporterGuidance)),
       prepareItems: unique(Array.from(group.prepareItems)),
@@ -553,8 +607,13 @@ function buildA2mGuidelineGroups(pkg) {
       .map((section) => firstNonEmpty(section.heading_ko, section.heading_en))
       .filter(Boolean)
       .slice(0, 8);
+    const preparationRows = asList(source.preparation_items)
+      .map((item) => asObject(item))
+      .filter((item) => clean(item.item_name_ko));
+    const preparationLabels = unique(preparationRows.map((item) => preparationItemLabel(item)));
     return {
       groupName: firstNonEmpty(source.title_ko, source.title_en, source.a2m_code),
+      groupId: a2mCode,
       a2mCode,
       sourceType: "a2m",
       measureTypes: ["Access2Markets"],
@@ -566,7 +625,11 @@ function buildA2mGuidelineGroups(pkg) {
       sourceSections,
       summaries: splitLines(source.exporter_summary_ko),
       actionSteps: splitLines(source.exporter_action_steps_ko),
-      requiredEvidenceItems: splitLines(source.exporter_required_evidence_ko),
+      requiredEvidenceItems: preparationLabels.length
+        ? preparationLabels
+        : splitLines(source.exporter_required_evidence_ko),
+      preparationItems: preparationLabels,
+      preparationItemRows: preparationRows,
       verificationSources: splitLines(source.exporter_verification_sources_ko),
       exporterGuidance: unique([
         ...splitLines(source.exporter_summary_ko),
@@ -754,6 +817,7 @@ function buildBaselineRows(pkg, certificateGroups) {
         documentId: clean(source.document_id),
         documentName: firstNonEmpty(source.document_name_ko, source.document_name, source.document_code),
         family: clean(source.document_family),
+        requiredLevelRaw: clean(source.required_level),
         requiredLevel: statusLabel(source.required_level),
         preparedBy: firstNonEmpty(source.prepared_by_ko, source.prepared_by),
         submittedTo: firstNonEmpty(source.submitted_to_ko, source.submitted_to),
@@ -779,6 +843,92 @@ function buildPreArrivalRows(certificateGroups) {
       exemptions,
     };
   });
+}
+
+const DOC_MODES_WHEN_APPLIES = new Set(["always_required_document", "conditional_required_document"]);
+const DOC_MODES_WHEN_NOT_APPLIES = new Set(["always_required_document"]);
+const CHECK_MODES_WHEN_APPLIES = new Set(["always_check"]);
+const CHECK_MODES_WHEN_NOT_APPLIES = new Set(["always_check", "non_applicable_check"]);
+
+function buildPreArrivalModel(baselineRows, requirementGroups, checkedGroups) {
+  const baselineById = new Map(
+    baselineRows
+      .filter((row) => clean(row.documentId))
+      .map((row) => [clean(row.documentId), row]),
+  );
+  const docs = new Map();
+
+  function addDoc(key, payload) {
+    if (!key || docs.has(key)) {
+      return;
+    }
+    docs.set(key, payload);
+  }
+
+  baselineRows.forEach((row) => {
+    if (!isRequiredLevel(row.requiredLevelRaw)) {
+      return;
+    }
+    addDoc(`baseline:${row.documentId}`, {
+      documentName: row.documentName,
+      source: "기본 필수 서류",
+      detail: row.fields.length ? joinList(row.fields) : "",
+      baselineDocumentId: row.documentId,
+      bucket: "baseline",
+    });
+  });
+
+  const groups = requirementGroups.map((group) => {
+    const key = groupKey(group);
+    const applies = Boolean(checkedGroups[key]);
+    const docModes = applies ? DOC_MODES_WHEN_APPLIES : DOC_MODES_WHEN_NOT_APPLIES;
+    const checkModes = applies ? CHECK_MODES_WHEN_APPLIES : CHECK_MODES_WHEN_NOT_APPLIES;
+    const items = asList(group.preparationItemRows).map((item) => asObject(item));
+    const documentItems = [];
+    const checkItems = [];
+
+    items.forEach((item) => {
+      const mode = clean(item.recommendation_mode);
+      const itemType = clean(item.item_type);
+      const label = preparationItemLabel(item, baselineById);
+      if (!label) {
+        return;
+      }
+      if (itemType === "document" && docModes.has(mode)) {
+        const baselineId = clean(item.baseline_document_id);
+        const docKey = baselineId ? `baseline:${baselineId}` : `requirement:${label}`;
+        addDoc(docKey, {
+          documentName: label,
+          source: baselineId ? "조건부 기본 서류" : "수입요건 추가 서류",
+          detail: clean(item.item_detail_ko),
+          baselineDocumentId: baselineId,
+          groupName: group.groupName,
+          bucket: baselineId ? "baseline" : "requirement",
+        });
+        documentItems.push({ label, detail: clean(item.item_detail_ko), mode });
+        return;
+      }
+      if (itemType === "keep_check" && checkModes.has(mode)) {
+        checkItems.push({ label, detail: clean(item.item_detail_ko), mode });
+      }
+    });
+
+    return {
+      ...group,
+      key,
+      applies,
+      documentItems,
+      checkItems,
+    };
+  });
+
+  const finalDocuments = Array.from(docs.values());
+  return {
+    baselineDocuments: finalDocuments.filter((doc) => doc.bucket === "baseline"),
+    requirementDocuments: finalDocuments.filter((doc) => doc.bucket === "requirement"),
+    finalDocuments,
+    groups,
+  };
 }
 
 const DUTY_UNIT_LABELS = {
@@ -999,7 +1149,6 @@ function ExporterRequirementCard({ group }) {
           <p>이 TARIC 수입요건 묶음의 적용 여부를 먼저 확인하고, 연결된 certificate/declaration code와 footnote를 기준으로 세부 신고 경로를 검토합니다.</p>
         )}
         <GuidanceSection title="진행 순서" items={group.actionSteps} ordered />
-        <GuidanceSection title="준비할 자료" items={group.requiredEvidenceItems} />
         {fallbackItems.length ? (
           <div className="ddv-guidance-checkpoints">
             <strong>확인할 사항</strong>
@@ -1163,50 +1312,123 @@ function CertificateGroupCards({ groups }) {
   );
 }
 
-function PreArrivalCards({ rows }) {
+function ResultDocumentList({ title, rows, emptyMessage }) {
+  const documents = asList(rows);
+  return (
+    <section className="ddv-result-section">
+      <div className="ddv-result-section-head">
+        <strong>{title}</strong>
+        <span>{documents.length}건</span>
+      </div>
+      {documents.length ? (
+        <div className="ddv-final-doc-list">
+          {documents.map((doc) => (
+            <div className="ddv-final-doc-row" key={`${doc.baselineDocumentId || doc.documentName}_${doc.source}`}>
+              <div>
+                <strong>{doc.documentName}</strong>
+                {doc.detail ? <p>{doc.detail}</p> : null}
+              </div>
+              <span>{doc.source}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyBlock message={emptyMessage} />
+      )}
+    </section>
+  );
+}
+
+function PreArrivalCards({ model, onToggle }) {
+  const rows = asList(model.groups);
+  const checkGroups = rows.filter((row) => row.checkItems.length);
   if (!rows.length) {
     return <EmptyBlock message="입항 전 준비로 전환할 certificate/declaration 묶음이 없습니다." />;
   }
   return (
-    <div className="ddv-procedure-grid">
-      {rows.map((row) => (
-        <article className="ddv-procedure-card" key={row.groupName}>
-          <div className="ddv-procedure-card-head">
-            <strong>{row.groupName}</strong>
-            <span>{row.codes}</span>
+    <div className="ddv-prearrival-shell">
+      <section className="ddv-checklist-panel">
+        <div className="ddv-checklist-head">
+          <strong>수입요건 적용 여부</strong>
+          <p>각 요건이 실제 품목에 해당하는지 체크하면 하단 추천 서류가 자동 갱신됩니다.</p>
+        </div>
+        <div className="ddv-prearrival-stack">
+          {rows.map((row, index) => {
+            const summaryItems = row.summaries?.length ? row.summaries : row.exporterGuidance;
+            const conditionalDocs = unique(row.documentItems
+              .filter((item) => item.mode === "conditional_required_document")
+              .map((item) => item.label));
+            return (
+              <article className={`ddv-check-row ${row.applies ? "active" : ""}`} key={row.key}>
+                <label className="ddv-check-row-main">
+                  <input
+                    type="checkbox"
+                    checked={row.applies}
+                    onChange={(event) => onToggle(row.key, event.target.checked)}
+                  />
+                  <div>
+                    <strong><span>{String(index + 1).padStart(2, "0")}</span>{row.groupName}</strong>
+                    {summaryItems.slice(0, 2).map((item) => <p key={item}>{item}</p>)}
+                    {conditionalDocs.length ? (
+                      <em>해당 시 추가: {conditionalDocs.join(", ")}</em>
+                    ) : null}
+                  </div>
+                </label>
+                <span className="ddv-check-status">{row.applies ? "해당" : "미확인"}</span>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="ddv-final-docs">
+        <div className="ddv-final-docs-head">
+          <strong>선택 결과에 따른 추천 서류</strong>
+          <span>{model.finalDocuments.length}건</span>
+        </div>
+        <ResultDocumentList
+          title="기본 필수 서류"
+          rows={model.baselineDocuments}
+          emptyMessage="표시할 기본 필수 서류가 없습니다."
+        />
+        <ResultDocumentList
+          title="수입요건 추가 서류"
+          rows={model.requirementDocuments}
+          emptyMessage="체크된 수입요건에 따라 추가되는 서류가 없습니다."
+        />
+        <section className="ddv-result-section">
+          <div className="ddv-result-section-head">
+            <strong>확인/보관 사항</strong>
+            <span>{checkGroups.length}개 요건</span>
           </div>
-          {row.conditions.length ? (
-            <div className="ddv-prep-block">
-              <h3>적용 조건</h3>
-              <ul>
-                {row.conditions.map((item) => <li key={item}>{item}</li>)}
-              </ul>
+          {checkGroups.length ? (
+            <div className="ddv-check-group-list">
+              {checkGroups.map((row) => (
+                <div className="ddv-check-group" key={`${row.key}_checks`}>
+                  <strong>{row.groupName}</strong>
+                  <ul className="ddv-check-list">
+                    {row.checkItems.map((item) => (
+                      <li key={`${row.key}_${item.mode}_${item.label}_${item.detail}`}>
+                        <strong>{item.label}</strong>
+                        {item.detail && item.detail !== item.label ? <span>{item.detail}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </div>
-          ) : null}
-          {row.evidence.length ? (
-            <div className="ddv-prep-block">
-              <h3>준비·확인 정보</h3>
-              <div className="ddv-pill-row">
-                {row.evidence.slice(0, 12).map((item) => <span className="ddv-pill" key={item}>{item}</span>)}
-              </div>
-            </div>
-          ) : null}
-          {row.exemptions.length ? (
-            <div className="ddv-prep-block">
-              <h3>비대상·면제 경로</h3>
-              <ul>
-                {row.exemptions.map((item) => <li key={item}>{item}</li>)}
-              </ul>
-            </div>
-          ) : null}
-        </article>
-      ))}
+          ) : (
+            <EmptyBlock message="표시할 확인/보관 사항이 없습니다." />
+          )}
+        </section>
+      </section>
     </div>
   );
 }
 
 export default function DocumentPackageDetail({ packageData }) {
   const [activeFlow, setActiveFlow] = useState(FLOW_KEYS.REQUIREMENTS);
+  const [requirementChecks, setRequirementChecks] = useState({});
   const pkg = asObject(packageData);
 
   const viewModel = useMemo(() => {
@@ -1218,9 +1440,20 @@ export default function DocumentPackageDetail({ packageData }) {
     const dutyRows = buildDutyRows(pkg);
     const dutyPriority = buildDutyPriority(pkg);
     const baselineRows = buildBaselineRows(pkg, certificateGroups);
-    const preArrivalRows = buildPreArrivalRows(certificateGroups);
-    return { certificateGroups, requirementGroups, dutyRows, dutyPriority, baselineRows, preArrivalRows };
+    return { certificateGroups, requirementGroups, dutyRows, dutyPriority, baselineRows };
   }, [pkg]);
+
+  const preArrivalModel = useMemo(
+    () => buildPreArrivalModel(viewModel.baselineRows, viewModel.requirementGroups, requirementChecks),
+    [viewModel.baselineRows, viewModel.requirementGroups, requirementChecks],
+  );
+
+  function handleRequirementToggle(key, checked) {
+    setRequirementChecks((current) => ({
+      ...current,
+      [key]: checked,
+    }));
+  }
 
   if (!Object.keys(pkg).length) {
     return <EmptyBlock message="문서 패키지 데이터가 없습니다." />;
@@ -1230,7 +1463,7 @@ export default function DocumentPackageDetail({ packageData }) {
     [FLOW_KEYS.REQUIREMENTS]: viewModel.requirementGroups.length,
     [FLOW_KEYS.DUTY]: dutyPriorityCount(viewModel.dutyPriority) || viewModel.dutyRows.length,
     [FLOW_KEYS.BASELINE]: viewModel.baselineRows.length,
-    [FLOW_KEYS.PRE_ARRIVAL]: viewModel.preArrivalRows.length,
+    [FLOW_KEYS.PRE_ARRIVAL]: preArrivalModel.groups.length,
   };
   const activeItem = FLOW_ITEMS.find((item) => item.key === activeFlow) || FLOW_ITEMS[0];
 
@@ -1297,9 +1530,9 @@ export default function DocumentPackageDetail({ packageData }) {
       {activeFlow === FLOW_KEYS.PRE_ARRIVAL ? (
         <FlowPanel
           title={activeItem.title}
-          description="TARIC 수입요건에서 확인한 certificate/declaration 묶음을 입항 전 준비 체크리스트로 다시 배치합니다."
+          description="수입요건 해당 여부를 체크하고, 기본 필수 서류와 조건부 추가 서류를 중복 없이 정리합니다."
         >
-          <PreArrivalCards rows={viewModel.preArrivalRows} />
+          <PreArrivalCards model={preArrivalModel} onToggle={handleRequirementToggle} />
         </FlowPanel>
       ) : null}
     </div>

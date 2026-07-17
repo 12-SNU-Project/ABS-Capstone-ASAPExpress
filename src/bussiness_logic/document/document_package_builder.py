@@ -62,6 +62,12 @@ TABLE_NAME_ALIASES = {
     "taric_duty_table": (
         "taric_duty_table",
     ),
+    "taric_group_preparation_table": (
+        "taric_group_preparation_table",
+    ),
+    "a2m_group_preparation_table": (
+        "a2m_group_preparation_table",
+    ),
 }
 
 
@@ -1530,6 +1536,110 @@ def _fetch_group_guidance(
     return guidance_by_group
 
 
+def _preparation_item(row_dict: dict) -> dict:
+    return {
+        "rule_id": row_dict.get("rule_id") or "",
+        "item_type": row_dict.get("item_type") or "",
+        "item_name_ko": row_dict.get("item_name_ko") or "",
+        "item_detail_ko": row_dict.get("item_detail_ko") or "",
+        "baseline_document_id": row_dict.get("baseline_document_id") or "",
+        "display_order": row_dict.get("display_order") or 0,
+        "recommendation_mode": row_dict.get("recommendation_mode") or "",
+    }
+
+
+def _fetch_group_preparation_items(
+    cur,
+    control_document_group_ids: list[str],
+) -> dict[str, list[dict]]:
+    if (
+        not control_document_group_ids
+        or not _table_exists(cur, "taric_group_preparation_table")
+    ):
+        return {}
+
+    preparation_table = _resolve_table_name(cur, "taric_group_preparation_table")
+    fields = _select_fields(
+        cur,
+        "taric_group_preparation_table",
+        [
+            "rule_id",
+            "control_document_group_id",
+            "item_type",
+            "item_name_ko",
+            "item_detail_ko",
+            "baseline_document_id",
+            "display_order",
+            "recommendation_mode",
+        ],
+    )
+    _execute(
+        cur,
+        f"""
+        SELECT {fields}
+        FROM {preparation_table}
+        WHERE control_document_group_id = ANY(%s)
+        ORDER BY control_document_group_id, display_order, rule_id
+        """,
+        (control_document_group_ids,),
+    )
+    cols = [d[0] for d in cur.description]
+    items_by_group: dict[str, list[dict]] = defaultdict(list)
+    for row in cur.fetchall():
+        row_dict = dict(zip(cols, row))
+        group_id = (row_dict.get("control_document_group_id") or "").strip()
+        if not group_id:
+            continue
+        items_by_group[group_id].append(_preparation_item(row_dict))
+    return dict(items_by_group)
+
+
+def _fetch_a2m_preparation_items(
+    cur,
+    a2m_codes: list[str],
+) -> dict[str, list[dict]]:
+    if (
+        not a2m_codes
+        or not _table_exists(cur, "a2m_group_preparation_table")
+    ):
+        return {}
+
+    preparation_table = _resolve_table_name(cur, "a2m_group_preparation_table")
+    fields = _select_fields(
+        cur,
+        "a2m_group_preparation_table",
+        [
+            "rule_id",
+            "a2m_code",
+            "item_type",
+            "item_name_ko",
+            "item_detail_ko",
+            "baseline_document_id",
+            "display_order",
+            "recommendation_mode",
+        ],
+    )
+    _execute(
+        cur,
+        f"""
+        SELECT {fields}
+        FROM {preparation_table}
+        WHERE a2m_code = ANY(%s)
+        ORDER BY a2m_code, display_order, rule_id
+        """,
+        (a2m_codes,),
+    )
+    cols = [d[0] for d in cur.description]
+    items_by_code: dict[str, list[dict]] = defaultdict(list)
+    for row in cur.fetchall():
+        row_dict = dict(zip(cols, row))
+        a2m_code = (row_dict.get("a2m_code") or "").strip()
+        if not a2m_code:
+            continue
+        items_by_code[a2m_code].append(_preparation_item(row_dict))
+    return dict(items_by_code)
+
+
 def _fetch_a2m_guidelines(
     cur,
     goods_codes: list[str],
@@ -2770,6 +2880,7 @@ def BuildDocumentPackage(
                 all_footnote_codes,
             )
             group_guidance = _fetch_group_guidance(cur, all_control_group_ids)
+            group_preparation_items = _fetch_group_preparation_items(cur, all_control_group_ids)
             group_a2m_codes = sorted({
                 (guidance.get("a2m_code") or "").strip()
                 for guidance in group_guidance.values()
@@ -2782,6 +2893,21 @@ def BuildDocumentPackage(
                 group_a2m_codes,
                 code,
             )
+            a2m_preparation_items = _fetch_a2m_preparation_items(
+                cur,
+                sorted({
+                    *group_a2m_codes,
+                    *[
+                        (guideline.get("a2m_code") or "").strip()
+                        for guideline in a2m_guidelines
+                        if (guideline.get("a2m_code") or "").strip()
+                    ],
+                }),
+            )
+            for guideline in a2m_guidelines:
+                a2m_code = (guideline.get("a2m_code") or "").strip()
+                if a2m_code:
+                    guideline["preparation_items"] = a2m_preparation_items.get(a2m_code, [])
             duty_priority = _fetch_duty_priority(cur, rows, code)
             if a2m_guidelines:
                 notes.append(
@@ -2815,9 +2941,11 @@ def BuildDocumentPackage(
                     group_id = (guidance.get("control_document_group_id") or "").strip()
                     if group_id:
                         guidance.update(group_guidance.get(group_id, {}))
+                        guidance["preparation_items"] = group_preparation_items.get(group_id, [])
                         a2m_code = (guidance.get("a2m_code") or "").strip()
                         if a2m_code:
                             guidance.update(group_a2m_guidelines.get(a2m_code, {}))
+                            guidance["a2m_preparation_items"] = a2m_preparation_items.get(a2m_code, [])
                         guidance["footnote_guidelines"] = [
                             guideline
                             for guideline in (

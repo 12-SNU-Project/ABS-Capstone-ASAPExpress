@@ -221,6 +221,270 @@
   padding: 16px;
 }
 
+.ddv-prearrival-shell {
+  display: grid;
+  gap: 16px;
+}
+
+.ddv-prearrival-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.ddv-checklist-panel {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(24, 32, 24, 0.1);
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.ddv-checklist-head {
+  margin-bottom: 12px;
+}
+
+.ddv-checklist-head strong {
+  display: block;
+  font-size: 1rem;
+  margin-bottom: 4px;
+}
+
+.ddv-checklist-head p {
+  color: var(--doc-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.ddv-check-row {
+  align-items: flex-start;
+  background: rgba(246, 250, 253, 0.86);
+  border: 1px solid rgba(24, 32, 24, 0.08);
+  border-radius: 14px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 13px 14px;
+}
+
+.ddv-check-row.active {
+  background: rgba(223, 241, 232, 0.48);
+  border-color: rgba(30, 107, 74, 0.22);
+}
+
+.ddv-check-row-main {
+  align-items: flex-start;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ddv-check-row-main input {
+  accent-color: var(--doc-accent);
+  flex: 0 0 auto;
+  height: 17px;
+  margin-top: 2px;
+  width: 17px;
+}
+
+.ddv-check-row-main div {
+  min-width: 0;
+}
+
+.ddv-check-row-main strong {
+  display: block;
+  line-height: 1.35;
+}
+
+.ddv-check-row-main strong span {
+  color: var(--doc-accent);
+  display: inline-block;
+  font-size: 0.78rem;
+  margin-right: 8px;
+}
+
+.ddv-check-row-main p {
+  color: var(--doc-muted);
+  line-height: 1.45;
+  margin: 5px 0 0;
+}
+
+.ddv-check-row-main em {
+  color: var(--doc-accent);
+  display: block;
+  font-size: 0.82rem;
+  font-style: normal;
+  font-weight: 800;
+  margin-top: 6px;
+}
+
+.ddv-check-status {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(24, 32, 24, 0.08);
+  border-radius: 999px;
+  color: var(--doc-muted);
+  flex: 0 0 auto;
+  font-size: 0.76rem;
+  font-weight: 800;
+  padding: 5px 8px;
+}
+
+.ddv-final-docs {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(22, 97, 168, 0.18);
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.ddv-result-section {
+  border-top: 1px solid rgba(24, 32, 24, 0.08);
+  padding-top: 14px;
+}
+
+.ddv-result-section:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.ddv-result-section + .ddv-result-section {
+  margin-top: 14px;
+}
+
+.ddv-result-section-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.ddv-result-section-head strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.ddv-result-section-head span {
+  color: var(--doc-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.ddv-final-docs-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.ddv-final-docs-head strong {
+  font-size: 1rem;
+}
+
+.ddv-final-docs-head span {
+  background: var(--doc-accent-soft);
+  border-radius: 999px;
+  color: var(--doc-accent);
+  font-size: 0.8rem;
+  font-weight: 800;
+  padding: 5px 9px;
+}
+
+.ddv-final-doc-list {
+  display: grid;
+  gap: 8px;
+}
+
+.ddv-final-doc-row {
+  align-items: flex-start;
+  background: rgba(246, 250, 253, 0.9);
+  border: 1px solid rgba(24, 32, 24, 0.08);
+  border-radius: 12px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 11px 12px;
+}
+
+.ddv-final-doc-row strong {
+  display: block;
+  line-height: 1.35;
+}
+
+.ddv-final-doc-row p {
+  color: var(--doc-muted);
+  line-height: 1.45;
+  margin: 4px 0 0;
+}
+
+.ddv-final-doc-row > span {
+  color: var(--doc-muted);
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.ddv-procedure-card.prearrival {
+  display: grid;
+  gap: 12px;
+}
+
+.ddv-requirement-check {
+  align-items: center;
+  background: rgba(223, 241, 232, 0.36);
+  border: 1px solid rgba(30, 107, 74, 0.16);
+  border-radius: 12px;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.ddv-requirement-check input {
+  accent-color: var(--doc-accent);
+  height: 16px;
+  width: 16px;
+}
+
+.ddv-requirement-check span {
+  font-weight: 800;
+}
+
+.ddv-check-list {
+  display: grid;
+  gap: 8px;
+  line-height: 1.48;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.ddv-check-list strong {
+  display: block;
+}
+
+.ddv-check-list span {
+  color: var(--doc-muted);
+  display: block;
+  margin-top: 2px;
+}
+
+.ddv-check-group-list {
+  display: grid;
+  gap: 10px;
+}
+
+.ddv-check-group {
+  background: rgba(246, 250, 253, 0.86);
+  border: 1px solid rgba(24, 32, 24, 0.08);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.ddv-check-group > strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
 .ddv-procedure-card.exporter,
 .ddv-procedure-card.broker {
   background: rgba(255, 255, 255, 0.9);
@@ -325,6 +589,11 @@
   margin-top: 14px;
   padding: 18px;
   width: 100%;
+}
+
+.ddv-group-guidance.compact {
+  margin-top: 0;
+  padding: 14px;
 }
 
 .ddv-group-guidance h3,
