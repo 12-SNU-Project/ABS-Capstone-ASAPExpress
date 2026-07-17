@@ -535,7 +535,12 @@ export default function EnterprisePage() {
       <p className="ent-hint">
         <b>물품 서류</b>는 ASAP이 대리 수취할 수 없어 반드시 직접 제출해야 합니다. 제조사 수취 서류는 <b>품질 미보증</b>이라 "미검증 사본"으로
         등록되며 원본 대조 후 확정됩니다.
-        {docDetailPath ? <> 요건 서류 패키지 전체는 <Link to={docDetailPath} className="ent-link">서류 상세 페이지 ›</Link></> : null}
+        {" "}요건 서류 패키지 전체는{" "}
+        {docDetailPath ? (
+          <Link to={docDetailPath} className="ent-link">서류 상세 페이지 ›</Link>
+        ) : (
+          <span className="ent-link disabled" title="분류 실행 후 활성화됩니다">서류 상세 페이지 (분류 실행 후)</span>
+        )}
       </p>
     </>
   );
@@ -549,6 +554,11 @@ export default function EnterprisePage() {
           <div className="ent-review-meta">
             {activeLive && basis ? <span>{basis.slice(0, 160)}</span> : <span>연체동물(재첩) 조제품 — 소스·건더기 동봉 밀키트, 본질적 특성은 수산물이 부여</span>}
             <Link to="/classification" className="ent-link">분류 근거 전체 ›</Link>
+            {docDetailPath ? (
+              <Link to={docDetailPath} className="ent-link">서류 상세 페이지 ›</Link>
+            ) : (
+              <span className="ent-link disabled" title="분류 실행 후 활성화됩니다">서류 상세 (분류 후)</span>
+            )}
           </div>
         </div>
         <div className="ent-duty compact">
@@ -689,11 +699,14 @@ export default function EnterprisePage() {
 
   const customsPanel = (
     <>
-      {docDetailPath ? (
-        <p className="ent-hint" style={{ marginTop: 0 }}>
-          이 코드의 요건 서류 패키지(베이스라인·인증서·celex 근거)는 <Link to={docDetailPath} className="ent-link">서류 상세 페이지 ›</Link>
-        </p>
-      ) : null}
+      <p className="ent-hint" style={{ marginTop: 0 }}>
+        이 코드의 요건 서류 패키지(베이스라인·인증서·celex 근거)는{" "}
+        {docDetailPath ? (
+          <Link to={docDetailPath} className="ent-link">서류 상세 페이지 ›</Link>
+        ) : (
+          <span className="ent-link disabled" title="분류 실행 후 활성화됩니다">서류 상세 페이지 (분류 실행 후)</span>
+        )}
+      </p>
       <div className="ent-cat-panel cat-customs flat">
         <div className="ent-bigtable-head">
           <span>서류 (baseline)</span><span>제출 방식</span><span>상태</span><span>파일 · 액션</span>

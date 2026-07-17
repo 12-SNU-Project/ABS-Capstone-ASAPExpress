@@ -1616,3 +1616,93 @@
 
 .ent.theme-light .ent-add-note { color: #64748b; }
 .ent.theme-light .ent-add-note b { color: #15803d; }
+
+/* ================= 비주얼 패스 1 — 위계·밀도·카드 마감 ================= */
+
+/* 카드 타이틀: 액센트 바로 섹션 위계 부여 */
+.ent-card-title::before {
+  content: "";
+  width: 4px;
+  height: 16px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #a855f7, #22d3ee);
+  flex: 0 0 auto;
+}
+
+.ent.theme-light .ent-card-title::before {
+  background: linear-gradient(180deg, #6d3fd6, #8b5cf6);
+}
+
+/* 그리드 밀도: 헤더는 낮고 단단하게, 행은 숨 쉴 만큼 */
+.ent-mgmt th {
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  padding: 8px 10px;
+}
+
+.ent-mgmt td {
+  padding: 11px 10px;
+}
+
+.ent-mgmt-name {
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+/* 인라인 확장 카드: 패널 종류별 색 코드 (윗변 스트립 + 헤더 구분선) */
+.ent-detail-card {
+  border-top: 2px solid rgba(34, 211, 238, 0.7);
+  border-radius: 0 0 14px 14px;
+}
+
+.ent-detail-card.p-docs { border-top-color: #22d3ee; border-color: rgba(34, 211, 238, 0.35); }
+.ent-detail-card.p-code { border-top-color: #a855f7; border-color: rgba(168, 85, 247, 0.4); }
+.ent-detail-card.p-duty { border-top-color: #34d399; border-color: rgba(52, 211, 153, 0.35); }
+.ent-detail-card.p-review { border-top-color: #fbbf24; border-color: rgba(251, 191, 36, 0.35); }
+.ent-detail-card.p-customs { border-top-color: #34d399; border-color: rgba(52, 211, 153, 0.35); }
+
+.ent-detail-card.p-code .ent-detail-head b { color: #c084fc; }
+.ent-detail-card.p-duty .ent-detail-head b,
+.ent-detail-card.p-customs .ent-detail-head b { color: #34d399; }
+.ent-detail-card.p-review .ent-detail-head b { color: #fbbf24; }
+
+.ent-detail-head {
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(185, 128, 255, 0.14);
+}
+
+.ent.theme-light .ent-detail-head { border-bottom-color: #eef0f5; }
+.ent.theme-light .ent-detail-card.p-code .ent-detail-head b { color: #6d3fd6; }
+.ent.theme-light .ent-detail-card.p-duty .ent-detail-head b,
+.ent.theme-light .ent-detail-card.p-customs .ent-detail-head b { color: #15803d; }
+.ent.theme-light .ent-detail-card.p-review .ent-detail-head b { color: #b45309; }
+.ent.theme-light .ent-detail-card.p-docs { border-top-color: #0e7490; }
+.ent.theme-light .ent-detail-card.p-code { border-top-color: #6d3fd6; }
+.ent.theme-light .ent-detail-card.p-duty,
+.ent.theme-light .ent-detail-card.p-customs { border-top-color: #16a34a; }
+.ent.theme-light .ent-detail-card.p-review { border-top-color: #d97706; }
+
+/* 라이트 카드 그림자 절제 — 떠 보이지 않게 */
+.ent.theme-light .ent-card {
+  box-shadow: 0 6px 20px rgba(23, 16, 53, 0.05);
+}
+
+.ent.theme-light .ent-detail-card { box-shadow: none; }
+
+/* 히어로: 로고와 케이스 칩 시선 정렬 */
+.ent-hero { align-items: center; }
+.ent-sub { margin-top: 2px; }
+
+/* 카테고리 카드 진행바·여백 균형 */
+.ent-cat-card { padding: 15px 17px; }
+.ent-cat-bar { height: 5px; }
+
+/* 판정 배너: 아이콘 여백감 */
+.ent-decision-banner { line-height: 1.55; }
+
+/* 비활성 링크 — 분류 실행 전의 서류 상세 자리 표시 */
+.ent-link.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  text-decoration: none;
+}
