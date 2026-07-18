@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -184,53 +185,13 @@ CHAPTER_DOMAIN_FALLBACK: dict[str, tuple[str, ...]] = {
     "33": ("cosmetics",),
 }
 
-PRODUCT_FORM_TO_HS2: tuple[tuple[re.Pattern[str], str, str], ...] = (
-    (
-        re.compile(
-            r"\b(stir[- ]?fried|fried|cooked|seasoned|prepared)\b.{0,40}\b(octopus|squid|mollusc|cockle|shrimp|prawn|crustacean|fish|seafood)\b"
-            r"|\b(octopus|squid|mollusc|cockle|shrimp|prawn|crustacean|fish|seafood)\b.{0,40}\b(stir[- ]?fried|fried|cooked|seasoned|prepared)\b"
-            r"|낙지.{0,12}볶음|주꾸미.{0,12}볶음|쭈꾸미.{0,12}볶음|오징어.{0,12}볶음|새우.{0,12}볶음|꼬막.{0,12}(장|무침|볶음)",
-            re.I,
-        ),
-        "16",
-        "prepared_aquatic_animal_product",
-    ),
-    (
-        re.compile(r"\b(noodle|ramen|pasta|macaroni|spaghetti)\b|라면|유탕면|국수|면류|파스타", re.I),
-        "19",
-        "cereal_noodle_preparation",
-    ),
-    (
-        re.compile(r"\b(sauce|seasoning|condiment|soup|broth|stock)\b|소스|양념|조미|스프|미역국|(?<!중)국|탕|찌개|육수", re.I),
-        "21",
-        "miscellaneous_edible_preparation",
-    ),
-    (
-        re.compile(r"\b(sausage|ham|surimi)\b|소시지|햄|어묵|맛살|멘보샤", re.I),
-        "16",
-        "meat_fish_crustacean_preparation",
-    ),
-    (
-        re.compile(r"\b(dumpling|mandu|stuffed pasta|stuffed noodles)\b|만두|물만두|군만두", re.I),
-        "19",
-        "stuffed_pasta_cereal_preparation",
-    ),
-    (
-        re.compile(r"\b(jam|pickle|fruit preparation|vegetable preparation)\b|잼|절임|피클|과실가공|채소가공", re.I),
-        "20",
-        "vegetable_fruit_preparation",
-    ),
-    (
-        re.compile(r"\b(beverage|drink|juice|tea)\b|음료|주스|차음료", re.I),
-        "22",
-        "beverage",
-    ),
-    (
-        re.compile(r"\b(deodorant|antiperspirant|roll[- ]?on|cosmetic|skincare|perfume|lotion|shampoo|toner|essence)\b|데오드란트|데오도란트|롤온|화장품|스킨케어|향수|로션|샴푸|토너|에센스", re.I),
-        "33",
-        "cosmetic_toilet_preparation",
-    ),
-)
+# [8회차-1 (가) 철거] PRODUCT_FORM_TO_HS2 — 상품명 정규식→챕터 수기 매핑
+# (낙지볶음→16·국수→19·(?<!중)국→21 등) 전량 철거. 최중량 하드코딩이자
+# 식품 hs2의 숨은 기둥이었다(합격선 3: 철거 후 회귀선 유지가 검증 대상).
+# 형태→챕터 신호는 라우터 4층(중의 판별권 박탈·구문 흡수·조건부 자격·
+# 사전 경유)과 cn_chapter_index 원천 어휘가 승계한다. 재유입 금지 —
+# 규칙 대장(handoff/RULE_LEDGER.md) 대조 감사.
+PRODUCT_FORM_TO_HS2: tuple[tuple[re.Pattern[str], str, str], ...] = ()
 
 CONDIMENT_PRODUCT_NAME_PATTERN = re.compile(
     r"\b(condiment|seasoning sauce|sauce)\b|비빔장|양념장|소스|[가-힣]{1,16}장(?:\s|$)",
@@ -256,6 +217,30 @@ GENERIC_CHAPTER_KEYWORD_STOPLIST = {
     "products",
     "specified",
 }
+
+
+_DERIVED_KW_CACHE: dict | None = None
+
+
+def _derived_chapter_keywords() -> dict[str, list[str]]:
+    """[9회차 P1] 법정 서술 기계 도출 챕터 어휘 아티팩트 —
+    DB/artifacts/chapter_keywords_derived.jsonl (빌드: DB/
+    build_chapter_keywords.py, 창작 0 게이트 --verify). cn_chapter_index
+    원본 무접촉 — 부재 시 빈 dict(기존 동작). ASAP_ROUTER_DERIVED_KW=0 OFF."""
+    global _DERIVED_KW_CACHE
+    if _DERIVED_KW_CACHE is None:
+        _DERIVED_KW_CACHE = {}
+        try:
+            if (os.environ.get("ASAP_ROUTER_DERIVED_KW", "1") or "1").strip() != "0":
+                from pathlib import Path as _P
+                _path = _P(__file__).resolve().parents[4] / "DB" / "artifacts" /                     "chapter_keywords_derived.jsonl"
+                for _line in _path.read_text(encoding="utf-8").splitlines():
+                    _row = json.loads(_line)
+                    _DERIVED_KW_CACHE[str(_row.get("chapter"))] = list(
+                        _row.get("keywords") or [])
+        except Exception:  # noqa: BLE001 — 아티팩트 부재 = 기능 OFF
+            _DERIVED_KW_CACHE = {}
+    return _DERIVED_KW_CACHE
 
 
 class PreClassificationDomainRouter:
@@ -386,15 +371,152 @@ class PreClassificationDomainRouter:
             if chapter
         }
 
+        # [8회차-2] 라우터 4층 선계산 — 전부 결정론·원천 어휘(수기 0).
+        # 층1 중의 토큰 판별권 박탈: 복수 챕터 keyword에 등장하는 토큰 =
+        #   판별력 0 (형제-과반 정화의 라우터판). 전수 교차 기계 산출.
+        # 층2 구문 흡수(보조·킬스위치): 타 챕터 매치 구문의 진부분집합인
+        #   매치는 흡수(관측 기록).
+        # 층3 조건부 자격: 중의 토큰 매치는 챕터-유일 토큰 동반 시만 기여.
+        # 층4 관세청 사전 경유: 한글 원문 → 표준품명 사전(hs6) 공적
+        #   disambiguator — 해당 챕터에 유일-동반 자격 부여.
+        _l4_on = (os.environ.get("ASAP_ROUTER_L4", "1") or "1").strip() != "0"
+        _absorb_on = (os.environ.get(
+            "ASAP_ROUTER_PHRASE_ABSORB", "1") or "1").strip() != "0"
+        _tokenOwners: dict[str, set] = {}
+        _termOwners: dict[str, set] = {}
+        _scopeOwners: dict[str, set] = {}
+        _kwByChapter: dict[str, list[str]] = {}
+        if _l4_on:
+            # 소유 수 계산 전 '원료↔조제 가족' 접기 — 같은 종 어휘가 원료
+            # 챕터(02/03…)와 조제 챕터(16…)에 정당 공유되는 구조를 중의로
+            # 오판하면 식품 챕터가 대량 실격된다(새우살 03·16 12→4 실측).
+            # 가족 관계는 cn_chapter_index의 prepared_food_redirect_chapters
+            # 컬럼 원천으로 기계 도출 — 수기 0.
+            _fam_parent: dict[str, str] = {}
+
+            def _fam_find(c5: str) -> str:
+                while _fam_parent.get(c5, c5) != c5:
+                    c5 = _fam_parent.get(c5, c5)
+                return c5
+
+            for _row4 in chapterRows:
+                _ch4 = self._ReadChapter(_row4)
+                if not _ch4:
+                    continue
+                for _rd4 in self._SplitValues(
+                        _row4.get("prepared_food_redirect_chapters")):
+                    _rd4 = re.sub(r"\D", "", str(_rd4))[:2]
+                    if len(_rd4) == 2:
+                        _ra, _rb = _fam_find(_ch4), _fam_find(_rd4)
+                        if _ra != _rb:
+                            _fam_parent[_ra] = _rb
+            _fam_rep = {}
+            for _row4 in chapterRows:
+                _ch4 = self._ReadChapter(_row4)
+                if _ch4:
+                    _fam_rep[_ch4] = _fam_find(_ch4)
+            for _row4 in chapterRows:
+                _ch4 = self._ReadChapter(_row4)
+                if not _ch4:
+                    continue
+                _terms4 = self._FilterChapterKeywordTerms(
+                    self._SplitValues(_row4.get("chapter_keywords")))
+                _terms4 = list(dict.fromkeys(
+                    [*_terms4, *_derived_chapter_keywords().get(_ch4, [])]))
+                for _t4 in _terms4:
+                    for _tok4 in str(_t4).lower().split():
+                        _tokenOwners.setdefault(_tok4, set()).add(
+                            _fam_rep.get(_ch4, _ch4))
+                    if " " in str(_t4):
+                        # 구문(2그램+) 소유 지도 — 구문 자체가 유일 가족
+                        # 소유면 토큰 중의성과 무관하게 판별 자격(층3에서
+                        # 'pencil lead'가 pencil·lead 각각의 중의로 살해
+                        # 되던 결함의 처방 — 구문 우선 원칙의 층3판).
+                        _termOwners.setdefault(
+                            str(_t4).lower(), set()).add(
+                            _fam_rep.get(_ch4, _ch4))
+                _kwByChapter[_ch4] = self._TermMatches(_terms4, searchText)
+                # [9회차 §1] 만능 토큰 소탕 — raw/prepared scope lane도
+                # 동일 전수 교차. 'prepared'가 층1(키워드 lane 한정)을
+                # 탈출해 전 챕터에 2~6점을 공급한 실측(낙지볶음 ch02/05/
+                # 06/23)의 처방: 수기 스톱워드가 아니라 같은 소유-가족
+                # 기계가 전 계급을 포획한다. processed '판정'(전역
+                # boolean)은 무관 — 챕터별 점수 기여만 박탈.
+                for _col1 in ("raw_scope_signals", "prepared_scope_signals"):
+                    for _t1 in self._SplitValues(_row4.get(_col1)):
+                        for _tok1 in str(_t1).lower().split():
+                            _scopeOwners.setdefault(_tok1, set()).add(
+                                _fam_rep.get(_ch4, _ch4))
+            _ambiguous = {tok for tok, owners in _tokenOwners.items()
+                          if len(owners) >= 2}
+            _scope_universal = {tok for tok, owners in _scopeOwners.items()
+                                if len(owners) >= 2}
+            # 층2: 흡수 — 매치 구문 토큰집합의 진부분집합(타 챕터) 제거
+            _absorbed: dict[str, list[str]] = {}
+            if _absorb_on:
+                _all_matches = [(ch2, m2, frozenset(m2.lower().split()))
+                                for ch2, ms in _kwByChapter.items()
+                                for m2 in ms]
+                for ch2, m2, s2 in _all_matches:
+                    for ch3, m3, s3 in _all_matches:
+                        if ch2 != ch3 and s2 < s3:
+                            _kwByChapter[ch2] = [
+                                x for x in _kwByChapter[ch2] if x != m2]
+                            _absorbed.setdefault(ch2, []).append(
+                                f"absorbed:{m2}<{m3}")
+                            break
+            # 층4: 사전 경유 — 한글 원문 문자열의 사전 표제 exact 대응
+            _dict_chapters: dict[str, str] = {}
+            if (os.environ.get("ASAP_ROUTER_DICT", "1") or "1").strip() != "0":
+                try:
+                    from bussiness_logic.product.services.term_bridge import (
+                        _exact_index, _load_dict, _norm_key)
+                    _idx = _exact_index()
+                    _rows_d = _load_dict()
+                    for _seg in re.findall(r"[가-힣][가-힣\s]{1,20}", searchText):
+                        for _key in (_norm_key(_seg), *(
+                                _norm_key(w) for w in _seg.split())):
+                            for _i_d in _idx.get(_key, []):
+                                _hs6_d = re.sub(
+                                    r"\D", "", str(_rows_d[_i_d].get("hs6") or ""))
+                                if len(_hs6_d) >= 2:
+                                    _dict_chapters.setdefault(
+                                        _hs6_d[:2], _key)
+                except Exception:  # noqa: BLE001 — 사전 부재 = 층4 no-op
+                    _dict_chapters = {}
+        else:
+            _ambiguous = set()
+            _scope_universal = set()
+            _absorbed = {}
+            _dict_chapters = {}
+
+        _raw_side: set = set()
+        _prep_side: set = set()
+        for _row_p in chapterRows:
+            _ch_p = self._ReadChapter(_row_p)
+            _rds_p = [re.sub(r"\D", "", str(x))[:2] for x in self._SplitValues(
+                _row_p.get("prepared_food_redirect_chapters"))]
+            _rds_p = [x for x in _rds_p if len(x) == 2]
+            if _ch_p and _rds_p:
+                _raw_side.add(_ch_p)
+                _prep_side.update(_rds_p)
+        # 원물 판정 = redirect 보유 − 지목 차집합: 조제 챕터끼리의 사슬
+        # (16→19;20;21)로 16·20·21이 보유 측에 들어가는 원천 구조 실측 —
+        # '지목받은 챕터'는 조제 측이므로 원물 집합에서 제외한다.
+        _raw_only = _raw_side - _prep_side
+
         for row in chapterRows:
             chapter = self._ReadChapter(row)
             if not chapter:
                 continue
 
             keywordMatches = self._TermMatches(
-                self._FilterChapterKeywordTerms(
-                    self._SplitValues(row.get("chapter_keywords")),
-                ),
+                list(dict.fromkeys([
+                    *self._FilterChapterKeywordTerms(
+                        self._SplitValues(row.get("chapter_keywords")),
+                    ),
+                    *_derived_chapter_keywords().get(chapter, []),
+                ])),
                 searchText,
             )
             rawMatches = self._TermMatches(
@@ -478,12 +600,86 @@ class PreClassificationDomainRouter:
                         concept_groups.append(set(toks))
                         deduped.append(term)
                 keywordMatches = deduped
+            # [8회차-2] 층1·3·4 적용 — 층2(흡수)는 선계산 반영분 사용.
+            if _l4_on:
+                if _absorb_on and chapter in _kwByChapter:
+                    _abs_set = {a.split(":", 1)[1].split("<", 1)[0]
+                                for a in _absorbed.get(chapter, [])}
+                    keywordMatches = [
+                        m for m in keywordMatches if m not in _abs_set]
+                _unique_m = [
+                    m for m in keywordMatches
+                    if any(tok not in _ambiguous
+                           for tok in m.lower().split())
+                    or (" " in m
+                        and len(_termOwners.get(m.lower(), ())) <= 1)]
+                _ambig_m = [m for m in keywordMatches if m not in _unique_m]
+                _dict_hit = chapter in _dict_chapters
+                # 층3 조건부 자격: 중의 매치는 유일 동반 또는 사전 자격 시만
+                if _unique_m or _dict_hit:
+                    keywordMatches = _unique_m + _ambig_m
+                else:
+                    keywordMatches = []
+                    if _ambig_m:
+                        self._AppendUnique(
+                            matchedByChapter.setdefault(chapter, []),
+                            "ambiguous_only_disqualified:"
+                            + ",".join(_ambig_m[:3]))
+                for _a_rec in _absorbed.get(chapter, []):
+                    self._AppendUnique(
+                        matchedByChapter.setdefault(chapter, []), _a_rec)
             keywordScore = float(len(keywordMatches) * 4)
-            rawScore = float(len(rawMatches) * (1 if processed else 4))
+            # [9회차 §1] 다가족 공유 신호는 챕터 점수 기여 박탈 (매치
+            # 기록·processed 판정은 유지). 서명 universal_scope_muted.
+            if _l4_on:
+                _raw_scored = [m for m in rawMatches
+                               if any(tok not in _scope_universal
+                                      for tok in m.lower().split())]
+                _prep_scored = [m for m in preparedMatches
+                                if any(tok not in _scope_universal
+                                       for tok in m.lower().split())]
+                _muted = [m for m in (*rawMatches, *preparedMatches)
+                          if m not in _raw_scored and m not in _prep_scored]
+                if _muted:
+                    self._AppendUnique(
+                        matchedByChapter.setdefault(chapter, []),
+                        "universal_scope_muted:" + ",".join(
+                            sorted(set(_muted))[:4]))
+            else:
+                _raw_scored, _prep_scored = rawMatches, preparedMatches
+            rawScore = float(len(_raw_scored) * (1 if processed else 4))
             formScore = float(len(formMatches) * 8)
             score = keywordScore + rawScore + formScore
+            if _l4_on and chapter in _dict_chapters:
+                # [9회차 §3] 층4 상태 조건 — 사전은 원물 표제 중심이라
+                # 조리품에서 구조적 raw 편향(dict:낙지→ch03 실측). 상품이
+                # processed면 원물 챕터(redirect 보유 측)에는 gate 불부여,
+                # 그 챕터의 redirect 조제 측으로 자격 재배정 — 수기 매핑
+                # 없이 상태축×챕터 성질(redirect 컬럼) 대조 결정론.
+                _dict_ok = not (processed and chapter in _raw_only)
+                if _dict_ok:
+                    score += 4.0
+                    self._AddScore(
+                        scores, scoreBreakdownByChapter, chapter=chapter,
+                        amount=4.0, source="dictionary_gate")
+                    self._AppendUnique(
+                        matchedByChapter.setdefault(chapter, []),
+                        f"dict:{_dict_chapters[chapter]}")
+                else:
+                    for _rd_d in self._SplitValues(
+                            row.get("prepared_food_redirect_chapters")):
+                        _rd_d = re.sub(r"\D", "", str(_rd_d))[:2]
+                        if len(_rd_d) == 2:
+                            self._AddScore(
+                                scores, scoreBreakdownByChapter,
+                                chapter=_rd_d, amount=4.0,
+                                source="dictionary_gate_redirect")
+                            self._AppendUnique(
+                                matchedByChapter.setdefault(_rd_d, []),
+                                f"dict_redirect:{_dict_chapters[chapter]}"
+                                f":{chapter}->{_rd_d}")
             if processed:
-                preparedScore = float(len(preparedMatches) * 2)
+                preparedScore = float(len(_prep_scored) * 2)
                 score += preparedScore
             else:
                 preparedScore = 0.0
@@ -534,7 +730,98 @@ class PreClassificationDomainRouter:
                 keywordMatches + rawMatches + preparedMatches + formMatches,
             )
 
-        rankedChapters = sorted(scores, key=lambda chapter: (-scores[chapter], chapter))
+        # [9회차 P2] 원료↔조제 동점의 이산 방향 규칙 — 법조 근거: 16류
+        # 주1(육·어류 등의 '조제(prepared) 식료품'은 2류·3류가 아니라
+        # 16류) 및 각 조제류 총설: 조리·조제 사실이 성립하면 조제류가
+        # 원료류에 우선한다. redirect 가족 내 동점에서만 발동 — 조제
+        # 신호(processed 판정: PROCESSED_SIGNAL_PATTERN + DTO typed
+        # override) 존재 → 조제 측(redirect 대상) 선두, 부재 → 원료 측.
+        # 코드순은 최후 폴백. 서명 redirect_tie:{prepared|raw}_first.
+        def _tie_dir(chapter: str) -> int:
+            if processed and chapter in _prep_side:
+                return 0
+            if (not processed) and chapter in _raw_only:
+                return 0
+            return 1
+
+        # [9회차 §2] 동점의 숫자순 해소 금지 — 상태 모순 강등(이산).
+        # DTO 상태가 cooked/prepared 계열(processed 판정)이면 원물 챕터는
+        # 동점에서 패배한다. '원물' 판정은 수기 목록이 아니라 redirect
+        # 컬럼 원천(_raw_side = prepared_food_redirect_chapters 보유 챕터)
+        # — 16류 주1(조제 식료품은 원료류가 아니라 16류) 계보의 라우터판.
+        # 코드순은 최후 폴백으로만 남는다(결정론 요건).
+        def _raw_loss(chapter: str) -> int:
+            return 1 if (processed and chapter in _raw_only) else 0
+
+        # [10회차-1B] 동점 보조키: 최장 '정체 구문' 매치 우위 — 구문 우선
+        # 원칙(층2)의 동점판. 떡볶이 실측: ch16 8.0('sauce' 유니그램) =
+        # ch19 8.0('prepared rice meal' 구문) 동점 코드순 납치의 처방.
+        # scope 계급(조리·상태 lane) 토큰만의 매치는 구문 길이 0 취급 —
+        # 수기 어휘 0 (lane·구문 길이 전부 기계 사실).
+        def _max_phrase(chapter: str) -> int:
+            best = 0
+            for _m_p in _kwByChapter.get(chapter, []):
+                _tk_p = str(_m_p).lower().split()
+                if all(tok in _scopeOwners for tok in _tk_p):
+                    continue
+                best = max(best, len(_tk_p))
+            return best
+
+        rankedChapters = sorted(
+            scores, key=lambda chapter: (
+                -scores[chapter], _raw_loss(chapter), _tie_dir(chapter),
+                -_max_phrase(chapter), chapter))
+        # [9회차 §2 보강] 유일-직격 챕터 창 입장권 — 정체 어휘('soup')를
+        # '유일 소유'로 직격한 챕터가 범용 4점 동점군에 밀려 시작창(:5)
+        # 밖으로 떨어지는 실측(재첩국 ch21 22위 → 2104 도달 불가)의 처방.
+        # 점수 불변·순위 5위 삽입(입장권만 — BTI 소환·G1 계보). 자격은
+        # 이산: 매치 중 유일-소유 토큰/구문 보유 ∧ §2 상태 강등 비대상.
+        # 서명 window_ticket:{챕터}. 최대 1석 — 창의 잡음 방지 원칙 보존.
+        if _l4_on:
+            def _has_unique_hit(ch_w: str) -> str:
+                # 자격 = '정체' 직격만 — 상태·조리 lane 어휘(_scopeOwners
+                # 원천: raw/prepared scope signals)는 입장권 불가('cooked'가
+                # ch20 직격 행세로 1석을 가로채 재첩국 ch21 'soup'를 다시
+                # 밀어낸 실측). lane 판정은 원천 컬럼 기반 — 수기 0.
+                for m_w in _kwByChapter.get(ch_w, []):
+                    toks_w = str(m_w).lower().split()
+                    if all(tok in _scopeOwners for tok in toks_w):
+                        continue
+                    if any(tok not in _ambiguous and tok not in _scopeOwners
+                           for tok in toks_w) or (
+                            len(toks_w) > 1 and len(
+                                _termOwners.get(str(m_w).lower(), ())) <= 1):
+                        return str(m_w)
+                return ""
+            _top5 = rankedChapters[:5]
+            _ticket = next(
+                (c_w for c_w in rankedChapters[5:]
+                 if scores.get(c_w, 0) > 0 and not _raw_loss(c_w)
+                 and _has_unique_hit(c_w)), "")
+            if _ticket:
+                rankedChapters = [*_top5[:4], _ticket,
+                                  *[c for c in rankedChapters[4:]
+                                    if c != _ticket]]
+                self._AppendUnique(
+                    matchedByChapter.setdefault(_ticket, []),
+                    ("window_ticket_prep:" if _ticket in _prep_side
+                     else "window_ticket:")
+                    + _has_unique_hit(_ticket))
+            # [기각 좌표] 창 '안' 조제 측 직격의 서명 일반화는 실측 기각
+            # — 면류(우동전골·칼국수)의 'soup' 부수 힌트가 21 동점 교대로
+            # 정답을 탈취(A/B 실측). 창밖 티켓(잃을 것 없는 구제)과 창안
+            # 개입(경쟁 지형 교란)의 비대칭 — 전복미역국(창안 21, 병합
+            # 서열 패배)은 병합 증거화(10회차)의 몫으로 귀속.
+        # 서명: 동점 그룹에서 방향 규칙이 실제 순서를 바꾼 챕터에 표기
+        for _i_r2, _ch_r2 in enumerate(rankedChapters):
+            _peers = [c for c in scores
+                      if scores[c] == scores[_ch_r2] and c != _ch_r2]
+            if _peers and _tie_dir(_ch_r2) == 0 and any(
+                    _tie_dir(c) == 1 and c < _ch_r2 for c in _peers):
+                self._AppendUnique(
+                    matchedByChapter.setdefault(_ch_r2, []),
+                    "redirect_tie:"
+                    + ("prepared_first" if processed else "raw_first"))
         candidateHs2 = tuple(rankedChapters[:5])
         matchedTerms: list[str] = []
         for chapter in candidateHs2:

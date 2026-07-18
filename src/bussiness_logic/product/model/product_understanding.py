@@ -40,6 +40,8 @@ class EncyclopediaEntryDto:
     description: str = field(metadata=_desc("백과사전 요약 설명"))
     link: str = field(metadata=_desc("백과사전 원문 링크"))
     contentHash: str = field(metadata=_desc("중복 제거용 콘텐츠 해시"))
+    grade: str = field(default="", metadata=_desc("승선 등급(strong/medium/weak)"))
+    gradeEvidence: str = field(default="", metadata=_desc("등급 근거 실물"))
 
     def ToTrace(self) -> dict[str, JsonValue]:
         return {
@@ -47,6 +49,8 @@ class EncyclopediaEntryDto:
             "description": self.description,
             "link": self.link,
             "content_hash": self.contentHash,
+            "grade": self.grade,
+            "grade_evidence": self.gradeEvidence,
         }
 
 

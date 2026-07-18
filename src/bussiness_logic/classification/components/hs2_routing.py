@@ -51,10 +51,18 @@ class Hs2RoutingComponent(BasePipelineComponent):
         compositionFacts = productUnderstanding.get("composition_facts") or {}
         if not isinstance(compositionFacts, dict):
             compositionFacts = {}
+        # [8회차-1 (다)] routing_terms 사장 필드 정리 — PU가 조립한
+        # routing_terms(진실원)를 그대로 소비한다. 종전엔 이 지점이 동일
+        # 내용을 재조립해 routing_terms가 소비자 0의 사장 필드였다
+        # (NONFOOD_PERCEPTION_AUTOPSY [2] 실측). 부재 시(구 캐시) 재조립 폴백.
+        _pu_routing_terms = [
+            str(x).strip() for x in
+            (productUnderstanding.get("routing_terms") or []) if str(x).strip()
+        ]
         routeInput = BuildPreClassificationRouteInput(
             productName=str(productUnderstanding.get("product_name") or ""),
             shortDescription="",
-            factTexts=(
+            factTexts=tuple(_pu_routing_terms) if _pu_routing_terms else (
                 str(identityLane.get("commercial_identity") or ""),
                 str(identityLane.get("translated_product_name") or ""),
                 str(identityLane.get("normalized_tariff_description") or ""),

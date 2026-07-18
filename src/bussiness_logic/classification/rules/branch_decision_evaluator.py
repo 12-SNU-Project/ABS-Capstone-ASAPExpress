@@ -116,7 +116,7 @@ def LoadBranchDecisions(
             rows = manager.FetchRows(
                 text(
                     'SELECT branch_id, seq, then_code, cond_type, dto_field, op,'
-                    ' value, source_text, role'
+                    ' value, source_text, role, grade'
                     ' FROM "branch_decision_index"'
                     " WHERE level = :level AND branch_id IN :parents AND version = :version"
                     " ORDER BY branch_id, seq"
@@ -396,9 +396,19 @@ def EvaluateCodeDecision(
             else:
                 why = "field_no_match"    # 필드는 찼는데 값 불일치 (어휘 갭/오답)
         answers.append(verdict)
-        detail.append({"cond": cond_type, "op": op, "verdict": verdict,
-                       "field": dto_field.split(";")[0][:40], "why": why,
-                       "value": str(cond.get("value") or "")[:80]})
+        det_entry = {"cond": cond_type, "op": op, "verdict": verdict,
+                     "field": dto_field.split(";")[0][:40], "why": why,
+                     "value": str(cond.get("value") or "")[:80]}
+        # [기록 의무화] 근거 등급은 항상 서명 — 판례(precedent)는 원천 사건
+        # 결정번호(source_text의 BTI: 접두)까지 병기한다 (UI 노출·감사 실물).
+        _grade = str(cond.get("grade") or "").strip()
+        if _grade:
+            det_entry["grade"] = _grade
+            if _grade == "precedent":
+                _src = str(cond.get("source_text") or "")
+                if _src.startswith("BTI:"):
+                    det_entry["refs"] = _src[4:].split(",")[:4]
+        detail.append(det_entry)
     if "false" in answers:
         return "violated", detail
     if answers and all(a == "true" for a in answers):

@@ -165,8 +165,25 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             productId=productId,
             productName=productName,
         )
+        # [8회차-1] 등급 승선제 원천: 법정 어휘 = cn_chapter_index 기계
+        # 도출(_chapter_vocab — 수기 목록 0) · 사전 표제 = 관세청 표준품명
+        # (term_bridge _load_dict ko 표제). 실패 시 빈 집합 = 전부 약 등급
+        # (기록 보존, 승선만 보수적).
+        try:
+            from bussiness_logic.product.services.identity_hint_agent import _scoped_chapter_vocab
+            _legal_vocab = _scoped_chapter_vocab()
+        except Exception:  # noqa: BLE001
+            _legal_vocab = frozenset()
+        try:
+            from bussiness_logic.product.services.term_bridge import _load_dict, _norm_key
+            _dict_titles = frozenset(
+                _norm_key(r.get("ko") or "") for r in _load_dict() if r.get("ko"))
+        except Exception:  # noqa: BLE001
+            _dict_titles = frozenset()
         encyclopediaEvidence = LookupEncyclopediaEvidence(
             encyclopediaEvidenceId=store.next_id("ency"),
+            legalVocab=_legal_vocab,
+            dictTitles=_dict_titles,
             productId=productId,
             query=productName,
         )
@@ -199,6 +216,25 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             reconstructedTables=reconstructedTables,
             coiEvidence=coiEvidence,
         )
+        # [8회차-1 (다)] 백과→조성 경로 개통 — 승선(강/중) 문서의 재질
+        # 서술 문장에서 법정 어휘 실등장분만 조성 토큰으로 (볼펜 steel/
+        # brass/tungsten carbide 유실 실측의 처방). 문장 탐지는 문법
+        # 패턴((나)급 — 규칙 대장 등재), 어휘 자격은 legalVocab(기계 도출)
+        # — 수기 도메인 어휘 0, 창작 0.
+        try:
+            _enc_terms, _enc_traces = self._EncyclopediaMaterialTerms(
+                encyclopediaEvidence, self._MaterialVocab() or _legal_vocab)
+            if _enc_terms:
+                import dataclasses as _dc
+                composition = _dc.replace(
+                    composition,
+                    compositionTerms=tuple(dict.fromkeys(
+                        (*composition.compositionTerms, *_enc_terms))),
+                    extractionTraces=(
+                        *composition.extractionTraces, *_enc_traces),
+                )
+        except Exception:  # noqa: BLE001 — 백과 조성 실패는 무영향
+            pass
         understandingId = store.next_id("under")
         productUnderstanding = ProductUnderstandingPackage(
             understandingId=understandingId,
@@ -463,6 +499,75 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         if result["identity_terms"]:
             overlay["identityTerms"] = result["identity_terms"]
         return dataclasses.replace(identity, **overlay)
+
+    _material_vocab_cache: list = []
+
+    @classmethod
+    def _MaterialVocab(cls) -> frozenset:
+        """재질 추출 어휘 — taxonomy CSV material_composition 패턴의
+        리터럴 대안을 기계 파싱 (수기 0, 원천 CSV 추종). 승선 스코프
+        어휘(소유 챕터 ≤3)는 다챕터 재질(steel 등)을 정당하게 배제하므로
+        재질 추출에는 패턴 실소유분을 쓴다."""
+        if cls._material_vocab_cache:
+            return cls._material_vocab_cache[0]
+        vocab: set[str] = set()
+        try:
+            import csv as _csv
+            from pathlib import Path as _Path
+            _p = _Path(__file__).resolve().parents[4] / "data" /                 "classification_criterion_taxonomy_20260702.csv"
+            for _r in _csv.DictReader(open(_p, encoding="utf-8-sig")):
+                if str(_r.get("criterion_type")) != "material_composition":
+                    continue
+                for _grp in re.findall(r"\(\?\:([^()]+)\)", str(_r.get("examples") or "")):
+                    for _alt in _grp.split("|"):
+                        _w = re.sub(r"[^a-z]", "", _alt.lower().replace("s?", ""))
+                        if len(_w) >= 3:
+                            vocab.add(_w)
+        except Exception:  # noqa: BLE001
+            vocab = set()
+        cls._material_vocab_cache.append(frozenset(vocab))
+        return cls._material_vocab_cache[0]
+
+    _MATERIAL_SENT_RX = re.compile(
+        r"(?:made\s+(?:up\s+)?of|consist(?:s|ing)?\s+of|composed\s+of|"
+        r"materials?\s+(?:commonly\s+)?used)", re.I)
+    _MATERIAL_TOK_RX = re.compile(r"[a-z]{3,}")
+    _MATERIAL_SPLIT_RX = re.compile(r"(?<=[.!?])\s+")
+
+    @staticmethod
+    def _EncyclopediaMaterialTerms(
+        encyclopediaEvidence: EncyclopediaEvidenceSet,
+        legalVocab: frozenset,
+    ) -> tuple[tuple[str, ...], tuple[CompositionExtractionTrace, ...]]:
+        """승선 문서의 재질 문장 → 법정 어휘 실등장 토큰만 조성 승선."""
+        terms: list[str] = []
+        traces: list[CompositionExtractionTrace] = []
+        if not legalVocab:
+            return (), ()
+        C = ProductUnderstandingComponent
+        for entry in encyclopediaEvidence.entries:
+            if str(getattr(entry, "grade", "") or "") not in ("strong", "medium"):
+                continue
+            for sent in C._MATERIAL_SPLIT_RX.split(str(entry.description or "")):
+                if not C._MATERIAL_SENT_RX.search(sent):
+                    continue
+                hits = [w for w in C._MATERIAL_TOK_RX.findall(sent.lower())
+                        if w in legalVocab and w not in terms]
+                if not hits:
+                    continue
+                terms.extend(hits)
+                traces.append(CompositionExtractionTrace(
+                    sourceFieldName="encyclopedia_evidence",
+                    sourceText=sent[:200],
+                    selectedSpan=", ".join(hits[:8]),
+                    outputField="composition_terms",
+                    normalizedValue=", ".join(hits[:8]),
+                    extractionMethod="encyclopedia_material_sentence",
+                    decisionReason="material sentence x legal vocab (grade "
+                                   + str(getattr(entry, "grade", "")) + ")",
+                    sourceRefs=(entry.link,),
+                ))
+        return tuple(terms[:12]), tuple(traces)
 
     @staticmethod
     def _BuildCompositionLane(

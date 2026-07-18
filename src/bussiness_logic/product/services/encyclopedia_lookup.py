@@ -27,25 +27,11 @@ WIKI_REQUEST_HEADERS = {
 TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"\s+")
 HANGUL_RE = re.compile(r"[가-힣]")
-# 한글 대안은 \b 밖에 둔다 — \b는 한글 복합어 내부 경계에서 성립하지
-# 않아('군만두' 속 '만두', '떡볶이' 속 '떡볶') 힌트가 사실상 불발됐다.
-FOOD_RELATED_HINT_RE = re.compile(
-    r"\b("
-    r"food|edible|beverage|juice|rice|seafood|fish|shrimp|prawn|octopus|squid|meat|beef|pork|"
-    r"vegetable|fruit|noodle|noodles|pasta|bread|soup|stew|broth|sauce|seasoning|sauce|fried|frozen|"
-    r"raw|cooked|grocery|ingredient|recipe|korean|chicken|lamb|cheese|milk|egg|dairy|meat|tuna|salmon"
-    r")\b"
-    r"|(?:만두|떡볶|떡|우동|라면|국수|국물|조림|조리|냉동|냉장|생선|어류|새우|주꾸미|쭈꾸미)",
-    re.I,
-)
-OFFTOPIC_RE = re.compile(
-    r"\b("
-    r"tv|television|drama|series|film|movie|anime|cartoon|comic|manhwa|manga|music|album|song|singer|"
-    r"musician|artist|band|character|bus|station|village|city|river|mountain|person|actor|actress|writer|"
-    r"place|company|organization|church|university|school|airport|hotel|restaurant|brand|logo|franchise"
-    r")\b",
-    re.I,
-)
+# [8회차-1 (가) 철거] FOOD_RELATED_HINT_RE(식품 화이트리스트)·OFFTOPIC_RE
+# (주제 블랙리스트) 전량 철거 — 정답 문서 기각 실측(Mechanical pencil
+# food_signal_mismatch, Diaper 본문 'person' offtopic) 근거. 기각의 폐지:
+# 문서는 버리지 않고 아래 등급 승선제(GradeWikipediaRow)가 등급만 부여한다.
+# 도메인 어휘 수기 재유입 금지 — 규칙 대장(handoff/RULE_LEDGER.md) 대조 감사.
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +49,8 @@ def LookupEncyclopediaEvidence(
     query: str,
     display: int = 3,
     timeoutSeconds: float = 10.0,
+    legalVocab: frozenset[str] = frozenset(),
+    dictTitles: frozenset[str] = frozenset(),
 ) -> EncyclopediaEvidenceSet:
     normalizedQuery = CleanEncyclopediaQuery(query)
     if not normalizedQuery:
@@ -75,67 +63,56 @@ def LookupEncyclopediaEvidence(
             qualityReasons=("empty_query",),
         )
 
-    rows: list[WikipediaSearchResult] = []
-    relevanceRejectedCount = 0
+    graded: list[tuple[WikipediaSearchResult, str, str]] = []
     searchError = ""
-    qualityStatus = "raw_entries"
-    qualityReasons = ("raw_not_routing_input",)
-    # Restored backup candidate fallback: brand/quantity-stripped full query
-    # first, then trailing dish-name suffixes ("압구정낙지 낙지 볶음" -> "낙지 볶음").
+    # [8회차-1] 등급 승선제 — 기각 없음. 후보열 순회: 강/중 문서가 나오는
+    # 첫 후보에서 확정, 없으면 첫 유효 후보의 약 등급 기록 보존.
+    weakFallback: list[tuple[WikipediaSearchResult, str, str]] = []
+    weakQuery = ""
     for candidate in _QueryCandidates(normalizedQuery):
         try:
-            rows, qualityStatus, qualityReasons = _lookup_candidate(
+            rows, _st, _rs = _lookup_candidate(
                 candidate,
                 limit=display,
                 timeoutSeconds=timeoutSeconds,
             )
-            filteredRows = []
-            for row in rows:
-                isRelevant, _ = _IsWikipediaRowRelevant(normalizedQuery, row)
-                if isRelevant:
-                    filteredRows.append(row)
-                else:
-                    relevanceRejectedCount += 1
-            rows = filteredRows
         except Exception as exc:  # noqa: BLE001 — keep lookup tolerant
             searchError = f"{type(exc).__name__}: {exc}"
             continue
-        if rows:
+        if not rows:
+            continue
+        searchError = ""
+        rowsGraded = [
+            (row, *GradeWikipediaRow(
+                candidate, row,
+                legalVocab=legalVocab, dictTitles=dictTitles))
+            for row in rows
+        ]
+        if any(g in ("strong", "medium") for _r, g, _e in rowsGraded):
+            graded = rowsGraded
             normalizedQuery = candidate
-            searchError = ""
             break
+        if not weakFallback:
+            weakFallback = rowsGraded
+            weakQuery = candidate
 
-    if not rows and searchError:
+    if not graded and weakFallback:
+        graded = weakFallback
+        normalizedQuery = weakQuery
+    if not graded:
         return EncyclopediaEvidenceSet(
             encyclopediaEvidenceId=encyclopediaEvidenceId,
             productId=productId,
             query=normalizedQuery,
             configured=True,
-            qualityStatus="error",
-            qualityReasons=("lookup_error",),
+            qualityStatus="error" if searchError else "no_result",
+            qualityReasons=("lookup_error",) if searchError else ("no_items",),
             error=searchError,
         )
 
-    if not rows:
-        if relevanceRejectedCount > 0:
-            return EncyclopediaEvidenceSet(
-                encyclopediaEvidenceId=encyclopediaEvidenceId,
-                productId=productId,
-                query=normalizedQuery,
-                configured=True,
-                qualityStatus="no_relevant_result",
-                qualityReasons=("relevance_guard_failed",),
-                entries=(),
-            )
-        return EncyclopediaEvidenceSet(
-            encyclopediaEvidenceId=encyclopediaEvidenceId,
-            productId=productId,
-            query=normalizedQuery,
-            configured=True,
-            qualityStatus="no_result",
-            qualityReasons=("no_items",),
-        )
-
+    counts = {"strong": 0, "medium": 0, "weak": 0}
+    for _r, g, _e in graded:
+        counts[g] = counts.get(g, 0) + 1
     return EncyclopediaEvidenceSet(
         encyclopediaEvidenceId=encyclopediaEvidenceId,
         productId=productId,
@@ -147,50 +124,74 @@ def LookupEncyclopediaEvidence(
                 description=row.snippet,
                 link=row.link,
                 contentHash=_HashEntry(row.title, row.description, row.snippet, row.link),
+                grade=grade,
+                gradeEvidence=evidence,
             )
-            for row in rows
+            for row, grade, evidence in graded
         ),
-        qualityStatus=qualityStatus,
-        qualityReasons=qualityReasons,
+        qualityStatus="graded_entries",
+        qualityReasons=(
+            "grade_boarding_v1",
+            f"strong={counts['strong']},medium={counts['medium']},weak={counts['weak']}",
+        ),
     )
 
 
-def _IsWikipediaRowRelevant(query: str, row: WikipediaSearchResult) -> tuple[bool, str]:
+def GradeWikipediaRow(
+    query: str,
+    row: WikipediaSearchResult,
+    *,
+    legalVocab: frozenset[str] = frozenset(),
+    dictTitles: frozenset[str] = frozenset(),
+) -> tuple[str, str]:
+    """[8회차-1] 등급 승선제 — 기각의 폐지. 전부 결정론, 수기 어휘 0.
+
+    강(strong): ko 표제가 쿼리 정규화 일치 또는 관세청 사전 표제 대응 →
+      전문 승선. 중(medium): 문서 en 토큰 ∩ 법정 서술 어휘(legalVocab —
+      cn_chapter_index 기계 도출, 수기 금지) ≥ 2 → 성립 대목만 승선.
+    약(weak): 무근거 → identity 입력 불승선, 근거 기록만 (전주 칼국수
+      도시 문서 하이재킹의 방어를 가드 대신 이 불승선이 승계한다).
+    등급의 소비는 identity 프롬프트 조립·근거 표시 2곳 한정 — 결정층
+    자격은 D3 단독 소유(이중 판정 금지).
+    """
     queryText = str(query or "").strip()
-    candidateText = f"{row.title} {row.description} {row.snippet}"
     if not queryText:
-        return False, "empty_query"
+        return "weak", "empty_query"
+    # ko 표제 = _search_korean_wikipedia_as_english가 description 선두에
+    # 실은 koreanTitle (row 구성 계약, :318-329)
+    koTitle = str(row.description or "").split(" ")[0].strip()
+    normQ = re.sub(r"\s+", "", queryText)
+    normT = re.sub(r"\s+", "", koTitle)
+    if normT and (normT == normQ or normT in dictTitles):
+        return "strong", f"title_match:{koTitle}"
+    enToks = _Tokenize(f"{row.title} {row.snippet}") - {
+        t for t in _Tokenize(f"{row.title} {row.snippet}") if HANGUL_RE.search(t)}
+    hits = sorted(enToks & legalVocab)
+    # 중의 연결 전제: ko 표제·쿼리의 2자+ 연속 한글 공유(문자열 연산 —
+    # 수기 어휘 0). 법정 어휘만으로는 '무관 문서가 자기 도메인 어휘로
+    # 승선'하는 남발이 실측됨(수제비→Homemade firearm '사제 총기').
+    # 샤프심↔'샤프 펜슬'(샤프)·기저귀↔'기저귀'는 통과, 수제비↔'수비수'는
+    # 공유 2자 부재로 차단.
+    if len(hits) >= 2 and _KoLinked(queryText, koTitle):
+        return "medium", "legal_vocab:" + ",".join(hits[:6])
+    # 전 매치 한국어 표제 겹침(구 가드의 query_overlap)은 강·중 근거가
+    # 아니면 등급을 만들지 않는다 — 관계어('이상') 겹침 통과 사고의 처방.
+    return "weak", ("legal_vocab_hits:" + ",".join(hits[:2])) if hits else "no_ground"
 
-    if OFFTOPIC_RE.search(candidateText) and not FOOD_RELATED_HINT_RE.search(candidateText):
-        return False, "offtopic_pattern"
 
-    if _ContainsHangul(queryText):
-        if _HasKoreanOverlap(queryText, candidateText):
-            return True, "query_overlap"
-        if FOOD_RELATED_HINT_RE.search(queryText) and FOOD_RELATED_HINT_RE.search(candidateText):
-            return True, "food_signal_overlap"
-        return False, "food_signal_mismatch"
-    if _HasOverlap(queryText, candidateText):
-        return True, "token_overlap"
-    if FOOD_RELATED_HINT_RE.search(candidateText):
-        return True, "food_signal_fallback"
-    return False, "generic_non_food"
+def _KoLinked(query: str, koTitle: str) -> bool:
+    """2자 이상 연속 한글 공유 — 문서·상품 연결의 최소 전제 (문자열 연산)."""
+    q = re.sub(r"[^가-힣]", "", str(query or ""))
+    ti = re.sub(r"[^가-힣]", "", str(koTitle or ""))
+    if len(q) < 2 or len(ti) < 2:
+        return not q or not ti  # 한글 부재(영문 쿼리 등)면 전제 면제
+    return any(q[i:i + 2] in ti for i in range(len(q) - 1))
 
 
 def _HasKoreanOverlap(left: str, right: str) -> bool:
     leftTokens = _Tokenize(left)
     rightTokens = _Tokenize(right)
-    if leftTokens.intersection(rightTokens):
-        return True
-    # 한글 복합어는 토큰 완전 일치가 안 된다 — '설기' 질의가 문서 제목
-    # '백설기'를 만나도 교집합이 비어 관련성 가드가 기각했다(실측).
-    # 어느 쪽이든 한쪽 토큰(≥2자)이 반대쪽 토큰에 통째로 포함되면 겹침.
-    for lt in leftTokens:
-        if HANGUL_RE.search(lt):
-            for rt in rightTokens:
-                if len(lt) >= 2 and len(rt) >= 2 and (lt in rt or rt in lt):
-                    return True
-    return False
+    return bool(leftTokens.intersection(rightTokens))
 
 
 def _HasOverlap(left: str, right: str) -> bool:
@@ -212,11 +213,17 @@ def CleanEncyclopediaQuery(value: str) -> str:
     """
     text = re.sub(r"\[[^\]]+\]", " ", str(value or ""))
     text = re.sub(r"\([^)]*\)", " ", text)
-    text = re.sub(r"\b\d+(?:\.\d+)?\s*(?:g|kg|ml|l|개입|팩|종|인분)\b", " ", text, flags=re.I)
-    text = re.sub(r"(?:택\s*1|택1|냉동|냉장|상온|간편|프리미엄)", " ", text)
-    # 수량 표기가 지워진 뒤 남는 홑 기호·1자 라틴 토큰("85g X 5개입"의
-    # 'X', '×') — 검색 잡음이라 제거. 한글 1자는 건드리지 않는다(밤·김).
+    # (나) 문법·연산어 — 단위·치수·관계어(수량 문법 lane, 규칙 대장 등재).
+    # 치수(mm/cm)는 쿼리 노이즈로만 스트립하되 fact 자체는 DTO 치수 슬롯
+    # 소관(G-7). 관계어(이상/이하/미만/초과)는 표제 승격 사고의 원인
+    # (샤프심→'이상 샤프심'→이상심리학 실측)이라 쿼리에서 제거.
+    text = re.sub(r"\b\d+(?:\.\d+)?\s*(?:g|kg|ml|l|mm|cm|개입|팩|종|인분)\b", " ", text, flags=re.I)
+    text = re.sub(r"(?:^|\s)(?:이상|이하|미만|초과|택\s*1|택1)(?=\s|$)", " ", text)
+    # [메인 병합 보존] 수량 표기 제거 후 남는 홑 기호·1자 라틴('X','×') —
+    # 검색 잡음. 한글 1자는 보존(밤·김).
     text = re.sub(r"(?<!\S)[A-Za-z×*+&/-](?!\S)", " ", text)
+    # [8회차-1 (가) 철거] 한글 마케팅어 목록(냉동·냉장·상온·간편·프리미엄)
+    # 삭제 — 도메인 편향 어휘. 상태어는 지각 fact lane 소관.
     return re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip(" -_/|")
 
 
@@ -324,10 +331,10 @@ def _search_korean_wikipedia_as_english(
             timeoutSeconds=timeoutSeconds,
         )
         if not englishTitle:
-            # en 문서 부재 = 폐기가 아니라 ko 원문 승선 — 백설기처럼 영문
-            # 인터위키가 없는 한식 문서의 제목·설명(주요 재료 서술)이
-            # identity LLM의 발산 증거가 된다 (닫힌 사상 번역은 하류
-            # term_bridge 몫 — 여기서 LLM 번역 금지 원칙 유지).
+            # [메인 병합 보존] en 인터위키 부재 = 폐기가 아니라 ko 원문 승선
+            # (백설기 실측). 승선 자격은 아래 등급제(GradeWikipediaRow)가
+            # ko 표제 일치/법정 어휘 교차로 판정 — 여기서 버리면 등급제가
+            # 볼 기회 자체가 없다.
             koFallbackRows.append(
                 WikipediaSearchResult(
                     title=koreanTitle,
@@ -358,8 +365,6 @@ def _search_korean_wikipedia_as_english(
                 link=link,
             ),
         )
-    # 번역(langlink) 행이 하나도 없을 때만 ko 원문 행으로 대체 — 영문
-    # 행이 있으면 그쪽이 항상 우선(기존 동작 보존).
     return rows or koFallbackRows[:limit]
 
 

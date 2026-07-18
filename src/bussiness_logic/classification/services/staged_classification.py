@@ -95,6 +95,20 @@ _STATE_ARM_LEXICON = frozenset({
     "frozen", "fresh", "chilled", "live", "dried", "dehydrated", "salted",
     "brine", "smoked", "cooked", "uncooked", "boiled", "steamed", "raw",
 })
+# [7회차-1 FORMSET] 형태 arm 어휘 — 컴파일러 _FORM_LEXICON과 동일 집합
+# (physical_form 패턴 실소유분만). FORMSET 라벨 집합의 모순 자격 심사
+# 전용 — 감점·가산 없음, 상태 게이트와 같은 자격 박탈 계보.
+_FORM_ARM_LEXICON = frozenset({
+    "whole", "broken", "powder", "granule", "flake", "pellet", "paste",
+    "liquid", "solid", "sheet", "plate", "bar", "rod", "tube", "pipe",
+})
+# [8회차-4] 재질 arm 어휘 — 컴파일러 _MATERIAL_LEXICON과 동일 집합
+# (비식품 재질만 — 식품 재질은 함유 조건 지대라 모순 심사 불참)
+_MATERIAL_ARM_LEXICON = frozenset({
+    "steel", "iron", "aluminium", "copper", "nickel", "zinc", "tin",
+    "lead", "plastic", "rubber", "wood", "paper", "glass", "ceramic",
+    "cotton", "wool", "silk", "textile", "leather", "stone",
+})
 LEVELS = (("hs4", 4), ("hs6", 6), ("cn8", 8))
 _TOKEN = re.compile(r"[a-z0-9]+")
 
@@ -141,6 +155,15 @@ def _negated_tokens(label: str) -> set[str]:
     treated as a negation.
     """
     cleaned = _WHETHER_OR_NOT_RE.sub(" ", str(label or "").lower())
+    # [9회차 [2]] 교차참조 배제절은 부정이 아니다 — 'other than pencils
+    # of heading 9608'은 코드 간 경계 참조(그 heading의 물품)이지 상품
+    # 어휘의 부정이 아니다. heading/chapter+코드 숫자가 실린 절을 부정
+    # 수확 전에 제거 (9609가 자기 정체어 pencil로 0점 되던 실측 처방 —
+    # 문법 연산, 규칙 대장 등재).
+    cleaned = re.sub(
+        r"(?:other\s+than|excluding|except)[^,;.()]*"
+        r"(?:heading|chapter)\s*\d{2,4}[^,;.()]*",
+        " ", cleaned)
     out: set[str] = set()
     for match in _NEGATION_RE.finditer(cleaned):
         out |= _tokens(match.group(1))
@@ -289,6 +312,125 @@ def _quantitative_verdict(descr: str, percentages: list[Any]) -> dict[str, Any]:
     return {"verdict": "neutral", "reason": "indeterminate"}
 
 
+_BTI_RECALL_CACHE: dict | None = None
+
+
+def _bti_recall_index() -> dict:
+    """컴파일 시점 빌드된 BM25 인덱스(DB/artifacts/bti_recall_index.json).
+
+    부재 = 소환층 전체 no-op. 코퍼스 고정 — 런타임은 사칙연산만(결정론).
+    """
+    global _BTI_RECALL_CACHE
+    if _BTI_RECALL_CACHE is None:
+        import pathlib
+        try:
+            path = (pathlib.Path(__file__).resolve().parents[3]
+                    ).parent / "DB" / "artifacts" / "bti_recall_index.json"
+            _BTI_RECALL_CACHE = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            _BTI_RECALL_CACHE = {}
+    return _BTI_RECALL_CACHE
+
+
+def _bti_summon(scope_prefixes: list[str], q_primary: set, q_all: set,
+                cut: int, existing: set) -> dict | None:
+    """[7회차-3] BTI 후보 소환 — BM25 추림 + 이산 발동 (스펙 확정판).
+
+    scope_prefixes: '그 단계 진입 시점의 생존 후보 접두 집합'(복수 —
+      hs4 stall은 allowed_hs2 전체, 이하는 생존 상위 코드들. 필수 1)
+    q_primary: 법정 어휘 병기분 우선 쿼리(term_bridge EN 병기·term_aliases·
+      NTD·identity 영문 — 필수 2. 서명에 매치 실물로 남긴다)
+    q_all: q_primary + raw DTO 토큰(보조 — 한글은 영문 코퍼스와 교차 0)
+    cut: stall 레벨 자릿수만 소비(staged narrowing 주권 — 요구 3)
+    existing: 현행 트리 실존 절단 코드 집합(개정 시차 — 요구 5)
+
+    역할 격리(설계자 확정): BM25는 후보 사건 상위 N **추림 전용**이다.
+    발동 판정은 이산 요건만 — ①공유 '구문 전 토큰 일치' 사건 수 k≥2
+    (ASAP_BTI_K, 민감도 표는 k축만) ②절단 코드 반례 0. BM25 점수는 판정
+    입력이 될 수 없다(점수 임계 발동 금지 — 튜닝 손잡이 차단). 인덱스의
+    컴파일 시점 빌드는 '사전 각인 금지'와 무모순 — 금지 대상은 판례→코드
+    매핑 각인이고 인덱스는 검색 구조다. 오확정 지대는 소환이 아니라 강등
+    장치(D3 백과 상한·상태 모순·typed 게이트)의 몫(요구 6 의존 관계).
+    산출은 입장권+지지까지 — 확정 자격 없음.
+    """
+    idx = _bti_recall_index()
+    cases = idx.get("cases") or []
+    if not cases or not q_all:
+        return None
+    df = idx.get("df") or {}
+    n_docs = float(idx.get("n_docs") or 1)
+    avg_len = float(idx.get("avg_len") or 1.0)
+    import math
+    k1, b = 1.2, 0.75
+    scored = []
+    for i, c in enumerate(cases):
+        cn8 = str(c.get("cn8") or "")
+        if not any(cn8.startswith(p2) for p2 in scope_prefixes):
+            continue  # 경계 밖 판례는 조회 자체 금지(납치 원천 차단)
+        toks = c.get("toks") or []
+        overlap = [t for t in toks if t in q_all]
+        if not overlap:
+            continue
+        dl = len(toks) or 1
+        score = 0.0
+        for t in overlap:
+            idf = math.log(1.0 + (n_docs - df.get(t, 0) + 0.5)
+                           / (df.get(t, 0) + 0.5))
+            score += idf * (k1 + 1) / (1 + k1 * (1 - b + b * dl / avg_len))
+        scored.append((-score, i, cn8[:cut], c))
+    if not scored:
+        # [기록 의무화 07-18 — 메인 그래프트 재이식] 침묵도 근거다 —
+        # 시도 사실·사유 서명(UI 노출·감사, 판정 불변: code=""는 발동 아님).
+        return {"code": "", "refs": [], "matched": [], "distribution": {},
+                "silence": "no_lexical_overlap"}
+    scored.sort()
+    shortlist = scored[:20]  # 추림 전용 — 이하 판정에 score 불참
+    # 이산 발동: 구문 '전 토큰' 동시 존재 사건만 (부분 토큰 잡음 차단 —
+    # _phrase_sets 계보). 매치 구문은 서명 실물.
+    hits: list[tuple[str, dict, list[str]]] = []
+    for _s, _i, code_c, c in shortlist:
+        full = [ph for ph in (c.get("phrases") or [])
+                if ph and all(t in q_all for t in ph.split())]
+        if full:
+            hits.append((code_c, c, full))
+    if not hits:
+        return {"code": "", "refs": [], "matched": [], "distribution": {},
+                "silence": "no_phrase_match",
+                "shortlist_n": len(shortlist)}  # 침묵 — 공유 구문 일치 사건 0
+    dist: dict[str, int] = {}
+    for code_c, _c, _f in hits:
+        dist[code_c] = dist.get(code_c, 0) + 1
+    # [기록 의무화 — 메인 그래프트 재이식] 침묵 경로도 근거 판례(refs)·
+    # 매치 구문 서명 — 어떤 사건이 분포를 만들었는지가 UI·감사 실물.
+    refs = list(dict.fromkeys(c["ref"] for _cc, c, _f in hits))
+    phrases = sorted({ph for _cc, _c, full in hits for ph in full})[:6]
+    matched = sorted({t for ph in phrases for t in ph.split()})[:8]
+    if len(dist) != 1:
+        return {"code": "", "refs": refs[:4], "matched": matched,
+                "phrases": phrases, "distribution": dist,
+                "silence": "distribution_split"}  # 반례 존재 — 유보(C안 몫)
+    code_w = next(iter(dist))
+    if existing and code_w not in existing:
+        return {"code": "", "refs": refs[:4], "matched": matched,
+                "phrases": phrases, "distribution": dist,
+                "not_in_tree": code_w,
+                "silence": "not_in_tree"}  # 실존 검증 실패(개정 시차) — 유보
+    try:
+        k_min = int((os.environ.get("ASAP_BTI_K", "2") or "2").strip())
+    except ValueError:
+        k_min = 2
+    if len(refs) < k_min:
+        return {"code": "", "refs": refs[:4], "matched": matched,
+                "phrases": phrases, "distribution": dist, "k": len(refs),
+                "silence": "k_below_min"}  # 침묵 규율 — k 하향 금지(기본 2)
+    return {"code": code_w, "refs": refs[:4], "matched": matched,
+            "phrases": phrases, "k": len(refs),
+            "primary_matched": sorted(
+                {t for t in matched if t in q_primary})[:6],
+            "counter": 0, "distribution": dist,
+            "shortlist_n": len(shortlist)}
+
+
 class StagedClassificationTool:
     tool_name = "StagedClassificationTool"
 
@@ -355,6 +497,34 @@ class StagedClassificationTool:
         recovery_candidates: list[dict[str, Any]] = []
         route_disagreements: list[dict[str, Any]] = []
         merge_gate_observations: list[dict[str, Any]] = []
+        bti_summons: list[dict[str, Any]] = []
+        # [10회차-1A] hs4 판별 축 지도 — 최종 병합의 정체 직격 서열 판정용
+        _hs4_axis: dict[str, str] = {}
+        # [7회차-2 G1] 라우터 신뢰 게이트 — 창밖 회수 (조건부 승인 반영).
+        # 부검 실측: 병합 유실 16건 중 11건이 시작 창 [:5] 컷으로 정답
+        # 챕터 미스캔(볼펜 지각·vocab 양존인데 0회). 기본 observe(관측만),
+        # ASAP_ROUTER_TRUST_GATE=1 ON(입장권 추가)/0 OFF. ON 실험은 비식품
+        # 실험장 + 22캐시·coi50 기준선 유지 조건.
+        _rt_gate = (os.environ.get(
+            "ASAP_ROUTER_TRUST_GATE", "observe") or "observe").strip().lower()
+        router_trust_obs: list[dict[str, Any]] = []
+        # 직격 어휘 = 백과 '제목'+상업 정체만 — 본문 서술 토큰은 오동의
+        # 오염원(탐폰→'Tampon Run' 비디오게임 실측)이라 불참.
+        # lane 확정(오염 실측 반영): identity_hints.commercial_identity는
+        # 백과 '본문 요약' 성격이라 오동의를 그대로 승계한다(탐폰
+        # ih.ci='video game' 실측). 원문 직역(translated_product_name)과
+        # 백과 '제목'(distilled source_titles/commercial_identity)만 소비.
+        _rt_title_toks: set = set()
+        for _p_t in ("identity_hints.translated_product_name",
+                     "distilled_identity.commercial_identity",
+                     "distilled_identity.source_titles"):
+            for _v_t in _string_values(_dig(product_facts, _p_t)):
+                _rt_title_toks |= {t_t for t_t in _tokens(_v_t)
+                                   if t_t.isascii()}
+        _RT_GENERIC = frozenset({
+            "other", "article", "part", "similar", "product", "products",
+            "preparation", "accessory", "material", "the", "and", "for"})
+        _rt_title_toks -= _RT_GENERIC
         # chapter_hint_terms stay ON at hs4 (default): retiring them was
         # A/B-measured at staged-only hs4 36% -> 24% — the hints carry live
         # heading evidence ("noodles", "molluscs") alongside the chapter-
@@ -385,6 +555,15 @@ class StagedClassificationTool:
                         decisions_by_parent = LoadBranchDecisions(level, tuple(parents))
                     except Exception:  # noqa: BLE001 — 사이드카 부재 = 계층 off
                         decisions_by_parent = {}
+                    if level == "hs4":
+                        for _p_ax, _codes_ax in (decisions_by_parent or {}).items():
+                            for _c_ax, _rows_ax in (_codes_ax or {}).items():
+                                for _r_ax in _rows_ax:
+                                    if str(_r_ax.get("role")) == "discriminator":
+                                        _hs4_axis.setdefault(
+                                            str(_c_ax),
+                                            str(_r_ax.get("cond_type") or ""))
+                                        break
                 predicates_by_code = {}
                 if (os.environ.get("ASAP_STAGED_PREDICATES", "1") or "").strip().lower() not in (
                     "0", "false", "no", "off",
@@ -411,6 +590,83 @@ class StagedClassificationTool:
                     _obs = _e_obs.pop("_merge_gate_obs", None)
                     if _obs:
                         merge_gate_observations.append({"level": level, **_obs})
+                # [7회차-3] BTI 후보 소환 — 발동은 '해당 단계 전원 증거 0'
+                # (stall)일 때만. scope=현 부모 접두 집합(후보 풀 잠금),
+                # 판례 결정번호는 이 레벨 자릿수만 소비(staged 주권), 소환
+                # 코드는 현행 분기(branch rows) 실존 검증(판례 개정 시차).
+                # 산출 = 입장권(다음 병합 참여)뿐 — 지지는 기존 판례 행
+                # (+3), 서열은 기존 기제·A 3중 전제. ASAP_BTI_RECALL=0 복귀.
+                if ((os.environ.get("ASAP_BTI_RECALL", "1") or "1").strip()
+                        != "0" and ranked):
+                    def _no_evidence(e2: dict[str, Any]) -> bool:
+                        if float(e2.get("score") or 0.0) > 0:
+                            return False
+                        if e2.get("decision") == "confirmed":
+                            return False
+                        if any(d2.get("verdict") == "true"
+                               for d2 in e2.get("decision_detail") or []):
+                            return False
+                        return not any(
+                            pr2.get("verdict") == "true"
+                            for pr2 in e2.get("predicate_results") or [])
+                    if all(_no_evidence(e2) for e2 in ranked):
+                        q_toks: set = set()
+                        for vals2 in level_facts.values():
+                            for v2 in vals2:
+                                q_toks |= _tokens(v2)
+                        # [필수 2] 법정 어휘 병기분 우선 쿼리 — term_bridge
+                        # 산출(EN 병기·term_aliases)+NTD+identity 영문.
+                        # raw 한글 fact만으로는 유럽 판례와 교차 0([A]
+                        # 자연발동 0 실측) — Track 2 사전 개선이 소환
+                        # 재현율로 연동되는 구조.
+                        q_pri: set = set()
+                        for e3 in (_dig(product_facts,
+                                        "composition_facts.ingredient_entries")
+                                   or []):
+                            if not isinstance(e3, dict):
+                                continue
+                            for a3 in (e3.get("term_aliases") or []):
+                                q_pri |= _tokens(a3)
+                            nm3 = str(e3.get("ingredient_name") or "")
+                            if " / " in nm3:  # 원문 / EN 병기의 EN부
+                                q_pri |= _tokens(nm3.split(" / ", 1)[1])
+                        for p3 in ("identity_hints.normalized_tariff_description",
+                                   "identity_hints.identity_terms"):
+                            for v3 in _string_values(_dig(product_facts, p3)):
+                                q_pri |= {t3 for t3 in _tokens(v3)
+                                          if t3.isascii()}
+                        # [필수 1] scope = 그 단계 진입 시점의 생존 후보
+                        # 접두 집합 — hs4 stall은 라우터 allowed 전체(시작
+                        # 창 [:5] 락인을 소환이 상속하면 회수력 반감),
+                        # 이하는 생존 상위 코드들.
+                        if level == "hs4":
+                            scope3 = [
+                                _digits(c3.get("chapter")
+                                        if isinstance(c3, dict) else c3,
+                                        limit=2)
+                                for c3 in (routing_context.get("allowed_hs2")
+                                           or routing_context.get("candidate_hs2")
+                                           or [])]
+                            scope3 = [s3 for s3 in scope3 if len(s3) == 2] \
+                                or [str(p2) for p2 in parents]
+                        else:
+                            scope3 = [str(p2) for p2 in parents]
+                        summon = _bti_summon(
+                            scope3, q_pri, q_pri | q_toks,
+                            prefix_len, set())
+                        if summon is not None:
+                            record = {"level": level, **summon}
+                            if summon.get("code"):
+                                chk = self._load_branch_rows(
+                                    level, [summon["code"][:prefix_len - 2]])
+                                if any(_digits(r2.get("code"), limit=prefix_len)
+                                       == summon["code"] for r2 in chk):
+                                    record["summoned_by"] = (
+                                        "BTI:" + ",".join(summon["refs"]))
+                                else:
+                                    record["code"] = ""
+                                    record["not_in_tree"] = summon["code"]
+                            bti_summons.append(record)
             else:
                 children = self._load_children(parents, prefix_len)
                 if not children:
@@ -444,6 +700,145 @@ class StagedClassificationTool:
                         })
                     ranked = [r for r in ranked if r not in inherited] + inherited
             full_ranked = ranked
+            # [7회차-2 G1] 창밖 회수 — hs4 전용. 발동·직격 요건 전부 이산
+            # (점수 입력 0): 선두가 ①1급 확정(confirmed) 미보유 ②제목·
+            # 상업정체 비범용 직격 미보유일 때만, 라우터 허용 '전' 챕터의
+            # hs4 vocab을 스캔해 '직격 토큰 ≥2 or 유일 직격' hs4에 입장권.
+            # 비용 주석(승인 조건 ③): 발동시에만 1회 추가 인덱스 로드 —
+            # hs4 전행 ~1.2k 행 상한, stall 지형 한정이라 상시 비용 0.
+            if (_rt_gate != "0" and _rt_title_toks
+                    and ranked and branch_rows):
+                _rt_leader = ranked[0]
+                _rt_row_toks: dict[str, set] = {}
+                for _r_b in branch_rows:
+                    _c_b = _digits(_r_b.get("code"), limit=prefix_len)
+                    _rt_row_toks[_c_b] = _tokens(
+                        str(_r_b.get("positive_terms") or "").replace(";", " "))
+                _leader_hit = (_rt_title_toks
+                               & _rt_row_toks.get(_rt_leader["code"], set()))
+                # 발동 전제 강화(식품 observe 실측 반영): 선두에 결정층·
+                # 술어 true가 하나라도 있으면 G2 불참 — 질문 계층 실증거
+                # 보유 선두(청양고추 0710 true×1)는 '증거 0 선두'가 아니다.
+                _rt_leader_true = (
+                    any(d5.get("verdict") == "true"
+                        for d5 in _rt_leader.get("decision_detail") or [])
+                    or any(p5.get("verdict") == "true"
+                           for p5 in _rt_leader.get("predicate_results") or []))
+                _rt_stalled = (_rt_leader.get("decision") != "confirmed"
+                               and not _leader_hit
+                               and not _rt_leader_true)
+                # [G2] 승자 자격 — 경쟁 풀(동일 ranked + G1 창밖 직격 후보)
+                # 에서 '비범용 직격 ≥2 or 유일 직격' 보유자로 선두 교대.
+                # demote-not-penalize: 점수·풀 불변, 순서 1자리만. violated
+                # 수혜 금지·confirmed 선두 불가침. 임계 0(전부 이산 사실).
+                _g2_pool: list[tuple[str, set, int]] = []
+                # G2도 hs4 한정 — 라우터 신뢰 게이트는 '챕터 선택' 레벨의
+                # 장치다. hs6+에서의 단독 직격은 재질·부품 어휘 함정이
+                # 실측됨(만년필 'pen'→8304 트레이, 샤프심 'lead'→7806
+                # 납제품): 가족 내부 서열은 기존 기제 소관.
+                if _rt_stalled and level == "hs4":
+                    for _i_r, _r_g in enumerate(ranked[1:], 1):
+                        if _r_g.get("decision") == "violated":
+                            continue
+                        # 같은 분기 형제 제외 — 잔반(Other) 정답 vs named
+                        # 형제의 직격 경쟁은 소거 기제(_proven·post-pass)
+                        # 소관이다. G2는 가족(부모) 단위 신뢰 게이트
+                        # (실측: 07108059 정답 잔반이 8051 'pepper' 직격에
+                        # 축출되는 회귀를 이 제외가 막는다).
+                        if (_r_g["code"][:prefix_len - 2]
+                                == _rt_leader["code"][:prefix_len - 2]):
+                            continue
+                        _d_g = ((_rt_title_toks - _RT_GENERIC)
+                                & _rt_row_toks.get(_r_g["code"], set()))
+                        if _d_g:
+                            _g2_pool.append((_r_g["code"], _d_g, _i_r))
+                if (level == "hs4" and _rt_stalled):
+                    _sc_chs = [
+                        _digits(c4.get("chapter")
+                                if isinstance(c4, dict) else c4, limit=2)
+                        for c4 in (routing_context.get("allowed_hs2")
+                                   or routing_context.get("candidate_hs2")
+                                   or [])]
+                    _sc_chs = [c4 for c4 in dict.fromkeys(_sc_chs)
+                               if len(c4) == 2 and c4 not in set(parents)]
+                    if _sc_chs:
+                        _scan_rows = self._load_branch_rows("hs4", _sc_chs)
+                        _hit_by_code: dict[str, set] = {}
+                        _tok_codes: dict[str, set] = {}
+                        for _r_s in _scan_rows or ():
+                            _c_s = _digits(_r_s.get("code"), limit=4)
+                            _d_s = (_rt_title_toks - _RT_GENERIC) & _tokens(
+                                str(_r_s.get("positive_terms") or ""
+                                    ).replace(";", " "))
+                            if _d_s:
+                                _hit_by_code[_c_s] = (
+                                    _hit_by_code.get(_c_s, set()) | _d_s)
+                                for _t_s in _d_s:
+                                    _tok_codes.setdefault(_t_s, set()).add(_c_s)
+                        _quals = []
+                        for _c_s, _d_s in _hit_by_code.items():
+                            _sole = any(len(_tok_codes[_t_s]) == 1
+                                        for _t_s in _d_s)
+                            if len(_d_s) >= 2 or (len(_d_s) == 1 and _sole):
+                                _quals.append((-len(_d_s), _c_s,
+                                               sorted(_d_s)))
+                        _quals.sort()
+                        _quals = _quals[:3]
+                        if _quals:
+                            _obs_rt = {
+                                "level": level, "mode": _rt_gate,
+                                "leader": _rt_leader["code"],
+                                "candidates": [
+                                    {"code": _c_s, "tokens": _d_s}
+                                    for _n_s, _c_s, _d_s in _quals],
+                            }
+                            router_trust_obs.append(_obs_rt)
+                            for _n_s, _c_s, _d_s in _quals:
+                                _g2_pool.append((_c_s, set(_d_s), 10_000))
+            if (_rt_gate != "0" and ranked and branch_rows
+                    and _rt_title_toks and _rt_stalled and _g2_pool):
+                _tok_owner: dict[str, set] = {}
+                for _c_g, _d_g, _i_g in _g2_pool:
+                    for _t_g in _d_g:
+                        _tok_owner.setdefault(_t_g, set()).add(_c_g)
+                _g2_quals = []
+                for _c_g, _d_g, _i_g in _g2_pool:
+                    _sole_g = any(len(_tok_owner[_t_g]) == 1 for _t_g in _d_g)
+                    if len(_d_g) >= 2 or (len(_d_g) == 1 and _sole_g):
+                        _g2_quals.append((-len(_d_g), _i_g, _c_g,
+                                          sorted(_d_g)))
+                # 단독 우세 요건(생리대 실측 반영): 최다 직격이 동수로
+                # 복수 코드에 걸리면 침묵 — 다수 소유 직격은 판별력이
+                # 없고, 코드순 임의 선택은 이산 원칙 위반(7418 구리
+                # 위생용품이 'pad,sanitary' 동수로 9619를 가로채는 오방향
+                # 교대 관측). G1 입장권은 복수 유지 — 서열은 하류 증거 몫.
+                if _g2_quals:
+                    _g2_quals.sort()
+                    _best_n = _g2_quals[0][0]
+                    if sum(1 for _q_g in _g2_quals
+                           if _q_g[0] == _best_n) > 1:
+                        _g2_quals = []
+                if _g2_quals:
+                    _n_g, _i_g, _c_g, _d_g = _g2_quals[0]
+                    _obs_g2 = {
+                        "level": level, "mode": _rt_gate, "gate": "G2",
+                        "leader": ranked[0]["code"],
+                        "new_leader": _c_g, "tokens": _d_g,
+                        "would_change": _c_g != ranked[0]["code"],
+                    }
+                    router_trust_obs.append(_obs_g2)
+                    if _rt_gate == "1" and _c_g != ranked[0]["code"]:
+                        _obs_g2["applied"] = _c_g
+                        _hit_g = next((r5 for r5 in ranked
+                                       if r5["code"] == _c_g), None)
+                        if _hit_g is None:
+                            _hit_g = {"code": _c_g, "score": 0.0,
+                                      "decision": "undecided",
+                                      "router_trust_entry": ",".join(_d_g)}
+                        else:
+                            ranked.remove(_hit_g)
+                        _hit_g["router_trust_gate"] = "G2:" + ",".join(_d_g)
+                        ranked.insert(0, _hit_g)
             level_score_maps[level] = {r["code"]: float(r["score"]) for r in full_ranked}
             ancestor_violated = {
                 r["code"] for r in full_ranked if r.get("decision") == "violated"
@@ -546,6 +941,73 @@ class StagedClassificationTool:
                     and score_by_code.get(selected[-1], 0.0) <= 0.0
                 ):
                     selected = [*selected[:-1], best_residual["code"]]
+            # [9회차 [1]] window_ticket 자식 입장권 — 라우터가 정체
+            # 유일-직격으로 창 입장시킨 챕터(서명 window_ticket:)의 최고
+            # 자식을 selected 말미에 보존. 부모 라운드로빈 서열(재첩국
+            # ch21 5위)이 정체 직격 가족을 keep 밖으로 밀어 2104가 풀
+            # 실재에도 소멸하던 실측의 처방 — 입장권 계보(점수·서열
+            # 불변, 생존만). ASAP_WINDOW_TICKET_CHILD=0 복귀.
+            if (os.environ.get("ASAP_WINDOW_TICKET_CHILD", "1")
+                    or "1").strip() != "0":
+                _wt_chs: set = set()
+                for _d_wt in (routing_context.get(
+                        "candidate_chapter_details") or []):
+                    if any(str(m_wt).startswith(
+                            ("window_ticket:", "window_ticket_prep:"))
+                           for m_wt in (_d_wt.get("matched_terms") or [])):
+                        _wt_chs.add(str(_d_wt.get("chapter")))
+                for _ch_wt in sorted(_wt_chs):
+                    if any(str(c_wt).startswith(_ch_wt)
+                           for c_wt in selected):
+                        continue
+                    _best_wt = max(
+                        (r_wt for r_wt in full_ranked
+                         if r_wt["code"].startswith(_ch_wt)
+                         and r_wt.get("decision") != "violated"),
+                        key=lambda r_wt: float(r_wt.get("score") or 0.0),
+                        default=None)
+                    if _best_wt is not None:
+                        selected = [*selected, _best_wt["code"]]
+            # [10회차-1A] 정체 축 보존 — hs4 선두 가족이 성분 축(material_
+            # composition)일 때 정체 축(product_identity) 최고 자식을
+            # selected 말미 보존(입장권 계보 — 재첩국 신지각: 21 창안
+            # 3위인데 2104가 keep 밖 소멸 → 최종 축 교대 자체가 불가하던
+            # 실측). 면류 보호: 선두가 정체 축이면 무발동. ASAP_AXIS_RANK.
+            if (selected
+                    and (os.environ.get("ASAP_AXIS_RANK", "1")
+                         or "1").strip() != "0"
+                    and _hs4_axis.get(str(selected[0])[:4])
+                    == "material_composition"):
+                _best_ax = max(
+                    (r_ax2 for r_ax2 in full_ranked
+                     if _hs4_axis.get(str(r_ax2["code"])[:4])
+                     == "product_identity"
+                     and r_ax2.get("decision") != "violated"),
+                    key=lambda r_ax2: float(r_ax2.get("score") or 0.0),
+                    default=None)
+                if (_best_ax is not None
+                        and _best_ax["code"] not in selected):
+                    selected = [*selected, _best_ax["code"]]
+            # [7회차-3] 소환 입장권 — 이 레벨 stall 소환이 성립했으면
+            # 다음 레벨 부모 풀에 합류(신뢰 0 — 서열은 기존 기제가 결정)
+            for _sm in bti_summons:
+                if (_sm.get("level") == level and _sm.get("code")
+                        and _sm["code"] not in selected):
+                    selected = [*selected, _sm["code"]]
+            # [7회차-2 G1] 창밖 회수 입장권 (ON시에만) — BTI와 동일 계보:
+            # selected 말미 추가만(신뢰 0), rank_top_k 절단의 영향 밖.
+            if _rt_gate == "1":
+                for _o_rt in router_trust_obs:
+                    if _o_rt.get("level") != level:
+                        continue
+                    for _cand_rt in _o_rt.get("candidates") or []:
+                        if _cand_rt["code"] not in selected:
+                            selected = [*selected, _cand_rt["code"]]
+                            # [8회차-0] ON 발동 서명 — 실제 개입(입장권
+                            # 부여)을 관측 레코드에 실물로 남긴다. 무서명
+                            # 개입 사고(6런 A/B)의 재발 방지.
+                            _o_rt.setdefault("applied", []).append(
+                                _cand_rt["code"])
             stages.append(self._trace(
                 level, ranked, selected, level_facts, "ok",
                 engine="branch_index" if branch_rows else "cn_table",
@@ -557,16 +1019,132 @@ class StagedClassificationTool:
             # to a sibling with a higher raw score (measured: jjokgalbi won
             # hs4 with 1602 but hs6 followed 1601's children again). The
             # level's chosen top carries top parent authority downward.
+            # [8회차-3] 병합 증거화 — 부모 서열 세습에 자식 증거 조건.
+            # 세습(선두 최상 부여) 자격 = 선두 가족이 ①1급 확정(confirmed)
+            # ②원문·제목 직격 ③'마커 무보유' 직접 true(강등 계보 마커
+            # encyclopedia/alias/precedent_hit·qualifier_state_conflict·
+            # broad_pool_hit_guarded·typed_gate_blocked·state_alone·
+            # qualifier_rank_excluded 보유 true는 불인정 — 승인 조건 1)
+            # 중 하나 보유. 미달 시 세습 생략(부모 순서만 유지) — 무증거
+            # 상위 오선택의 하위 고착(볼펜 좌표) 차단. G1/G2는 이 구조
+            # 완성 시 소멸 예정 과도 장치. ASAP_PARENT_TRUST_EVIDENCE=0 복귀.
+            _pte_on = (os.environ.get(
+                "ASAP_PARENT_TRUST_EVIDENCE", "1") or "1").strip() != "0"
+            _MARKERS = ("encyclopedia_hit", "alias_hit", "precedent_hit",
+                        "qualifier_state_conflict", "broad_pool_hit_guarded",
+                        "typed_gate_blocked", "state_alone",
+                        "qualifier_rank_excluded")
+
+            def _direct_true(e6: dict) -> bool:
+                for d6 in (list(e6.get("decision_detail") or [])
+                           + list(e6.get("predicate_results") or [])):
+                    if d6.get("verdict") != "true":
+                        continue
+                    why6 = str(d6.get("why") or "")
+                    if not any(mk in why6 for mk in _MARKERS):
+                        return True
+                return False
+
             if selected:
-                parent_scores[selected[0]] = max(parent_scores.values())
+                _top_e = next((r6 for r6 in full_ranked
+                               if r6["code"] == selected[0]), None)
+                try:
+                    _top_hit = (_rt_title_toks
+                                & _rt_row_toks.get(selected[0], set()))
+                except NameError:  # 게이트 OFF 경로 — 직격 lane 미구축
+                    _top_hit = set()
+                _inherit = (not _pte_on) or (_top_e is not None and (
+                    _top_e.get("decision") == "confirmed"
+                    or bool(_top_hit)
+                    or _direct_true(_top_e)
+                    # ④ 소거 승격 잔반 — 소거(형제 위반·미입증)로 선두에
+                    # 선 잔반의 세습은 이 승계 장치의 원 처방(쪽갈비
+                    # 1602→1601 재이탈 방지). 소거도 증거의 한 형태.
+                    or bool(_top_e.get("residual"))))
+                if _inherit:
+                    parent_scores[selected[0]] = max(parent_scores.values())
             parents = selected
 
         candidates = self._final_candidates(parents, top_k=top_k)
         # 최종 DTO의 score는 cn8 스테이지 점수를 그대로 싣는다 — 키가 없으면
         # 소비측(ClassificationCandidate 조립)이 기본 0.0으로 표시해 버린다.
         cn8_scores = level_score_maps.get("cn8", {})
+        _phase_by_code = {str(r_ph.get("code")): r_ph.get("residual_phase")
+                          for r_ph in (full_ranked or [])
+                          if r_ph.get("residual_phase")}
         for cand in candidates:
             cand["score"] = cn8_scores.get(str(cand.get("cn8")), 0.0)
+            _ph_c = _phase_by_code.get(str(cand.get("cn8") or ""))
+            if _ph_c:
+                cand["residual_phase"] = _ph_c  # [10회차-2] trace 전파(내부)
+        # [9회차 [1] 결승] 입장권 자식의 점수 우위 교대 — 정체 유일-직격
+        # 챕터(window_ticket)의 자식이 최종 점수에서 현 선두를 이기면
+        # 선두 교대(순서만 — demote-not-penalize). 부모 라운드로빈이
+        # 점수 우위·동점 후보를 하위로 미는 재첩국 실측(cn8 3.0=3.0
+        # 동점 — §2 '동점은 정체 직격 우선'의 최종병합판)의 처방.
+        # 열세면 불변. 서명 window_ticket_lead.
+        if (os.environ.get("ASAP_WINDOW_TICKET_CHILD", "1")
+                or "1").strip() != "0" and len(candidates) >= 2:
+            _wt_prep = set()
+            _wt_chs2 = set()
+            for _d_w2 in (routing_context.get(
+                    "candidate_chapter_details") or []):
+                _ms_w2 = [str(m_w2) for m_w2 in
+                          (_d_w2.get("matched_terms") or [])]
+                if any(m_w2.startswith("window_ticket_prep:")
+                       for m_w2 in _ms_w2):
+                    _wt_prep.add(str(_d_w2.get("chapter")))
+                    _wt_chs2.add(str(_d_w2.get("chapter")))
+                elif any(m_w2.startswith("window_ticket:")
+                         for m_w2 in _ms_w2):
+                    _wt_chs2.add(str(_d_w2.get("chapter")))
+            if _wt_chs2:
+                # 동점(>=) 교대는 §2 지대(조제 측 티켓 — redirect 원천
+                # 서명 window_ticket_prep)에서만. 그 외 티켓은 순수
+                # 우위(>)만 — 잡음 티켓의 동점 선두 탈취 실측(주꾸미
+                # ch48·멘보샤 ch85) 차단.
+                _lead_sc = float(candidates[0].get("score") or 0.0)
+
+                def _wt_beats(i_w: int) -> bool:
+                    _c2 = str(candidates[i_w].get("cn8") or "")[:2]
+                    _s2 = float(candidates[i_w].get("score") or 0.0)
+                    if _c2 not in _wt_chs2:
+                        return False
+                    return _s2 >= _lead_sc if _c2 in _wt_prep \
+                        else _s2 > _lead_sc
+                _best_i = max(
+                    (i_w for i_w in range(1, len(candidates))
+                     if _wt_beats(i_w)),
+                    key=lambda i_w: float(
+                        candidates[i_w].get("score") or 0.0),
+                    default=None)
+                if _best_i is not None:
+                    _wt_cand = candidates.pop(_best_i)
+                    _wt_cand["window_ticket_lead"] = True
+                    candidates.insert(0, _wt_cand)
+        # [10회차-1A] 정체 직격 서열 — 최종 동점에서 '정체 축(product_
+        # identity) 판별 가족' 후보가 '성분 축(material_composition)
+        # 판별 가족' 선두를 이긴다 (이산·수기 0 — 축은 taxonomy 원천.
+        # 재첩국 신지각: 1605(성분 clam) 3.0 = 2104(정체 soup) 3.0 동점
+        # 코드순 패배의 처방. 면류 보호: 1902도 정체 축이라 불변).
+        # ASAP_AXIS_RANK=0 복귀. 서명 identity_axis_lead.
+        if (os.environ.get("ASAP_AXIS_RANK", "1") or "1").strip() != "0" \
+                and len(candidates) >= 2:
+            _lead_c = candidates[0]
+            _lead_ax = _hs4_axis.get(str(_lead_c.get("cn8") or "")[:4], "")
+            if _lead_ax == "material_composition":
+                _lead_s = float(_lead_c.get("score") or 0.0)
+                _ax_i = next(
+                    (i_a for i_a in range(1, len(candidates))
+                     if _hs4_axis.get(str(candidates[i_a].get("cn8")
+                                          or "")[:4]) == "product_identity"
+                     and float(candidates[i_a].get("score") or 0.0)
+                     >= _lead_s),
+                    None)
+                if _ax_i is not None:
+                    _ax_cand = candidates.pop(_ax_i)
+                    _ax_cand["identity_axis_lead"] = True
+                    candidates.insert(0, _ax_cand)
         paths: list[dict[str, Any]] = []
         for cand in candidates:
             cn8 = _digits(cand.get("cn8"), limit=8)
@@ -592,6 +1170,8 @@ class StagedClassificationTool:
             "recovery_candidates": recovery_candidates,
             "route_disagreements": route_disagreements,
             "merge_gate_observations": merge_gate_observations,
+            "router_trust_gate": router_trust_obs,
+            "bti_summons": bti_summons,
         }
 
     # ---- facts / route ----------------------------------------------------
@@ -850,18 +1430,27 @@ class StagedClassificationTool:
         _gate_mode = (os.environ.get("ASAP_MERGE_EVIDENCE_GATE",
                                      "observe") or "observe").strip()
         if _gate_mode in ("1", "observe"):
+            # [8회차-3] 등급 결합안(승인) — 가족 면제 자격은 '1급' 증거만:
+            # confirmed 또는 마커 무보유 직접 true. lexical 점수·강등 계보
+            # 마커 보유 true(2급 이하)는 면제 자격이 아니다 — "오답 가족
+            # 증거가 2급 이하뿐일 때만 강등"의 이산 구현.
+            _GATE_MARKERS = (
+                "encyclopedia_hit", "alias_hit", "precedent_hit",
+                "qualifier_state_conflict", "broad_pool_hit_guarded",
+                "typed_gate_blocked", "state_alone",
+                "qualifier_rank_excluded")
+
             def _fam_has_evidence(entries: list[dict[str, Any]]) -> bool:
                 for e in entries:
-                    if float(e.get("score") or 0.0) > 0:
-                        return True
                     if e.get("decision") == "confirmed":
                         return True
-                    if any(d.get("verdict") == "true"
-                           for d in e.get("decision_detail") or []):
-                        return True
-                    if any(pr.get("verdict") == "true"
-                           for pr in e.get("predicate_results") or []):
-                        return True
+                    for d in (list(e.get("decision_detail") or [])
+                              + list(e.get("predicate_results") or [])):
+                        if d.get("verdict") != "true":
+                            continue
+                        if not any(mk in str(d.get("why") or "")
+                                   for mk in _GATE_MARKERS):
+                            return True
                 return False
             fam_ev = {p: _fam_has_evidence(es) for p, es in fam_entries.items()}
             gated_fams = [p for p, ok in fam_ev.items() if not ok]
@@ -955,6 +1544,13 @@ class StagedClassificationTool:
                 - negated - _QUANT_OPERATOR_TOKENS
             )
             negative = _tokens(str(row.get("negative_terms") or "").replace(";", " ")) | negated
+            # [9회차 [2]] 자기모순 negative 박탈 — positive에도 등장하는
+            # negative 토큰은 배제절 오수확의 서명('Pencils (other than
+            # pencils of heading 9608), … pencil leads' → negative에
+            # pencil — 코드 간 한정 참조지 상품 어휘 부정이 아님. 9609가
+            # 자기 정체어로 0점 되던 실측). 진짜 배제 어휘는 positive에
+            # 없다 — 교집합 박탈은 기계적·전 계급 일괄.
+            negative -= positive
             prepared.append({**item, "positive": positive, "negative": negative})
 
         sibling_count = len(prepared)
@@ -1004,12 +1600,13 @@ class StagedClassificationTool:
                 src_q = str(row_q.get("source_text") or "")
                 if src_q.startswith("NOTE:"):
                     continue
-                if src_q.startswith("STATESET:"):
+                if src_q.startswith(("STATESET:", "FORMSET:", "MATERIALSET:")):
                     try:
                         vals_ls = json.loads(str(row_q.get("value") or "null")) or []
                     except Exception:  # noqa: BLE001
                         vals_ls = []
-                    ls = {t2 for v2 in vals_ls for t2 in str(v2).split()}                         & _STATE_ARM_LEXICON
+                    ls = {t2 for v2 in vals_ls for t2 in str(v2).split()}                         & (_STATE_ARM_LEXICON | _FORM_ARM_LEXICON
+                           | _MATERIAL_ARM_LEXICON)
                     if ls:
                         label_state_by_code[code_q] = (
                             label_state_by_code.get(code_q, set()) | ls)
@@ -1023,12 +1620,21 @@ class StagedClassificationTool:
             if toks_q:
                 qual_state_by_code[code_q] = toks_q
         product_state_toks: set = set()
-        if qual_state_by_code:
+        if qual_state_by_code or label_state_by_code:
             for path in ("identity_hints.processing_state",
-                         "composition_facts.processing_state"):
+                         "composition_facts.processing_state",
+                         # [7회차-1 FORMSET] 제품 형태 지각도 심사 풀에 —
+                         # 상태와 같은 채널, lexicon 교집합이 lane을 지킨다.
+                         "identity_hints.food_form",
+                         "identity_hints.product_form_terms",
+                         # [8회차-4] 재질 지각 — 백과→조성 경로가 실은
+                         # 재질(steel/paper…)을 심사 풀에 (비식품 lexicon
+                         # 교집합이 식품 조성 오발동을 차단)
+                         "composition_facts.composition_terms"):
                 for value in _string_values(_dig(product_facts, path)):
                     product_state_toks |= _tokens(value)
-            product_state_toks &= _STATE_ARM_LEXICON
+            product_state_toks &= (_STATE_ARM_LEXICON | _FORM_ARM_LEXICON
+                           | _MATERIAL_ARM_LEXICON)
 
         scored: list[dict[str, Any]] = []
         for entry in prepared:
@@ -1127,8 +1733,10 @@ class StagedClassificationTool:
                     code_conditions, product_facts, fact_tokens, percentages,
                     _quantitative_verdict,
                 )
-                # (치환 1a 섀도 훅 07-17 폐기 — grade/role 컬럼이 진실원 승계,
-                #  원장 §4.3. decision_tables.py는 삭제됨.)
+                # [10회차-0 위생] 치환 스프린트 섀도 블록 뿌리 제거 —
+                # 표 해석 섀도 모듈은 원장 §4.3 폐기 계보(메인 삭제).
+                # 6차 재출현의 원본이 이 지점이었다 — 재도입 금지 (감사
+                # 게이트는 규칙 대장 §6 섀도 grep 0).
                 # [P3-b] 상태 arm 모순 자격 심사 (자격 박탈 계보 — 백과 상한·
                 # typed_gate_blocked과 동일 원칙: 감점 없음). 마커는 확정
                 # 여부와 무관하게 부착한다 — undecided true(+3)도 입증
@@ -1407,18 +2015,36 @@ class StagedClassificationTool:
                                 own_phrases.append(toks_c)
                     except Exception:  # noqa: BLE001
                         continue
-                eligible = (set(r.get("matched") or []) - qualifier_toks) & proof
+                # [10회차-2] 자격 강화 — 상태·형태·재질 계급(arm lexicon
+                # 원천, 수기 0) 토큰은 lexical proof 무자격: 'frozen/
+                # paste/steel' 류 계급 매치만으로 named가 잔반을 이기는
+                # 무자격 승리(미도달 34%)의 한 축을 이산 차단.
+                eligible = ((set(r.get("matched") or []) - qualifier_toks)
+                            & proof) - (_STATE_ARM_LEXICON
+                                        | _FORM_ARM_LEXICON
+                                        | _MATERIAL_ARM_LEXICON)
                 for t_m in list(eligible):
                     partial = [ph for ph in own_phrases if t_m in ph]
                     if partial and not any(ph <= fallback_tokens for ph in partial):
                         eligible.discard(t_m)  # 구문 부분 매치 — 무자격
                 return bool(eligible)
             if not any(_proven(r) for r in specific if r["score"] > 0):
+                # [10회차-2] 3상 출력 — 소거 승격(residual_promoted) 또는
+                # 전원 무자격(unqualified_question = 질문 승격 후보; UI
+                # 노출은 4군 합의 전 — 내부 상태+trace 기록까지만).
+                _phase = ("residual_promoted" if viable_residuals
+                          else "unqualified_question")
+                for _e_ph in (*viable_residuals, *specific):
+                    _e_ph["residual_phase"] = _phase
                 return viable_residuals + specific + [
                     r for r in residuals if r not in viable_residuals
                 ]
         if specific and specific[0]["score"] > 0:
+            for _e_ph in specific[:1]:
+                _e_ph["residual_phase"] = "qualified_named"
             return specific + residuals
+        for _e_ph in (*residuals, *specific):
+            _e_ph.setdefault("residual_phase", "unqualified_question")
         return residuals + specific if residuals else specific
 
     # ---- weighted lexical rank + quantitative gate ------------------------
@@ -1715,6 +2341,10 @@ class StagedClassificationTool:
                     "decision_detail": r.get("decision_detail", []),
                     "precedent_tiebreak": r.get("precedent_tiebreak"),
                     "quantitative_verdict": (r.get("quantitative_verdict") or {}).get("verdict", "neutral"),
+                    # [기록 의무화 07-18 — 메인 그래프트 재이식] 잔반·형태
+                    # 히트 trace 병기(UI 계약·잔반 혼동 행렬 실물). 판정 불변.
+                    "residual": bool(r.get("residual")),
+                    "form_hits": r.get("form_hits", 0),
                 }
                 for r in ranked[:8]
             ],

@@ -669,7 +669,14 @@ def _ReadOpenAiSdkFirstMessage(response: object) -> object | None:
 def _DumpSdkObject(value: object) -> Dict[str, object]:
     modelDump = getattr(value, "model_dump", None)
     if callable(modelDump):
-        dumped = modelDump(mode="json")
+        # warnings=False: SDK 응답 모델(ParsedChatCompletion 등)의 json 덤프는
+        # 보관용 원시 사본이라 필드 형 불일치 경고가 의미가 없는데, 호출마다
+        # 'Pydantic serializer warnings' 스팸을 낸다 (coi50 실측). 의미 추출은
+        # _ExtractOpenAiSdkParsedText 등 별도 경로가 담당한다.
+        try:
+            dumped = modelDump(mode="json", warnings=False)
+        except TypeError:  # pydantic v1 계열 SDK 모델 — warnings 인자 부재
+            dumped = modelDump(mode="json")
         if isinstance(dumped, dict):
             return dumped
     return {

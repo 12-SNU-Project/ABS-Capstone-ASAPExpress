@@ -166,35 +166,30 @@ class ClassificationComponent(BasePipelineComponent):
                             )
                             scope = None
                 if verdict.get("verdict") in ("promote_recovery", "reroute", "narrow") and scope:
+                    # [10회차-4] Validator 개입 권한 폐지 (VALIDATOR_DPO_
+                    # DESIGN §1 — 설계자 확정): 재실행·후보 교체를 하지
+                    # 않는다. G1/G2 교훈(무서명 개입 위험·observe 정당성)
+                    # 의 Validator판 — 판단은 기록만 남기고, 독립 병렬
+                    # 추리 대조군(DPO 수집)이 대체한다.
+                    # '구validator 구제 손실' 정산 열: 폐지로 잃는 구제
+                    # (종전 applied 케이스)를 정산에서 셀 수 있게 would_
+                    # have_scope·verdict를 실물 보존.
                     scope = str(scope)
-                    # The validator's authority ends at NAMING the region; the
-                    # final line inside it belongs to deterministic sibling
-                    # ranking. A full 8-digit promote would hard-pick a line
-                    # (measured: 19021910 "no common wheat" chosen over the
-                    # correct sibling 19021990), so step back one level and
-                    # let the ranking decide.
                     if len(scope) == 8:
                         scope = scope[:6]
-                    rerun = stagedTool.classify(
-                        product_facts=product_facts,
-                        routing_context=routing,
-                        start_parents=[scope],
+                    validatorRecord = {
+                        **verdict,
+                        "applied": False,
+                        "authority_revoked": True,
+                        "would_have_scope": scope,
+                        "original_top_cn8": str(
+                            (candidates[0] or {}).get("cn8") or ""),
+                    }
+                    self.reason(
+                        f"Validator authority revoked (observe-only): "
+                        f"{verdict.get('verdict')} -> {scope} recorded, "
+                        f"not applied."
                     )
-                    if rerun.get("ok") and rerun.get("candidates"):
-                        validatorRecord = {
-                            **verdict,
-                            "applied": True,
-                            "original_top_cn8": str((candidates[0] or {}).get("cn8") or ""),
-                        }
-                        staged = rerun
-                        stages = stages + (rerun.get("stages") or [])
-                        candidates = rerun.get("candidates") or []
-                        self.reason(
-                            f"Validator override applied ({verdict.get('verdict')} -> {scope}): "
-                            f"{verdict.get('reason', '')[:120]}"
-                        )
-                    else:
-                        validatorRecord = {**verdict, "applied": False, "second_pass_failed": True}
 
             ccs_id = store.next_id("ccs")
             ccs_candidates: list[dict] = []
@@ -273,6 +268,14 @@ class ClassificationComponent(BasePipelineComponent):
                 "classification_paths": classificationPaths,
                 "recovery_candidates": staged.get("recovery_candidates") or [],
                 "route_disagreements": staged.get("route_disagreements") or [],
+                # [8회차-0] 개입 서명 의무화 — G1/G2·병합 게이트·BTI 소환의
+                # 관측/발동 기록을 blackboard에 영속화. ON 모드가 무서명으로
+                # 개입한 6런 A/B 사고(22캐시 기록 0)의 처방: staged 결과에는
+                # 있었으나 이 지점이 싣지 않아 유실됐다. validator 재실행
+                # (rerun) 경로도 staged 교체 후 동일 키를 읽으므로 함께 남는다.
+                "router_trust_gate": staged.get("router_trust_gate") or [],
+                "merge_gate_observations": staged.get("merge_gate_observations") or [],
+                "bti_summons": staged.get("bti_summons") or [],
                 "selected_path": selectedPath,
                 "candidates": ccs_candidates,
             })

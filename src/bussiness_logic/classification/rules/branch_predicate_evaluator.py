@@ -130,10 +130,27 @@ def _field_tokens(product_facts: Mapping[str, Any] | None, dto_field: str) -> se
             parts = [] if value.strip().lower() in _FIELD_SENTINELS else [value]
         elif isinstance(value, list):
             parts = []
+            # [8회차-4] 성분 물량 내성 — 대량 성분 목록(COI 30항 등)이
+            # 정체·종 술어를 ANY-match로 납치하던 지대(꼬막장 0307행·추어탕)
+            # 의 처방: 표기 서열(order_index) 상위 N만 술어 답안에 관여.
+            # 어휘 제거가 아니라 '관여 제한' — BTI 쿼리·조성 질문 경로는
+            # 전체 entries를 그대로 본다. ASAP_ENTRY_RANK_CAP(기본 8), 0=무제한.
+            try:
+                _cap = int((os.environ.get(
+                    "ASAP_ENTRY_RANK_CAP", "8") or "8").strip())
+            except ValueError:
+                _cap = 8
             for v in value:
                 if isinstance(v, dict):
                     # 구조화 엔트리(ingredient_entries 등): 성분명만 읽는다
                     # — 라벨이든 COI든 존재하는 쪽이 그대로 답안이 된다.
+                    if _cap > 0:
+                        try:
+                            _oi = int(v.get("order_index") or 0)
+                        except (TypeError, ValueError):
+                            _oi = 0
+                        if _oi > _cap:
+                            continue
                     name = str(v.get("ingredient_name") or v.get("name") or "")
                     if name.strip():
                         parts.append(name)
@@ -213,6 +230,19 @@ def EvaluatePredicates(
         if not tokens:
             continue
         op = str(pred.get("op") or "")
+        # [9회차 [2]] 교차참조 배제절 negation은 미결 — 'other than
+        # pencils of heading 9608'은 코드 간 경계 참조지 상품 부정이
+        # 아니다 (9609가 자기 정체어 pencil로 -100 되던 실측 — 컴파일러
+        # ·staged와 동일 문법 규칙의 평가기판. 재컴파일 없이 기존
+        # rule-v2 행에도 적용).
+        if op == "not_contains" and re.search(
+                r"\bof\s+(?:heading|chapter)s?\b",
+                str(pred.get("source_text") or ""), re.I):
+            verdicts.append({"axis": axis, "op": op,
+                             "value": ",".join(sorted(tokens))[:60],
+                             "verdict": "unknown",
+                             "why": "crossref_exclusion_skipped"})
+            continue
         if op == "not_contains":
             hit = bool(tokens & pool)
             verdict = "false" if hit else "unknown"

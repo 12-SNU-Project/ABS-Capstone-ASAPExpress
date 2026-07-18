@@ -84,6 +84,41 @@ _chapter_context_cache: list[str] = []
 _chapter_vocab_cache: list[frozenset[str]] = []
 
 
+def _scoped_chapter_vocab(max_owners: int = 3) -> frozenset[str]:
+    """[8회차-1] 등급 승선제 '중'의 법정 어휘 — 소유 챕터 ≤N 토큰만.
+
+    전 챕터 공유 토큰(also/are/food 류)은 판별력 0(라우터 층1과 동일
+    원리)이라 승선 근거가 될 수 없다 — 기준선 실측(IU·Haiti가 범용
+    토큰으로 중 승선)의 처방. 원천은 cn_chapter_index 행 전체, 수기 0.
+    """
+    if _scoped_vocab_cache:
+        return _scoped_vocab_cache[0]
+    owners: dict[str, set] = {}
+    try:
+        from bussiness_logic.classification.repositories.chapter_index_repository import (
+            LoadPreClassificationChapterRows,
+        )
+        for row in LoadPreClassificationChapterRows():
+            ch = str(row.get("chapter") or "").strip()
+            if not ch:
+                continue
+            text = " ".join(
+                str(row.get(k) or "") for k in (
+                    "title", "description", "heading_scope",
+                    "chapter_keywords", "raw_scope_signals",
+                    "prepared_scope_signals"))
+            for tok in set(re.findall(r"[a-z]{3,}", text.lower())):
+                owners.setdefault(tok, set()).add(ch)
+    except Exception:  # noqa: BLE001 — DB 부재 = 빈 어휘(전부 약 등급)
+        owners = {}
+    _scoped_vocab_cache.append(frozenset(
+        tok for tok, chs in owners.items() if len(chs) <= max_owners))
+    return _scoped_vocab_cache[0]
+
+
+_scoped_vocab_cache: list[frozenset[str]] = []
+
+
 def _chapter_vocab() -> frozenset[str]:
     """Word vocabulary of the cn_chapter_index context (DB text, cached).
 
@@ -168,9 +203,21 @@ def _compact_evidence(
     encyclopediaEvidence: EncyclopediaEvidenceSet,
     factTexts: tuple[str, ...] = (),
 ) -> str:
+    # [8회차-1] 등급 승선제 소비 ②: 약 등급은 프롬프트 불승선(근거 기록만),
+    # 중은 성립 대목 우선. 등급·근거를 표기해 LLM이 신뢰 층위를 본다.
+    _has_strong = any(
+        str(getattr(e, "grade", "") or "") == "strong"
+        for e in encyclopediaEvidence.entries)
+    _boarded = [
+        e for e in encyclopediaEvidence.entries
+        if str(getattr(e, "grade", "") or "") != "weak"
+        and not (_has_strong
+                 and str(getattr(e, "grade", "") or "") == "medium")
+    ][:3]
     encyc = "\n".join(
-        f"- {entry.title}: {entry.description[:220]}"
-        for entry in encyclopediaEvidence.entries[:3]
+        f"- [{getattr(e, 'grade', '') or 'ungraded'}] {e.title}: "
+        f"{e.description[:220]}"
+        for e in _boarded
     )
     # ASAP_IDENTITY_FACTS=1: 라벨 사실 텍스트(원재료명 등)를 identity 번역
     # 문맥에 포함 — DTO를 채우는 LLM이 이름+위키만 보던 정보 절단의 처방.
@@ -313,6 +360,27 @@ def _BuildIdentityFacts(
     except (TypeError, ValueError):
         confidence = 0.5
 
+    # [P3 병기 원칙 — 구조판] LLM ci가 백과 표제(정규화 일치)면 정체 교체가
+    # 아니라 병기다: ci는 관세 서술로 되돌리고 표제는 identity_terms에
+    # 싣는다 (프롬프트 지침 폐기 → merge 코드 강제, CYCLE9 P3).
+    # [10회차-0 역이식] 원 구현이 assert 실패로 디스크 미저장 — 메인 실물
+    # (TRANSPLANT_NOTES §2)을 진실원으로 채택. 차이 없음 회신 완료.
+    _extra_terms: list[str] = []
+    _parsed_ci = str(parsed.get("commercial_identity") or "").strip()
+    _ency_title = str(distilledIdentity.commercialIdentity or "").strip()
+
+    def _norm_title(value: str) -> str:
+        return re.sub(r"[^0-9a-z가-힣]+", " ", value.lower()).strip()
+
+    if (_parsed_ci and _ency_title
+            and _norm_title(_parsed_ci) == _norm_title(_ency_title)):
+        _extra_terms.append(_ency_title)
+        _tariff_ci = str(
+            parsed.get("normalized_tariff_description")
+            or distilledIdentity.normalizedDescription or "").strip()
+        if _tariff_ci:
+            parsed["commercial_identity"] = _tariff_ci
+
     return {
         "translated_product_name": str(parsed.get("translated_product_name") or "").strip(),
         "commercial_identity": str(
@@ -325,7 +393,9 @@ def _BuildIdentityFacts(
             or distilledIdentity.normalizedDescription
         ).strip(),
         "identity_terms": _dedup_strings(
-            parsed.get("identity_terms") or distilledIdentity.identityTerms,
+            [*_extra_terms,
+             *(parsed.get("identity_terms")
+               or distilledIdentity.identityTerms or [])],
             limit=16,
         ),
         "product_form_terms": _dedup_strings(

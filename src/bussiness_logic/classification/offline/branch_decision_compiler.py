@@ -26,6 +26,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -70,10 +71,17 @@ CRITERION_FIELD_BINDING = {
         "composition_facts.ingredient_classes;composition_facts.principal_ingredient;"
         "composition_facts.ingredient_entries;composition_facts.composition_terms"
     ),
-    "preservation_state": "identity_hints.processing_state;identity_hints.product_form_terms",
+    # [배선 일관성 07-18] preservation_state가 composition_facts를 안 읽어
+    # 문서(COI/CO)가 '냉동'을 알아도 답 못 하던 누락 — 옆 축 processing_
+    # method는 읽는데 이 축만 빠져 있었다(답변가능성 감사 212건 실측).
+    "preservation_state": (
+        "identity_hints.processing_state;composition_facts.processing_state;"
+        "composition_facts.preservation_state;identity_hints.product_form_terms"
+    ),
     "processing_method": "identity_hints.processing_state;composition_facts.processing_state;identity_hints.product_form_terms",
     "physical_form": (
         "identity_hints.food_form;identity_hints.product_form_terms;"
+        "composition_facts.physical_form;"
         "composition_facts.contains_wrapper_or_dough;composition_facts.contains_sauce_or_broth"
     ),
     "quantitative_threshold": "composition_facts.ingredient_percentages",
@@ -105,6 +113,22 @@ _STATE_LEXICON = frozenset({
     # 어디서도 수확되지 않는다 (05051010 'Raw' bare 재발 실측).
     "frozen", "fresh", "chilled", "dried", "dehydrated", "salted",
     "brine", "smoked", "cooked", "uncooked", "boiled", "steamed",
+})
+# [7회차-1] 형태 어휘 lane — physical_form 패턴 실소유분만 (FORMSET
+# qualifier의 집합 원천 · 모순 자격 심사 전용, 순위 가산 없음)
+_FORM_LEXICON = frozenset({
+    "whole", "broken", "powder", "granule", "flake", "pellet", "paste",
+    "liquid", "solid", "sheet", "plate", "bar", "rod", "tube", "pipe",
+})
+# [8회차-4] 재질 어휘 lane — material_composition 패턴 실소유 '비식품'
+# 재질만 (MATERIALSET qualifier 원천). 식품 재질(cocoa/milk…)은 함유
+# 조건('containing cocoa')의 정당 지대라 심사 불참 — 식품/비식품 경계만
+# 수기 선언, 어휘는 taxonomy CSV 원천(종이컵 392410 'of plastics' 오확정
+# 실측의 처방 좌표).
+_MATERIAL_LEXICON = frozenset({
+    "steel", "iron", "aluminium", "copper", "nickel", "zinc", "tin",
+    "lead", "plastic", "rubber", "wood", "paper", "glass", "ceramic",
+    "cotton", "wool", "silk", "textile", "leather", "stone",
 })
 _NEG_VALUE = re.compile(
     r"\b(?:other\s+than|excluding|except|does\s+not\s+include|not\s+including|"
@@ -409,6 +433,15 @@ def CompileGroupDecisions(
                 # (taxonomy 탐지기가 못 잡는 경우의 안전망 — 아래 emit부).
                 quant_neg_source = quant_neg_source or neg.group(0)
                 continue
+            # [9회차 [2]] 교차참조 배제절은 eliminator가 아니다 —
+            # 'other than pencils of heading 9608'은 코드 간 경계 참조.
+            # 그 어휘를 not_contains 값으로 실으면 자기 정체어(pencil)로
+            # 자기 코드가 위반된다 (9609 -197 실측). heading/chapter+숫자
+            # 동반 배제절은 배제 수확에서 제외 (staged _negated_tokens와
+            # 동일 문법 규칙 — 규칙 대장 등재).
+            if re.search(r"\bof\s+(?:heading|chapter)s?\b", neg.group(0),
+                         re.I):
+                continue
             add("exclusion_boundary", "not_contains", sorted(values), neg.group(0))
             emitted_types.add("exclusion_boundary")
         positive_side = _NEG_VALUE.sub(" ", clean)
@@ -513,6 +546,42 @@ def CompileGroupDecisions(
             # 입증이 박탈된다 (실측: 잔반 0709 소거 승격 회귀).
             add("preservation_state", "has_token", sorted(state_set),
                 "STATESET: " + ", ".join(state_srcs), role="qualifier")
+        # [7회차-1] FORMSET — 라벨의 '전' 형태 매치 집합 (STATESET 대칭,
+        # 모순 자격 심사 전용 — 형태 시소의 방어층. 떡볶이 잠금은 지각
+        # form 세분/원천 보강 대기로 제외 — 커브피팅 금지, 승인 지침).
+        form_set: list[str] = []
+        form_srcs: list[str] = []
+        for entry_f in _TAXONOMY:
+            if entry_f["criterion_type"] != "physical_form":
+                continue
+            for m_f in entry_f["pattern"].finditer(positive_side):
+                tok_f = m_f.group(0)
+                st_f = _stem(tok_f.lower())
+                if st_f in _FORM_LEXICON and st_f not in form_set:
+                    form_set.append(st_f)
+                    form_srcs.append(tok_f)
+        if form_set and (os.environ.get("ASAP_FORMSET", "1")
+                         or "1").strip() != "0":
+            add("physical_form", "has_token", sorted(form_set),
+                "FORMSET: " + ", ".join(form_srcs), role="qualifier")
+        # [8회차-4] MATERIALSET — 라벨의 '전' 재질 매치 집합 (FORMSET
+        # 대칭 · 모순 자격 심사 전용). 오답 확정 3건(종이컵→392410
+        # plastics·생리대→56012110 cotton)의 귀속처.
+        mat_set: list[str] = []
+        mat_srcs: list[str] = []
+        for entry_m in _TAXONOMY:
+            if entry_m["criterion_type"] != "material_composition":
+                continue
+            for m_m in entry_m["pattern"].finditer(positive_side):
+                tok_m = m_m.group(0)
+                st_m = _stem(tok_m.lower())
+                if st_m in _MATERIAL_LEXICON and st_m not in mat_set:
+                    mat_set.append(st_m)
+                    mat_srcs.append(tok_m)
+        if mat_set and (os.environ.get("ASAP_MATERIALSET", "1")
+                        or "1").strip() != "0":
+            add("material_composition", "has_token", sorted(mat_set),
+                "MATERIALSET: " + ", ".join(mat_srcs), role="qualifier")
         # 수량 부정에서 라우팅된 quant_gate — taxonomy 수량 탐지기는
         # positive_side(부정 스팬 제거 후)를 보므로 "not more than 20 %"는
         # 비교어가 지워진 채 숫자만 남아 못 잡는다. 이미 잡혔으면 중복
