@@ -31,8 +31,6 @@ import {
   statusLabel,
 } from "../lib/format.js";
 
-const THEME_STORAGE_KEY = "asap-classification-theme";
-
 function eventLabel(stage) {
   const key = clean(stage);
   return EVENT_STAGE_LABELS[key] || key || "대기";
@@ -778,15 +776,6 @@ export default function WorkbenchPage() {
   const [jobIdInput, setJobIdInput] = useState("");
   const [loadError, setLoadError] = useState("");
   const [selectedKey, setSelectedKey] = useState("");
-  const [theme, setTheme] = useState(
-    () => window.localStorage.getItem(THEME_STORAGE_KEY) || "classic",
-  );
-  const [fx, setFx] = useState(
-    () => window.localStorage.getItem("asap-classification-fx") || "calm",
-  );
-  useEffect(() => {
-    window.localStorage.setItem("asap-classification-fx", fx);
-  }, [fx]);
   const derived = useWorkbenchDerived(result);
   // 기록 의무화 trace — 런 완료 후 blackboard에서 1회 로드
   const trace = useBlackboardTrace(result?.job_id, !busy);
@@ -798,15 +787,6 @@ export default function WorkbenchPage() {
       setJobIdInput(clean(result.job_id));
     }
   }, [result?.job_id]);
-
-  useEffect(() => {
-    document.body.classList.toggle("asap-cjs-neon", theme === "neon");
-    document.body.classList.toggle("asap-cjs-classic", theme !== "neon");
-    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-    return () => {
-      document.body.classList.remove("asap-cjs-neon", "asap-cjs-classic");
-    };
-  }, [theme]);
 
   // 실행 중에는 진행 단계를 자동 추적, 완료되면 분류 결과로 착지.
   // 사용자가 레일을 직접 클릭하면 그 run이 끝날 때까지 수동 모드 유지.
@@ -858,79 +838,7 @@ export default function WorkbenchPage() {
   };
 
   return (
-    <div
-      className={`classification-js-shell theme-${theme === "neon" ? "neon" : "classic"} ${
-        fx === "storm" ? "fx-storm" : ""
-      }`}
-    >
-      {/* feTurbulence 구름 포그 — 카드 뒤에서 떠다니는 노이즈 안개 (테마별 틴트) */}
-      <svg width="0" height="0" aria-hidden="true" focusable="false" style={{ position: "absolute" }}>
-        <filter id="cjs-fog-classic" x="-20%" y="-20%" width="140%" height="140%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.008 0.014" numOctaves="3" seed="11">
-            <animate
-              attributeName="baseFrequency"
-              values="0.008 0.014;0.011 0.017;0.008 0.014"
-              dur="12s"
-              repeatCount="indefinite"
-            />
-          </feTurbulence>
-          {/* 라이트 테마: 부드러운 라벤더-인디고, 성긴 구름 */}
-          <feColorMatrix
-            type="matrix"
-            values="0 0 0 0 0.47  0 0 0 0 0.4  0 0 0 0 0.86  0 0 0.62 0 -0.24"
-          />
-          <feGaussianBlur stdDeviation="10" />
-        </filter>
-        {/* 폭풍 모드: 회색 연기 (불난 집 굴뚝 톤) */}
-        <filter id="cjs-smoke-classic" x="-20%" y="-20%" width="140%" height="140%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.011 0.019" numOctaves="4" seed="23">
-            <animate
-              attributeName="baseFrequency"
-              values="0.011 0.019;0.015 0.024;0.011 0.019"
-              dur="8s"
-              repeatCount="indefinite"
-            />
-          </feTurbulence>
-          <feColorMatrix
-            type="matrix"
-            values="0 0 0 0 0.42  0 0 0 0 0.43  0 0 0 0 0.48  0 0 0.95 0 -0.22"
-          />
-          <feGaussianBlur stdDeviation="8" />
-        </filter>
-        <filter id="cjs-smoke-neon" x="-20%" y="-20%" width="140%" height="140%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.011 0.019" numOctaves="4" seed="29">
-            <animate
-              attributeName="baseFrequency"
-              values="0.011 0.019;0.016 0.025;0.011 0.019"
-              dur="8s"
-              repeatCount="indefinite"
-            />
-          </feTurbulence>
-          {/* 어두운 배경에서 네온 불빛에 비친 밝은 회백색 연기 */}
-          <feColorMatrix
-            type="matrix"
-            values="0 0 0 0 0.78  0 0 0 0 0.77  0 0 0 0 0.84  0 0 0.9 0 -0.2"
-          />
-          <feGaussianBlur stdDeviation="8" />
-        </filter>
-        <filter id="cjs-fog-neon" x="-20%" y="-20%" width="140%" height="140%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.008 0.014" numOctaves="3" seed="7">
-            <animate
-              attributeName="baseFrequency"
-              values="0.008 0.014;0.012 0.018;0.008 0.014"
-              dur="12s"
-              repeatCount="indefinite"
-            />
-          </feTurbulence>
-          {/* 네온 테마: 밝은 바이올렛, 짙은 구름 */}
-          <feColorMatrix
-            type="matrix"
-            values="0 0 0 0 0.68  0 0 0 0 0.36  0 0 0 0 0.99  0 0 0.85 0 -0.16"
-          />
-          <feGaussianBlur stdDeviation="9" />
-        </filter>
-      </svg>
-      <div className="cjs-fog-layer" aria-hidden="true" />
+    <div className="classification-js-shell">
       <div className="cjs-hero">
         <div className="cjs-heading">
           <div className="cjs-eyebrow">ASAP Classification</div>
@@ -939,45 +847,9 @@ export default function WorkbenchPage() {
             상품 정보를 읽고 HS6/CN8 후보와 TARIC10 서류 연결 지점을 확인합니다.
           </div>
         </div>
-        <div className="cjs-hero-tools">
-          <div className="cjs-theme-toggle">
-            <span className="cjs-theme-label">테마</span>
-            <button
-              type="button"
-              className={`cjs-theme-button ${theme !== "neon" ? "active" : ""}`}
-              onClick={() => setTheme("classic")}
-            >
-              기본
-            </button>
-            <button
-              type="button"
-              className={`cjs-theme-button ${theme === "neon" ? "active" : ""}`}
-              onClick={() => setTheme("neon")}
-            >
-              네온
-            </button>
-          </div>
-          <div className="cjs-theme-toggle">
-            <span className="cjs-theme-label">이펙트</span>
-            <button
-              type="button"
-              className={`cjs-theme-button ${fx !== "storm" ? "active" : ""}`}
-              onClick={() => setFx("calm")}
-            >
-              은은
-            </button>
-            <button
-              type="button"
-              className={`cjs-theme-button ${fx === "storm" ? "active" : ""}`}
-              onClick={() => setFx("storm")}
-            >
-              폭풍
-            </button>
-          </div>
-          <div className="cjs-runtime-status">
-            <strong>{statusLabel(result?.job_status || "idle")}</strong>
-            {result?.error ? <em>{result.error}</em> : null}
-          </div>
+        <div className="cjs-runtime-status">
+          <strong>{statusLabel(result?.job_status || "idle")}</strong>
+          {result?.error ? <em>{result.error}</em> : null}
         </div>
       </div>
 

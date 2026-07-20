@@ -75,6 +75,10 @@ body {
   text-decoration: none;
 }
 
+.app-topbar-home {
+  margin-left: auto;
+}
+
 .app-topbar-tab:hover,
 .app-topbar-tab.active {
   color: #111827;

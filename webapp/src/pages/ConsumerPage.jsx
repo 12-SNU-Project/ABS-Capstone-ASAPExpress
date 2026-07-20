@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useClassificationRun } from "../hooks/useClassificationRun";
-import { useBlackboardTrace } from "../hooks/useBlackboardTrace";
-import { EBTI_CONSULT_URL, buildConsumerWhy, summarizeSummons } from "../lib/traceContract.js";
 import { asList, asObject, clean } from "../lib/format.js";
 import logo from "../assets/asap_black.png";
 
@@ -108,19 +106,6 @@ export default function ConsumerPage() {
   const noCandidates = completed && !candidates.length;
   const stepIndex = consumerStepIndex(result);
   const jobId = clean(result?.job_id);
-
-  // 기록 의무화 trace — "왜 이 코드인가" 3줄 (정체/상태·형태/판례)
-  const trace = useBlackboardTrace(result?.job_id, completed);
-  const why = buildConsumerWhy(trace, shownCandidate?.cn8);
-  const summonsRows = summarizeSummons(trace?.summons);
-
-  const copyRefs = () => {
-    try {
-      navigator.clipboard?.writeText(why.refs.join(", "));
-    } catch {
-      /* clipboard unavailable */
-    }
-  };
 
   return (
     <div className={`consumer theme-${uiTheme}`}>

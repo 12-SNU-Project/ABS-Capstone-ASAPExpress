@@ -2,12 +2,12 @@ function cleanText(value) {
   return String(value ?? "").trim();
 }
 
-function buildUrl(path) {
+export function buildUrl(path) {
   const baseUrl = cleanText(import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
   return baseUrl ? `${baseUrl}${path}` : path;
 }
 
-async function readJson(response) {
+export async function readJson(response) {
   const text = await response.text();
   const payload = text ? JSON.parse(text) : {};
   if (!response.ok) {
