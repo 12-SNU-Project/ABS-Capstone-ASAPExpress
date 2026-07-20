@@ -185,13 +185,12 @@ CHAPTER_DOMAIN_FALLBACK: dict[str, tuple[str, ...]] = {
     "33": ("cosmetics",),
 }
 
-# [8회차-1 (가) 철거] PRODUCT_FORM_TO_HS2 — 상품명 정규식→챕터 수기 매핑
+# [8회차-1 (가) 철거 → 11회차-2 §1-A 잔해 소멸] PRODUCT_FORM_TO_HS2
 # (낙지볶음→16·국수→19·(?<!중)국→21 등) 전량 철거. 최중량 하드코딩이자
 # 식품 hs2의 숨은 기둥이었다(합격선 3: 철거 후 회귀선 유지가 검증 대상).
 # 형태→챕터 신호는 라우터 4층(중의 판별권 박탈·구문 흡수·조건부 자격·
 # 사전 경유)과 cn_chapter_index 원천 어휘가 승계한다. 재유입 금지 —
 # 규칙 대장(handoff/RULE_LEDGER.md) 대조 감사.
-PRODUCT_FORM_TO_HS2: tuple[tuple[re.Pattern[str], str, str], ...] = ()
 
 CONDIMENT_PRODUCT_NAME_PATTERN = re.compile(
     r"\b(condiment|seasoning sauce|sauce)\b|비빔장|양념장|소스|[가-힣]{1,16}장(?:\s|$)",
@@ -527,13 +526,6 @@ class PreClassificationDomainRouter:
                 self._SplitValues(row.get("prepared_scope_signals")),
                 searchText,
             )
-            formMatches = [
-                f"{match.group(0)}:{reason}"
-                for pattern, targetChapter, reason in PRODUCT_FORM_TO_HS2
-                for match in (pattern.search(searchText),)
-                if match is not None and targetChapter == chapter
-            ]
-
             redirects = self._SplitValues(
                 row.get("prepared_food_redirect_chapters"),
             )
@@ -648,8 +640,11 @@ class PreClassificationDomainRouter:
             else:
                 _raw_scored, _prep_scored = rawMatches, preparedMatches
             rawScore = float(len(_raw_scored) * (1 if processed else 4))
-            formScore = float(len(formMatches) * 8)
-            score = keywordScore + rawScore + formScore
+            # [11회차-2 §1-A] formScore 소멸 — 원천이던 PRODUCT_FORM_TO_HS2
+            # 는 8회차에 철거(빈 튜플)돼 이후 항상 0이었다. 최근 2런 58건
+            # 서명 0(:prepared_aquatic_animal_product 등 reason 마커 0)
+            # 확인 후 상수·소비부 3곳 동시 제거.
+            score = keywordScore + rawScore
             if _l4_on and chapter in _dict_chapters:
                 # [9회차 §3] 층4 상태 조건 — 사전은 원물 표제 중심이라
                 # 조리품에서 구조적 raw 편향(dict:낙지→ch03 실측). 상품이
@@ -719,15 +714,8 @@ class PreClassificationDomainRouter:
                 amount=preparedScore,
                 source="prepared_scope",
             )
-            self._AddScore(
-                scores,
-                scoreBreakdownByChapter,
-                chapter=chapter,
-                amount=formScore,
-                source="product_form",
-            )
             matchedByChapter.setdefault(chapter, []).extend(
-                keywordMatches + rawMatches + preparedMatches + formMatches,
+                keywordMatches + rawMatches + preparedMatches,
             )
 
         # [9회차 P2] 원료↔조제 동점의 이산 방향 규칙 — 법조 근거: 16류

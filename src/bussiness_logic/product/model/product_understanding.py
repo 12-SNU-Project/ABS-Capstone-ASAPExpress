@@ -132,6 +132,13 @@ class IdentityHintSet:
     chapterHintStatus: str = field(default="", metadata=_desc("HS2 힌트 상태"))
     principalIngredientGuess: str = field(default="", metadata=_desc("LLM 성분서열 보고: 주성분 추정(라벨 1순위)"))
     accessoryIngredients: tuple[str, ...] = field(default=(), metadata=_desc("LLM 성분서열 보고: 부성분(소스·국물·고명)"))
+    titleBoundTerms: tuple[str, ...] = field(default=(), metadata=_desc("[P3] 백과 표제 병기분(정체 교체 대신 별칭 보존) — 발동 서명"))
+    # [메인 수리 07-19] ToTrace가 참조하는데 필드 신설이 CompositionFactSet
+    # 에만 반영돼 전 상품 PU가 AttributeError로 전사하던 결함(orca dry는
+    # 캐시 지각이라 미검출 — 실런 첫 케이스에서 즉사). 지각 유래 형태/
+    # 상태의 자리로 기본값 유지(빈 값 무해).
+    physicalForm: str = field(default="", metadata=_desc("지각 유래 물리적 형태"))
+    preservationState: str = field(default="", metadata=_desc("지각 유래 보존 상태"))
     understandingMode: str = field(default="regex", metadata=_desc("힌트 생성 방식"))
     needsReview: bool = field(default=False, metadata=_desc("수동 검토 필요 여부"))
     llmError: str = field(default="", metadata=_desc("LLM 힌트 생성 오류"))
@@ -147,6 +154,8 @@ class IdentityHintSet:
             "normalized_tariff_description": self.normalizedTariffDescription,
             "identity_terms": list(self.identityTerms),
             "composition_terms": list(self.compositionTerms),
+            "physical_form": self.physicalForm,
+            "preservation_state": self.preservationState,
             "confidence": self.confidence,
             "conflict_reason": self.conflictReason,
             "translated_product_name": self.translatedProductName,
@@ -158,6 +167,7 @@ class IdentityHintSet:
             "chapter_hint_status": self.chapterHintStatus,
             "principal_ingredient_guess": self.principalIngredientGuess,
             "accessory_ingredients": list(self.accessoryIngredients),
+            "title_bound_terms": list(self.titleBoundTerms),
             "understanding_mode": self.understandingMode,
             "needs_review": self.needsReview,
             "llm_error": self.llmError,
@@ -204,6 +214,11 @@ class CompositionFactSet:
     componentCompositions: tuple[dict[str, JsonValue], ...] = field(default=(), metadata=_desc("구성품 단위 성분 projection"))
     compositionTerms: tuple[str, ...] = field(default=(), metadata=_desc("성분/함량 분류 토큰"))
     compositionBasis: str = field(default="label", metadata=_desc("성분 정보 출처"))
+    # [12회차-5] 감사 심각 1 완결 — 컴파일러 배선(physical_form ·
+    # preservation_state)이 읽을 direct 필드. 종전엔 배선만 있고 필드가
+    # 없어 S2 확장이 반쪽이었다(문서 답변율은 올랐는데 확정 권한 없음).
+    physicalForm: str = field(default="", metadata=_desc("문서 유래 물리적 형태"))
+    preservationState: str = field(default="", metadata=_desc("문서 유래 보존 상태"))
     containsWrapperOrDough: bool = field(default=False, metadata=_desc("피/도우 포함 여부"))
     containsSauceOrBroth: bool = field(default=False, metadata=_desc("소스/육수 포함 여부"))
     allergenTermsExcluded: tuple[str, ...] = field(default=(), metadata=_desc("분류에서 제외한 알레르겐 문구"))
@@ -224,6 +239,8 @@ class CompositionFactSet:
             "ingredient_percentages": list(self.ingredientPercentages),
             "component_compositions": list(self.componentCompositions),
             "composition_terms": list(self.compositionTerms),
+            "physical_form": self.physicalForm,
+            "preservation_state": self.preservationState,
             "composition_basis": self.compositionBasis,
             "contains_wrapper_or_dough": self.containsWrapperOrDough,
             "contains_sauce_or_broth": self.containsSauceOrBroth,

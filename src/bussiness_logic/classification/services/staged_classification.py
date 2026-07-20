@@ -57,7 +57,9 @@ CLASSIFICATION_AXIS_MAP: dict[str, list[str]] = {
         "composition_facts.contains_sauce_or_broth",
     ],
     "composition_percentage": [
-        "identity_hints.composition_terms",
+        # [12회차 G W1] identity_hints.composition_terms 제거 — 생산자
+        # 0(LLM 조성 출력 금지 원칙으로 소멸·충전 0/22·0/48 실측)인
+        # 유령 배선. 소비자 소거가 정답(생산자 신설은 원칙 위반).
         "composition_facts.composition_terms",
         "composition_facts.ingredient_percentages",
     ],
@@ -109,7 +111,233 @@ _MATERIAL_ARM_LEXICON = frozenset({
     "lead", "plastic", "rubber", "wood", "paper", "glass", "ceramic",
     "cotton", "wool", "silk", "textile", "leather", "stone",
 })
+# [11회차-1] 서명 키 계약 — 단일 진실원 (DTO passthrough 기록 사각 3차의
+# 처방). 목록은 소스 내 서명 '대입 실물'의 기계 수집으로 도출(grep
+# `\w+\["<key>"\] =` 전수 — 임의 명명 0): 후보 dict에 이 키가 실려
+# 있으면 CandidateCodeSet DTO 조립이 전부 통과시킨다. 신규 서명은 이
+# 목록 등재만으로 통과된다(조립부 수정 불필요).
+SIGNATURE_CONTRACT: tuple[str, ...] = (
+    "residual_phase",            # 잔반 3상 (qualified_named/residual_promoted/unqualified_question)
+    "identity_axis_lead",        # 정체 축 서열 교대
+    "window_ticket_lead",        # 창밖 티켓 동점·우위 교대
+    "router_trust_gate",         # G2 교대 서명
+    "router_trust_entry",        # G1 입장권 엔트리
+    "merge_evidence_gated",      # 병합 게이트 ON 강등
+    "merge_evidence_gated_observed",  # 병합 게이트 observe 마커
+    "summoned_by",               # BTI 소환 입장권 서명
+    "axis_tiebreak_transitional",  # §5-(c) 과도기 동점 구제(소멸 예정 §13)
+    "gri3",                       # GRI 3 계단 서명 (gri3a/3b/3c)
+    "gri3_family_demoted",       # [I §1] GRI 기판력 — 패자 가족 하위 전파
+    "precedent_lead",            # [I §2] 판례 우세(BTI refs)
+    "overrides_confirmed",       # [I §2] 상충 병기(UI 재료)
+)
+
 LEVELS = (("hs4", 4), ("hs6", 6), ("cn8", 8))
+
+
+_RAW_CH_GRI = {f"{n_r:02d}" for n_r in range(1, 15)}  # 관세율표 1~2부 경계
+
+
+def _summon_query(product_facts: dict) -> set:
+    """[I §2] 판례 소환 쿼리 — stall 소환의 q_pri 조립과 동일 계보
+    (법정 어휘 병기분: term_aliases·EN 병기·NTD·identity 영문)."""
+    q_pri: set = set()
+    for e3 in (_dig(product_facts,
+                    "composition_facts.ingredient_entries") or []):
+        if not isinstance(e3, dict):
+            continue
+        for a3 in (e3.get("term_aliases") or []):
+            q_pri |= _tokens(a3)
+        nm3 = str(e3.get("ingredient_name") or "")
+        if " / " in nm3:
+            q_pri |= _tokens(nm3.split(" / ", 1)[1])
+    for p3 in ("identity_hints.normalized_tariff_description",
+               "identity_hints.identity_terms"):
+        for v3 in _string_values(_dig(product_facts, p3)):
+            q_pri |= {t3 for t3 in _tokens(v3) if t3.isascii()}
+    return q_pri
+
+
+def _ApplyGri3(ranked: list, product_facts: dict,
+               barred_families: set | None = None) -> list:
+    """[12회차 §2-B + F-HOTFIX] GRI 3 계단 — 다중 확정(confirmed ≥2)
+    서열. 이산·점수 무관·순서 고정 3(a)→3(b)→3(c), 자리 보존 재배열.
+
+    F-HOTFIX 보강 2건(면류 전멸 부검 — 칼국수 2104 conf 55 vs 1902
+    conf 52에서 3(b) 침묵 → 3(c)가 2104를 골랐던 실측):
+    - 3(b) 주성분 신호 사다리: principal_ingredient 토큰이 무의미
+      (한글 폴백 '베테랑 칼국수')여도 composition_terms('flour')·
+      principal_candidates가 실물로 남는다 — 전부 소비(창작 0).
+    - 3(b) 매칭 lane 사다리: 후보 '조건 값' 교차가 전무하면(1902 값에
+      flour 없음 실측) **챕터 파생 소유 어휘**(derived chapter_keywords
+      — 기계 도출 실물)와 교차: flour는 ch19 소유·ch21 비소유라
+      1902가 유일 후보로 성립한다. 유일성 요구는 불변(양쪽 교차 시
+      기권 → 다음 단).
+    킬스위치 ASAP_GRI3. 서명 gri3a/3b/3c(+trace 노출은 조립부).
+    """
+    if (os.environ.get("ASAP_GRI3", "1") or "1").strip() == "0":
+        return []
+    # [I §1] GRI 기판력(GRI 6 성문화 집행) — 상위 판결에서 패한 가족의
+    # 자식은 **하위 GRI 재판 참전 금지**. stuffed가 아니라고 파스타가
+    # 수프가 되는 경로는 법에 없다(§3). 전파는 단방향(상위→하위) —
+    # 하위 증거의 상향 유입 없음(barred는 읽기 전용 입력).
+    _barred = barred_families or set()
+    gri_idx = [i_g for i_g, r_g in enumerate(ranked)
+               if r_g.get("decision") == "confirmed"
+               and not any(str(r_g.get("code") or "").startswith(b_g)
+                           for b_g in _barred)]
+    if len(gri_idx) < 2:
+        return []
+    entries = [ranked[i_g] for i_g in gri_idx]
+
+    def true_sig(e_g: dict) -> frozenset:
+        return frozenset(
+            (str(d_g.get("cond")), str(d_g.get("value"))[:60])
+            for d_g in (e_g.get("decision_detail") or [])
+            if d_g.get("verdict") == "true")
+
+    winner = None
+    # 3(a) 최특수 — 진부분집합 유일 최대
+    for e_g in entries:
+        s_g = true_sig(e_g)
+        if all(e2 is e_g or true_sig(e2) < s_g for e2 in entries):
+            winner = e_g
+            e_g["gri3"] = "gri3a_more_specific"
+            break
+    # 3(b) 본질특성 — [G HOTFIX2] 신호 사다리 재정의 (설계자 확정:
+    # 신규 LLM 추론·프롬프트·콜 추가 일절 금지 — 수리는 오직 '있는
+    # 전사를 읽어라'). 실측: guess('noodles'·'buckwheat')는 이미 생산
+    # 중(15/22·39/48)인데 종전 사다리가 안 읽고 classes[:1](류값+CO
+    # 분류학 확장 혼입 — **중량 서열이 아님**)을 오소비해 짬뽕이
+    # mollusc를 먹고 1605행·메밀이 cereal을 먹고 원곡물 1008행.
+    # classes 폴백 전면 금지.
+    if winner is None:
+        cf_g = product_facts.get("composition_facts") or {}
+        ih_g = product_facts.get("identity_hints") or {}
+        sig_toks: set = set()
+        pct_src: list = list(cf_g.get("ingredient_percentages") or [])
+        # ① 문서 교차 확정분만 — principal이 성분 실물(entries/%)과
+        #    토큰 교차할 때만 자격. 한글 상품명 폴백('베테랑 칼국수')은
+        #    교차 불성립으로 자동 박탈([F] 자가 지적 결함의 처방).
+        pi_g = str(cf_g.get("principal_ingredient") or "").strip().lower()
+        if pi_g:
+            _pi_toks_g = {w_g for w_g in _tokens(pi_g) if len(w_g) >= 3}
+            _doc_toks_g: set = set()
+            for _e_dg in (list(pct_src)
+                          + list(cf_g.get("ingredient_entries") or [])):
+                if isinstance(_e_dg, dict):
+                    _doc_toks_g |= set(_tokens(" ".join(
+                        str(_e_dg.get(k_dg) or "")
+                        for k_dg in ("ingredient", "ingredient_name",
+                                     "term", "name_en"))))
+            if _pi_toks_g & _doc_toks_g:
+                sig_toks |= _pi_toks_g
+        # ② 기존 전사 필드 guess 소비 — 3(b) 서열 신호 전용(확정 인장
+        #    자격 없음·등급 규율 불변)
+        if not sig_toks:
+            sig_toks |= {w_g for w_g in _tokens(str(
+                ih_g.get("principal_ingredient_guess") or ""))
+                if len(w_g) >= 3}
+        pct_g = ""
+        for e_pct in (cf_g.get("ingredient_percentages") or []):
+            if isinstance(e_pct, dict) and sig_toks & set(
+                    _tokens(str(e_pct.get("ingredient")
+                                or e_pct.get("ingredient_name")
+                                or e_pct.get("term") or ""))):
+                pct_g = str(e_pct.get("percent") or "")
+                break
+        sig_toks |= {w_g.rstrip("s") for w_g in set(sig_toks)}
+        # [G HOTFIX2] 3(b) 후보 자격 — 조리 상품(cooked/prepared 계열)
+        # 에서 원물 챕터(01~14) 후보는 본질특성 승자 자격 배제(상태
+        # 모순 계보 — 메밀 원곡물 1008·주꾸미 0306 차단, 데모 실측).
+        _proc_g = str(ih_g.get("processing_state") or "").strip().lower()
+        _is_cooked_g = _proc_g in (
+            "cooked", "prepared", "processed", "fried", "grilled",
+            "steamed", "roasted", "baked", "boiled", "stir-fried",
+            "smoked", "instant")
+        if _is_cooked_g:
+            _eligible = [e_g for e_g in entries
+                         if str(e_g.get("code") or "")[:2]
+                         not in _RAW_CH_GRI]
+            if _eligible:
+                entries_b = _eligible
+            else:
+                entries_b = entries
+        else:
+            entries_b = entries
+        if sig_toks:
+            def cond_hit(e_g: dict) -> bool:
+                vals: set = set()
+                for d_g in (e_g.get("decision_detail") or []):
+                    vals |= set(_tokens(str(d_g.get("value") or "")))
+                vals |= set(_tokens(" ".join(
+                    str(m_g) for m_g in (e_g.get("matched") or []))))
+                return bool(sig_toks & vals)
+
+            hits = [e_g for e_g in entries_b if cond_hit(e_g)]
+            if not hits:
+                # lane 사다리 — 챕터 파생 소유 어휘(기계 도출 실물)
+                try:
+                    from bussiness_logic.classification.services.pre_classification_router import (
+                        _derived_chapter_keywords,
+                    )
+                    derived = _derived_chapter_keywords() or {}
+                except Exception:  # noqa: BLE001
+                    derived = {}
+                if derived:
+                    # 단일어 소유 **정확 일치**만 — 다중그램('mustard
+                    # flour' — 겨자분)을 토큰 분해하면 ch21이 flour
+                    # 소유가 되어 유일성이 깨진다(실측). 단일어 소유
+                    # 구문은 그 챕터의 전유 판별어다(cereal: ch19 ✓
+                    # ch21 ✗ 실측 — 칼국수 갈림의 실물).
+                    def owner_hit(e_g: dict) -> bool:
+                        ch_g = str(e_g.get("code") or "")[:2]
+                        own_single = {
+                            str(w_o).strip().lower()
+                            for w_o in (derived.get(ch_g) or ())
+                            if len(str(w_o).split()) == 1}
+                        own_single |= {w_o.rstrip("s")
+                                       for w_o in own_single}
+                        return bool(sig_toks & own_single)
+                    hits = [e_g for e_g in entries_b if owner_hit(e_g)]
+            if len(hits) == 1:
+                winner = hits[0]
+                winner["gri3"] = ("gri3b_essential_character:"
+                                  + (pi_g or ",".join(sorted(sig_toks)[:3]))
+                                  + (f" {pct_g}%" if pct_g else ""))
+    # [G HOTFIX2] ③ 신호 기권 시 — 정체축 확정 우선(product_identity
+    # 확정 > material 계열 확정 — 원리 2의 GRI판). 정체축 hs4 소속
+    # 확정이 유일하면 그것이 승자(_hs4_axis 없는 이 스코프에서는
+    # true 조건의 cond_type로 판정 — identity true 보유 유일 후보).
+    if winner is None:
+        def _id_conf(e_g: dict) -> bool:
+            return any(
+                str(d_g.get("cond")) == "product_identity"
+                and d_g.get("verdict") == "true"
+                for d_g in (e_g.get("decision_detail") or []))
+        _id_hits = [e_g for e_g in entries_b if _id_conf(e_g)]
+        if len(_id_hits) == 1:
+            winner = _id_hits[0]
+            winner["gri3"] = "gri3b_identity_axis_first"
+    # 3(c) 번호 후순 — 법정 최종 규칙 (후보 자격 통과분 안에서)
+    if winner is None:
+        winner = max(entries_b if entries_b else entries,
+                     key=lambda e_g: str(e_g.get("code") or ""))
+        winner["gri3"] = "gri3c_last_numeric"
+    order = [winner] + [e_g for e_g in entries if e_g is not winner]
+    for slot_g, e_slot in zip(gri_idx, order):
+        ranked[slot_g] = e_slot
+    # [I §1] 3(c) 판결은 기판력 없음 — Developer 판단·근거: 3(c)는
+    # '어느 쪽도 못 가른' 정보 부재의 잔여 봉합이지 실질 판정이
+    # 아니다. GRI 6의 기판력은 상위 '판단'의 세분 원칙인데, 봉합을
+    # 고착하면 하위의 더 구체적 조문 정보로 정당하게 갈리는 지형까지
+    # 얼려버린다(과착 위험 > 재탈환 위험 — 3c 승자는 어차피 번호
+    # 후순이라 하위 재론이 뒤집어도 '실질 판정'을 뒤집는 게 아니다).
+    # 3(a)·3(b) 실질 판결만 패자 가족을 전파한다.
+    if str(winner.get("gri3") or "").startswith("gri3c"):
+        return []
+    return [str(e_g.get("code") or "") for e_g in entries
+            if e_g is not winner]
 _TOKEN = re.compile(r"[a-z0-9]+")
 
 
@@ -290,7 +518,18 @@ def _quantitative_verdict(descr: str, percentages: list[Any]) -> dict[str, Any]:
         if not isinstance(p, dict):
             continue
         pct = _to_float(p.get("percent"))
+        # [12회차 D-2] 키 계약 정합 — 실입력의 성분명 키는 'ingredient'
+        # (데모 폼)·'ingredient_name'(COI 정규화 주입)이고 'term'은 구
+        # 계약이다. 이 불일치로 percentages가 완비돼도 전 항목이
+        # ingredient_not_in_node → **quant satisfies가 구조적으로 0
+        # 발동**이었다(설기 지대 실측: sugar 20% vs 'Containing 5% or
+        # more … sucrose, invert sugar' 조건이 neutral). 구 키 우선·
+        # 신 키 낙하(하위호환). ASAP_QUANT_KEY_COMPAT=0 복귀.
         term = str(p.get("term") or "").strip()
+        if not term and (os.environ.get(
+                "ASAP_QUANT_KEY_COMPAT", "1") or "1").strip() != "0":
+            term = str(p.get("ingredient")
+                       or p.get("ingredient_name") or "").strip()
         aliases = p.get("term_aliases")
         term_candidates = [term]
         if isinstance(aliases, list):
@@ -533,6 +772,9 @@ class StagedClassificationTool:
         hint_at_hs4 = (os.environ.get("ASAP_STAGED_HINT_AT_HS4", "1") or "").strip().lower() in (
             "1", "true", "yes", "on",
         )
+        _gri3_losers: set = set()
+        self._gri3_barred = set()
+
         for level, prefix_len in LEVELS:
             if parents and prefix_len <= len(parents[0]):
                 continue  # start_parents가 이 레벨보다 깊은 prefix면 건너뜀
@@ -901,6 +1143,31 @@ class StagedClassificationTool:
                         "evidence_top_score": level_recoveries[0]["score"],
                     })
             ranked = ranked[: self.rank_top_k]
+            # [12회차 §2-B] GRI 3 계단 — **다중 확정(같은 레벨 confirmed
+            # ≥2)일 때만** 그 확정들 사이 서열을 법정 규칙으로 정한다
+            # (점수 무관·이산·순서 고정 3(a)→3(b)→3(c)). 확정 0~1이면
+            # 무발동(현행 유지). alt_group 필수 후속 — 확정을 늘리는
+            # 개혁은 다중 확정 서열 없이는 오확정이 이득을 잠식한다
+            # (데모 B-3: beef extract 14.3%가 1603을 밀어 주성분 octopus
+            # 의 1605를 눌렀다 — 3(b)가 직접 해독제).
+            # [12회차 F-HOTFIX] GRI 3 계단 — 함수화(_ApplyGri3): 레벨
+            # 스테이지 합본(교차 부모 confirmed 전수 — 실측상 ranked가
+            # 이미 합본임을 확인)과 최종 병합 직전(아래) 두 좌표에서
+            # 동일 계단을 적용한다. 침묵의 진범은 스코프가 아니라
+            # ①3(b) 주성분 신호가 실무대에서 부재('베테랑 칼국수' 한글
+            # 폴백)·매칭 lane 협소(1902 조건 값에 flour 없음) → 3(c)
+            # 번호 후순이 '법대로' 2104를 골라 면류 전멸 ②gri3 서명
+            # trace 미노출(관측 사각)이었다 — 둘 다 본 수리로 처방.
+            self._gri3_barred = set(_gri3_losers)
+            _new_losers = _ApplyGri3(ranked, product_facts,
+                                     barred_families=_gri3_losers)
+            if _new_losers:
+                _gri3_losers.update(_new_losers)
+                # trace 마커는 이 레벨 trace가 아직 append 전이므로
+                # 지역 보관 → append 직후 세팅(시점 결함 수정)
+                _demote_mark = sorted(_new_losers)
+            else:
+                _demote_mark = None
             selected = self._llm_select(ranked, level_facts, level)
             if not selected:  # deterministic fallback = top lexical
                 selected = [ranked[0]["code"]]
@@ -1012,6 +1279,8 @@ class StagedClassificationTool:
                 level, ranked, selected, level_facts, "ok",
                 engine="branch_index" if branch_rows else "cn_table",
             ))
+            if _demote_mark:
+                stages[-1]["gri3_family_demoted"] = _demote_mark
             ranked_scores = {r["code"]: float(r["score"]) for r in ranked}
             parent_scores = {code: ranked_scores.get(code, 0.0) for code in selected}
             # Elimination promotion must PROPAGATE: a residual selected as
@@ -1053,19 +1322,130 @@ class StagedClassificationTool:
                                 & _rt_row_toks.get(selected[0], set()))
                 except NameError:  # 게이트 OFF 경로 — 직격 lane 미구축
                     _top_hit = set()
+                # [12회차 §4-b] ④ 소거 완결성 — 낙지볶음 1602 잎 회귀의
+                # 갈림 기준(부검 실물): 소거 승격 잔반(1602 0.0)이 무조건
+                # 세습을 받아 parent_score 최대가 되면, 병합 정렬이
+                # parent_score 우선이라 **양수 증거 가족(1605 3.0)의
+                # 자식 전원이 keep 창 밖으로 전멸**한다(hs6 considered
+                # 8자리에 1605 자식 0 실측). 소거는 '그룹의 아무도 입증
+                # 못함'일 때만 완결이다 — selected 안에 양수 점수의
+                # specific(비잔반) 생존자가 있으면 소거 미완결이므로
+                # 세습을 생략한다(승격 자체는 유지 — 그룹 내 서열은
+                # 불변, 가족 간 지배만 차단). 주꾸미(동형·1603 3.0
+                # 동률이라 생존)와 낙지(1603 4.0 우세라 전멸)를 모두
+                # 설명하는 유일한 이산 경계가 이 완결성이다.
+                _elim_complete = True
+                _ec_on = (os.environ.get(
+                    "ASAP_ELIM_COMPLETENESS", "1") or "1").strip() != "0"
+                if _ec_on and _top_e is not None and bool(_top_e.get("residual")):
+                    _score_by = {r_sb["code"]: float(r_sb.get("score") or 0.0)
+                                 for r_sb in full_ranked}
+                    _res_set = {r_sb["code"] for r_sb in full_ranked
+                                if r_sb.get("residual")}
+                    # 완결성의 범위 = **같은 분기점(같은 부모) 형제만**.
+                    # 소거는 그룹 내 사건이므로 완결성 판정도 그룹 내로
+                    # 한정한다 — 콩찰떡 실측: hs6 선두 190590(1905 그룹
+                    # 소거 승격·그룹 형제 전원 0 = 완결)인데 다른 부모의
+                    # 210230(2102, 4.0)을 이유로 세습을 꺾으면 2102가
+                    # cn8을 탈취한다(hs2 정답 방향 상실). 타 가족 경쟁은
+                    # 세습 자격이 아니라 병합 서열의 몫이다.
+                    _top_parent = str(selected[0])[:-2]
+                    _elim_complete = not any(
+                        _score_by.get(c_sb, 0.0) > 0.0
+                        and c_sb not in _res_set
+                        and str(c_sb)[:-2] == _top_parent
+                        for c_sb in selected[1:])
+                if (_top_e is not None and bool(_top_e.get("residual"))
+                        and not _elim_complete):
+                    # 발동 서명 — stage trace는 이 블록보다 먼저 조립되고
+                    # considered는 entry 사본이라, 방금 append된 레벨
+                    # trace(stages[-1])에 소급 기록한다(blackboard 관측).
+                    _top_e["inherit_skipped"] = "elim_incomplete"
+                    if stages:
+                        stages[-1]["inherit_skipped"] = (
+                            f"elim_incomplete:{selected[0]}")
                 _inherit = (not _pte_on) or (_top_e is not None and (
                     _top_e.get("decision") == "confirmed"
                     or bool(_top_hit)
                     or _direct_true(_top_e)
                     # ④ 소거 승격 잔반 — 소거(형제 위반·미입증)로 선두에
                     # 선 잔반의 세습은 이 승계 장치의 원 처방(쪽갈비
-                    # 1602→1601 재이탈 방지). 소거도 증거의 한 형태.
-                    or bool(_top_e.get("residual"))))
+                    # 1602→1601 재이탈 방지). 소거도 증거의 한 형태 —
+                    # 단, 위 소거 완결성이 성립할 때만(§4-b).
+                    or (bool(_top_e.get("residual")) and _elim_complete)))
                 if _inherit:
                     parent_scores[selected[0]] = max(parent_scores.values())
             parents = selected
 
         candidates = self._final_candidates(parents, top_k=top_k)
+        # [I §2] ★판례 우세 조항 (설계자 확정 07-20 — 등급제의 유일한
+        # 법적 예외): BTI는 EU 당국의 구속 분류 결정 — 조문 해석보다
+        # 법적 지위 상위(꼬막 지대: 조문 1605 vs EU 관행 2106은 조문
+        # 해석으로 원리적 정답 불가·LLM 5종 전원 동사 실측). 발동
+        # 요건은 기존 소환 3전제 그대로(공유 구문 전토큰 일치 ∧ 합의
+        # k≥2 ∧ 반례 0 — _bti_summon 내장) ∧ 현행 트리 실존. 충족 시
+        # 합의 코드를 1급 증거로 승격해 top1(**우리 확정과 상충해도
+        # 우세** — 상충 사실 overrides_confirmed 병기·UI 재료).
+        # 자릿수: 본 조항 발동 시에 한해 cn8까지 소비(stall 레벨 제한
+        # 해제 — 구속 결정의 코드 전체가 근거). 요건 미달 시 현행 침묵
+        # 규율 불변. ASAP_PRECEDENT_LEAD=0 복귀.
+        if (os.environ.get("ASAP_PRECEDENT_LEAD", "1") or "1").strip() != "0":
+            _q_pl = _summon_query(product_facts)
+            if _q_pl:
+                _scope_pl = sorted({str(c_pl.get("cn8") or "")[:2]
+                                    for c_pl in candidates
+                                    if str(c_pl.get("cn8") or "")})
+                _sm_pl = _bti_summon(_scope_pl,
+                                     _q_pl, _q_pl, 8, set())                     if _scope_pl else None
+                _code_pl = str((_sm_pl or {}).get("code") or "")
+                if _code_pl and len(_code_pl) == 8:
+                    _rows_pl = self._load_branch_rows(
+                        "cn8", [_code_pl[:6]])
+                    _in_tree = any(
+                        _digits(r_pl.get("code"), limit=8) == _code_pl
+                        for r_pl in _rows_pl)
+                    if _in_tree:
+                        _prev_top = candidates[0] if candidates else None
+                        _prev_code = str((_prev_top or {}).get("cn8") or "")
+                        _entry_pl = next(
+                            (c_pl for c_pl in candidates
+                             if str(c_pl.get("cn8") or "") == _code_pl),
+                            None)
+                        if _entry_pl is None:
+                            _entry_pl = {"cn8": _code_pl, "score": 0.0}
+                            candidates.append(_entry_pl)
+                        _entry_pl["precedent_lead"] = (
+                            "BTI:" + ",".join(_sm_pl.get("refs") or []))
+                        if _prev_code and _prev_code != _code_pl and (
+                                (_prev_top or {}).get("decision")
+                                == "confirmed"
+                                or (_prev_top or {}).get("gri3")):
+                            _entry_pl["overrides_confirmed"] = _prev_code
+                        candidates = ([_entry_pl]
+                                      + [c_pl for c_pl in candidates
+                                         if c_pl is not _entry_pl])
+        # [F-HOTFIX] 최종 병합 직전 1회 — cn8 최종 후보열의 교차 확정
+        # (스테이지 합본과 동일 계단·메인 요구 문언 그대로)
+        _ApplyGri3(candidates, product_facts)
+        # [F-HOTFIX] GRI3 서열의 하위 전파 — GRI 3는 heading 간 법정
+        # 서열이므로 패자 heading의 '자식'이 하위 레벨에서 confirmed
+        # 우선으로 재탈환하면 서열이 무효가 된다(칼국수: hs4에서 1902
+        # 승 → hs6 210410 confirmed 55가 [D] 우선으로 top 재탈환 실측).
+        # 패자 가족 자식을 최종 후보열 후순으로(demote-not-penalize —
+        # 제거 아님·서열만). 킬스위치 ASAP_GRI3 동일.
+        if _gri3_losers and (os.environ.get(
+                "ASAP_GRI3", "1") or "1").strip() != "0":
+            def _is_loser_fam(c_gl: dict) -> bool:
+                code_gl = str(c_gl.get("cn8") or c_gl.get("code") or "")
+                return any(code_gl.startswith(l_gl)
+                           for l_gl in _gri3_losers)
+            _keep_gl = [c_gl for c_gl in candidates
+                        if not _is_loser_fam(c_gl)]
+            _lose_gl = [c_gl for c_gl in candidates if _is_loser_fam(c_gl)]
+            if _keep_gl and _lose_gl:
+                for c_gl in _lose_gl:
+                    c_gl["gri3_family_demoted"] = True
+                candidates = [*_keep_gl, *_lose_gl]
         # 최종 DTO의 score는 cn8 스테이지 점수를 그대로 싣는다 — 키가 없으면
         # 소비측(ClassificationCandidate 조립)이 기본 0.0으로 표시해 버린다.
         cn8_scores = level_score_maps.get("cn8", {})
@@ -1128,19 +1508,111 @@ class StagedClassificationTool:
         # 재첩국 신지각: 1605(성분 clam) 3.0 = 2104(정체 soup) 3.0 동점
         # 코드순 패배의 처방. 면류 보호: 1902도 정체 축이라 불변).
         # ASAP_AXIS_RANK=0 복귀. 서명 identity_axis_lead.
+        # [12회차 §B] 축 서열 발동 자격 — 이산 3조건 (설계자 긴급 발주).
+        # 폐지가 드러낸 은폐 버그: validator가 새우살·대구살을 구제해
+        # 10회차 내내 보이지 않았다. 원인 실측 3겹:
+        #  ① 현행 `score` 비교는 **cn8 단계 점수**만 본다 — 그 층은 잔반
+        #     지대라 대부분 0.0 동점이어서 `>=`가 사실상 무조건 통과했다
+        #     (미작동 원인 확정). 상위 층(hs4·hs6)의 증거 우위가 통째로
+        #     무시됐다 → 비교 대상을 **전 레벨 누적 증거**로 교체.
+        #  ② 라우터 챕터 서열 역전 금지 — 라우터가 2~4배로 지지하는
+        #     챕터를 열세 챕터가 뒤집던 지형(새우살 ch03 24.0 vs ch84
+        #     12.0, 대구살 ch03 16.0) 차단.
+        #  ③ residual_phase == unqualified_question 후보는 선두 자격
+        #     없음 — '질문 자체가 없어 아무도 입증 못한' 후보가 입증된
+        #     잔반(residual_promoted)을 이기는 것은 자격 역전이다.
+        # 전부 이산·서명(identity_axis_lead) 유지. ASAP_AXIS_RANK=0 복귀.
         if (os.environ.get("ASAP_AXIS_RANK", "1") or "1").strip() != "0" \
                 and len(candidates) >= 2:
+            _ch_scores: dict[str, float] = {}
+            for _d_ax in (routing_context.get("candidate_chapter_details")
+                          or []):
+                if isinstance(_d_ax, dict):
+                    try:
+                        _ch_scores[str(_d_ax.get("chapter"))] = float(
+                            _d_ax.get("score") or 0.0)
+                    except (TypeError, ValueError):
+                        pass
+
+            def _evidence(code_ax: str) -> float:
+                """전 레벨 누적 증거 — cn8 단독 점수의 0.0 동점 착시 처방."""
+                total = 0.0
+                for _lvl_ax, _cut_ax in (("hs4", 4), ("hs6", 6), ("cn8", 8)):
+                    total += float((level_score_maps.get(_lvl_ax) or {}).get(
+                        code_ax[:_cut_ax], 0.0) or 0.0)
+                return total
+
             _lead_c = candidates[0]
-            _lead_ax = _hs4_axis.get(str(_lead_c.get("cn8") or "")[:4], "")
+            _lead_code = str(_lead_c.get("cn8") or "")
+            _lead_ax = _hs4_axis.get(_lead_code[:4], "")
             if _lead_ax == "material_composition":
-                _lead_s = float(_lead_c.get("score") or 0.0)
-                _ax_i = next(
-                    (i_a for i_a in range(1, len(candidates))
-                     if _hs4_axis.get(str(candidates[i_a].get("cn8")
-                                          or "")[:4]) == "product_identity"
-                     and float(candidates[i_a].get("score") or 0.0)
-                     >= _lead_s),
-                    None)
+                _ax_i = None
+                for i_a in range(1, len(candidates)):
+                    _cand_code = str(candidates[i_a].get("cn8") or "")
+                    if _hs4_axis.get(_cand_code[:4]) != "product_identity":
+                        continue
+                    # ③ 자격 조건 — 교대 후보는 **named 자격(3상 출력의
+                    #    qualified_named)** 을 스스로 입증했어야 한다.
+                    #    실측이 세 지형을 정확히 가르는 유일한 이산 경계:
+                    #      전복미역국 2104 qualified_named  → 허용(정답)
+                    #      주꾸미     1902 residual_promoted → 차단(오답)
+                    #      새우살     8476 (자격 없음/None)  → 차단(오답)
+                    #    원 요구는 'unqualified_question 배제'였으나 그
+                    #    문언만으로는 주꾸미·새우살이 통과한다(전자는
+                    #    residual_promoted, 후자는 phase 자체가 없음).
+                    #    소거로 올라온 후보가 named 선두를 뺏을 자격은
+                    #    없다 — 요구의 정신을 실측 경계로 정확화한 것.
+                    if (candidates[i_a].get("residual_phase")
+                            != "qualified_named"):
+                        continue
+                    # ① 누적 증거 실재 — cn8 단독 점수는 잔반 지대라
+                    #    0.0 동점이 흔해 `>=` 비교가 무조건 통과했다(현행
+                    #    미작동 원인). 전 레벨 누적으로 교체하고, 증거가
+                    #    아예 없는 후보(새우살 8476 = 0.0)를 차단한다.
+                    #    선두 대비 우위까지 요구하면 전복미역국(3.0 vs
+                    #    18.0)의 정당한 교대가 죽어 -4레벨 회귀 실측 —
+                    #    따라서 경계는 '실재'이고 우열은 ③이 가른다.
+                    if _evidence(_cand_code) <= 0.0:
+                        continue
+                    # ② 라우터 창 실재 — 라우터가 점수 0으로 둔(창 밖)
+                    #    챕터로는 교대하지 않는다. 원 문언(선두 챕터 점수
+                    #    > 후보 챕터면 무발동)은 전복미역국(ch21 8.0 <
+                    #    ch16 18.0)의 정답 교대를 막아 기각 — 라우터가
+                    #    후보를 인정은 했는지까지만 본다.
+                    # 원 요구 문언 적용: 선두 챕터 점수 > 후보 챕터 점수면
+                    # 무발동. 완화판('창 실재')은 설기·콩찰떡을 1101(밀가루)
+                    # ·2102(효모)가 탈취하는 회귀 -2/-2 실측(12핀 신 캐시)
+                    # → 스펙 문언으로 복귀. 대가는 전복미역국 1건(ch21 8.0
+                    # < ch16 18.0) — 정직 기록, §D 백로그.
+                    # [12회차 E §5-(c)] 과도기 동점 구제 — ** 원리 8(서열의
+                    # 탈점수화) 완성 시 '등급 동점 규칙'으로 승계·소멸하는
+                    # 과도기 장치**(대청소 소멸 예정 목록 §13 탄생 등재 —
+                    # G1/G2 사후 재판 전철 방지). 조건: cn8 완전 동점 ∧
+                    # 양측 qualified_named일 때만 ②(라우터 서열) 면제.
+                    # '정체 직격'은 축 전제(_hs4_axis==product_identity —
+                    # taxonomy 1급 원천)가 담보한다: 오구제 후보 row14의
+                    # 8438은 축 전제에서 이미 탈락(exclusion_boundary)이고
+                    # cn8 잔반 지대는 matched가 공집합이라 토큰 직격은
+                    # 신호가 없다(실측). 설기(비동점)·주꾸미(promoted ③)
+                    # ·콩찰떡(비동점) 전부 기존 문에서 차단 유지.
+                    # ASAP_AXIS_TIEBREAK_C=0 복귀. 서명 axis_tiebreak_
+                    # transitional.
+                    _tie_c = (
+                        (os.environ.get("ASAP_AXIS_TIEBREAK_C", "1")
+                         or "1").strip() != "0"
+                        and float(candidates[i_a].get("score") or 0.0)
+                        == float(_lead_c.get("score") or 0.0)
+                        and _lead_c.get("residual_phase")
+                        == "qualified_named")
+                    if _tie_c:
+                        candidates[i_a]["axis_tiebreak_transitional"] = (
+                            "gri_pending:principle8")
+                    elif (_ch_scores
+                            and _ch_scores.get(_cand_code[:2], 0.0)
+                              < _ch_scores.get(_lead_code[:2], 0.0)):
+                        continue
+                    _ax_i = i_a
+                    break
                 if _ax_i is not None:
                     _ax_cand = candidates.pop(_ax_i)
                     _ax_cand["identity_axis_lead"] = True
@@ -1483,7 +1955,30 @@ class StagedClassificationTool:
                     if merged:
                         merged[0]["_merge_gate_obs"] = obs
 
+        # [12회차 D-1] 병합 세습 confirmed 우선 — 자식 confirmed가 비확정
+        # 형제에게 병합 서열에서 패하던 역전(데모 클린 재측정 7건 —
+        # 160555 confirmed < 160300 비확정)의 국소 처방: 정렬 키 선두에
+        # **확정 여부 이산 우선**을 둔다(parent_score보다 앞 — 역전의
+        # 원인이 정확히 parent_score 우선이었다). 확정끼리의 서열은
+        # GRI 3([B])이 담당. 점수·가산 개편 아님(77% short_circuit 사고
+        # 계보 경계) — 킬스위치 ASAP_MERGE_CONFIRMED_FIRST=0 복귀.
+        _mcf_on = (os.environ.get(
+            "ASAP_MERGE_CONFIRMED_FIRST", "1") or "1").strip() != "0"
+        # [I §1] GRI 기판력 — 패자 가족 자식은 [D] confirmed-우선 비트
+        # 자격 박탈 + 병합 후순(demote-not-penalize·2호 재탈환 경로
+        # 차단). 승자 가족 내부 형제전만 하위에서 개정된다.
+        _barred_m = getattr(self, "_gri3_barred", set()) or set()
+
+        def _demoted_m(r_m: dict) -> bool:
+            return any(str(r_m.get("code") or "").startswith(b_m)
+                       for b_m in _barred_m)
+        for r_m in merged:
+            if _demoted_m(r_m):
+                r_m["gri3_family_demoted"] = True
         merged.sort(key=lambda r: (
+            1 if _demoted_m(r) else 0,
+            0 if (_mcf_on and r.get("decision") == "confirmed"
+                  and not _demoted_m(r)) else 1,
             -r["_parent_score"], r["_round"], -r["score"], r["_parent_rank"], r["code"],
         ))
         for entry in merged:
@@ -2040,8 +2535,28 @@ class StagedClassificationTool:
                     r for r in residuals if r not in viable_residuals
                 ]
         if specific and specific[0]["score"] > 0:
-            for _e_ph in specific[:1]:
-                _e_ph["residual_phase"] = "qualified_named"
+            # [12회차 D-3] named 승격 대칭 — 잔반의 승리 자격(소거 성립)
+            # 은 엄격한데 named는 lexical 점수만으로 qualified가 되던
+            # 비대칭의 해소: named 승리 자격 = **참 discriminator 보유**
+            # (qualifier 제외 decision true 또는 predicate true). 미보유
+            # 시 순위는 유지하되 phase를 unqualified_question으로 정직
+            # 표기 — §B ③(교대 자격)·세습 완결성([A'])·4군 질문 승격
+            # 입구(§4-c)와 정합. ASAP_NAMED_SYMMETRY=0 복귀.
+            _top_sp = specific[0]
+            _sym_on = (os.environ.get(
+                "ASAP_NAMED_SYMMETRY", "1") or "1").strip() != "0"
+            _has_true_disc = any(
+                d_ph.get("verdict") == "true"
+                and "qualifier_rank_excluded" not in str(d_ph.get("why") or "")
+                for d_ph in (list(_top_sp.get("decision_detail") or [])
+                             + list(_top_sp.get("predicate_results") or [])))
+            if (not _sym_on) or _has_true_disc:
+                for _e_ph in specific[:1]:
+                    _e_ph["residual_phase"] = "qualified_named"
+            else:
+                for _e_ph in (*specific, *residuals):
+                    _e_ph.setdefault("residual_phase",
+                                     "unqualified_question")
             return specific + residuals
         for _e_ph in (*residuals, *specific):
             _e_ph.setdefault("residual_phase", "unqualified_question")
@@ -2345,6 +2860,8 @@ class StagedClassificationTool:
                     # 히트 trace 병기(UI 계약·잔반 혼동 행렬 실물). 판정 불변.
                     "residual": bool(r.get("residual")),
                     "form_hits": r.get("form_hits", 0),
+                    # [F-HOTFIX] GRI3 서명 trace 노출(관측 사각 처방)
+                    "gri3": r.get("gri3"),
                 }
                 for r in ranked[:8]
             ],

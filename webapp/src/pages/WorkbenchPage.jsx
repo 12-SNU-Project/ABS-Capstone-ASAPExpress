@@ -3,6 +3,18 @@ import { Link } from "react-router-dom";
 import DataTable from "../components/DataTable";
 import KeyValueRows from "../components/KeyValueRows";
 import { useClassificationRun } from "../hooks/useClassificationRun";
+import { useBlackboardTrace } from "../hooks/useBlackboardTrace";
+import {
+  GRADE_LABELS,
+  detailValueText,
+  gradeOf,
+  isTrueVerdict,
+  stageEntryForCode,
+  summarizeSummons,
+  summonsForStage,
+  stageLabelKo,
+  trueDetails,
+} from "../lib/traceContract.js";
 import {
   EVENT_STAGE_LABELS,
   PRODUCT_FACT_KEYS,
@@ -573,10 +585,143 @@ function RoutingPanel({ result }) {
   );
 }
 
-function TracePanel({ candidate }) {
+// 등급 뱃지 — named=법정 서술(파랑)/precedent=판례(보라)/derived=승인 파생(초록)/fallback=회색
+function GradeBadge({ detail }) {
+  const grade = gradeOf(detail);
+  if (!grade) {
+    return null;
+  }
+  return <span className={`cjs-grade g-${grade}`}>{GRADE_LABELS[grade] || grade}</span>;
+}
+
+function StageSummonRow({ row, stageCode }) {
+  const joined = row.fired && stageCode && row.code === stageCode;
+  return (
+    <div className={`cjs-stage-summon ${row.fired ? "fired" : ""}`}>
+      <b>📚 이 지점에서 판례 조회</b>
+      {row.fired ? (
+        <span>
+          발동 — <span className="cjs-mono">{row.code}</span>
+          {joined ? " (판례 소환으로 후보 합류)" : " 후보 합류"}
+          {row.refs.length ? ` · ${row.refs.slice(0, 3).join(", ")}` : ""}
+        </span>
+      ) : (
+        <span>
+          {row.reviewed || "-"}건 검토 — {row.silenceLabel || "미반영"}
+          {row.notInTree ? ` (${row.notInTree})` : ""}
+          {row.refs.length ? ` · 근거 판례 ${row.refs.slice(0, 3).join(", ")}` : ""}
+        </span>
+      )}
+      {row.phrases.length ? <em>매치 구문: {row.phrases.slice(0, 3).join(" / ")}</em> : null}
+      {row.distribution.length > 1 ? (
+        <div className="cjs-summons-bar" title={row.distribution.map((d) => `${d.code} ${d.count}`).join(" · ")}>
+          {row.distribution.map((entry) => (
+            <span key={entry.code} style={{ flexGrow: Math.max(entry.count, 1) }}>
+              {entry.code.slice(-6)} {entry.count}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function StageTraceBlock({ stage, cn8, summons }) {
+  const entry = stageEntryForCode(stage, cn8);
+  const stageName = clean(asObject(stage).stage);
+  const stageSummons = summonsForStage(summons, stageName);
+  if (!entry && !stageSummons.length) {
+    return null;
+  }
+  const decision = clean(entry?.decision);
+  const positives = entry ? trueDetails(entry) : [];
+  const allDetails = entry ? asList(entry.decision_detail) : [];
+  return (
+    <div className="cjs-stage-trace">
+      <div className="cjs-stage-trace-head">
+        <b>{stageLabelKo(stageName)}</b>
+        {entry ? <span className="cjs-mono">{clean(entry.code)}</span> : null}
+        {decision ? (
+          <span className={`cjs-decision d-${decision}`}>
+            {decision === "confirmed" ? "확정" : decision === "violated" ? "위배" : "미확정"}
+          </span>
+        ) : null}
+        {entry?.residual ? <span className="cjs-residual">기타(Other)</span> : null}
+      </div>
+      {stageSummons.map((row, index) => (
+        <StageSummonRow row={row} stageCode={clean(entry?.code)} key={index} />
+      ))}
+      {entry ? (
+        positives.length ? (
+          positives.map((detail, index) => (
+            <div className="cjs-trace-detail" key={index}>
+              <GradeBadge detail={detail} />
+              <span className="cjs-mono dim">{clean(detail.cond)}</span>
+              <span>{detailValueText(detail) || clean(detail.why)}</span>
+            </div>
+          ))
+        ) : (
+          <div className="cjs-muted">verdict=true 근거가 없습니다.</div>
+        )
+      ) : null}
+      {allDetails.length > positives.length ? (
+        <details className="cjs-trace-more">
+          <summary>전체 심사 내역 펼치기 ({allDetails.length}건)</summary>
+          {allDetails.map((detail, index) => (
+            <div className="cjs-trace-detail full" key={index}>
+              <span className={`cjs-mono ${isTrueVerdict(detail) ? "ok" : "dim"}`}>
+                {isTrueVerdict(detail) ? "true" : clean(asObject(detail).verdict) || "-"}
+              </span>
+              <span className="cjs-mono dim">{clean(asObject(detail).cond)}·{clean(asObject(detail).op)}</span>
+              <span>{clean(asObject(detail).why)}</span>
+            </div>
+          ))}
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+// 스테이지에 앵커되지 못한(level 없는) 소환 기록만 — 나머지는 StageTraceBlock 안에 표시
+function BtiSummonsBlock({ summons }) {
+  const rows = summarizeSummons(summons).filter((row) => !row.level);
+  if (!rows.length) {
+    return null;
+  }
+  return (
+    <>
+      <div className="cjs-subpanel-title">BTI 판례 조회 이력 (단계 미지정)</div>
+      {rows.map((row, index) => {
+        const total = row.distribution.reduce((sum, entry) => sum + entry.count, 0);
+        return (
+          <div className="cjs-summons" key={index}>
+            <div>
+              {row.fired
+                ? `판례 발동: ${row.code}${row.refs.length ? ` — ${row.refs.slice(0, 3).join(", ")}` : ""}`
+                : `판례 조회: ${row.reviewed || "-"}건 검토 — ${row.silenceLabel || "미반영"}`}
+            </div>
+            {row.distribution.length > 1 ? (
+              <div className="cjs-summons-bar" title={row.distribution.map((d) => `${d.code} ${d.count}`).join(" · ")}>
+                {row.distribution.map((entry) => (
+                  <span key={entry.code} style={{ flexGrow: Math.max(entry.count, 1) }}>
+                    {entry.code.slice(-6)} {entry.count}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {total ? null : null}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function TracePanel({ candidate, trace }) {
   const tree = asObject(candidate?.candidate_static_tree);
   const score = asObject(candidate?.score_breakdown);
   const basis = asList(candidate?.classification_basis).slice(0, 6);
+  const validator = asObject(trace?.validator);
   return (
     <div className="cjs-panel">
       <div className="cjs-panel-title">단계별 분류 근거</div>
@@ -600,8 +745,27 @@ function TracePanel({ candidate }) {
       ) : (
         <div className="cjs-muted">표시할 판단 메모가 없습니다.</div>
       )}
+      {trace?.hasTrace ? (
+        <>
+          <div className="cjs-subpanel-title">단계별 심사 기록 (trace) — 판례 소환 지점 포함</div>
+          {asList(trace.stages).map((stage, index) => (
+            <StageTraceBlock stage={stage} cn8={candidate?.cn8} summons={trace.summons} key={index} />
+          ))}
+          {Object.keys(validator).length ? (
+            <div className={`cjs-validator ${validator.applied ? "applied" : ""}`}>
+              <b>LLM 검증 권고</b>
+              <span className="cjs-mono">{clean(validator.cn8)}</span>
+              <span>{clean(validator.reason)}</span>
+              {validator.applied && clean(validator.original_top_cn8) ? (
+                <em>적용됨 — 원 1순위 {clean(validator.original_top_cn8)} 교체</em>
+              ) : null}
+            </div>
+          ) : null}
+          <BtiSummonsBlock summons={trace.summons} />
+        </>
+      ) : null}
       <div className="cjs-subpanel-title">
-        유사 EU 분류 판례 ({asList(candidate?.similar_ebti_cases).length}건)
+        유사 EU 분류 판례 ({asList(candidate?.similar_ebti_cases).length}건 · 표시 전용 — 위 소환 기록과 무관, 선택에 무관여)
       </div>
       <PrecedentList cases={candidate?.similar_ebti_cases} />
     </div>
@@ -622,6 +786,8 @@ export default function WorkbenchPage() {
     window.localStorage.setItem("asap-classification-fx", fx);
   }, [fx]);
   const derived = useWorkbenchDerived(result);
+  // 기록 의무화 trace — 런 완료 후 blackboard에서 1회 로드
+  const trace = useBlackboardTrace(result?.job_id, !busy);
   const [activeStage, setActiveStage] = useState("classification");
   const followStageRef = useRef(true);
 
@@ -876,7 +1042,7 @@ export default function WorkbenchPage() {
               {/* 후보 선택(좌) ↔ 선택한 후보의 근거(우)를 나란히 — 클릭 즉시 옆에서 갱신 */}
               <div className="cjs-stage-duo">
                 <CandidateBoard derived={derived} selectedKey={selectedKey} onSelect={setSelectedKey} />
-                <TracePanel candidate={selectedCandidate} />
+                <TracePanel candidate={selectedCandidate} trace={trace} />
               </div>
             </>
           ) : null}

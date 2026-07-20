@@ -155,25 +155,12 @@ def _CachedFlatten(pathText: str, maxChars: int) -> str:
     return FlattenXlsxText(Path(pathText), maxChars=maxChars)
 
 
-def LoadCoiEvidence(
-    *,
-    caseIndex: int | None,
-    productName: str,
-    coiRoot: Path = DEFAULT_COI_ROOT,
-    maxChars: int = 8000,
-) -> CoiEvidence | None:
-    path = FindCoiPath(
-        caseIndex=caseIndex,
-        productName=productName,
-        coiRoot=coiRoot,
-    )
-    if path is None:
-        return None
-    return CoiEvidence(
-        path=path,
-        text=_CachedFlatten(str(path), maxChars),
-        matchedScore=_ScorePath(path, caseIndex=caseIndex, productName=productName),
-    )
+# [11회차-2 §1-A] LoadCoiEvidence 소멸 — 구식 디렉토리 스캔 경로(상품명
+# 유사도로 xlsx를 고르던 방식)는 정규화 폼 단일화(ParseCoiComposition ·
+# InjectIntoProductUnderstanding)로 대체. 삭제 근거: 최근 2런 58건에서
+# 구식 경로 서명 0 · 외부 소비자 0(product_understanding 호출부 동시
+# 제거). FindCoiPath/DEFAULT_COI_ROOT는 진단 유틸 SummarizeCoiMatches가
+# 계속 쓰므로 존치.
 
 
 _HEADER_KEYS = ("품명", "성분", "함량")
@@ -567,6 +554,24 @@ def InjectIntoProductUnderstanding(pu: dict[str, Any]) -> dict[str, Any] | None:
             cf["component_compositions"] = [dict(c) for c in comp2]
     except Exception:  # noqa: BLE001 — 재계산 실패는 기존 값 유지
         pass
+    # [12회차-5] 하네스 주입 — 문서(COI 정규화 폼)가 실제로 답한
+    # 형태·보존 상태를 direct 필드에 채운다. 값은 폼 실등장분만(창작 0),
+    # provenance는 coi_normalized로 표시돼 §C 자격 심사의 입력이 된다.
+    _pf = str(form.get("physical_form") or form.get("form") or "").strip()
+    _ps = str(form.get("preservation_state") or form.get("storage")
+              or form.get("processing_state") or "").strip()
+    if _pf and not cf.get("physical_form"):
+        cf["physical_form"] = _pf
+    if _ps and not cf.get("preservation_state"):
+        cf["preservation_state"] = _ps
+    # [12회차 A] 스탬프 조건 수리 — 종전엔 형태/보존 값이 있을 때만
+    # 찍었는데, COI 폼에는 그 최상위 키가 없어 신 3런 전체가 스탬프 0
+    # 이었다(실측). entries 주입이 성립한 것 자체가 문서 출처이므로
+    # (entry 단위 source=coi_normalized 실물과 동일 의미) 주입 성립
+    # 시 항상 찍는다.
+    if added or _pf or _ps:
+        cf.setdefault("composition_provenance", "coi_normalized")
     pu["composition_facts"] = cf
     return {"coi_form_injected": True, "entries_added": len(added),
+            "physical_form": _pf, "preservation_state": _ps,
             "principal": principal or "(후보 병기)"}

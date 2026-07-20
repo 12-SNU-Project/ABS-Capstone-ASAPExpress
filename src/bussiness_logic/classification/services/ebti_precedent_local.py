@@ -82,7 +82,12 @@ def _load_evidence(index: dict[str, Any], seen_refs: set[str]) -> None:
                 "cn8": cn8,
                 "country": str(row.get("issuing_country") or ""),
                 "terms": terms,
-                "summary": str(row.get("bti_case_summary") or "")[:800],
+                # 표시 요약: 한글 번역본(bti_case_summary_ko, 배치 번역 산출)이
+                # 있으면 우선 — 없으면 기존 키워드 템플릿 폴백. 표시 전용·선택 무관여.
+                "summary": (
+                    str(row.get("bti_case_summary_ko") or "").strip()
+                    or str(row.get("bti_case_summary") or "").strip()
+                )[:800],
             }, cn8, hs6)
 
 

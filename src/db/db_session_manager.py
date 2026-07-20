@@ -49,7 +49,16 @@ class DbSessionConfig:
     def FromEnvironment() -> "DbSessionConfig":
         _load_project_dotenv()
         database_url = (
-            _env("ASAP_DATABASE_URL")
+            # [07-20 설계자 확정] 분류 DB = PG* 블록(Supabase pooler).
+            # 서류 작업이 ASAP_DATABASE_URL을 메인 서버 DB로 옮기면서
+            # (그쪽엔 branch_decision_index·술어 테이블 없음) staged가
+            # 빈손이 되는 충돌 실측 → 분류층은 PGHOST가 설정돼 있으면
+            # PG* 조립 주소를 ASAP_DATABASE_URL보다 우선한다. 명시
+            # 오버라이드는 ASAP_CLASSIFICATION_DATABASE_URL(값은 .env
+            # 에서 설계자 관리).
+            _env("ASAP_CLASSIFICATION_DATABASE_URL")
+            or (_build_url_from_pg_env() if _env("PGHOST") else "")
+            or _env("ASAP_DATABASE_URL")
             or _env("DATABASE_URL")
             or _build_url_from_pg_env()
         )
@@ -131,8 +140,6 @@ def _read_optional_int_env(name: str) -> int | None:
 
 
 def _build_url_from_pg_env() -> str:
-    import os
-
     host = _env("PGHOST")
     if not host:
         raise RuntimeError(
@@ -185,7 +192,19 @@ class DbSessionManager:
             max_overflow=config.maxOverflow,
             pool_timeout=config.poolTimeoutSeconds,
             pool_pre_ping=True,
-            connect_args={"connect_timeout": config.connectTimeoutSeconds},
+            # [순단 내성 07-19] TCP keepalive — 원거리 DB에서 응답 패킷이
+            # 유실되면 read가 영원히 블록된다(실측: 재컴파일 INSERT가
+            # ClientRead 데드 커넥션으로 하루 4회, 17~37분 무한 대기).
+            # keepalive가 죽은 커넥션을 ~30초 내 에러로 승격시켜 '조용한
+            # 멈춤'을 재시도 가능한 실패로 바꾼다. 연결 옵션이라 판정·
+            # 점수 무영향.
+            connect_args={
+                "connect_timeout": config.connectTimeoutSeconds,
+                "keepalives": 1,
+                "keepalives_idle": 10,
+                "keepalives_interval": 5,
+                "keepalives_count": 4,
+            },
             future=True,
         )
         self._sessionFactory = sessionmaker(

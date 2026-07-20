@@ -98,6 +98,158 @@ CRITERION_FIELD_BINDING = {
 }
 
 _COND_CLAUSE = re.compile(r"whether\s+or\s+not[^,;.)]*", re.I)
+
+# [12회차-2 A안] 교대(OR) 원자 도출 문법 — 조문 표기 규칙만 본다(어휘 0).
+#  · 괄호절 안의 ' or ' 열거: "(uncooked or cooked by steaming…)"
+#  · 최상위 ' or ' 열거: "bread, pastry … or wafer, rice paper"
+# 진성 누적(AND)과 교대(OR)를 가르는 것은 접속사이지 의미가 아니다 —
+# 'and'/쉼표 단독 열거는 누적으로 남고, 'or'로 이어진 원자만 묶는다.
+# 그룹은 반드시 **행 부분집합**에 붙는다(코드 단위 X): 0710 =
+# vegetable ∧ frozen ∧ (uncooked ∨ steaming/boiling).
+_ALT_PAREN = re.compile(r"\(([^()]*\bor\b[^()]*)\)", re.I)
+_ALT_SPLIT = re.compile(r"\s+or\s+", re.I)
+# [12회차 B-2] whether-or-not 선택 성분 — '조건 태깅' 억제용 마스크.
+# _COND_CLAUSE 스크럽(값 수확용)은 쉼표에서 멈춰 "whether or not
+# concentrated[, or containing added sugar…]" 꼬리의 or들이 교대로
+# 오태깅됐다(0403 g1 'nut, cocoa' 실측). 선택 성분은 질문이 아니므로
+# 절 전체(다음 ';' 또는 끝까지)를 **동일 길이 공백으로 마스킹**해
+# 오프셋을 보존한 채 교대 도출에서만 제외한다(값 수확 스크럽 불변).
+# 마스크 경계: ';' **또는 예시 도입구(', such as')** — 1902 실측: [^;]*
+# 로만 끊으면 "whether or not cooked or stuffed … , such as spaghetti,
+# …, noodles, …"의 판별 열거(noodle)까지 삼켜 confirmed가 붕괴한다
+# (칼국수 -3 회귀). such as 이하는 선택 성분이 아니라 판별 어휘의
+# 보고다(용도 참조절 스크럽과 같은 조문 관용구 문법 계보).
+_WON_RX = re.compile(
+    r"\bwhether\s+or\s+not\b(?:(?!,\s*such\s+as\b)[^;])*", re.I)
+# [12회차 E §6] of-원료 참조절 — 참조절 문법 가족의 **3좌표째**(①용도
+# 참조절 'of a kind used for…' ②교차참조 배제절 'of heading/chapter'
+# ③본 좌표). 선두 정체 명사구 뒤의 `of <다항 원료 열거>`(콤마 ≥1 ∧
+# ' or ' 포함)는 원료 참조지 판별 서술이 아니다 — 1603 "Extracts and
+# juices of meat, fish or crustaceans, molluscs…"의 원료 열거가
+# material 판별값으로 수확돼 mollusc 제품이 1603에 끌리던 실측([C]
+# §6)의 처방. 경계 설계: **다항 열거만**(콤마+or 동시 요구) — "articles
+# of leather"·"flour of wheat"(단일 원료 = 정당 재질 판별값)와 대시
+# 라벨 선두 "Of coffee"(선두 정체 없음 — (?<=\w) 요구)는 보존된다.
+# 선두 정체(extract·juice 실단어)는 마스크 밖 — 설계자 조건 그대로.
+_OF_SOURCE_RX = re.compile(
+    r"(?<=\w)\s+of\s+((?:[^,;()]{1,60},\s*)+[^,;()]{0,60}?\bor\b[^,;()]{0,60})",
+    re.I)
+
+
+def _of_clause_is_source(listing: str) -> bool:
+    """of-절의 or-열거가 '원료 열거'인가 — **상태축 열거면 아니다**.
+
+    표면 문법이 동형인 두 지형의 기계 갈림(수기 0 — taxonomy 패턴):
+      1603 "of meat, fish or crustaceans, molluscs…" → 원소 전부 명사
+      0201 "of bovine animals, fresh or chilled"   → fresh·chilled가
+           상태축 매치 → 상태 열거(뒤따르는 조건 서술)지 원료 열거가
+           아님 — 마스크 취소(bovine 판별값 전멸 실측의 처방).
+    """
+    parts = [s.strip() for s in re.split(r",|\bor\b", listing, flags=re.I)
+             if s.strip()]
+    for part in parts:
+        for entry in _TAXONOMY:
+            if entry["criterion_type"] not in _STATE_TYPES:
+                continue
+            if entry["pattern"].fullmatch(part) or (
+                    len(part.split()) <= 2 and entry["pattern"].search(part)):
+                return False
+    return True
+
+
+# [12회차 E-편입] 유래 참조절 — 가족 **4좌표째**(설계자 '가족 확장'
+# 조건의 첫 적용): 'obtained/derived from X'의 동사구는 연산어지 판별
+# 어휘가 아니다 — 19049010 "Obtained from rice"가 폴백에서 'obtained
+# rice' 파편으로 수확되던 실측의 처방. **동사구만** 동일 길이 공백
+# 치환해 목적어(rice — 정당 판별값)는 보존한다. 동사 목록은 실측 좌표
+# 최소(obtained·derived) — 'prepared from'(1604 caviar 계보)은 판례
+# 상한 기보호라 확장 보류.
+_DERIV_RX = re.compile(
+    r"\b(?:obtained|derived)\s+(?:entirely\s+|wholly\s+|partly\s+)?from\b",
+    re.I)
+
+
+def _mask_optional_clauses(text_in: str) -> str:
+    body = str(text_in or "")
+    body = _WON_RX.sub(lambda m: " " * len(m.group(0)), body)
+    body = _DERIV_RX.sub(lambda m: " " * len(m.group(0)), body)
+    if (os.environ.get("ASAP_OF_SOURCE_SCRUB", "1") or "1").strip() != "0":
+        body = _OF_SOURCE_RX.sub(
+            lambda m: (" " * len(m.group(0))
+                       if _of_clause_is_source(m.group(1)) else m.group(0)),
+            body)
+    return body
+
+
+def _alt_spans(text_in: str) -> list[tuple[int, int, int]]:
+    """교대 원자의 **문자 오프셋 구간** — [(start, end, group_idx), …].
+
+    스펙 확정: source_text 사후 문자열 매칭은 기각(0201 'fresh or
+    chilled' 오탐 대량·상한 1,989↔하한 620). 컴파일 시점에 '값을 뽑은
+    match 위치'가 어느 원자 구간에 들어가는지로 판정하면 문자열 오탐이
+    구조적으로 불가능하다 — 이것이 유일 해법.
+    """
+    spans: list[tuple[int, int, int]] = []
+    body = str(text_in or "")
+    gid = 0
+    covered: list[tuple[int, int]] = []
+    for m in _ALT_PAREN.finditer(body):
+        inner_off = m.start(1)
+        cuts = [(mm.start(), mm.end()) for mm in _ALT_SPLIT.finditer(m.group(1))]
+        if not cuts:
+            continue
+        bounds = [0] + [c for cut in cuts for c in cut] + [len(m.group(1))]
+        parts = [(bounds[i], bounds[i + 1]) for i in range(0, len(bounds) - 1, 2)]
+        if len(parts) >= 2:
+            for s, e in parts:
+                spans.append((inner_off + s, inner_off + e, gid))
+            covered.append((m.start(), m.end()))
+            gid += 1
+    # [12회차 3-수리] 괄호 밖 or 열거 — 원자 경계를 **쉼표**로 제한한다.
+    # 문장 전체를 or로 가르면 무관한 진성 누적 조건까지 한 그룹이 되어
+    # (0403: fermented ∧ cream/kephir / 0304: fresh ∧ fillet/meat) 곧
+    # 오확정이다. 실제 조문에서 교대 원자의 경계는 쉼표다:
+    #   0811 "Fruit and nuts, [uncooked] or [cooked by steaming] or
+    #         [boiling in water], frozen"  → 세 원자만 묶이고 nuts·frozen
+    #         (진성 누적)은 그룹 밖으로 남는다.
+    # 따라서 or 매치의 좌우로 **직전/직후 쉼표까지만** 확장한다.
+    def _inside(pos: int) -> bool:
+        return any(a <= pos < b for a, b in covered)
+
+    _SEP = ",;:()"
+    tops = [(mm.start(), mm.end()) for mm in _ALT_SPLIT.finditer(body)
+            if not _inside(mm.start())]
+    if tops:
+        # 인접한 or들은 하나의 열거다 — 열거 범위를 [첫 or의 직전 쉼표+1,
+        # 마지막 or의 직후 쉼표)로 잡고 그 안을 or로 분할한다.
+        runs: list[list[tuple[int, int]]] = [[tops[0]]]
+        for s_or, e_or in tops[1:]:
+            prev_end = runs[-1][-1][1]
+            if any(ch in body[prev_end:s_or] for ch in _SEP):
+                runs.append([(s_or, e_or)])
+            else:
+                runs[-1].append((s_or, e_or))
+        for run in runs:
+            first_s, last_e = run[0][0], run[-1][1]
+            left_cut = max((body.rfind(ch, 0, first_s) for ch in _SEP),
+                           default=-1)
+            right_cut = min(
+                (p for p in (body.find(ch, last_e) for ch in _SEP) if p >= 0),
+                default=len(body))
+            l_s, r_e = left_cut + 1, right_cut
+            atoms: list[tuple[int, int]] = []
+            cur = l_s
+            for s_or, e_or in run:
+                atoms.append((cur, s_or))
+                cur = e_or
+            atoms.append((cur, r_e))
+            atoms = [(s_a, e_a) for s_a, e_a in atoms
+                     if body[s_a:e_a].strip()]
+            if len(atoms) >= 2:
+                for s_a, e_a in atoms:
+                    spans.append((s_a, e_a, gid))
+                gid += 1
+    return spans
 # 상태축 — dash 헤더 소비가 정당한 유형(R1 원형). 값 추출·거울 배제에서
 # 명사(정체) 계열과 다른 규칙을 탄다.
 _STATE_TYPES = frozenset({"preservation_state", "processing_method",
@@ -329,7 +481,6 @@ def CompileGroupDecisions(
             {_stem(t) for t in _TOKEN.findall(ancestor_text.lower())}
             - leaf_union)
         siblings = tuple(l for c, l in ordered if c != code)
-        sibling_toks = _toks(" ".join(siblings))
         # 형제 '배타' 필터는 상태×종 행렬 그룹(0203/0306: fresh·frozen 쌍이
         # 같은 종 라벨을 반복)에서 모든 토큰을 공유로 판정해 조건을 전멸시킨다
         # (실측: 0306 20형제 조건 0개). 판별력의 올바른 기준은 배타가 아니라
@@ -380,7 +531,8 @@ def CompileGroupDecisions(
             return units[:8]
 
         def add(cond_type: str, op: str, values, source: str,
-                role: str = "discriminator", grade: str = "named") -> None:
+                role: str = "discriminator", grade: str = "named",
+                alt_group: str = "", alt_kind: str = "") -> None:
             # grade: 'named'=원문 판별 서술 수확 / 'fallback'=패턴 불발 시
             # 명사 덤핑 (컴파일 2.0 B-5 — 폴백 구분은 축 이름이 아니라
             # 컬럼으로: binding 자격쌍 무접촉, 평가기 하위호환).
@@ -392,6 +544,12 @@ def CompileGroupDecisions(
                 "value": json.dumps(values, ensure_ascii=False) if values is not None else "null",
                 "source_text": _grounded_source(source, values), "version": "parser-v1",
                 "role": role, "grade": grade,
+                # [12회차-2 A안] 교대 원자 묶음 ID — 같은 alt_group 내
+                # 조건은 평가기에서 **OR**(1개 참이면 그룹 충족).
+                # 빈 문자열 = 진성 누적(AND) 조건.
+                "alt_group": alt_group,
+                # emit 경로(디버그 전용) — 그룹 정체성에 불참한다.
+                "alt_kind": alt_kind,
             })
 
         # [P1-B] 조상 헤더 = 그룹 공통 자격층(role='qualifier') — 특정 형제의
@@ -416,7 +574,9 @@ def CompileGroupDecisions(
         # 구성품 상태라 광역 풀 배제로 쓰면 밀키트의 'prepared' 같은 요리
         # 수준 토큰에 정답이 위반당한다(실측). 그래서 부정 캡처는 leaf
         # 세그먼트(';' 뒤 마지막)에서만, dash 세그먼트는 긍정 조건만 낸다.
-        leaf_segment = segs_all[-1] if segs_all else ""
+        # [12회차 B-2] leaf 창도 WON 마스킹 경유(값 수확 억제 — 위와 동일)
+        leaf_segment = (_COND_CLAUSE.sub(" ", _mask_optional_clauses(
+            raw_segs[-1])).strip() if raw_segs else "")
         quant_neg_source = ""
         for neg in _NEG_VALUE.finditer(leaf_segment):
             # 정렬 후 절단 — _toks는 set이라 순회 순서가 PYTHONHASHSEED에
@@ -444,12 +604,98 @@ def CompileGroupDecisions(
                 continue
             add("exclusion_boundary", "not_contains", sorted(values), neg.group(0))
             emitted_types.add("exclusion_boundary")
+        # [12회차 B-2] 값 수확 창에도 WON 마스킹 — _COND_CLAUSE가 쉼표에서
+        # 멈춰 남긴 꼬리("…, or containing added fruit, nuts or cocoa")가
+        # 조건 행으로 수확되면 선택 성분이 AND 질문이 되어 확정을 막는다
+        # (0403 'nut','cocoa' 행 실측). 선택 성분은 질문이 아니다 — 행
+        # 생성 자체를 억제한다(마스킹은 raw 세그먼트 기준·동일 길이
+        # 공백이라 leaf/조상 분리·오프셋 전부 보존).
+        clean = " ; ".join(s_wm for s_wm in (
+            _COND_CLAUSE.sub(" ", _mask_optional_clauses(s_rm)).strip()
+            for s_rm in raw_segs) if s_wm)
         positive_side = _NEG_VALUE.sub(" ", clean)
         # dash(중간) 세그먼트는 상태축 전용: 'Molluscs' 같은 dash 명사(류
         # 정의)가 조건 값이 되면 그 류의 전 형제가 같은 값으로 확정된다
         # (실측: 1605.5x 일곱 형제 전원 확정 — ingredient_class='molluscs'
         # 하나로). 명사류 값 추출은 leaf 세그먼트에서만.
         leaf_positive = _NEG_VALUE.sub(" ", leaf_segment)
+        # [12회차-2 A안] 교대 원자 구간 선계산 — 값을 뽑은 match 위치가
+        # 어느 원자에 속하는지로 alt_group을 붙인다(컴파일 시점 태깅).
+        # 검색 창이 둘(상태축=positive_side / 명사축=leaf_positive)이라
+        # 창별로 따로 계산하고, 그룹 ID는 코드 단위로 유일해야 하므로
+        # 창 접두를 붙인다.
+        # [12회차 3-수리] 그룹 정체성 = (코드, 교대 스팬 구간) — **단일
+        # 기준 문자열(clean)** 위에서만 도출한다. 종전 결함: 창별
+        # (positive_side / leaf_positive)로 따로 스팬을 뜨고 kind를 ID에
+        # 섞어(`0710:pos0` vs `0710:leaf0`) 같은 괄호절의 원자가 경로마다
+        # 다른 그룹이 됐다 — 그룹 간 AND라 OR이 걸리지 않았고, 태깅 코드
+        # 1,948개 중 460개(24%)가 같은 결함 지형이었다. 두 창은 서로 다른
+        # 좌표계라 오프셋 자체도 통약 불가이므로, 기준을 clean 하나로
+        # 고정하고 **원자 텍스트 포함 관계**로 소속을 판정한다(오프셋
+        # 구간의 의미를 좌표계 독립적으로 구현 — 수기 매핑 0).
+        # 교대 도출용 기준 문자열은 **raw에서 별도 조립**한다: 값 수확
+        # 스크럽(_COND_CLAUSE — 쉼표에서 멈춤)이 clean에서 'whether or
+        # not' 앵커를 먼저 지워버려, 그 꼬리(", or containing added …
+        # nuts or cocoa")의 or들이 교대로 오태깅된다(0403 g1 실측).
+        # raw 세그먼트에 WON 절 전체(';'까지) 마스킹을 먼저 적용한 뒤
+        # 값 스크럽을 얹는다 — 값 수확 경로(clean)는 불변.
+        _segs_for_alt = [
+            _COND_CLAUSE.sub(" ", _mask_optional_clauses(s_am)).strip()
+            for s_am in raw_segs
+        ]
+        _clean_masked = " ; ".join(s_am for s_am in _segs_for_alt if s_am)
+        _alt_atoms_std: list[tuple[str, ...]] = [
+            (_clean_masked[_s_a:_e_a].strip().lower(), f"g{_g_a}")
+            for _s_a, _e_a, _g_a in _alt_spans(_clean_masked)
+        ]
+        # [12회차 B-1] ';' 교대 — 계층 구분자 ' ; '는 raw_segs 분리로
+        # 이미 소비됐고(파스 단계 분리 — 충돌 안전 설계), **leaf 세그먼트
+        # 내부**의 ';'만 서술 열거다: 1905 "bread, pastry … wares;
+        # communion wafers, … rice paper"의 A ∨ B. 스크럽이 만든 인공
+        # ' ; '도 원위치가 서술 ';'였으므로 교대 경계로 정당하다.
+        _leaf_seg = _COND_CLAUSE.sub(" ", _mask_optional_clauses(
+            raw_segs[-1] if raw_segs else ""))
+        if ";" in _leaf_seg:
+            _semi_parts = [p_sm.strip(" ,.").lower()
+                           for p_sm in _leaf_seg.split(";")]
+            _semi_parts = [p_sm for p_sm in _semi_parts if p_sm]
+            if len(_semi_parts) >= 2:
+                for p_sm in _semi_parts:
+                    _alt_atoms_std.append((p_sm, "s0"))
+
+        def _alt_of(kind: str, pos: int, probe: str = "") -> str:
+            """교대 그룹 ID — kind는 **디버그 전용**(ID 불참).
+
+            probe: 이 행이 나온 원문 조각(매치 텍스트/값 구문). 기준
+            문자열의 어느 교대 원자에 속하는지로 그룹을 정한다.
+            """
+            needle = str(probe or "").strip().lower()
+            if not needle:
+                return ""
+            for _atom, _g_a in _alt_atoms_std:
+                if not _atom:
+                    continue
+                # 방향 고정: **원자 ⊇ 매치**일 때만 소속. 역방향(매치가
+                # 원자를 포함)은 매치가 여러 원자를 걸친 경우라 특정
+                # 원자의 소속으로 볼 수 없다(과다 태깅 원인).
+                if needle in _atom:
+                    return f"{code}:{_g_a}"
+            # [12회차 B-1] 토큰 단위 낙하 — 폴백 값은 스템·구문 압축
+            # ('empty cachet suitable' ← "empty cachets of a kind
+            # suitable…")이라 전체-포함이 구조적으로 실패한다. needle의
+            # 전 토큰이 같은 원자에 부분문자열로 들어 있을 때만 소속
+            # (토큰 AND — 방향 고정 원칙 유지).
+            _n_toks = [w_at for w_at in needle.split() if len(w_at) >= 3]
+            if _n_toks:
+                for _atom, _g_a in _alt_atoms_std:
+                    if _atom and all(w_at in _atom for w_at in _n_toks):
+                        return f"{code}:{_g_a}"
+            return ""
+
+        def _alt_kind(kind: str) -> str:
+            """emit 경로 표시 — 그룹 ID에서 분리된 디버그 필드."""
+            return kind
+
         for entry in _TAXONOMY:
             cond_type = entry["criterion_type"]
             if cond_type in ("residual_other", "exclusion_boundary"):
@@ -488,6 +734,20 @@ def CompileGroupDecisions(
                 if len(window) == 80 and not window[-1].isspace():
                     window = window.rsplit(" ", 1)[0] if " " in window else window
                 span_source = window.split(";")[0].split(".")[0]
+                # [12회차-3] 축 경계 절단 — 값 창이 '다른 축의 연산어'를
+                # 만나면 그 앞에서 끊는다. 0710 "Vegetables … uncooked or
+                # cooked by steaming or boiling in water"에서 material
+                # 창이 'cooked by …' 구간을 삼켜 'steaming'이 재질 값이
+                # 되던 결손의 처방(0811 동형). 원천 taxonomy에 steam/boil
+                # 어휘가 없어 값 자체로는 축을 못 가리므로, 어휘가 아니라
+                # **연산어 경계**로 자른다(문법 규칙 — 수기 어휘 0,
+                # ';'·'.' 절단과 동형 계보).
+                for _e_b in _TAXONOMY:
+                    if _e_b["criterion_type"] not in _STATE_TYPES:
+                        continue
+                    _m_b = _e_b["pattern"].search(span_source)
+                    if _m_b and _m_b.start() > 0:
+                        span_source = span_source[:_m_b.start()]
                 # 근거 기록은 match+채택 창 전체 — 값은 창에서 뽑으면서
                 # source_text에 match.group(0)만 적으면 값이 원문 근거와
                 # 어긋난 행이 남는다("articles of leather"에서 값 ["article"]
@@ -520,8 +780,49 @@ def CompileGroupDecisions(
                 exclude=(frozenset() if cond_type in _STATE_TYPES
                          else frozenset(ancestor_toks | _STATE_LEXICON)))
             if span_tokens:
-                add(cond_type, "has_token", span_tokens, source_span)
-                emitted_types.add(cond_type)
+                # [12회차-3] 축 배정 라우팅 — 값 토큰이 '공정/상태축이
+                # 소유한 어휘'면 그 축으로 이관한다. 실측 결손 패턴:
+                # 0710 "cooked by steaming or boiling in water"의
+                # 'steaming'이 material_composition 값으로 실려(연산어형
+                # 창 캡처의 부작용) 재질 질문이 공정 어휘를 묻는 행이
+                # 됐다 — 0403 fermented·0811 steaming·1801 roasted 동형.
+                # 소유 판정은 taxonomy 패턴 실매치(_STATE_TYPES 계열)로만
+                # — 수기 목록 0. 'salt'(무기염 2825/382487)처럼 공정축
+                # 패턴에 매치되지 않는 물질 어휘는 이관되지 않는다.
+                if cond_type not in _STATE_TYPES:
+                    _proc_vals: dict[str, list[str]] = {}
+                    _kept_vals: list[str] = []
+                    for _v_ax in span_tokens:
+                        _owner = ""
+                        for _e_ax in _TAXONOMY:
+                            if _e_ax["criterion_type"] not in _STATE_TYPES:
+                                continue
+                            _m_ax = _e_ax["pattern"].fullmatch(str(_v_ax))
+                            if _m_ax:
+                                _owner = _e_ax["criterion_type"]
+                                break
+                        if _owner:
+                            _proc_vals.setdefault(_owner, []).append(_v_ax)
+                        else:
+                            _kept_vals.append(_v_ax)
+                    if _proc_vals:
+                        for _ax_t, _vs in _proc_vals.items():
+                            add(_ax_t, "has_token", sorted(_vs), source_span,
+                                alt_group=_alt_of("leaf", match.start(),
+                                                  probe=source_span),
+                                alt_kind="leaf")
+                            emitted_types.add(_ax_t)
+                        span_tokens = _kept_vals
+                if span_tokens:
+                    _kind_a = ("pos" if (cond_type in _STATE_TYPES
+                                         or cond_type
+                                         == "quantitative_threshold")
+                               else "leaf")
+                    add(cond_type, "has_token", span_tokens, source_span,
+                        alt_group=_alt_of(_kind_a, match.start(),
+                                          probe=source_span),
+                        alt_kind=_alt_kind(_kind_a))
+                    emitted_types.add(cond_type)
         # [B-3] 상태 집합 qualifier — 라벨의 '전' 상태 매치를 집합으로
         # 실은 그룹 자격층. 4회차 기각 2종(전 매치 가산·소수 한정 가산)과
         # 달리 순위 가산이 아니라 '모순 자격 심사'(P3-b arm 기계의 일반화)
@@ -619,8 +920,28 @@ def CompileGroupDecisions(
                 # 유일한 생산자다. 전면 교체 시 binding 자격쌍이 공집합화
                 # (실측: fallback 4,575/named 0 — 면류 confirm 전멸 위험).
                 # named/fallback 판별 기준은 dry-run diff로 검증 후 도입.
-                add("product_identity", "has_token", nouns, clean,
-                    grade="fallback")
+                # [12회차-2 A안] 교대 원자 분할 — 폴백 값이 여러 교대 원자에
+                # 걸치면 **원자별로 행을 쪼개고** 같은 alt_group으로 묶는다
+                # (1905: bread·pastry ∨ wafer·rice paper). 한 행에 다 실으면
+                # AND 의미가 되어 교대가 누적으로 오컴파일된다 — 데모 D-2가
+                # 잡아낸 결함의 본체. 위치는 leaf_positive 내 값 구문의
+                # 실오프셋(컴파일 시점) — 문자열 사후 매칭 아님.
+                _lp_low = leaf_positive.lower()
+                _by_group: dict[str, list[str]] = {}
+                for _n_a in nouns:
+                    _pos_a = _lp_low.find(str(_n_a).split()[0].lower())
+                    _g_a = _alt_of("leaf", _pos_a, probe=str(_n_a))
+                    _by_group.setdefault(_g_a, []).append(_n_a)
+                if len(_by_group) > 1:
+                    for _g_a, _vs_a in _by_group.items():
+                        add("product_identity", "has_token", _vs_a, clean,
+                            grade="fallback", alt_group=_g_a,
+                            alt_kind="fallback")
+                else:
+                    add("product_identity", "has_token", nouns, clean,
+                        grade="fallback",
+                        alt_group=next(iter(_by_group), ""),
+                        alt_kind="fallback")
         # [Phase 1.5] 최후 상태어 보존 — 위 폴백까지 전멸한 코드 중 leaf
         # 라벨이 taxonomy 상태 매치 토큰(_VALUE_STOP 관용어) 1~2개로만
         # 구성된 경우('Used' 63051010 실측: 값 필터 소실 → bare). 관용구가
@@ -1277,6 +1598,13 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
 
     if apply_mode:
         with manager.OpenSession() as session:
+            # [메인 그래프트 재이식 3차 — 동시 apply 봉쇄] 좀비 오염 사고 처방.
+            _got = session.execute(text(
+                "SELECT pg_try_advisory_lock(hashtext('branch_decision_index_apply'))"
+            )).scalar()
+            if not _got:
+                raise RuntimeError(
+                    '다른 apply가 진행 중(advisory lock 선점 실패) — 동시 실행 금지.')
             session.execute(text(
                 'CREATE TABLE IF NOT EXISTS "branch_decision_index" ('
                 "level text, branch_id text, seq int, then_code text,"
@@ -1292,6 +1620,12 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
             session.execute(text(
                 'ALTER TABLE "branch_decision_index"'
                 " ADD COLUMN IF NOT EXISTS grade text DEFAULT 'named'"))
+            session.execute(text(
+                'ALTER TABLE "branch_decision_index"'
+                " ADD COLUMN IF NOT EXISTS alt_group text DEFAULT ''"))
+            session.execute(text(
+                'ALTER TABLE "branch_decision_index"'
+                " ADD COLUMN IF NOT EXISTS alt_kind text DEFAULT ''"))
             # 반복 재기록으로 테이블이 부풀면 DELETE가 statement timeout에
             # 걸린다(실측 2회: 일괄 → ctid 청크 300s까지 실패). 다른 버전
             # 행이 없으면 TRUNCATE — 튜플 단위 작업이 없어 즉시 끝나고
@@ -1317,12 +1651,54 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
             insert_sql = text(
                 'INSERT INTO "branch_decision_index" ('
                 "level, branch_id, seq, then_code, cond_type,"
-                " dto_field, op, value, source_text, version, role, grade) VALUES ("
+                " dto_field, op, value, source_text, version, role, grade, alt_group, alt_kind) VALUES ("
                 ":level, :branch_id, :seq, :then_code, :cond_type,"
-                " :dto_field, :op, :value, :source_text, :version, :role, :grade)")
-            for start in range(0, len(out), 1000):
-                session.execute(insert_sql, out[start:start + 1000])
+                " :dto_field, :op, :value, :source_text, :version, :role, :grade,"
+                " :alt_group, :alt_kind)")
+            # [12회차 3-수리·재발 방지] INSERT 파라미터 정규화 — add()를
+            # 거치지 않고 rows/out에 직접 append하는 경로(법정 주·BTI·
+            # 거울 배제·qualifier·quant·CNEN 등)는 신설 컬럼 키를 갖지
+            # 않는다. executemany는 파라미터 그룹 하나만 키가 비어도
+            # **배치 전량이 실패**하고(메인 실측: 첫 재컴파일 exit 0인데
+            # 테이블 무변경) 조용히 넘어간다. 삽입 직전 한 번 채워서
+            # 향후 신설 경로까지 자동 커버한다(상설 안전장치).
+            _row_defaults = {"role": "discriminator", "grade": "named",
+                             "alt_group": "", "alt_kind": ""}
+            for _r_ins in out:
+                for _k_ins, _v_ins in _row_defaults.items():
+                    _r_ins.setdefault(_k_ins, _v_ins)
+            # [메인 그래프트 재이식 3차 — 순단 내성] execute_values 단문+청크 커밋+재시도.
+            from psycopg2.extras import execute_values
+            _cols = ("level", "branch_id", "seq", "then_code", "cond_type",
+                     "dto_field", "op", "value", "source_text", "version",
+                     "role", "grade", "alt_group", "alt_kind")
+            _ev_sql = ('INSERT INTO "branch_decision_index" ('
+                       + ", ".join(_cols) + ") VALUES %s")
             session.commit()
+            _retries = 0
+            _start = 0
+            while _start < len(out):
+                try:
+                    _chunk = [tuple(r.get(c) for c in _cols)
+                              for r in out[_start:_start + 2000]]
+                    _dbapi = session.connection().connection
+                    with _dbapi.cursor() as _cur:
+                        execute_values(_cur, _ev_sql, _chunk, page_size=500)
+                    session.commit()
+                    _start += 2000
+                    print(f"   … INSERT {min(_start, len(out))}/{len(out)}", flush=True)
+                except Exception as _ins_err:  # noqa: BLE001
+                    _retries += 1
+                    if _retries > 10:
+                        raise
+                    print(f"   ! 순단 감지({type(_ins_err).__name__}) — {_start}행부터 재개 ({_retries}/10)", flush=True)
+                    try:
+                        session.rollback()
+                        session.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    import time as _t
+                    _t.sleep(3)
         print(f"-> branch_decision_index에 {len(out)}행 기록")
     audit_dir = Path(__file__).resolve().parents[4] / "artifacts"
     audit_dir.mkdir(exist_ok=True)

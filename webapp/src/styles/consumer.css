@@ -609,3 +609,75 @@ body.asap-user-light {
   background-size: 220% 100%;
   animation: logo-sheen 7s ease-in-out infinite;
 }
+
+/* ---- 왜 이 코드인가 (trace 3줄) ---- */
+.consumer-why-lines { display: grid; gap: 6px; margin-bottom: 8px; }
+.consumer-why-lines > b { font-size: 12px; letter-spacing: 0.05em; }
+
+.consumer-why-line {
+  font-size: 12.5px;
+  line-height: 1.55;
+  padding-left: 14px;
+  position: relative;
+}
+
+.consumer-why-line::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22d3ee;
+}
+
+.consumer-why-line.k-identity::before { background: #22d3ee; }
+.consumer-why-line.k-state::before { background: #34d399; }
+.consumer-why-line.k-precedent::before { background: #a855f7; }
+
+.consumer-why-refs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: 8px;
+  align-items: center;
+}
+
+.consumer-why-refs em {
+  font-style: normal;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(168, 85, 247, 0.16);
+  color: #c084fc;
+}
+
+.consumer.theme-light .consumer-why-refs em { background: rgba(109, 63, 214, 0.1); color: #6d3fd6; }
+
+.consumer-why-refs button,
+.consumer-why-refs a {
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.consumer-why-note {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.consumer-summons {
+  display: block;
+  margin: 6px 0;
+  font-size: 11.5px;
+  opacity: 0.85;
+}

@@ -69,6 +69,18 @@ class ClassificationComponent(BasePipelineComponent):
 
             from bussiness_logic.classification.services.staged_classification import StagedClassificationTool
 
+            # [12회차 §2-4] uncooked 결정론 보강 — LLM 무접촉·발동 3조건
+            # 전부 이산(조리 어휘 0 ∧ 백과 원물 서술 ∧ 라우터 선두 원물
+            # 챕터). 서명 derived_state:uncooked(...) — 2급 파생(교대
+            # 응답·지지만, 단독 확정 인장은 상태 단독 게이트가 차단).
+            from bussiness_logic.classification.services.derived_state import (
+                DeriveUncookedState,
+            )
+            product_facts, _ds_sig = DeriveUncookedState(
+                product_facts, routing or {})
+            if _ds_sig:
+                self.reason(f"Derived state (deterministic): {_ds_sig}")
+
             stagedTool = StagedClassificationTool()
             staged = stagedTool.classify(
                 product_facts=product_facts,
@@ -97,43 +109,6 @@ class ClassificationComponent(BasePipelineComponent):
                 )
                 if verdict.get("fired"):
                     validatorRecord = dict(verdict)
-                if verdict.get("verdict") == "promote_candidate" and verdict.get("cn8"):
-                    chosen = str(verdict["cn8"])
-                    current_top = str((candidates[0] or {}).get("cn8") or "")
-                    # 형제 재론 금지: 같은 hs4 안에서의 top1 교체는 staged가
-                    # 증거(술어·결정·lexical)로 이미 내린 형제 비교를 LLM이
-                    # 근거 없이 뒤집는 것 — 전 이력 489발화 실측에서 hs4 교차
-                    # promote는 개악 0, 같은 hs4 내 promote는 hs6 순 -44
-                    # (개악 77회 전원 190219→190230 단일 편향). keep으로 강등.
-                    # ASAP_VALIDATOR_SIBLING_GUARD=0 으로 이전 동작 복귀.
-                    sibling_guard = (os.environ.get(
-                        "ASAP_VALIDATOR_SIBLING_GUARD", "1") or "1").strip() != "0"
-                    if sibling_guard and chosen[:4] == current_top[:4] and chosen != current_top:
-                        validatorRecord = {
-                            **verdict,
-                            "applied": False,
-                            "blocked": "sibling_relitigation_guard",
-                        }
-                        self.reason(
-                            f"Validator promote_candidate {chosen} blocked: same-hs4 "
-                            f"sibling re-litigation (top={current_top})."
-                        )
-                        chosen = ""
-                    reordered = sorted(
-                        candidates,
-                        key=lambda c: 0 if str(c.get("cn8") or "") == chosen else 1,
-                    )
-                    if str((reordered[0] or {}).get("cn8") or "") == chosen:
-                        validatorRecord = {
-                            **verdict,
-                            "applied": True,
-                            "original_top_cn8": str((candidates[0] or {}).get("cn8") or ""),
-                        }
-                        candidates = reordered
-                        self.reason(
-                            f"Validator promoted existing candidate {chosen}: "
-                            f"{verdict.get('reason', '')[:120]}"
-                        )
                 scope = verdict.get("code") or verdict.get("chapter") or verdict.get("heading")
                 if verdict.get("verdict") == "reroute" and scope:
                     # reroute = 라우터 의견 '복원' 전용: 대상 챕터가 라우터
@@ -165,29 +140,37 @@ class ClassificationComponent(BasePipelineComponent):
                                 f"restore (router rank {t_rank} vs current {c_rank})."
                             )
                             scope = None
-                if verdict.get("verdict") in ("promote_recovery", "reroute", "narrow") and scope:
-                    # [10회차-4] Validator 개입 권한 폐지 (VALIDATOR_DPO_
-                    # DESIGN §1 — 설계자 확정): 재실행·후보 교체를 하지
-                    # 않는다. G1/G2 교훈(무서명 개입 위험·observe 정당성)
-                    # 의 Validator판 — 판단은 기록만 남기고, 독립 병렬
-                    # 추리 대조군(DPO 수집)이 대체한다.
-                    # '구validator 구제 손실' 정산 열: 폐지로 잃는 구제
-                    # (종전 applied 케이스)를 정산에서 셀 수 있게 would_
-                    # have_scope·verdict를 실물 보존.
-                    scope = str(scope)
+                # [11회차 2-C] Validator 개입 권한 **전면** 폐지 완결
+                # (CYCLE9_SPEC §6 원안·설계자 (b)안 확정). 10회차 이식이
+                # promote_recovery/reroute/narrow만 폐지하고
+                # promote_candidate를 남겨 불완전 집행됐던 것을 여기서
+                # 종결한다 — 이제 네 판정 유형 전부가 '기록만'이다.
+                # 폐지 근거(오염 실측): 22캐시 95% 헤드라인에 청양고추
+                # 2001→0710·대구살 0309·기저귀 3923 교체가 우리 기전
+                # 성과로 오귀속돼 측정기가 거짓말을 하고 있었다. 손실
+                # 케이스는 '결정층 취약 지대 지도'로 남는다(관측 전용
+                # 설계의 산출물 — would_have_* 실물 보존).
+                _verdict_kind = str(verdict.get("verdict") or "")
+                _would_pick = str(verdict.get("cn8") or "") if (
+                    _verdict_kind == "promote_candidate") else ""
+                if _verdict_kind in ("promote_candidate", "promote_recovery",
+                                     "reroute", "narrow") and (scope or _would_pick):
+                    scope = str(scope or "")
                     if len(scope) == 8:
                         scope = scope[:6]
                     validatorRecord = {
                         **verdict,
                         "applied": False,
                         "authority_revoked": True,
+                        "revoked_kind": _verdict_kind,
                         "would_have_scope": scope,
+                        "would_have_pick": _would_pick,
                         "original_top_cn8": str(
                             (candidates[0] or {}).get("cn8") or ""),
                     }
                     self.reason(
                         f"Validator authority revoked (observe-only): "
-                        f"{verdict.get('verdict')} -> {scope} recorded, "
+                        f"{_verdict_kind} -> {scope or _would_pick} recorded, "
                         f"not applied."
                     )
 
@@ -242,6 +225,16 @@ class ClassificationComponent(BasePipelineComponent):
                     "required_facts": [],
                     "unknowns": [],
                 })
+                # [11회차-1] 서명 passthrough — 계약 목록(staged.SIGNATURE_
+                # CONTRACT, 단일 진실원)에 등재된 키는 후보 dict에서 전부
+                # 승계. 수기 화이트리스트가 서명을 탈락시키던 기록 사각
+                # 3차의 구조 처방 — 신규 서명은 계약 등재만으로 통과.
+                from bussiness_logic.classification.services.staged_classification import (
+                    SIGNATURE_CONTRACT,
+                )
+                for _sig_k in SIGNATURE_CONTRACT:
+                    if _sig_k in candidate:
+                        ccs_candidates[-1][_sig_k] = candidate[_sig_k]
 
             if not ccs_candidates:
                 self.reason("Staged classifier produced no valid CN8.")

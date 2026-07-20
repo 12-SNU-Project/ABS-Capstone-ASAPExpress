@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useClassificationRun } from "../hooks/useClassificationRun";
+import { useBlackboardTrace } from "../hooks/useBlackboardTrace";
+import { EBTI_CONSULT_URL, buildConsumerWhy, summarizeSummons } from "../lib/traceContract.js";
 import { asList, asObject, clean } from "../lib/format.js";
 import logo from "../assets/asap_black.png";
 
@@ -81,6 +83,19 @@ export default function ConsumerPage() {
   const precedents = asList(shownCandidate?.similar_ebti_cases);
   const noCandidates = completed && !candidates.length;
   const stepIndex = consumerStepIndex(result);
+
+  // 기록 의무화 trace — "왜 이 코드인가" 3줄 (정체/상태·형태/판례)
+  const trace = useBlackboardTrace(result?.job_id, completed);
+  const why = buildConsumerWhy(trace, shownCandidate?.cn8);
+  const summonsRows = summarizeSummons(trace?.summons);
+
+  const copyRefs = () => {
+    try {
+      navigator.clipboard?.writeText(why.refs.join(", "));
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
 
   return (
     <div className={`consumer theme-${uiTheme}`}>
@@ -174,7 +189,45 @@ export default function ConsumerPage() {
             </>
           ) : null}
           <div className="consumer-why">
-            {basis ? <>{basis.slice(0, 120)} </> : "분류 근거와 서류 연결은 상세 화면에서 확인할 수 있습니다. "}
+            {why.lines.length ? (
+              <div className="consumer-why-lines">
+                <b>왜 이 코드인가</b>
+                {why.lines.map((line) => (
+                  <div className={`consumer-why-line k-${line.kind}`} key={line.kind}>
+                    {line.text}
+                    {line.kind === "precedent" && line.refs?.length ? (
+                      <span className="consumer-why-refs">
+                        {line.refs.slice(0, 3).map((ref) => (
+                          <em key={ref}>{ref}</em>
+                        ))}
+                        <button type="button" onClick={copyRefs} title="판례 번호 복사">복사</button>
+                        <a href={EBTI_CONSULT_URL} target="_blank" rel="noreferrer" title="EU EBTI 공개 DB에서 번호로 조회">
+                          EBTI 조회 ↗
+                        </a>
+                      </span>
+                    ) : null}
+                  </div>
+                ))}
+                {why.refs.length ? (
+                  <div className="consumer-why-note">판례는 참고 근거(2급)이며 확정 사유가 아닙니다.</div>
+                ) : null}
+              </div>
+            ) : basis ? (
+              <>{basis.slice(0, 120)} </>
+            ) : (
+              "분류 근거와 서류 연결은 상세 화면에서 확인할 수 있습니다. "
+            )}
+            {summonsRows.length ? (
+              <div className="consumer-summons">
+                {summonsRows.slice(0, 1).map((row, index) => (
+                  <span key={index}>
+                    {row.fired
+                      ? `판례 발동: ${row.code}`
+                      : `판례 조회: ${row.reviewed || "-"}건 검토 — ${row.silenceLabel || "미반영"}`}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <Link to="/classification">자세히 보기 ›</Link>
             {precedents.length ? (
               <details className="consumer-precedents" open={altIndex >= 0}>

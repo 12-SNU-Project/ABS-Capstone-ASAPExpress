@@ -306,6 +306,56 @@ export default function AdminPage() {
         </div>
       </section>
 
+      {/* 분류 판정 디버그 — 소비자에겐 숨기는 라우터·게이트 내부 관측 (기록 의무화 계약) */}
+      <section className="cadm-section">
+        <div className="cadm-panel cadm-panel-wide">
+          <div className="cadm-panel-title">분류 판정 디버그 (trace)</div>
+          {(() => {
+            const sets = asList(blackboard?.candidate_code_sets);
+            const lastSet = asObject(sets[sets.length - 1]);
+            const routing = asObject(blackboard?.routing_context);
+            const chapterDetails = asList(routing.candidate_chapter_details);
+            const mergeGates = asList(lastSet.merge_gate_observations);
+            const trustGates = asList(lastSet.router_trust_gate);
+            const formHits = asList(lastSet.form_hits);
+            if (!chapterDetails.length && !mergeGates.length && !trustGates.length && !formHits.length) {
+              return <div className="cadm-muted">trace 관측 기록이 없습니다 (기록 의무화 이후 run부터 표시).</div>;
+            }
+            return (
+              <>
+                {chapterDetails.length ? (
+                  <>
+                    {/* 라우터 서명(absorbed:/dict:/universal_scope_muted:)은 가공 없이 그대로 노출 */}
+                    <div className="cadm-subpanel-title">챕터 서열 · 매치 어휘 (routing_context)</div>
+                    <RecordTable records={chapterDetails} limit={20} />
+                  </>
+                ) : null}
+                {trustGates.length ? (
+                  <>
+                    <div className="cadm-subpanel-title">router_trust_gate</div>
+                    <RecordTable records={trustGates} limit={20} />
+                  </>
+                ) : null}
+                {mergeGates.length ? (
+                  <>
+                    <div className="cadm-subpanel-title">merge_gate_observations</div>
+                    <RecordTable records={mergeGates} limit={20} />
+                  </>
+                ) : null}
+                {formHits.length ? (
+                  <>
+                    <div className="cadm-subpanel-title">form_hits</div>
+                    <RecordTable records={formHits} limit={20} />
+                  </>
+                ) : null}
+                {/* [슬롯] 10회차 Validator 대조군 — pipeline pick vs LLM 대조군 pick 나란히 + 일치 뱃지.
+                    반드시 "대조군은 결정에 무관여" 라벨과 함께 붙일 것. */}
+              </>
+            );
+          })()}
+        </div>
+      </section>
+
       <section className="cadm-section">
         <details className="cadm-panel">
           <summary>Raw · input_processing_view</summary>

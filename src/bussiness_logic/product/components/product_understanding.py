@@ -9,7 +9,6 @@ from collections.abc import Mapping
 
 from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
 from bussiness_logic.pipeline.component_base import BasePipelineComponent
-from bussiness_logic.product.services.coi_loader import LoadCoiEvidence
 from bussiness_logic.product.services.identity_hint_agent import IdentityHintAgent
 from bussiness_logic.product.model.product_understanding import (
     CompositionExtractionTrace,
@@ -331,29 +330,15 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         productId: str,
         productName: str,
     ) -> CoiEvidenceSet:
-        coiEvidenceId = store.next_id("coi")
-        try:
-            evidence = LoadCoiEvidence(
-                caseIndex=None,
-                productName=productName,
-            )
-        except RuntimeError as exc:
-            return CoiEvidenceSet(
-                coiEvidenceId=coiEvidenceId,
-                productId=productId,
-                error=str(exc),
-            )
-        if evidence is None:
-            return CoiEvidenceSet(
-                coiEvidenceId=coiEvidenceId,
-                productId=productId,
-            )
+        # [11회차-2 §1-A] 구식 COI 경로 소멸 — LoadCoiEvidence(ASAP_COI_ROOT
+        # 디렉토리 스캔·상품명 유사도 매칭)는 정규화 폼 단일화(coi_loader
+        # InjectIntoProductUnderstanding/ParseCoiComposition)로 대체됐다.
+        # 삭제 근거: 최근 2런 58건 blackboard에 구식 경로 서명 0(coi_root·
+        # LoadCoiEvidence 흔적 0) — 원장·규칙 대장 기록.
+        # 본 메서드는 빈 CoiEvidenceSet만 반환(주입은 정규화 폼 경로 전담).
         return CoiEvidenceSet(
-            coiEvidenceId=coiEvidenceId,
+            coiEvidenceId=store.next_id("coi"),
             productId=productId,
-            matchedDocuments=(str(evidence.path),),
-            matchedTexts=(evidence.text,),
-            matchScores=(evidence.matchedScore,),
         )
 
     @staticmethod
@@ -498,6 +483,8 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             overlay["normalizedTariffDescription"] = result["normalized_tariff_description"]
         if result["identity_terms"]:
             overlay["identityTerms"] = result["identity_terms"]
+        if result.get("title_bound_terms"):
+            overlay["titleBoundTerms"] = tuple(result["title_bound_terms"])
         return dataclasses.replace(identity, **overlay)
 
     _material_vocab_cache: list = []

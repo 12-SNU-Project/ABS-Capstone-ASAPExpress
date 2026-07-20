@@ -1544,3 +1544,179 @@ body.asap-cjs-neon .app-topbar-logo {
 .cjs-precedent-more[open] summary {
   margin-bottom: 4px;
 }
+
+/* ---- 기록 의무화 trace 노출 ---- */
+
+/* 등급 뱃지: named=진한 파랑(법정) · precedent=보라(판례) · derived=초록(파생) · fallback=회색 */
+.cjs-grade {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+}
+
+.cjs-grade.g-named { background: rgba(29, 78, 216, 0.14); color: #1d4ed8; }
+.cjs-grade.g-precedent { background: rgba(139, 92, 246, 0.14); color: #7c3aed; }
+.cjs-grade.g-derived { background: rgba(22, 163, 74, 0.13); color: #15803d; }
+.cjs-grade.g-fallback { background: rgba(100, 116, 139, 0.14); color: #64748b; }
+
+.theme-neon .cjs-grade.g-named { background: rgba(96, 165, 250, 0.18); color: #93c5fd; }
+.theme-neon .cjs-grade.g-precedent { background: rgba(168, 85, 247, 0.2); color: #c084fc; }
+.theme-neon .cjs-grade.g-derived { background: rgba(52, 211, 153, 0.16); color: #34d399; }
+.theme-neon .cjs-grade.g-fallback { background: rgba(200, 183, 234, 0.14); color: #c8b7ea; }
+
+.cjs-stage-trace {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--cjs-border);
+  border-radius: 8px;
+  background: var(--cjs-surface-strong);
+}
+
+.cjs-stage-trace-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.cjs-stage-trace-head b { font-size: 11px; letter-spacing: 0.08em; color: var(--cjs-accent); }
+
+.cjs-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.cjs-mono.dim { color: var(--cjs-muted); }
+.cjs-mono.ok { color: #15803d; font-weight: 800; }
+.theme-neon .cjs-mono.ok { color: #34d399; }
+
+.cjs-decision {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+}
+.cjs-decision.d-confirmed { background: rgba(22, 163, 74, 0.13); color: #15803d; }
+.cjs-decision.d-undecided { background: rgba(100, 116, 139, 0.13); color: #64748b; }
+.cjs-decision.d-violated { background: rgba(225, 29, 72, 0.11); color: #be123c; }
+.theme-neon .cjs-decision.d-confirmed { color: #34d399; }
+.theme-neon .cjs-decision.d-violated { color: #fb7185; }
+
+.cjs-residual {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  background: rgba(100, 116, 139, 0.14);
+  color: #64748b;
+}
+
+.cjs-trace-detail {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cjs-trace-detail.full { font-size: 11px; color: var(--cjs-muted); }
+
+.cjs-trace-more { margin-top: 6px; }
+.cjs-trace-more summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--cjs-accent);
+  user-select: none;
+}
+
+.cjs-validator {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--cjs-border);
+  border-left: 3px solid #7c3aed;
+  border-radius: 8px;
+  font-size: 12px;
+  background: var(--cjs-surface-strong);
+}
+
+.cjs-validator b { font-size: 11px; color: #7c3aed; }
+.theme-neon .cjs-validator b { color: #c084fc; }
+.cjs-validator em { font-style: normal; font-size: 11px; color: #b45309; }
+.theme-neon .cjs-validator em { color: #fbbf24; }
+
+.cjs-summons {
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--cjs-text);
+}
+
+.cjs-summons-bar {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+  height: 18px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.cjs-summons-bar span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 9px;
+  font-weight: 800;
+  font-family: ui-monospace, Menlo, monospace;
+  background: rgba(124, 58, 237, 0.16);
+  color: #7c3aed;
+}
+
+.cjs-summons-bar span:first-child { background: rgba(124, 58, 237, 0.32); }
+.theme-neon .cjs-summons-bar span { background: rgba(168, 85, 247, 0.22); color: #d9c6ff; }
+.theme-neon .cjs-summons-bar span:first-child { background: rgba(168, 85, 247, 0.45); }
+
+/* ---- 스테이지 내 판례 소환 지점 ---- */
+.cjs-stage-summon {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(124, 58, 237, 0.25);
+  border-left: 3px solid #7c3aed;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  display: grid;
+  gap: 4px;
+  background: rgba(124, 58, 237, 0.05);
+}
+
+.cjs-stage-summon.fired {
+  border-left-color: #16a34a;
+  background: rgba(22, 163, 74, 0.05);
+}
+
+.cjs-stage-summon b {
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  color: #7c3aed;
+}
+
+.cjs-stage-summon.fired b { color: #15803d; }
+
+.cjs-stage-summon em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--cjs-muted);
+}
+
+.theme-neon .cjs-stage-summon { background: rgba(168, 85, 247, 0.08); border-color: rgba(168, 85, 247, 0.35); }
+.theme-neon .cjs-stage-summon b { color: #c084fc; }
+.theme-neon .cjs-stage-summon.fired { border-left-color: #34d399; background: rgba(52, 211, 153, 0.07); }
+.theme-neon .cjs-stage-summon.fired b { color: #34d399; }

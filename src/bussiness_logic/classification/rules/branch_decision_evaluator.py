@@ -112,30 +112,22 @@ def LoadBranchDecisions(
 
         manager = DbSessionManager.GetInstance()
         params = {"level": level, "parents": tuple(parent_codes), "version": version}
-        try:
-            rows = manager.FetchRows(
-                text(
-                    'SELECT branch_id, seq, then_code, cond_type, dto_field, op,'
-                    ' value, source_text, role, grade'
-                    ' FROM "branch_decision_index"'
-                    " WHERE level = :level AND branch_id IN :parents AND version = :version"
-                    " ORDER BY branch_id, seq"
-                ).bindparams(bindparam("parents", expanding=True)),
-                params,
-            )
-        except Exception:  # noqa: BLE001
-            # [P1-B] role 컬럼 이전(구판) 테이블 호환 — 컬럼 부재로 층이
-            # 통째로 꺼지는 것을 막는다. 구판 행은 전부 판별층으로 간주.
-            rows = manager.FetchRows(
-                text(
-                    'SELECT branch_id, seq, then_code, cond_type, dto_field, op,'
-                    ' value, source_text'
-                    ' FROM "branch_decision_index"'
-                    " WHERE level = :level AND branch_id IN :parents AND version = :version"
-                    " ORDER BY branch_id, seq"
-                ).bindparams(bindparam("parents", expanding=True)),
-                params,
-            )
+        # [11회차-2 §1-A] 구판 폴백 SELECT 소멸 — role/grade 컬럼 부재
+        # 시절의 호환 경로(P1-B)를 제거했다. 현행 테이블 23,881행은
+        # role·grade를 전부 보유(dry 컴파일 행 키 실측). 폴백이 살아
+        # 있으면 grade SELECT 누락 사고(9회차 판례 상한 무작동)가
+        # '조용한 성공'으로 위장된다 — 컬럼 사고는 아래 except로 층 off
+        # (사이드카 부재와 동일 취급)로 드러나야 한다.
+        rows = manager.FetchRows(
+            text(
+                'SELECT branch_id, seq, then_code, cond_type, dto_field, op,'
+                ' value, source_text, role, grade, alt_group'
+                ' FROM "branch_decision_index"'
+                " WHERE level = :level AND branch_id IN :parents AND version = :version"
+                " ORDER BY branch_id, seq"
+            ).bindparams(bindparam("parents", expanding=True)),
+            params,
+        )
     except Exception:  # noqa: BLE001 — sidecar absent = layer off
         return {}
     out: dict[str, dict[str, list[dict[str, Any]]]] = {}
@@ -171,6 +163,8 @@ def EvaluateCodeDecision(
     pool = set(fact_tokens)
     detail: list[dict[str, str]] = []
     answers: list[str] = []
+    _grp_answers: dict[str, list[str]] = {}
+    _alt_on = (os.environ.get("ASAP_ALT_GROUP_OR", "1") or "1").strip() != "0"
     # [P1-D3] 백과(encyclopedia) 유래 토큰 — 검색 API 잡음(무관 문서)이
     # 지각 필드로 유입돼 확정을 만든 사고(전골 2104 confirmed 55 실측:
     # 백과 서술의 soup/broth가 정체 조건을 확정). 원천 구분이 필드에서
@@ -395,10 +389,20 @@ def EvaluateCodeDecision(
                 why = "field_empty"       # 답안지 부재 — DTO가 이 질문에 침묵
             else:
                 why = "field_no_match"    # 필드는 찼는데 값 불일치 (어휘 갭/오답)
-        answers.append(verdict)
+        # [12회차 3-수리] 그룹 조건은 answers에 직접 넣지 않고 버킷으로
+        # 모은다. 종전엔 루프 뒤에서 conditions 인덱스로 answers를
+        # 필터했는데, **answers는 skipped 조건을 담지 않아 인덱스가
+        # 어긋났다** — 그래서 그룹 OR이 서명만 남기고 실판정에는
+        # 반영되지 않았다(0710 undecided의 진짜 원인).
+        _alt_g = str(cond.get("alt_group") or "")
+        if _alt_g and _alt_on:
+            _grp_answers.setdefault(_alt_g, []).append(verdict)
+        else:
+            answers.append(verdict)
         det_entry = {"cond": cond_type, "op": op, "verdict": verdict,
                      "field": dto_field.split(";")[0][:40], "why": why,
-                     "value": str(cond.get("value") or "")[:80]}
+                     "value": str(cond.get("value") or "")[:80],
+                     "alt_group": str(cond.get("alt_group") or "")}
         # [기록 의무화] 근거 등급은 항상 서명 — 판례(precedent)는 원천 사건
         # 결정번호(source_text의 BTI: 접두)까지 병기한다 (UI 노출·감사 실물).
         _grade = str(cond.get("grade") or "").strip()
@@ -409,6 +413,23 @@ def EvaluateCodeDecision(
                 if _src.startswith("BTI:"):
                     det_entry["refs"] = _src[4:].split(",")[:4]
         detail.append(det_entry)
+    # [12회차-2 A안] alt_group OR 판정 — 같은 그룹(교대 원자)의 조건은
+    # 하나만 참이면 그룹이 충족된다. 조문의 'A or B'를 AND로 컴파일해
+    # 확정이 구조적으로 불가능하던 결함(0710 냉동 생채소: uncooked ∧
+    # steaming 동시 요구·1905 떡·1604 구이)의 처방. 그룹 밖 조건은
+    # 종전대로 누적(AND). 서명: alt_group_or:<그룹ID>.
+    if _grp_answers:
+        for _g_id, _vs_g in _grp_answers.items():
+            if "true" in _vs_g:
+                answers.append("true")
+                for _d_g2 in detail:
+                    if str(_d_g2.get("alt_group") or "") == _g_id:
+                        _d_g2["why"] = (str(_d_g2.get("why") or "")
+                                        + f";alt_group_or:{_g_id}")
+            elif all(v == "false" for v in _vs_g):
+                answers.append("false")   # 전 원자 위반 = 그룹 위반
+            else:
+                answers.append("undecided")
     if "false" in answers:
         return "violated", detail
     if answers and all(a == "true" for a in answers):
@@ -498,12 +519,48 @@ def EvaluateCodeDecision(
         binding = _binding_table() if (os.environ.get(
             "ASAP_BINDING_V1", "1") or "1").strip() != "0" else {}
         if binding:
-            # 측정 산출물 모드: (cond|leaf) 쌍의 실측 정밀도가 자격을 준다
+            # 측정 산출물 모드: (cond|leaf) 쌍의 실측 정밀도가 자격을 준다.
+            # [12회차 §C] provenance 편입 — 자격 키를 (cond|field)에서
+            # **(cond|field|provenance)** 로 확장한다. 같은 'mollusc'라도
+            # 문서 기계 도출분(COI 정규화·CO 학명)과 LLM 추측분은 신뢰도가
+            # 다르며, 출처는 이미 실물로 보유한다(composition_provenance ·
+            # source: coi_normalized). 순환 고착 처방: 문서 출처가 있으면
+            # 자격 후보, 없으면 무자격 → 정보 부실 시 보수적 퇴화(서비스
+            # 안전). 확장 키가 표에 없으면 종전 (cond|field) 키로 낙하해
+            # 하위호환(재캘리브레이션 전에도 회귀 0).
+            _prov = str((_dig(product_facts,
+                              "composition_facts.composition_provenance")
+                         or "")).strip()
+            if not _prov:
+                # 상위 스탬프 부재 시 entry 단위 source 서명 실물로 낙하
+                # (신 3런 실측: 상위 0·entries 전 케이스 coi_normalized).
+                _srcs = {str((_e_p or {}).get("source") or "").strip()
+                         for _e_p in (_dig(product_facts,
+                                           "composition_facts.ingredient_entries")
+                                      or [])
+                         if isinstance(_e_p, dict)}
+                _srcs.discard("")
+                if len(_srcs) == 1:
+                    _prov = next(iter(_srcs))
+
+            def _binding_hit(d_b: dict) -> bool:
+                # [12회차 B] why에는 OR 서명(;alt_group_or:…)이 뒤따를 수
+                # 있다 — ';' 앞까지만 leaf다([3-수리] 서명 도입의 잠복
+                # 결함: 그룹 조건이 typed 자격을 잃던 사인).
+                for leaf in (d_b["why"].removeprefix("field_hit:")
+                             .split(";")[0].split(",")):
+                    leaf = leaf.strip()
+                    if not leaf:
+                        continue
+                    if _prov and f"{d_b['cond']}|{leaf}|{_prov}" in binding:
+                        return True
+                    if f"{d_b['cond']}|{leaf}" in binding:
+                        return True
+                return False
+
             typed_ok = any(
                 (d["op"] == "quant_gate" and d["verdict"] == "true")
-                or (d["verdict"] == "true" and any(
-                    f"{d['cond']}|{leaf}" in binding
-                    for leaf in d["why"].removeprefix("field_hit:").split(",")))
+                or (d["verdict"] == "true" and _binding_hit(d))
                 for d in detail
             )
         else:
@@ -512,7 +569,8 @@ def EvaluateCodeDecision(
                 or (d["verdict"] == "true"
                     and d["cond"] not in state_types
                     and any(leaf in _TYPED_LEAVES
-                            for leaf in d["why"].removeprefix("field_hit:").split(",")))
+                            for leaf in d["why"].removeprefix("field_hit:")
+                            .split(";")[0].split(",")))
                 for d in detail
             )
         if gate_on and typed_ok and order_guard_on:
