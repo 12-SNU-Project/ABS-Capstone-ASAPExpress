@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import DocumentPackageDetail from "../components/DocumentPackageDetail";
 import { importClassification } from "../lib/enterpriseApi.js";
 import { getJson } from "../lib/api.js";
@@ -7,7 +7,12 @@ import { asList, clean } from "../lib/format.js";
 
 export default function DocumentPage() {
   const { jobId, taric10 } = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const caseId = clean(searchParams.get("caseId"));
+  const returnTarget = caseId
+    ? `/enterprise?caseId=${encodeURIComponent(caseId)}&panel=docs`
+    : `/classification?job=${encodeURIComponent(jobId)}`;
   const [packages, setPackages] = useState([]);
   const [packageData, setPackageData] = useState(null);
   const [error, setError] = useState("");
@@ -77,18 +82,20 @@ export default function DocumentPage() {
       <header className="docpage-header">
         <div>
           <div className="docpage-eyebrow">
-            <Link to="/classification">← 분류 워크벤치</Link>
+            <Link to={returnTarget}>{caseId ? "← 프로젝트 서류 관리" : "← 관리자 화면"}</Link>
           </div>
           <h1 className="docpage-title">TARIC 상세 서류 추천</h1>
           <div className="docpage-subtitle">
-            run {jobId} · backend document package DTO를 React 컴포넌트로 직접 렌더링합니다.
+            선택한 TARIC10에 적용될 수 있는 서류와 확인 조건을 검토합니다.
           </div>
         </div>
         <div className="docpage-actions">
           <div className="docpage-pill">TARIC10 {clean(packageData?.taric10) || taric10}</div>
-          <button type="button" className="docpage-save" disabled={!packageData || saving} onClick={saveToEnterprise}>
-            {saving ? "등록 중..." : "수출 상품 관리에 등록"}
-          </button>
+          {!caseId ? (
+            <button type="button" className="docpage-save" disabled={!packageData || saving} onClick={saveToEnterprise}>
+              {saving ? "등록 중..." : "기업 프로젝트에 추가"}
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -100,7 +107,7 @@ export default function DocumentPage() {
             return (
               <Link
                 key={clean(pkg.document_package_id) || target}
-                to={`/document/${encodeURIComponent(jobId)}/${encodeURIComponent(target)}`}
+                to={`/document/${encodeURIComponent(jobId)}/${encodeURIComponent(target)}${caseId ? `?caseId=${encodeURIComponent(caseId)}` : ""}`}
                 className={`docpage-tab ${active ? "active" : ""}`}
               >
                 {clean(pkg.taric10) || clean(pkg.document_package_id)}

@@ -32,7 +32,7 @@ function clearStoredJobId() {
   }
 }
 
-export function useClassificationRun() {
+export function useClassificationRun(initialJobId = "") {
   const [result, setResultState] = useState(null);
   const sseRef = useRef(null);
   const resultRef = useRef(null);
@@ -210,21 +210,25 @@ export function useClassificationRun() {
     }
   }, [closeSse, hydrateRun, openSse, setResult]);
 
-  // 서류 페이지 왕복/새로고침 후 최근 run 복원
+  // 상세 화면의 job 쿼리를 우선하고, 없으면 최근 run을 복원한다.
   useEffect(() => {
-    const storedJobId = readStoredJobId();
-    if (!storedJobId || resultRef.current?.job_id) {
+    const targetJobId = clean(initialJobId) || readStoredJobId();
+    if (!targetJobId || clean(resultRef.current?.job_id) === targetJobId) {
       return undefined;
     }
-    hydrateRun(storedJobId)
+    hydrateRun(targetJobId)
       .then((snapshot) => {
         if (ACTIVE_STATUSES.includes(clean(snapshot?.job_status).toLowerCase())) {
-          openSse(storedJobId);
+          openSse(targetJobId);
         }
       })
-      .catch(() => clearStoredJobId());
+      .catch(() => {
+        if (!clean(initialJobId)) {
+          clearStoredJobId();
+        }
+      });
     return undefined;
-  }, [hydrateRun, openSse]);
+  }, [hydrateRun, initialJobId, openSse]);
 
   useEffect(() => closeSse, [closeSse]);
 

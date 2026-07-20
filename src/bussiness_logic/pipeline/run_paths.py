@@ -15,7 +15,7 @@ from bussiness_logic.utils.json_types import JsonObject
 
 
 PROJECT_ROOT = Path(
-    os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[2])
+    os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[3])
 ).resolve()
 APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
 PIPELINE_OUTPUTS_ROOT = APP_CONFIG.paths.ResolvePath(

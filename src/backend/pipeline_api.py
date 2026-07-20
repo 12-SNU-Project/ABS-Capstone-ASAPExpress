@@ -195,6 +195,11 @@ class PipelineApi:
         for candidate in PIPELINE_OUTPUTS_ROOT.glob(f"*/{jobId}"):
             if (candidate / "blackboard.json").is_file():
                 return candidate
+        restoredArtifactDirectory = (
+            Path(__file__).resolve().parents[2] / "artifacts" / jobId
+        )
+        if (restoredArtifactDirectory / "blackboard.json").is_file():
+            return restoredArtifactDirectory
         return None
 
     def ReadDocumentPackageCollection(self, jobId: str) -> JsonObject:
@@ -226,6 +231,18 @@ class PipelineApi:
             except (OSError, ValueError):
                 snapshot = None
             if isinstance(snapshot, dict):
+                blackboardPath = runDirectory / "blackboard.json"
+                if blackboardPath.is_file():
+                    try:
+                        persistedBlackboard = json.loads(
+                            blackboardPath.read_text(encoding="utf-8"),
+                        )
+                    except (OSError, ValueError):
+                        persistedBlackboard = None
+                    if isinstance(persistedBlackboard, dict):
+                        snapshot["document_packages"] = list(
+                            persistedBlackboard.get("document_packages") or [],
+                        )
                 self._registry.RestoreCompletedRun(jobId, snapshot)
                 if self._registry.BuildUiResult(jobId):
                     return
@@ -249,13 +266,34 @@ class PipelineApi:
             "run_id": str((blackboard.get("run_context") or {}).get("run_id") or ""),
             "run_dir": str(runDirectory),
         })
-        product = blackboard.get("product_understanding") or {}
-        facts = {"product_name": product.get("product_name") or ""} if isinstance(product, dict) else {}
+        productEvidenceState = blackboard.get("product_evidence_state") or {}
+        observedFacts = (
+            productEvidenceState.get("observed_facts") or {}
+            if isinstance(productEvidenceState, dict)
+            else {}
+        )
+        if not isinstance(observedFacts, dict):
+            observedFacts = {}
+        sourceUrls = observedFacts.get("source_urls") or []
+        if not isinstance(sourceUrls, list):
+            sourceUrls = []
+        facts = {
+            "product_name": observedFacts.get("product_name") or "",
+            "description": observedFacts.get("description") or "",
+            "url": str(sourceUrls[0] if sourceUrls else ""),
+            "source_urls": sourceUrls[:8],
+            "origin_country": observedFacts.get("origin_country") or "unknown",
+            "intended_use": observedFacts.get("intended_use") or "unknown",
+        }
+        ingredients = observedFacts.get("ingredients") or []
+        if isinstance(ingredients, list) and ingredients:
+            facts["user_input_facts"] = {"ingredients": ingredients[:20]}
         self._registry.RestoreCompletedRun(jobId, {
             "query": facts.get("product_name") or "",
             "facts": facts,
             "events": [],
             "result": result,
+            "document_packages": documentPackages,
         })
 
     def StartRunFromPayload(self, payload: JsonMapping) -> tuple[JsonObject, int]:

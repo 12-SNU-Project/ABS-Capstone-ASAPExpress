@@ -138,6 +138,7 @@ class RunRegistry:
                 "events": list(snapshot.get("events") or []),
                 "result": dict(result),
                 "partial_result": dict(result),
+                "document_packages": list(snapshot.get("document_packages") or []),
             }
             self._condition.notify_all()
 
@@ -189,7 +190,7 @@ class RunRegistry:
             return {}
         jobId, snapshot = snapshotEntry
         resultData = self._ResultData(snapshot)
-        packages = self._DocumentPackagesFromSnapshot(snapshot, resultData)
+        packages = self._DetailedDocumentPackagesFromSnapshot(snapshot, resultData)
         for package in packages:
             if packageId in {
                 str(package.get("document_package_id") or ""),
@@ -205,12 +206,22 @@ class RunRegistry:
 
     def _EnrichDocumentPackageForDetail(self, package: JsonMapping) -> JsonObject:
         publicPackage = dict(package)
+        if "requirements" in publicPackage:
+            return publicPackage
         taric10 = str(publicPackage.get("taric10") or "").strip()
         if not taric10:
             return publicPackage
 
         try:
-            rebuilt = asdict(BuildDocumentPackage(taric10))
+            productFacts = publicPackage.get("product_facts") or {}
+            rebuilt = asdict(BuildDocumentPackage(
+                taric10,
+                product_facts=(
+                    dict(productFacts)
+                    if isinstance(productFacts, Mapping)
+                    else {}
+                ),
+            ))
         except Exception as exc:  # noqa: BLE001
             summary = dict(publicPackage.get("checklist_summary") or {})
             summary["a2m_enrichment_error"] = str(exc)
@@ -255,11 +266,23 @@ class RunRegistry:
         snapshotPackages = snapshot.get("document_packages")
         if not isinstance(snapshotPackages, list):
             return []
-        return [
-            self._projector.PublicDocumentPackage(package)
-            for package in snapshotPackages
-            if isinstance(package, Mapping)
-        ]
+        return self._projector.ExtractDocumentPackages({
+            "document_packages": snapshotPackages,
+        })
+
+    def _DetailedDocumentPackagesFromSnapshot(
+        self,
+        snapshot: JsonMapping,
+        resultData: JsonMapping,
+    ) -> list[JsonObject]:
+        snapshotPackages = snapshot.get("document_packages")
+        if isinstance(snapshotPackages, list) and snapshotPackages:
+            return [
+                self._projector.PublicDocumentPackage(package)
+                for package in snapshotPackages
+                if isinstance(package, Mapping)
+            ]
+        return self._DocumentPackagesFromSnapshot(snapshot, resultData)
 
     def BuildPipelineResultProjection(
         self,
@@ -433,6 +456,12 @@ class PipelineRunService:
                 ),
             )
             pipelineOutput = self._StripRuntimeObjects(pipelineOutput)
+            blackboard = pipelineOutput.get("blackboard") or {}
+            documentPackages = (
+                blackboard.get("document_packages") or []
+                if isinstance(blackboard, Mapping)
+                else []
+            )
             result = self._registry.BuildPipelineResultProjection(pipelineOutput)
             self._registry.UpdateRun(
                 runId,
@@ -440,6 +469,7 @@ class PipelineRunService:
                 finished_at=time.time(),
                 result=result,
                 partial_result=result,
+                document_packages=documentPackages,
             )
             self._registry.PersistCompletedRun(runId)
             self._registry.AppendEvent(

@@ -10,7 +10,7 @@ export default function KeyValueRows({ data, keys, limit = 12 }) {
     .slice(0, limit);
 
   if (!entries.length) {
-    return <div className="cjs-muted">표시할 핵심 정보가 없습니다. 상세 JSON에서 원본 값을 확인할 수 있습니다.</div>;
+    return <div className="cjs-muted">현재 응답에 표시할 핵심 정보가 없습니다.</div>;
   }
   return entries.map(([key, value]) => (
     <div className="cjs-kv" key={key}>

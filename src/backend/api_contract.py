@@ -184,6 +184,7 @@ class InputProcessingView(ApiContractModel):
         default_factory=list,
         alias="product_fact_conflicts",
     )
+    warnings: list[str] = Field(default_factory=list)
     evidenceSourceLabels: dict[str, str] = Field(
         default_factory=dict,
         alias="evidence_source_labels",
@@ -243,6 +244,10 @@ class CandidateCodeView(ApiContractModel):
     )
     requiredFacts: list[str] = Field(default_factory=list, alias="required_facts")
     unknowns: list[str] = Field(default_factory=list)
+    similarEbtiCases: list[JsonObject] = Field(
+        default_factory=list,
+        alias="similar_ebti_cases",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -253,6 +258,28 @@ class CandidateCodeView(ApiContractModel):
         cleanedValue.pop("selected_taric10_reason", None)
         cleanedValue.pop("primary_taric10_reason", None)
         return cleanedValue
+
+
+class ClassificationPathView(ApiContractModel):
+    hs2: str | None = None
+    hs4: str | None = None
+    hs6: str | None = None
+    cn8: str | None = None
+    levelScores: dict[str, float] = Field(
+        default_factory=dict,
+        alias="level_scores",
+    )
+    source: str | None = None
+
+
+class ClassificationTraceView(ApiContractModel):
+    mode: str | None = None
+    stages: list[JsonObject] = Field(default_factory=list)
+    validator: JsonObject | None = None
+    backtrackingRecommended: bool | None = Field(
+        default=None,
+        alias="backtracking_recommended",
+    )
 
 
 class ClassificationCandidateSetView(ApiContractModel):
@@ -270,6 +297,75 @@ class ClassificationCandidateSetView(ApiContractModel):
         alias="shortlisted_candidates",
     )
     candidates: list[CandidateCodeView] = Field(default_factory=list)
+    selectedPath: ClassificationPathView | None = Field(
+        default=None,
+        alias="selected_path",
+    )
+    classificationTrace: ClassificationTraceView | None = Field(
+        default=None,
+        alias="classification_trace",
+    )
+    btiSummons: list[JsonObject] = Field(
+        default_factory=list,
+        alias="bti_summons",
+    )
+
+
+class ProductUnderstandingView(ApiContractModel):
+    understandingId: str | None = Field(default=None, alias="understanding_id")
+    productId: str | None = Field(default=None, alias="product_id")
+    productName: str | None = Field(default=None, alias="product_name")
+    shortDescription: str = Field(default="", alias="short_description")
+    routingTerms: list[str] = Field(default_factory=list, alias="routing_terms")
+    blockedRoutingTerms: list[str] = Field(
+        default_factory=list,
+        alias="blocked_routing_terms",
+    )
+    excludedFromRoutingTerms: list[str] = Field(
+        default_factory=list,
+        alias="excluded_from_routing_terms",
+    )
+    unknowns: list[str] = Field(default_factory=list)
+    reconstructedFactTextCount: int = Field(
+        default=0,
+        alias="reconstructed_fact_text_count",
+    )
+    reconstructedProductFactCount: int = Field(
+        default=0,
+        alias="reconstructed_product_fact_count",
+    )
+    identityHints: JsonObject = Field(default_factory=dict, alias="identity_hints")
+    distilledIdentity: JsonObject = Field(
+        default_factory=dict,
+        alias="distilled_identity",
+    )
+    compositionFacts: JsonObject = Field(
+        default_factory=dict,
+        alias="composition_facts",
+    )
+    encyclopediaEvidence: JsonObject = Field(
+        default_factory=dict,
+        alias="encyclopedia_evidence",
+    )
+    coiEvidence: JsonObject = Field(default_factory=dict, alias="coi_evidence")
+
+
+class RoutingView(ApiContractModel):
+    allowedHs2: list[str] = Field(default_factory=list, alias="allowed_hs2")
+    blockedHs2: list[str] = Field(default_factory=list, alias="blocked_hs2")
+    enforceHs2Boundary: bool | None = Field(
+        default=None,
+        alias="enforce_hs2_boundary",
+    )
+    fallbackAllowed: bool | None = Field(default=None, alias="fallback_allowed")
+    domainScopes: list[str] = Field(default_factory=list, alias="domain_scopes")
+    preGateDomains: list[str] = Field(default_factory=list, alias="pre_gate_domains")
+    missingFacts: list[str] = Field(default_factory=list, alias="missing_facts")
+    routingBasis: JsonObject = Field(default_factory=dict, alias="routing_basis")
+    candidateChapterDetails: list[JsonObject] = Field(
+        default_factory=list,
+        alias="candidate_chapter_details",
+    )
 
 
 class DocumentPackageView(ApiContractModel):
@@ -287,11 +383,49 @@ class DocumentPackageView(ApiContractModel):
         return value
 
 
+class DocumentPackageSummaryView(ApiContractModel):
+    documentPackageId: str | None = Field(default=None, alias="document_package_id")
+    candidateId: str | None = Field(default=None, alias="candidate_id")
+    taric10: str | None = None
+    cn8: str | None = None
+    taric10BranchIndex: int | None = Field(
+        default=None,
+        alias="taric10_branch_index",
+    )
+    taric10BranchCount: int | None = Field(
+        default=None,
+        alias="taric10_branch_count",
+    )
+    taric10ResolutionMode: str | None = Field(
+        default=None,
+        alias="taric10_resolution_mode",
+    )
+    taric10IsRecommended: bool | None = Field(
+        default=None,
+        alias="taric10_is_recommended",
+    )
+    requiredDocumentCount: int = Field(
+        default=0,
+        alias="required_document_count",
+    )
+    summary: JsonObject = Field(default_factory=dict)
+    checklistSummary: JsonObject = Field(
+        default_factory=dict,
+        alias="checklist_summary",
+    )
+    productFacts: JsonObject = Field(default_factory=dict, alias="product_facts")
+    missingFacts: list[str] = Field(default_factory=list, alias="missing_facts")
+    backtrackingSignals: list[JsonObject] = Field(
+        default_factory=list,
+        alias="backtracking_signals",
+    )
+
+
 class DocumentPackageCollectionResponse(ApiContractModel):
     jobId: str = Field(alias="job_id")
     runId: str | None = Field(default=None, alias="run_id")
     total: int
-    packages: list[DocumentPackageView] = Field(default_factory=list)
+    packages: list[DocumentPackageSummaryView] = Field(default_factory=list)
 
 
 class DocumentPackageDetailResponse(ApiContractModel):
@@ -333,11 +467,11 @@ class RunSnapshotResponse(ApiContractModel):
         default=None,
         alias="input_processing_view",
     )
-    productUnderstandingView: JsonObject | None = Field(
+    productUnderstandingView: ProductUnderstandingView | None = Field(
         default=None,
         alias="product_understanding_view",
     )
-    routingView: JsonObject | None = Field(
+    routingView: RoutingView | None = Field(
         default=None,
         alias="routing_view",
     )
@@ -345,11 +479,11 @@ class RunSnapshotResponse(ApiContractModel):
         default=None,
         alias="candidate_code_set",
     )
-    documentPackage: DocumentPackageView | None = Field(
+    documentPackage: DocumentPackageSummaryView | None = Field(
         default=None,
         alias="document_package",
     )
-    documentPackages: list[DocumentPackageView] = Field(
+    documentPackages: list[DocumentPackageSummaryView] = Field(
         default_factory=list,
         alias="document_packages",
     )

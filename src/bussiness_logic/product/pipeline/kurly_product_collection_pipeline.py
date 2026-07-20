@@ -26,4 +26,5 @@ class KurlyProductCollectionPipeline:
                 if changed
                 else "수집 대상 Kurly URL 없음"
             ),
+            raw_input=context.facts,
         )

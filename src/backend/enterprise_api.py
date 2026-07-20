@@ -9,8 +9,8 @@
   전부 append-only 로그로 쌓인다. DB 이관 시 이 이벤트 포맷을 그대로 테이블로 옮긴다.
 
 저장소는 파일 기반 플레이스홀더:
-- 이벤트 원장: src/artifacts/enterprise/events.jsonl (append-only)
-- 케이스 스냅샷: src/artifacts/enterprise/cases/{caseId}.json
+- 이벤트 원장: artifacts/enterprise/events.jsonl (append-only)
+- 케이스 스냅샷: artifacts/enterprise/cases/{caseId}.json
 DB 팀 작업이 들어오면 이 모듈의 _AppendEvent/_SaveCase만 교체하면 된다.
 """
 
@@ -31,12 +31,12 @@ if TYPE_CHECKING:
     from backend.pipeline_service import RunRegistry
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_STORE_DIR = _PROJECT_ROOT / "src" / "artifacts" / "enterprise"
+_STORE_DIR = _PROJECT_ROOT / "artifacts" / "enterprise"
 _EVENTS_PATH = _STORE_DIR / "events.jsonl"
 _CASES_DIR = _STORE_DIR / "cases"
 _UPLOADS_DIR = _STORE_DIR / "uploads"
 
-_WRITE_LOCK = threading.Lock()
+_WRITE_LOCK = threading.RLock()
 
 _CASE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{4,64}$")
 
@@ -71,9 +71,28 @@ def _LoadCase(caseId: str) -> dict | None:
     if path is None or not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        case = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    return case if isinstance(case, dict) else None
+
+
+def _FindCaseByRun(jobId: str, taric10: str) -> dict | None:
+    if not _CASES_DIR.exists():
+        return None
+    for path in _CASES_DIR.glob("*.json"):
+        try:
+            case = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(case, dict) or not case.get("caseId"):
+            continue
+        if (
+            str(case.get("lastJobId") or "") == jobId
+            and str(case.get("taric10") or "") == taric10
+        ):
+            return case
+    return None
 
 
 def _SaveCase(case: dict) -> None:
@@ -203,22 +222,35 @@ def RegisterEnterpriseApi(app: Flask, *, registry: "RunRegistry | None" = None) 
         name = str(understanding.get("product_name") or facts.get("product_name") or requestView.get("query") or taric10).strip()
         url = str(facts.get("url") or "").strip()
 
-        caseId = _NewCaseId()
-        case = {
-            "caseId": caseId,
-            "name": name,
-            "url": url,
-            "taric10": taric10,
-            "lastJobId": jobId,
-            "jobHistory": [jobId],
-            "documentPackage": dict(package),
-            "documents": _DocumentsFromPackage(package),
-            "events": 1,
-            "createdAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-            "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        }
-        _SaveCase(case)
-        _AppendEvent("import-classification", {"caseId": caseId, "jobId": jobId, "taric10": taric10})
+        with _WRITE_LOCK:
+            existingCase = _FindCaseByRun(jobId, taric10)
+            if existingCase is not None:
+                return jsonify({
+                    "ok": True,
+                    "caseId": existingCase["caseId"],
+                    "case": existingCase,
+                })
+
+            caseId = _NewCaseId()
+            case = {
+                "caseId": caseId,
+                "name": name,
+                "url": url,
+                "taric10": taric10,
+                "lastJobId": jobId,
+                "jobHistory": [jobId],
+                "documentPackage": dict(package),
+                "documents": _DocumentsFromPackage(package),
+                "events": 1,
+                "createdAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            }
+            _SaveCase(case)
+            _AppendEvent("import-classification", {
+                "caseId": caseId,
+                "jobId": jobId,
+                "taric10": taric10,
+            })
         return jsonify({"ok": True, "caseId": caseId, "case": case})
 
     @app.post("/api/enterprise/register-product")

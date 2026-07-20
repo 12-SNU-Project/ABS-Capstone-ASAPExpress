@@ -7,7 +7,11 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.api_contract import ClassificationCandidateSetView, RunSnapshotResponse
+from backend.api_contract import (
+    ClassificationCandidateSetView,
+    DocumentPackageSummaryView,
+    RunSnapshotResponse,
+)
 from bussiness_logic.utils.json_types import JsonMapping, JsonObject
 
 
@@ -23,7 +27,7 @@ class PipelineRunResult(BaseModel):
         default=None,
         alias="candidate_code_set",
     )
-    documentPackage: Optional[JsonObject] = Field(
+    documentPackage: Optional[DocumentPackageSummaryView] = Field(
         default=None,
         alias="document_package",
     )
@@ -53,7 +57,7 @@ class PipelineRunResult(BaseModel):
             },
             candidate_code_set=pipelineOutput.get("candidate_code_set"),
             document_package=(
-                DocumentPackageProjector.PublicDocumentPackage(documentPackage)
+                DocumentPackageProjector.PublicDocumentPackageSummary(documentPackage)
                 if isinstance(documentPackage, Mapping)
                 else documentPackage
             ),
@@ -74,6 +78,48 @@ class DocumentPackageProjector:
             if key != "raw_document_package"
         }
 
+    @staticmethod
+    def PublicDocumentPackageSummary(documentPackage: JsonMapping) -> JsonObject:
+        checklistSummary = documentPackage.get("checklist_summary") or {}
+        if not isinstance(checklistSummary, Mapping):
+            checklistSummary = {}
+        productFacts = documentPackage.get("product_facts") or {}
+        if not isinstance(productFacts, Mapping):
+            productFacts = {}
+        requiredDocuments = documentPackage.get("required_documents") or []
+        if not isinstance(requiredDocuments, list):
+            requiredDocuments = []
+        return DocumentPackageSummaryView(
+            document_package_id=documentPackage.get("document_package_id"),
+            candidate_id=documentPackage.get("candidate_id"),
+            taric10=documentPackage.get("taric10"),
+            cn8=documentPackage.get("cn8"),
+            taric10_branch_index=documentPackage.get("taric10_branch_index"),
+            taric10_branch_count=documentPackage.get("taric10_branch_count"),
+            taric10_resolution_mode=documentPackage.get("taric10_resolution_mode"),
+            taric10_is_recommended=documentPackage.get("taric10_is_recommended"),
+            required_document_count=int(
+                documentPackage.get("required_document_count")
+                or len(requiredDocuments)
+            ),
+            summary=(
+                dict(documentPackage.get("summary"))
+                if isinstance(documentPackage.get("summary"), Mapping)
+                else {}
+            ),
+            checklist_summary={
+                "counts": dict(checklistSummary.get("counts") or {}),
+                "missing_facts": list(checklistSummary.get("missing_facts") or [])[:40],
+            },
+            product_facts=dict(productFacts),
+            missing_facts=list(documentPackage.get("missing_facts") or [])[:40],
+            backtracking_signals=[
+                dict(signal)
+                for signal in list(documentPackage.get("backtracking_signals") or [])[:8]
+                if isinstance(signal, Mapping)
+            ],
+        ).ToDict()
+
     def PublicDocumentPackagesFromBlackboard(
         self,
         blackboard: JsonMapping,
@@ -82,7 +128,7 @@ class DocumentPackageProjector:
         if not isinstance(packages, list):
             return []
         return [
-            self.PublicDocumentPackage(package)
+            self.PublicDocumentPackageSummary(package)
             for package in packages
             if isinstance(package, Mapping)
         ]
@@ -94,13 +140,13 @@ class DocumentPackageProjector:
         packages = resultData.get("document_packages")
         if isinstance(packages, list):
             return [
-                self.PublicDocumentPackage(package)
+                self.PublicDocumentPackageSummary(package)
                 for package in packages
                 if isinstance(package, Mapping)
             ]
         package = resultData.get("document_package")
         if isinstance(package, Mapping):
-            return [self.PublicDocumentPackage(package)]
+            return [self.PublicDocumentPackageSummary(package)]
         return []
 
 
@@ -230,6 +276,18 @@ class InputProcessingViewProjector:
         if not (hasBasicInfo or hasReconstruction or hasStructuredFacts):
             return {}
 
+        reconstructionWarnings = inputReconstruction.get("warnings") or []
+        if not isinstance(reconstructionWarnings, list):
+            reconstructionWarnings = []
+        factWarnings = facts.get("warnings") or []
+        if not isinstance(factWarnings, list):
+            factWarnings = []
+        warnings = list(dict.fromkeys(
+            str(item)
+            for item in [*reconstructionWarnings, *factWarnings]
+            if str(item).strip()
+        ))
+
         inputProcessingView = {
             "page_product_facts": {
                 "product_name": facts.get("product_name") or "",
@@ -279,6 +337,7 @@ class InputProcessingViewProjector:
                 or facts.get("product_fact_conflicts")
                 or []
             ),
+            "warnings": warnings,
             "evidence_source_labels": inputReconstruction.get("source_ref_labels") or {},
             "reconstruction_status": {
                 "mode": inputReconstruction.get("mode") or "",
@@ -407,6 +466,11 @@ class InputProcessingViewProjector:
                 limit=20,
                 textLimit=700,
             ),
+            "warnings": self._CompactTextList(
+                inputProcessingView.get("warnings"),
+                limit=20,
+                textLimit=700,
+            ),
             "evidence_source_labels": self._CompactTextMapping(
                 inputProcessingView.get("evidence_source_labels"),
                 textLimit=200,
@@ -502,6 +566,8 @@ class UnderstandingViewProjector:
         "product_form_terms",
         "chapter_hint_terms",
         "chapter_hint_status",
+        "chapter_hint_basis",
+        "chapter_hint_source_terms",
         "domain_hints",
         "confidence",
         "needs_review",
@@ -680,7 +746,7 @@ class PipelineOutputProjector:
         documentPackage = compact.get("document_package")
         if isinstance(documentPackage, Mapping):
             compact["document_package"] = (
-                self._documentPackageProjector.PublicDocumentPackage(documentPackage)
+                self._documentPackageProjector.PublicDocumentPackageSummary(documentPackage)
             )
         if isinstance(blackboard, Mapping):
             documentPackages = (
@@ -709,14 +775,14 @@ class PipelineSnapshotProjector:
         documentPackages = resultData.get("document_packages")
         if isinstance(documentPackages, list):
             resultData["document_packages"] = [
-                DocumentPackageProjector.PublicDocumentPackage(package)
+                DocumentPackageProjector.PublicDocumentPackageSummary(package)
                 for package in documentPackages
                 if isinstance(package, Mapping)
             ]
         snapshotPackages = snapshot.get("document_packages")
         if isinstance(snapshotPackages, list) and not resultData.get("document_packages"):
             resultData["document_packages"] = [
-                DocumentPackageProjector.PublicDocumentPackage(package)
+                DocumentPackageProjector.PublicDocumentPackageSummary(package)
                 for package in snapshotPackages
                 if isinstance(package, Mapping)
             ]

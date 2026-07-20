@@ -94,6 +94,39 @@ def _compact_text(value: object) -> str:
     return str(value or "").strip()
 
 
+def BuildDocumentFacts(
+    productFacts: JsonObject,
+    runContext: JsonObject,
+    routingContext: JsonObject,
+    *,
+    cn8: str,
+    taric10: str,
+) -> JsonObject:
+    facts: JsonObject = {
+        key: value
+        for key, value in productFacts.items()
+        if isinstance(value, (str, int, float, bool))
+    }
+    for key in ("ingredients", "composition"):
+        value = productFacts.get(key)
+        if isinstance(value, list):
+            facts[key] = value[:40]
+    facts.update({
+        "destination_market": runContext.get("destination_market") or "EU",
+        "origin_country": (
+            productFacts.get("origin_country")
+            or runContext.get("origin_country")
+            or "unknown"
+        ),
+        "domain_scopes": list(routingContext.get("domain_scopes") or []),
+        "pre_gate_domains": list(routingContext.get("pre_gate_domains") or []),
+        "chapter": cn8[:2],
+        "cn8": cn8,
+        "taric10": taric10,
+    })
+    return facts
+
+
 # ---------------------------------------------------------------------------
 # Document_Component
 # ---------------------------------------------------------------------------
@@ -120,6 +153,10 @@ class DocumentComponent(BasePipelineComponent):
         self.ReadBlackBoard(latest["candidate_set_id"])
 
         product_facts = pes.get("observed_facts") or {}
+        if not isinstance(product_facts, dict):
+            product_facts = {}
+        run_context = bb.get("run_context") or {}
+        routing_context = bb.get("routing_context") or {}
 
         for cand in latest["candidates"]:
             self.ReadBlackBoard(cand["candidate_id"])
@@ -134,12 +171,20 @@ class DocumentComponent(BasePipelineComponent):
             for target in taric_targets:
                 taric10 = target["taric10"]
                 cand_for_target = {**cand, "taric10": taric10}
+                document_facts = BuildDocumentFacts(
+                    product_facts,
+                    run_context if isinstance(run_context, dict) else {},
+                    routing_context if isinstance(routing_context, dict) else {},
+                    cn8=cn8,
+                    taric10=taric10,
+                )
 
                 # 1. Raw TARIC measure package
                 try:
                     raw = asdict(BuildDocumentPackage(
                         taric10,
                         include_celex_excerpt=self._include_celex_excerpt,
+                        product_facts=document_facts,
                     ))
                 except Exception as e:  # noqa: BLE001
                     self.reason(f"document package resolver error for {taric10}: {e}")

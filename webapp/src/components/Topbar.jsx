@@ -5,13 +5,15 @@ import {
   ACCESS_MODE_STORAGE_KEY,
   GUEST_ACCESS_MODE,
   ResolveAccessMode,
+  ResolveExpertToolbarSection,
 } from "../lib/expertAccess";
 
 export default function Topbar() {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const accessMode = ResolveAccessMode(
     pathname,
     window.sessionStorage.getItem(ACCESS_MODE_STORAGE_KEY),
+    search,
   );
   const isGuestMode = accessMode === GUEST_ACCESS_MODE;
   const toolbarItems = isGuestMode
@@ -20,6 +22,9 @@ export default function Topbar() {
         { to: "/classification", label: "관리자 화면" },
         { to: "/enterprise", label: "기업 서비스" },
       ];
+  const activePath = isGuestMode
+    ? "/consumer"
+    : ResolveExpertToolbarSection(pathname, search);
 
   useEffect(() => {
     window.sessionStorage.setItem(ACCESS_MODE_STORAGE_KEY, accessMode);
@@ -36,15 +41,19 @@ export default function Topbar() {
         />
       </Link>
       <nav className="app-topbar-tabs">
-        {toolbarItems.map((item) => (
-          <Link
-            key={item.to}
-            to={item.to}
-            className={`app-topbar-tab ${pathname.startsWith(item.to) ? "active" : ""}`}
-          >
-            {item.label}
-          </Link>
-        ))}
+        {toolbarItems.map((item) => {
+          const active = activePath === item.to;
+          return (
+            <Link
+              key={item.to}
+              to={item.to}
+              aria-current={active ? "page" : undefined}
+              className={`app-topbar-tab ${active ? "active" : ""}`}
+            >
+              {item.label}
+            </Link>
+          );
+        })}
       </nav>
       <Link to="/" className="app-topbar-tab app-topbar-home">
         처음으로

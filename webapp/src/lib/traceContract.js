@@ -1,9 +1,4 @@
-// 분류 trace UI 계약 — blackboard.json 경로 → 화면 요소 매핑.
-//
-// ⚠️ 이 필드명들은 기록 의무화(CYCLE9)에서 확정된 UI 계약이다.
-//    trace 필드 변경은 메인 합의 사항 — 임의로 바꾸면 화면이 깨진다.
-// 원천: /api/admin/runs/{jobId}/blackboard (런별 blackboard.json 서빙).
-import { getJson } from "./api.js";
+// 분류 trace UI 계약 — /api/runs/{jobId}의 candidate_code_set → 화면 요소 매핑.
 import { asList, asObject, clean } from "./format.js";
 
 // EU EBTI 공개 DB — 판례 번호 조회 화면 (신뢰도용 외부 링크)
@@ -34,38 +29,88 @@ export function stageLabelKo(level) {
   return STAGE_LABELS_KO[key] || (key ? key.toUpperCase() : "");
 }
 
-// 근거 등급 뱃지 — named=법정 서술 / precedent=판례 / derived=승인 파생 / fallback=대체
 export const GRADE_LABELS = {
-  named: "법정 서술",
+  named: "코드 설명 어휘",
   precedent: "판례",
-  derived: "승인 파생",
-  fallback: "대체",
+  derived: "파생 근거",
+  fallback: "보조 일치",
 };
 
-export async function fetchBlackboard(jobId) {
-  const id = clean(jobId);
-  if (!id) {
-    return null;
-  }
-  try {
-    return await getJson(`/api/admin/runs/${encodeURIComponent(id)}/blackboard`);
-  } catch {
-    return null;
-  }
+const CONDITION_LABELS = {
+  product_identity: "상품 정체",
+  species_source: "원재료·종",
+  material_composition: "재료 구성",
+  physical_form: "상품 형태",
+  processing_method: "가공 방식",
+  processing_state: "가공 상태",
+  preservation_state: "보존 상태",
+  quantitative_threshold: "함유량 기준",
+  intended_use_function: "상품 용도",
+  exclusion_boundary: "제외 조건",
+};
+
+const OPERATION_LABELS = {
+  has_token: "관련 어휘 포함",
+  not_contains: "제외 어휘 없음",
+  equals: "값 일치",
+  in: "허용 범위 포함",
+  quant_gate: "함유량 기준 확인",
+};
+
+const DECISION_LABELS = {
+  confirmed: "후보 유지",
+  violated: "후보 제외",
+  undecided: "추가 검토",
+};
+
+const VERDICT_LABELS = {
+  true: "조건 충족",
+  false: "조건 불충족",
+  skipped: "판정 제외",
+  undecided: "추가 확인",
+  unknown: "추가 확인",
+};
+
+export function conditionLabel(value) {
+  const key = clean(value);
+  return CONDITION_LABELS[key] || "기타 판정 조건";
 }
 
-// blackboard → trace 뷰모델 (없는 필드는 전부 빈 값으로 — 구형 run 안전)
-export function extractTrace(blackboard) {
-  const board = asObject(blackboard);
-  const sets = asList(board.candidate_code_sets);
-  const set = asObject(sets[sets.length - 1]);
+export function operationLabel(value) {
+  const key = clean(value);
+  return OPERATION_LABELS[key] || "조건 확인";
+}
+
+export function decisionLabel(value) {
+  return DECISION_LABELS[clean(value).toLowerCase()] || "검토 중";
+}
+
+export function verdictLabel(detail) {
+  const verdict = clean(asObject(detail).verdict).toLowerCase();
+  return VERDICT_LABELS[verdict] || "판정 기록";
+}
+
+export function reasonLabel(value) {
+  const reason = clean(value);
+  if (!reason) return "조건과 일치했습니다.";
+  if (reason.startsWith("field_hit:")) return "수집된 상품 정보에서 관련 어휘를 확인했습니다.";
+  if (reason.startsWith("alias_hit:")) return "상품 설명의 유사 어휘에서 관련 근거를 확인했습니다.";
+  if (reason === "field_no_match") return "현재 상품 정보에서 일치 근거를 찾지 못했습니다.";
+  if (reason === "qualifier_rank_excluded") return "보조 설명 어휘이므로 점수 반영에서 제외했습니다.";
+  if (reason === "exclusion_present_in_pool") return "제외 조건에 해당하는 어휘가 확인됐습니다.";
+  if (reason === "exclusion_absent") return "제외 조건에 해당하는 어휘가 확인되지 않았습니다.";
+  if (reason === "no_percentages") return "성분 함유량 정보가 없어 기준 충족 여부를 판단하지 못했습니다.";
+  return "내부 분류 규칙에 따라 기록된 사유입니다.";
+}
+
+// candidate_code_set → trace 뷰모델 (없는 필드는 빈 값으로 유지해 구형 run도 표시)
+export function extractTrace(candidateSet) {
+  const set = asObject(candidateSet);
   const trace = asObject(set.classification_trace);
   return {
     stages: asList(trace.stages),
-    // 최종 추천: 전용 키가 없으면 trace.validator(동일 레코드)로 폴백
-    validator: asObject(board.llm_validation_recommendation || trace.validator),
+    validator: asObject(trace.validator),
     summons: asList(set.bti_summons),
-    routing: asObject(board.routing_context),
     mergeGates: asList(set.merge_gate_observations),
     trustGates: asList(set.router_trust_gate),
     formHits: asList(set.form_hits || trace.form_hits),
@@ -110,66 +155,6 @@ export function stageEntryForCode(stage, cn8) {
     return code && digits.startsWith(code);
   });
   return exact ? asObject(exact) : null;
-}
-
-// 판례 지지 detail (grade=precedent, verdict=true) → refs 배열
-export function precedentRefs(candidateEntry) {
-  return trueDetails(candidateEntry)
-    .filter((detail) => gradeOf(detail) === "precedent")
-    .flatMap((detail) => asList(asObject(detail).refs))
-    .map((ref) => clean(ref))
-    .filter(Boolean);
-}
-
-// 소비자 "왜 이 코드인가" 3줄 — 정체 / 상태·형태 / 판례(있을 때만)
-export function buildConsumerWhy(traceModel, cn8) {
-  const stages = asList(traceModel?.stages);
-  const collected = [];
-  stages.forEach((stage) => {
-    const entry = stageEntryForCode(stage, cn8);
-    if (entry) {
-      collected.push(...trueDetails(entry).map((detail) => ({ ...asObject(detail), _stage: clean(asObject(stage).stage) })));
-    }
-  });
-  const byCond = (names) =>
-    collected.find((detail) => names.includes(clean(detail.cond)));
-  const identity = byCond(["product_identity"]);
-  const state = byCond(["preservation_state", "physical_form", "processing_state", "material_composition"]);
-  const precedent = collected.filter((detail) => gradeOf(detail) === "precedent");
-  // 판례 지지의 원천은 두 층: decision_detail(grade=precedent) + bti_summons 발동 기록.
-  // 소환 기록에는 "분류의 어느 지점(level)에서" 판례가 개입했는지가 실려 있다.
-  const digits = clean(cn8).replace(/\D/g, "");
-  const firedSummons = summarizeSummons(traceModel?.summons).filter(
-    (row) => row.fired && row.code && digits.startsWith(row.code.replace(/\D/g, "")),
-  );
-  const refs = [
-    ...precedent.flatMap((detail) => asList(detail.refs)).map(clean),
-    ...firedSummons.flatMap((row) => row.refs),
-  ].filter(Boolean).filter((ref, index, all) => all.indexOf(ref) === index);
-  const firedLevel = clean(firedSummons[0]?.level);
-  const firedLevelKo = stageLabelKo(firedLevel);
-  const lines = [];
-  if (identity) {
-    const value = detailValueText(identity);
-    lines.push({ kind: "identity", text: `상품 정체 ${value ? `'${value}'` : "판정 어휘"}가 관세 서술과 일치합니다.` });
-  }
-  if (state && state !== identity) {
-    const value = detailValueText(state);
-    lines.push({
-      kind: "state",
-      text: `${clean(state.cond) === "preservation_state" ? "보존 상태" : clean(state.cond) === "physical_form" ? "물리 형태" : "구성·가공 조건"}${value ? ` '${value}'` : ""}이 코드 조건을 충족합니다.`,
-    });
-  }
-  if (refs.length) {
-    lines.push({
-      kind: "precedent",
-      text: firedLevelKo
-        ? `${firedLevelKo} 단계에서 EU 관세당국 판례 ${refs.length}건이 이 코드를 지지했습니다`
-        : `EU 관세당국 판례 ${refs.length}건이 이 코드를 지지합니다`,
-      refs,
-    });
-  }
-  return { lines, refs };
 }
 
 // bti_summons 한 줄 요약 + 분포 (침묵의 투명성)

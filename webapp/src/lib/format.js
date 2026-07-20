@@ -17,7 +17,7 @@ const STATUS_LABELS = {
 const SOURCE_LABELS = {
   candidate: "후보",
   classifier: "기존 분류기",
-  staged_classifier: "Staged narrowing",
+  staged_classifier: "단계별 규칙 분류",
   proposed: "제안 후보",
 };
 
@@ -103,4 +103,3 @@ export function candidateKey(candidate, index) {
   const source = asObject(candidate);
   return clean(source.candidate_id || source.cn8 || source.taric10 || `candidate_${index}`);
 }
-
