@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useClassificationRun } from "../hooks/useClassificationRun";
 import { asList, asObject, clean } from "../lib/format.js";
 import {
@@ -9,6 +9,8 @@ import {
   issueSubmitUrl,
   normalizeCoi,
   linkJob,
+  fetchCases,
+  uploadDocument,
 } from "../lib/enterpriseApi.js";
 import logo from "../assets/asap_black.png";
 
@@ -195,11 +197,13 @@ const suggestVerdict = (rows) => {
 
 export default function EnterprisePage() {
   const { result, busy, runPipeline } = useClassificationRun();
+  const [searchParams] = useSearchParams();
   // panel: 어느 행(id)의 어느 카드(key)가 열려 있는지 — 행 바로 아래로 확장
   const [panel, setPanel] = useState({ id: DEMO_CASE.caseId, key: "docs" });
   // 행별 서류 상태 — 상품 추가 시 새 엔트리가 생긴다
   const [docsById, setDocsById] = useState({ [DEMO_CASE.caseId]: INITIAL_DOCS });
   const [extraRows, setExtraRows] = useState([]); // {id, name}
+  const [savedCases, setSavedCases] = useState([]);
   const [urlById, setUrlById] = useState({ [DEMO_CASE.caseId]: "" });
   // 파이프라인 결과의 주인 행 — 마지막으로 분류 실행을 누른 행
   const [runOwner, setRunOwner] = useState(DEMO_CASE.caseId);
@@ -242,6 +246,50 @@ export default function EnterprisePage() {
     return () => document.body.classList.remove("asap-cjs-neon", "consumer-body", "asap-user-light");
   }, [uiTheme]);
 
+  const savedCasesById = useMemo(
+    () => Object.fromEntries(savedCases.map((item) => [item.caseId, item])),
+    [savedCases],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCases().then((response) => {
+      const cases = asList(response?.cases).filter((item) => clean(item?.caseId));
+      if (cancelled || !cases.length) return;
+      const restoredDocs = {};
+      const restoredUrls = {};
+      const restoredMeta = {};
+      cases.forEach((item) => {
+        if (asList(item.documents).length) restoredDocs[item.caseId] = asList(item.documents);
+        restoredUrls[item.caseId] = clean(item.url);
+        restoredMeta[item.caseId] = {
+          price: Number(item.price) || 0,
+          volume: Number(item.volume) || 0,
+          channel: clean(item.channel),
+        };
+      });
+      setSavedCases(cases);
+      setDocsById((prev) => ({ ...prev, ...restoredDocs }));
+      setUrlById((prev) => ({ ...prev, ...restoredUrls }));
+      setMetaById((prev) => ({ ...prev, ...restoredMeta }));
+      setExtraRows((prev) => {
+        const ids = new Set(prev.map((item) => item.id));
+        const additions = cases
+          .filter((item) => item.caseId !== DEMO_CASE.caseId && !ids.has(item.caseId))
+          .map((item) => ({ id: item.caseId, name: clean(item.name) || item.caseId }));
+        return additions.length ? [...prev, ...additions] : prev;
+      });
+      const targetCaseId = clean(searchParams.get("caseId"));
+      if (targetCaseId && cases.some((item) => item.caseId === targetCaseId)) {
+        setPanel({ id: targetCaseId, key: clean(searchParams.get("panel")) || "docs" });
+        setOpenCat("product");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
+
   const candidates = asList(asObject(result?.candidate_code_set).candidates);
   const primary = candidates.find((c) => c.llm_recommended) || candidates[0] || null;
   const packages = asList(result?.document_packages);
@@ -277,7 +325,10 @@ export default function EnterprisePage() {
   const docBy = (key) => docs.find((d) => d.key === key);
 
   const activeIsRunOwner = activeId === runOwner;
-  const taric10 = activeIsRunOwner && liveTaric10 ? liveTaric10 : "1605550000";
+  const activeSavedCase = savedCasesById[activeId];
+  const taric10 = activeIsRunOwner && liveTaric10
+    ? liveTaric10
+    : clean(activeSavedCase?.taric10) || "1605550000";
   const activeLive = activeIsRunOwner && isLive;
   const docDetailPath = activeLive && jobId && clean(taric10) ? `/document/${jobId}/${clean(taric10)}` : null;
 
@@ -318,14 +369,18 @@ export default function EnterprisePage() {
     fileInputRef.current?.click();
   };
 
-  const onFileChosen = (event) => {
+  const onFileChosen = async (event) => {
     const file = event.target.files?.[0];
     const target = fileTargetRef.current;
     if (file && target) {
-      setDocs((prev) =>
-        prev.map((d) => (d.key === target ? { ...d, quality: "unverified", file: file.name, origin: d.origin ? d.origin : "직접 업로드" } : d)),
-      );
-      reportDocStatus({ caseId: activeId, doc: target, quality: "unverified", file: file.name });
+      try {
+        await uploadDocument(activeId, target, file);
+        setDocs((prev) =>
+          prev.map((d) => (d.key === target ? { ...d, quality: "unverified", file: file.name, origin: "직접 업로드" } : d)),
+        );
+      } catch (error) {
+        window.alert(`파일을 업로드하지 못했습니다: ${String(error?.message || error)}`);
+      }
     }
     event.target.value = "";
   };
@@ -787,6 +842,8 @@ export default function EnterprisePage() {
     const ready = !!clean(rowName) || !!clean(urlById[rowId]);
     const hasCoi = rowDocs.find((d) => d.key === "coi")?.quality !== "missing";
     const rowLive = runOwner === rowId && isLive;
+    const savedCase = savedCasesById[rowId];
+    const savedTaric10 = clean(savedCase?.taric10);
     const rowEvidence = evidenceRows(rowDocs, dutyBase);
     const filed = filedById[rowId] || false;
     // 관세사 검토 완료 = 요건 증거가 전부 충족되어 판정이 "수출 가능"에 도달한 상태
@@ -801,7 +858,7 @@ export default function EnterprisePage() {
         <td className={cellCls("", rowId, "docs")} onClick={cellClick(rowId, "docs")}>
           <div className="ent-mgmt-docs">
             <b>{secured}/{rowDocs.length}</b>
-            <span className="ent-mgmt-bar"><span style={{ width: `${(secured / rowDocs.length) * 100}%` }} /></span>
+            <span className="ent-mgmt-bar"><span style={{ width: `${rowDocs.length ? (secured / rowDocs.length) * 100 : 0}%` }} /></span>
           </div>
         </td>
         <td className="ent-mgmt-url" onClick={(e) => e.stopPropagation()}>
@@ -814,7 +871,7 @@ export default function EnterprisePage() {
           />
         </td>
         <td className={cellCls("ent-mgmt-hs", rowId, "code")} onClick={cellClick(rowId, "code")}>
-          <b>{rowLive ? formatTaric(liveTaric10) : "—"}</b>
+          <b>{rowLive ? formatTaric(liveTaric10) : savedTaric10 ? formatTaric(savedTaric10) : "—"}</b>
           <button
             type="button"
             className="ent-mini-btn solid"
@@ -835,7 +892,7 @@ export default function EnterprisePage() {
           </button>
         </td>
         <td className={cellCls("ent-mgmt-acc", rowId, "code")} onClick={cellClick(rowId, "code")}>
-          {rowLive ? "87%" : "—"}
+          {rowLive ? "87%" : savedTaric10 ? "저장됨" : "—"}
         </td>
         <td>KR</td>
         <td className={cellCls("ent-mgmt-duty", rowId, "duty")} onClick={cellClick(rowId, "duty")}>
@@ -874,7 +931,7 @@ export default function EnterprisePage() {
           <div className="ent-case-chip">
             <span>수출 케이스</span>
             <strong>{activeId}</strong>
-            <em>{activeId === DEMO_CASE.caseId ? mainName : extraRows.find((r) => r.id === activeId)?.name} → {DEMO_CASE.destination}</em>
+            <em>{activeId === DEMO_CASE.caseId ? mainName : savedCasesById[activeId]?.name || extraRows.find((r) => r.id === activeId)?.name} → {DEMO_CASE.destination}</em>
           </div>
           <div className="user-theme-toggle small" role="group" aria-label="테마 선택">
             <button type="button" className={uiTheme === "light" ? "on" : ""} onClick={() => setUiTheme("light")}>화이트</button>

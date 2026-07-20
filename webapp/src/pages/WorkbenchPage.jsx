@@ -773,8 +773,10 @@ function TracePanel({ candidate, trace }) {
 }
 
 export default function WorkbenchPage() {
-  const { result, busy, runPipeline } = useClassificationRun();
+  const { result, busy, runPipeline, loadRun } = useClassificationRun();
   const [form, setForm] = useState({ productName: "", url: "", description: "" });
+  const [jobIdInput, setJobIdInput] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [selectedKey, setSelectedKey] = useState("");
   const [theme, setTheme] = useState(
     () => window.localStorage.getItem(THEME_STORAGE_KEY) || "classic",
@@ -790,6 +792,12 @@ export default function WorkbenchPage() {
   const trace = useBlackboardTrace(result?.job_id, !busy);
   const [activeStage, setActiveStage] = useState("classification");
   const followStageRef = useRef(true);
+
+  useEffect(() => {
+    if (clean(result?.job_id)) {
+      setJobIdInput(clean(result.job_id));
+    }
+  }, [result?.job_id]);
 
   useEffect(() => {
     document.body.classList.toggle("asap-cjs-neon", theme === "neon");
@@ -838,6 +846,16 @@ export default function WorkbenchPage() {
     ) || derived.candidates[0] || null;
 
   const setField = (key) => (event) => setForm((prev) => ({ ...prev, [key]: event.target.value }));
+
+  const restoreRun = async () => {
+    setLoadError("");
+    try {
+      await loadRun(jobIdInput);
+      followStageRef.current = true;
+    } catch (error) {
+      setLoadError(String(error?.message || error));
+    }
+  };
 
   return (
     <div
@@ -1021,6 +1039,26 @@ export default function WorkbenchPage() {
           >
             상품 정보만 복원
           </button>
+        </div>
+        <div className="cjs-run-restore">
+          <label htmlFor="cjs-job-id">기존 작업 불러오기</label>
+          <div className="cjs-run-restore-controls">
+            <input
+              id="cjs-job-id"
+              type="text"
+              className="cjs-input"
+              placeholder="job_..."
+              value={jobIdInput}
+              onChange={(event) => setJobIdInput(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && restoreRun()}
+              disabled={busy}
+            />
+            <button type="button" className="cjs-secondary-button" disabled={busy} onClick={restoreRun}>
+              불러오기
+            </button>
+          </div>
+          <small>백엔드에 남아 있는 job_id의 분류 후보와 TARIC 서류 패키지를 다시 엽니다.</small>
+          {loadError ? <div className="cjs-run-restore-error">{loadError}</div> : null}
         </div>
       </section>
 

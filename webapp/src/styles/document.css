@@ -1,11 +1,12 @@
 .docpage {
-  --doc-bg: linear-gradient(180deg, #fbfbf7 0%, #f1efe6 100%);
-  --doc-panel: rgba(255, 255, 255, 0.84);
-  --doc-line: rgba(27, 33, 24, 0.14);
-  --doc-ink: #182018;
-  --doc-muted: #5f675c;
-  --doc-accent: #1e6b4a;
-  --doc-accent-soft: #dff1e8;
+  --doc-bg: #f8fafc;
+  --doc-panel: #ffffff;
+  --doc-line: #e4e7ee;
+  --doc-ink: #111827;
+  --doc-muted: #64748b;
+  --doc-accent: #6d3fd6;
+  --doc-accent-soft: rgba(109, 63, 214, 0.1);
+  background: var(--doc-bg);
   min-height: 100%;
   color: var(--doc-ink);
 }
@@ -16,6 +17,31 @@
   gap: 24px;
   align-items: flex-start;
   margin-bottom: 18px;
+}
+
+.docpage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.docpage-save {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid #6d3fd6;
+  border-radius: 8px;
+  background: #6d3fd6;
+  color: #ffffff;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.docpage-save:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .docpage-eyebrow a {
@@ -64,7 +90,7 @@
 
 .docpage-tab.active {
   color: var(--doc-accent);
-  border-color: rgba(30, 107, 74, 0.35);
+  border-color: rgba(109, 63, 214, 0.35);
   background: var(--doc-accent-soft);
 }
 
@@ -153,13 +179,13 @@
 
 .ddv-flow-button:hover,
 .ddv-flow-button.active {
-  border-color: rgba(30, 107, 74, 0.38);
+  border-color: rgba(109, 63, 214, 0.38);
   background: var(--doc-accent-soft);
 }
 
 .ddv-flow-step {
   border-radius: 999px;
-  background: rgba(30, 107, 74, 0.1);
+  background: rgba(109, 63, 214, 0.1);
   color: var(--doc-accent);
   font-size: 0.78rem;
   font-weight: 800;
@@ -266,8 +292,8 @@
 }
 
 .ddv-check-row.active {
-  background: rgba(223, 241, 232, 0.48);
-  border-color: rgba(30, 107, 74, 0.22);
+  background: rgba(109, 63, 214, 0.08);
+  border-color: rgba(109, 63, 214, 0.22);
 }
 
 .ddv-check-row-main {
@@ -431,8 +457,8 @@
 
 .ddv-requirement-check {
   align-items: center;
-  background: rgba(223, 241, 232, 0.36);
-  border: 1px solid rgba(30, 107, 74, 0.16);
+  background: rgba(109, 63, 214, 0.08);
+  border: 1px solid rgba(109, 63, 214, 0.16);
   border-radius: 12px;
   cursor: pointer;
   display: flex;
@@ -583,9 +609,9 @@
 }
 
 .ddv-group-guidance {
-  border: 1px solid rgba(30, 107, 74, 0.16);
+  border: 1px solid rgba(109, 63, 214, 0.16);
   border-radius: 14px;
-  background: rgba(223, 241, 232, 0.34);
+  background: rgba(109, 63, 214, 0.08);
   margin-top: 14px;
   padding: 18px;
   width: 100%;
@@ -661,7 +687,7 @@
 }
 
 .ddv-cert-detail-toggle summary {
-  border: 1px solid rgba(30, 107, 74, 0.24);
+  border: 1px solid rgba(109, 63, 214, 0.24);
   border-radius: 999px;
   color: var(--doc-accent);
   cursor: pointer;
@@ -706,8 +732,8 @@
 }
 
 .ddv-footnote-guide {
-  border: 1px solid rgba(30, 107, 74, 0.14);
-  background: rgba(223, 241, 232, 0.42);
+  border: 1px solid rgba(109, 63, 214, 0.14);
+  background: rgba(109, 63, 214, 0.08);
   border-radius: 12px;
   display: grid;
   grid-template-columns: 70px 1fr;
@@ -748,9 +774,9 @@
 }
 
 .ddv-review-grid > div {
-  border: 1px solid rgba(30, 107, 74, 0.12);
+  border: 1px solid rgba(109, 63, 214, 0.12);
   border-radius: 14px;
-  background: rgba(250, 252, 249, 0.94);
+  background: #f8fafc;
   min-width: 0;
   padding: 14px;
 }
@@ -936,8 +962,8 @@
 }
 
 .ddv-branch-card.success {
-  border-color: rgba(30, 107, 74, 0.32);
-  background: #eff8f3;
+  border-color: rgba(109, 63, 214, 0.32);
+  background: rgba(109, 63, 214, 0.08);
 }
 
 .ddv-branch-card.conditional {
@@ -1281,6 +1307,10 @@
 
   .docpage-pill {
     white-space: normal;
+  }
+
+  .docpage-actions {
+    justify-content: flex-start;
   }
 
   .ddv-section {

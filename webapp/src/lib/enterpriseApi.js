@@ -43,3 +43,18 @@ export const linkJob = (payload) => call("link-job", payload);
 export const fetchBrokerFiling = (caseId) => call("broker-filing", { caseId }, { method: "GET" });
 // 내부 관제용 케이스 목록
 export const fetchCases = () => call("cases", {}, { method: "GET" });
+// 분류 run의 선택 TARIC10 + 서류 패키지를 파일 기반 수출 케이스로 저장
+export const importClassification = (payload) => call("import-classification", payload);
+
+export async function uploadDocument(caseId, documentKey, file) {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(
+    `${BASE}/cases/${encodeURIComponent(caseId)}/documents/${encodeURIComponent(documentKey)}/upload`,
+    { method: "POST", body: form },
+  );
+  if (!response.ok) {
+    throw new Error(`http_${response.status}`);
+  }
+  return response.json();
+}

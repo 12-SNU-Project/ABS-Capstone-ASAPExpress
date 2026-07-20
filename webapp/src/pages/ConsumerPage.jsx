@@ -32,15 +32,45 @@ function formatCode(cn8) {
   return `${digits.slice(0, 4)} ${digits.slice(4, 6)} ${digits.slice(6)}`;
 }
 
+function taricChoices(candidate) {
+  const values = [
+    clean(candidate?.taric10),
+    ...asList(candidate?.taric10_branch_candidates).map((branch) =>
+      clean(typeof branch === "object" ? branch.taric10 || branch.code : branch),
+    ),
+  ].filter(Boolean);
+  return Array.from(new Set(values));
+}
+
+function CandidateDocuments({ candidate, jobId }) {
+  const tarics = taricChoices(candidate);
+  if (!jobId || !tarics.length) {
+    return <div className="consumer-document-pending">TARIC10 서류 연결 준비 중</div>;
+  }
+  if (tarics.length === 1) {
+    return (
+      <Link className="consumer-document-button" to={`/document/${encodeURIComponent(jobId)}/${encodeURIComponent(tarics[0])}`}>
+        필요 서류 보기
+      </Link>
+    );
+  }
+  return (
+    <details className="consumer-taric-picker">
+      <summary>서류를 확인할 TARIC10 선택 ({tarics.length}개)</summary>
+      <div className="consumer-taric-options">
+        {tarics.map((taric) => (
+          <Link key={taric} to={`/document/${encodeURIComponent(jobId)}/${encodeURIComponent(taric)}`}>
+            {taric} 서류 보기
+          </Link>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 export default function ConsumerPage() {
   const { result, busy, runPipeline } = useClassificationRun();
   const [query, setQuery] = useState("");
-  const [altIndex, setAltIndex] = useState(-1);
-
-  // 새 run이 뜨면 판례 선택을 추천 코드로 리셋
-  useEffect(() => {
-    setAltIndex(-1);
-  }, [result?.job_id]);
 
   // 사용자용 테마 — 기본은 화이트(가독성 피드백), 네온은 토글로
   const [uiTheme, setUiTheme] = useState(
@@ -75,14 +105,9 @@ export default function ConsumerPage() {
   const failed = status === "failed" || !!result?.error;
   const candidates = asList(asObject(result?.candidate_code_set).candidates);
   const primary = candidates.find((c) => c.llm_recommended) || candidates[0] || null;
-  const alternates = candidates.filter((c) => c !== primary).slice(0, 2);
-  const basis = clean(asList(primary?.classification_basis)[0]);
-  // 판례는 선택된 후보 기준 — 기본은 추천 코드, 대안 칩을 누르면 그 코드의 판례
-  const shownCandidate =
-    altIndex >= 0 && alternates[altIndex] ? alternates[altIndex] : primary;
-  const precedents = asList(shownCandidate?.similar_ebti_cases);
   const noCandidates = completed && !candidates.length;
   const stepIndex = consumerStepIndex(result);
+  const jobId = clean(result?.job_id);
 
   // 기록 의무화 trace — "왜 이 코드인가" 3줄 (정체/상태·형태/판례)
   const trace = useBlackboardTrace(result?.job_id, completed);
@@ -167,86 +192,31 @@ export default function ConsumerPage() {
       {completed && primary ? (
         <div className="consumer-result">
           <div className="consumer-rlabel">추천 관세 코드 · CN8</div>
-          <div className="consumer-code">{formatCode(primary.cn8)}</div>
-          <div className="consumer-conf">
-            ● {primary.llm_recommended ? "신뢰도 높음" : "후보 검토 권장"}
+          <div className="consumer-candidate-list">
+            <article className="consumer-candidate recommended">
+              <div className="consumer-candidate-topline">
+                <strong>추천</strong>
+              </div>
+              <div className="consumer-code">{formatCode(primary.cn8)}</div>
+              <div className="consumer-taric-label">
+                TARIC10 {taricChoices(primary).length === 1 ? taricChoices(primary)[0] : taricChoices(primary).length ? `${taricChoices(primary).length}개 후보` : "확인 중"}
+              </div>
+              <CandidateDocuments candidate={primary} jobId={jobId} />
+              {asList(primary.similar_ebti_cases).length ? (
+                <details className="consumer-precedents">
+                  <summary>유사 EU 분류 판례 {asList(primary.similar_ebti_cases).length}건 참고</summary>
+                  {asList(primary.similar_ebti_cases).map((item, index) => (
+                    <div className="consumer-precedent" key={index}>
+                      <div className="consumer-precedent-ref">{clean(item.evidence_ref)}</div>
+                      {clean(item.case_summary) ? <div className="consumer-precedent-body">{clean(item.case_summary)}</div> : null}
+                      <div className="consumer-precedent-sim">{clean(item.similarity_comment)}</div>
+                    </div>
+                  ))}
+                </details>
+              ) : null}
+            </article>
           </div>
-          {alternates.length ? (
-            <>
-              <div className="consumer-alts">
-                {alternates.map((candidate, index) => (
-                  <button
-                    type="button"
-                    className={`consumer-alt ${altIndex === index ? "active" : ""}`}
-                    key={index}
-                    onClick={() => setAltIndex(altIndex === index ? -1 : index)}
-                  >
-                    {formatCode(candidate.cn8)}
-                  </button>
-                ))}
-              </div>
-              <div className="consumer-alt-hint">후보 코드를 누르면 해당 코드의 판례를 볼 수 있어요</div>
-            </>
-          ) : null}
-          <div className="consumer-why">
-            {why.lines.length ? (
-              <div className="consumer-why-lines">
-                <b>왜 이 코드인가</b>
-                {why.lines.map((line) => (
-                  <div className={`consumer-why-line k-${line.kind}`} key={line.kind}>
-                    {line.text}
-                    {line.kind === "precedent" && line.refs?.length ? (
-                      <span className="consumer-why-refs">
-                        {line.refs.slice(0, 3).map((ref) => (
-                          <em key={ref}>{ref}</em>
-                        ))}
-                        <button type="button" onClick={copyRefs} title="판례 번호 복사">복사</button>
-                        <a href={EBTI_CONSULT_URL} target="_blank" rel="noreferrer" title="EU EBTI 공개 DB에서 번호로 조회">
-                          EBTI 조회 ↗
-                        </a>
-                      </span>
-                    ) : null}
-                  </div>
-                ))}
-                {why.refs.length ? (
-                  <div className="consumer-why-note">판례는 참고 근거(2급)이며 확정 사유가 아닙니다.</div>
-                ) : null}
-              </div>
-            ) : basis ? (
-              <>{basis.slice(0, 120)} </>
-            ) : (
-              "분류 근거와 서류 연결은 상세 화면에서 확인할 수 있습니다. "
-            )}
-            {summonsRows.length ? (
-              <div className="consumer-summons">
-                {summonsRows.slice(0, 1).map((row, index) => (
-                  <span key={index}>
-                    {row.fired
-                      ? `판례 발동: ${row.code}`
-                      : `판례 조회: ${row.reviewed || "-"}건 검토 — ${row.silenceLabel || "미반영"}`}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            <Link to="/classification">자세히 보기 ›</Link>
-            {precedents.length ? (
-              <details className="consumer-precedents" open={altIndex >= 0}>
-                <summary>
-                  유사 EU 분류 판례 {precedents.length}건 참고
-                  {altIndex >= 0 ? ` (${formatCode(shownCandidate?.cn8)} 기준)` : ""} ›
-                </summary>
-                {precedents.map((item, index) => (
-                  <div className="consumer-precedent" key={index}>
-                    <div className="consumer-precedent-ref">{clean(item.evidence_ref)}</div>
-                    {clean(item.case_summary) ? (
-                      <div className="consumer-precedent-body">{clean(item.case_summary)}</div>
-                    ) : null}
-                    <div className="consumer-precedent-sim">{clean(item.similarity_comment)}</div>
-                  </div>
-                ))}
-              </details>
-            ) : null}
-          </div>
+          <div className="consumer-why"><Link to="/classification">분류 근거 전체 보기 ›</Link></div>
         </div>
       ) : null}
     </div>

@@ -305,6 +305,40 @@ body.asap-cjs-neon main {
   gap: 8px;
 }
 
+.cjs-run-restore {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--cjs-border);
+}
+
+.cjs-run-restore label {
+  color: var(--cjs-muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.cjs-run-restore-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.cjs-run-restore-controls .cjs-input {
+  flex: 1;
+}
+
+.cjs-run-restore small {
+  color: var(--cjs-muted);
+  font-size: 11px;
+}
+
+.cjs-run-restore-error {
+  color: #dc2626;
+  font-size: 12px;
+  font-weight: 750;
+}
+
 .cjs-primary-button,
 .cjs-secondary-button {
   min-height: 42px;

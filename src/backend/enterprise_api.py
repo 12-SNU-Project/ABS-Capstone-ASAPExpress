@@ -22,13 +22,19 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING, Mapping
 
 from flask import Flask, jsonify, request
+from werkzeug.utils import secure_filename
+
+if TYPE_CHECKING:
+    from backend.pipeline_service import RunRegistry
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _STORE_DIR = _PROJECT_ROOT / "src" / "artifacts" / "enterprise"
 _EVENTS_PATH = _STORE_DIR / "events.jsonl"
 _CASES_DIR = _STORE_DIR / "cases"
+_UPLOADS_DIR = _STORE_DIR / "uploads"
 
 _WRITE_LOCK = threading.Lock()
 
@@ -37,6 +43,7 @@ _CASE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{4,64}$")
 
 def _EnsureDirs() -> None:
     _CASES_DIR.mkdir(parents=True, exist_ok=True)
+    _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _AppendEvent(action: str, payload: dict) -> dict:
@@ -88,7 +95,132 @@ def _Payload() -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
-def RegisterEnterpriseApi(app: Flask) -> None:
+def _DocumentKey(value: object, index: int) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").lower()).strip("_")
+    return normalized[:56] or f"document_{index + 1}"
+
+
+def _DocumentCategory(name: str) -> str:
+    normalized = name.lower()
+    if any(token in normalized for token in ("ingredient", "composition", "label", "health", "haccp", "specification", "coa")):
+        return "product"
+    if any(token in normalized for token in ("eori", "business registration", "company registration")):
+        return "company"
+    return "customs"
+
+
+def _DocumentsFromPackage(package: Mapping[str, object]) -> list[dict]:
+    """Flatten TARIC detailed requirements into the enterprise screen's document rows."""
+    documents: list[dict] = []
+    seen: set[str] = set()
+    for requirement in package.get("requirements") or []:
+        if not isinstance(requirement, Mapping):
+            continue
+        details = requirement.get("detailed_requirements") or []
+        for detail in details:
+            if not isinstance(detail, Mapping):
+                continue
+            if str(detail.get("decision_status") or "").lower() == "exempted":
+                continue
+            name = str(detail.get("required_document") or "").strip()
+            if not name:
+                continue
+            baseKey = _DocumentKey(name, len(documents))
+            key = baseKey
+            suffix = 2
+            while key in seen:
+                key = f"{baseKey}_{suffix}"
+                suffix += 1
+            seen.add(key)
+            category = _DocumentCategory(name)
+            documents.append({
+                "key": key,
+                "cat": category,
+                "name": name,
+                "quality": "missing",
+                "file": "",
+                "chosen": "direct" if category == "customs" else None,
+                "origin": "TARIC 서류 추천",
+                "reason": str(detail.get("decision_reason") or ""),
+            })
+    if documents:
+        return documents
+    for index, requirement in enumerate(package.get("requirements") or []):
+        if not isinstance(requirement, Mapping):
+            continue
+        name = str(requirement.get("measure_type") or "TARIC 요건 확인").strip()
+        documents.append({
+            "key": _DocumentKey(name, index),
+            "cat": "customs",
+            "name": name,
+            "quality": "missing",
+            "file": "",
+            "chosen": "direct",
+            "origin": "TARIC 서류 추천",
+        })
+    return documents
+
+
+def _UpdateDocument(case: dict, documentKey: str, changes: Mapping[str, object]) -> None:
+    documents = case.setdefault("documents", [])
+    if not isinstance(documents, list):
+        documents = []
+        case["documents"] = documents
+    for document in documents:
+        if isinstance(document, dict) and document.get("key") == documentKey:
+            document.update({key: value for key, value in changes.items() if value is not None})
+            break
+    else:
+        documents.append({"key": documentKey, "name": documentKey, **changes})
+
+
+def RegisterEnterpriseApi(app: Flask, *, registry: "RunRegistry | None" = None) -> None:
+    @app.post("/api/enterprise/import-classification")
+    def enterprise_import_classification():
+        payload = _Payload()
+        jobId = str(payload.get("jobId") or "").strip()
+        taric10 = str(payload.get("taric10") or "").strip()
+        if not jobId or not taric10:
+            return jsonify({"ok": False, "error": "jobId_and_taric10_required"}), 400
+        if registry is None:
+            return jsonify({"ok": False, "error": "run_registry_unavailable"}), 503
+
+        detail = registry.BuildDocumentPackageDetail(jobId, taric10)
+        package = detail.get("document_package") if isinstance(detail, Mapping) else None
+        snapshot = registry.BuildUiResult(jobId)
+        if not isinstance(package, Mapping) or not snapshot:
+            return jsonify({"ok": False, "error": "classification_result_not_found"}), 404
+
+        packageTaric10 = str(package.get("taric10") or "").strip()
+        if packageTaric10 != taric10:
+            return jsonify({"ok": False, "error": "taric10_not_in_run"}), 400
+
+        understanding = snapshot.get("product_understanding_view")
+        requestView = snapshot.get("request")
+        understanding = understanding if isinstance(understanding, Mapping) else {}
+        requestView = requestView if isinstance(requestView, Mapping) else {}
+        facts = requestView.get("facts") if isinstance(requestView.get("facts"), Mapping) else {}
+        name = str(understanding.get("product_name") or facts.get("product_name") or requestView.get("query") or taric10).strip()
+        url = str(facts.get("url") or "").strip()
+
+        caseId = _NewCaseId()
+        case = {
+            "caseId": caseId,
+            "name": name,
+            "url": url,
+            "taric10": taric10,
+            "lastJobId": jobId,
+            "jobHistory": [jobId],
+            "documentPackage": dict(package),
+            "documents": _DocumentsFromPackage(package),
+            "events": 1,
+            "createdAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        }
+        _SaveCase(case)
+        _AppendEvent("import-classification", {"caseId": caseId, "jobId": jobId, "taric10": taric10})
+        return jsonify({"ok": True, "caseId": caseId, "case": case})
+
     @app.post("/api/enterprise/register-product")
     def enterprise_register_product():
         payload = _Payload()
@@ -120,14 +252,54 @@ def RegisterEnterpriseApi(app: Flask) -> None:
             value = payload.get(key)
             if value not in (None, ""):
                 entry[key] = value
+        _UpdateDocument(case, docKey, entry)
         case["events"] = int(case.get("events", 0)) + 1
+        case["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         _SaveCase(case)
         _AppendEvent("doc-status", payload)
         return jsonify({"ok": True})
 
+    @app.post("/api/enterprise/cases/<caseId>/documents/<documentKey>/upload")
+    def enterprise_upload_document(caseId: str, documentKey: str):
+        case = _LoadCase(caseId)
+        upload = request.files.get("file")
+        if case is None:
+            return jsonify({"ok": False, "error": "case_not_found"}), 404
+        if upload is None or not upload.filename:
+            return jsonify({"ok": False, "error": "file_required"}), 400
+        filename = secure_filename(upload.filename)
+        if not filename:
+            return jsonify({"ok": False, "error": "invalid_filename"}), 400
+        targetDir = _UPLOADS_DIR / caseId / _DocumentKey(documentKey, 0)
+        targetDir.mkdir(parents=True, exist_ok=True)
+        targetPath = targetDir / filename
+        upload.save(targetPath)
+        relativePath = str(targetPath.relative_to(_STORE_DIR))
+        _UpdateDocument(case, documentKey, {
+            "quality": "unverified",
+            "file": filename,
+            "filePath": relativePath,
+            "uploadedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "origin": "직접 업로드",
+        })
+        case["events"] = int(case.get("events", 0)) + 1
+        case["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        _SaveCase(case)
+        _AppendEvent("upload-document", {"caseId": caseId, "doc": documentKey, "file": filename})
+        return jsonify({"ok": True, "file": filename, "filePath": relativePath})
+
     @app.post("/api/enterprise/doc-request")
     def enterprise_doc_request():
         payload = _Payload()
+        caseId = str(payload.get("caseId") or "").strip()
+        docKey = str(payload.get("doc") or "").strip()
+        contact = str(payload.get("contact") or "").strip()
+        case = _LoadCase(caseId) if caseId else None
+        if case is not None and docKey and contact:
+            _UpdateDocument(case, docKey, {"requested": contact})
+            case["events"] = int(case.get("events", 0)) + 1
+            case["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+            _SaveCase(case)
         _AppendEvent("doc-request", payload)
         # TODO: 실제 메일/SMS 발송 연동 — 지금은 요청 이력만 원장에 적재.
         return jsonify({"ok": True, "sent": False, "logged": True})
@@ -189,3 +361,10 @@ def RegisterEnterpriseApi(app: Flask) -> None:
             except (OSError, json.JSONDecodeError):
                 continue
         return jsonify({"ok": True, "cases": cases})
+
+    @app.get("/api/enterprise/cases/<caseId>")
+    def enterprise_case(caseId: str):
+        case = _LoadCase(caseId)
+        if case is None:
+            return jsonify({"ok": False, "error": "case_not_found"}), 404
+        return jsonify({"ok": True, "case": case})

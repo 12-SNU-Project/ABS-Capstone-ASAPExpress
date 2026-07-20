@@ -9,6 +9,7 @@ import time
 import traceback
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import asdict
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -121,6 +122,48 @@ class RunRegistry:
         if snapshot is None:
             return {}
         return self._projector.BuildUiResult(snapshot, runId)
+
+    def RestoreCompletedRun(self, runId: str, snapshot: JsonMapping) -> None:
+        """Restore a completed run from its durable UI snapshot after a server restart."""
+        result = snapshot.get("result")
+        if not isinstance(result, Mapping):
+            return
+        with self._condition:
+            self._runs[runId] = {
+                "status": "completed",
+                "query": str(snapshot.get("query") or ""),
+                "facts": self._projector.CompactInputFacts(
+                    snapshot.get("facts") if isinstance(snapshot.get("facts"), Mapping) else {},
+                ),
+                "events": list(snapshot.get("events") or []),
+                "result": dict(result),
+                "partial_result": dict(result),
+            }
+            self._condition.notify_all()
+
+    def PersistCompletedRun(self, runId: str) -> None:
+        snapshot = self.ReadSnapshot(runId)
+        if snapshot is None:
+            return
+        result = snapshot.get("result")
+        if not isinstance(result, Mapping):
+            return
+        runDir = Path(str(result.get("run_dir") or ""))
+        if not runDir.is_dir():
+            return
+        target = runDir / "api_snapshot.json"
+        temporary = target.with_suffix(".tmp")
+        payload = {
+            "query": snapshot.get("query") or "",
+            "facts": snapshot.get("facts") or {},
+            "events": snapshot.get("events") or [],
+            "result": dict(result),
+        }
+        try:
+            temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            temporary.replace(target)
+        except OSError:
+            temporary.unlink(missing_ok=True)
 
     def BuildDocumentPackageCollection(self, runId: str) -> JsonObject:
         snapshotEntry = self.ReadSnapshotByIdentifier(runId)
@@ -398,6 +441,7 @@ class PipelineRunService:
                 result=result,
                 partial_result=result,
             )
+            self._registry.PersistCompletedRun(runId)
             self._registry.AppendEvent(
                 runId,
                 {

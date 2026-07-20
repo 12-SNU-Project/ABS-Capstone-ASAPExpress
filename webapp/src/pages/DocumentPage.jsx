@@ -1,15 +1,38 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import DocumentPackageDetail from "../components/DocumentPackageDetail";
+import { importClassification } from "../lib/enterpriseApi.js";
 import { getJson } from "../lib/api.js";
 import { asList, clean } from "../lib/format.js";
 
 export default function DocumentPage() {
   const { jobId, taric10 } = useParams();
+  const navigate = useNavigate();
   const [packages, setPackages] = useState([]);
   const [packageData, setPackageData] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const saveToEnterprise = async () => {
+    const selectedTaric10 = clean(packageData?.taric10) || taric10;
+    if (!selectedTaric10 || !window.confirm("선택한 TARIC10과 필요 서류 목록을 수출 상품 관리에 등록하시겠습니까?")) {
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const response = await importClassification({ jobId, taric10: selectedTaric10 });
+      if (!response?.caseId) {
+        throw new Error("수출 상품을 등록하지 못했습니다.");
+      }
+      navigate(`/enterprise?caseId=${encodeURIComponent(response.caseId)}&panel=docs`);
+    } catch (saveError) {
+      setError(String(saveError?.message || saveError));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -61,7 +84,12 @@ export default function DocumentPage() {
             run {jobId} · backend document package DTO를 React 컴포넌트로 직접 렌더링합니다.
           </div>
         </div>
-        <div className="docpage-pill">TARIC10 {clean(packageData?.taric10) || taric10}</div>
+        <div className="docpage-actions">
+          <div className="docpage-pill">TARIC10 {clean(packageData?.taric10) || taric10}</div>
+          <button type="button" className="docpage-save" disabled={!packageData || saving} onClick={saveToEnterprise}>
+            {saving ? "등록 중..." : "수출 상품 관리에 등록"}
+          </button>
+        </div>
       </header>
 
       {packages.length > 1 ? (

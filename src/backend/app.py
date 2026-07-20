@@ -40,7 +40,7 @@ def CreateBackendApp(
 
     app = Flask(__name__)
     pipelineApi.RegisterRoutes(app)
-    RegisterEnterpriseApi(app)
+    RegisterEnterpriseApi(app, registry=registry)
     _RegisterCors(app, allowedFrontendOrigins)
 
     @app.get("/api/health")

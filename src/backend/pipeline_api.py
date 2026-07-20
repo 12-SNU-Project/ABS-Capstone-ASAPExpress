@@ -81,7 +81,7 @@ class PipelineApi:
 
         @server.route("/api/runs/<job_id>")
         def read_run_snapshot(job_id: str) -> ResponseReturnValue:
-            snapshot = self._registry.BuildUiResult(job_id)
+            snapshot = self.ReadRunSnapshot(job_id)
             if not snapshot:
                 return jsonify(ApiErrorResponse(
                     error="run_not_found",
@@ -198,6 +198,7 @@ class PipelineApi:
         return None
 
     def ReadDocumentPackageCollection(self, jobId: str) -> JsonObject:
+        self._RestorePersistedRun(jobId)
         return self._registry.BuildDocumentPackageCollection(jobId)
 
     def ReadDocumentPackageDetail(
@@ -205,7 +206,57 @@ class PipelineApi:
         jobId: str,
         packageId: str,
     ) -> JsonObject:
+        self._RestorePersistedRun(jobId)
         return self._registry.BuildDocumentPackageDetail(jobId, packageId)
+
+    def ReadRunSnapshot(self, jobId: str) -> JsonObject:
+        self._RestorePersistedRun(jobId)
+        return self._registry.BuildUiResult(jobId)
+
+    def _RestorePersistedRun(self, jobId: str) -> None:
+        if self._registry.BuildUiResult(jobId):
+            return
+        runDirectory = self._ResolveRunDirectory(jobId)
+        if runDirectory is None:
+            return
+        snapshotPath = runDirectory / "api_snapshot.json"
+        if snapshotPath.is_file():
+            try:
+                snapshot = json.loads(snapshotPath.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                snapshot = None
+            if isinstance(snapshot, dict):
+                self._registry.RestoreCompletedRun(jobId, snapshot)
+                if self._registry.BuildUiResult(jobId):
+                    return
+
+        blackboardPath = runDirectory / "blackboard.json"
+        if not blackboardPath.is_file():
+            return
+        try:
+            blackboard = json.loads(blackboardPath.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(blackboard, dict):
+            return
+        candidateSets = blackboard.get("candidate_code_sets") or []
+        documentPackages = blackboard.get("document_packages") or []
+        result = self._registry.BuildPipelineResultProjection({
+            "blackboard": blackboard,
+            "candidate_code_set": candidateSets[-1] if candidateSets else None,
+            "document_package": documentPackages[-1] if documentPackages else None,
+            "component_runs": blackboard.get("component_runs") or [],
+            "run_id": str((blackboard.get("run_context") or {}).get("run_id") or ""),
+            "run_dir": str(runDirectory),
+        })
+        product = blackboard.get("product_understanding") or {}
+        facts = {"product_name": product.get("product_name") or ""} if isinstance(product, dict) else {}
+        self._registry.RestoreCompletedRun(jobId, {
+            "query": facts.get("product_name") or "",
+            "facts": facts,
+            "events": [],
+            "result": result,
+        })
 
     def StartRunFromPayload(self, payload: JsonMapping) -> tuple[JsonObject, int]:
         try:

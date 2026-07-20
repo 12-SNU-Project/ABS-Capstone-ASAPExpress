@@ -100,6 +100,21 @@ export function useClassificationRun() {
     });
   }, [closeSse, hydrateRun, setResult]);
 
+  // 프로젝트 화면에서 기존 job_id를 직접 열 때 사용한다.
+  // 조회에 성공한 경우에만 결과를 교체하므로, 잘못된 job_id 입력이 현재 화면을 지우지 않는다.
+  const loadRun = useCallback(async (jobId) => {
+    const targetJobId = clean(jobId);
+    if (!targetJobId) {
+      throw new Error("job_id를 입력하세요.");
+    }
+    closeSse();
+    const snapshot = await hydrateRun(targetJobId);
+    if (ACTIVE_STATUSES.includes(clean(snapshot?.job_status).toLowerCase())) {
+      openSse(targetJobId);
+    }
+    return snapshot;
+  }, [closeSse, hydrateRun, openSse]);
+
   const runPipeline = useCallback(async (mode, form) => {
     const productName = clean(form.productName);
     const description = clean(form.description);
@@ -198,5 +213,5 @@ export function useClassificationRun() {
 
   const busy = ACTIVE_STATUSES.includes(clean(result?.job_status).toLowerCase());
 
-  return { result, busy, runPipeline };
+  return { result, busy, runPipeline, loadRun };
 }
