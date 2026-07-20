@@ -1,1 +1,0 @@
-"""Legacy document helpers."""
