@@ -5,7 +5,6 @@ import Topbar from "./components/Topbar";
 import AdminPage from "./pages/AdminPage";
 import ConsumerPage from "./pages/ConsumerPage";
 import DocumentPage from "./pages/DocumentPage";
-import EnterpriseAdminPage from "./pages/EnterpriseAdminPage";
 import EnterprisePage from "./pages/EnterprisePage";
 import IntroductionPage from "./pages/IntroductionPage";
 import WorkbenchPage from "./pages/WorkbenchPage";
@@ -28,7 +27,7 @@ function ApplicationLayout() {
           <Route path="/" element={<IntroductionPage />} />
           <Route path="/classification" element={<WorkbenchPage />} />
           <Route path="/admin" element={<AdminPage />} />
-          <Route path="/admin/companies" element={<EnterpriseAdminPage />} />
+          <Route path="/admin/companies" element={<Navigate to="/enterprise" replace />} />
           <Route path="/consumer" element={<ConsumerPage />} />
           <Route path="/enterprise" element={<EnterprisePage />} />
           <Route path="/document/:jobId/:taric10" element={<DocumentPage />} />

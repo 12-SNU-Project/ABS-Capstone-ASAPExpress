@@ -197,7 +197,7 @@ export default function AdminPage() {
         <h1 className="cadm-title">Run Inspector</h1>
         <div className="cadm-subtitle">
           LLM reconstruction 결과물과 ProductUnderstandingPackage가 어떤 값으로 채워졌는지 확인합니다. 기업 서류
-          진행 현황은 <Link to="/admin/companies">기업 서류 관제</Link>에서.
+          진행 현황은 <Link to="/enterprise">기업 서비스</Link>에서.
         </div>
       </div>
 

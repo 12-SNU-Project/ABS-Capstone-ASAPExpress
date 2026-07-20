@@ -130,6 +130,11 @@
   font-weight: 850;
 }
 
+.cjs-field small {
+  color: var(--cjs-muted);
+  font-size: 11px;
+}
+
 .cjs-input,
 .cjs-textarea {
   width: 100%;
@@ -157,6 +162,88 @@
 .cjs-textarea:focus {
   border-color: var(--cjs-accent);
   box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.14);
+}
+
+.cjs-uppercase-input {
+  text-transform: uppercase;
+}
+
+.cjs-ingredient-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.cjs-field-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.cjs-ingredient-fieldset > legend {
+  color: var(--cjs-muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.cjs-field-heading small {
+  color: var(--cjs-muted);
+  font-size: 11px;
+}
+
+.cjs-ingredient-labels,
+.cjs-ingredient-row {
+  display: grid;
+  grid-template-columns: 120px minmax(180px, 1fr) minmax(120px, 0.45fr) 42px;
+  gap: 8px;
+}
+
+.cjs-ingredient-labels {
+  padding: 0 2px 5px;
+  color: var(--cjs-muted);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.cjs-ingredient-row-wrap + .cjs-ingredient-row-wrap {
+  margin-top: 8px;
+}
+
+.cjs-add-button,
+.cjs-remove-button {
+  border: 1px solid var(--cjs-border);
+  border-radius: 8px;
+  background: var(--cjs-surface-strong);
+  color: var(--cjs-text);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 850;
+}
+
+.cjs-add-button {
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.cjs-remove-button {
+  height: 42px;
+  font-size: 20px;
+}
+
+.cjs-add-button:disabled,
+.cjs-remove-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.cjs-field-error {
+  margin-top: 4px;
+  color: #dc2626;
+  font-size: 11px;
+  font-weight: 750;
 }
 
 .cjs-run-actions {
@@ -589,6 +676,18 @@ summary.cjs-panel-title {
 
   .cjs-run-card {
     grid-template-columns: 1fr;
+  }
+
+  .cjs-ingredient-labels {
+    display: none;
+  }
+
+  .cjs-ingredient-row {
+    grid-template-columns: 1fr 1fr 42px;
+  }
+
+  .cjs-ingredient-row .cjs-input:nth-child(1) {
+    grid-column: 1 / -1;
   }
 
   .cjs-metric-grid,

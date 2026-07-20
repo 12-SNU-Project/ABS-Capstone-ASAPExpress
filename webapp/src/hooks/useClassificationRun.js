@@ -117,28 +117,45 @@ export function useClassificationRun() {
 
   const runPipeline = useCallback(async (mode, form) => {
     const productName = clean(form.productName);
-    const description = clean(form.description);
     const url = clean(form.url);
+    const ingredients = (Array.isArray(form.ingredients) ? form.ingredients : [])
+      .filter((item) => clean(item?.name) || clean(item?.percentage))
+      .map((item) => ({
+        role: item.role,
+        name: clean(item.name),
+        percentage: Number(item.percentage),
+      }));
+    const inputFacts = { ingredients };
+    if (clean(form.intendedUse)) {
+      inputFacts.intended_use = clean(form.intendedUse);
+    }
+    if (clean(form.originCountry)) {
+      inputFacts.origin_country = clean(form.originCountry).toUpperCase();
+    }
     const previousFacts = resultRef.current?.request?.facts || {};
+    const cachedQuery = mode === "cached"
+      ? clean(previousFacts.product_name) || clean(previousFacts.product_id)
+      : "";
     const payload = {
-      query: productName || description || url,
+      query: productName || url || cachedQuery,
       product_name: productName,
-      description,
       url,
+      input_facts: inputFacts,
       facts: {
         product_name: productName,
-        description,
         url,
         source_urls: url ? [url] : [],
-        origin_country: "KR",
-        intended_use: "human consumption",
       },
+    };
+    const requestFacts = {
+      ...payload.facts,
+      ...(Object.keys(inputFacts).length ? { user_input_facts: inputFacts } : {}),
     };
 
     if (!payload.query && !previousFacts.product_id) {
       setResult({
         job_status: "failed",
-        error: "제품명, 설명, URL 중 하나는 입력해야 합니다.",
+        error: "제품명 또는 URL 중 하나는 입력해야 합니다.",
         events: [{ stage: "Input", status: "failed", message: "입력값 없음" }],
       });
       return;
@@ -147,7 +164,7 @@ export function useClassificationRun() {
     closeSse();
     setResult({
       job_status: "submitting",
-      request: { query: payload.query, facts: payload.facts },
+      request: { query: payload.query, facts: requestFacts },
       events: [{ stage: "Pipeline", status: "submitting", message: "작업 등록 중" }],
     });
 
@@ -170,7 +187,7 @@ export function useClassificationRun() {
       setResult({
         job_id: accepted.job_id,
         job_status: accepted.status || "queued",
-        request: { query: payload.query, facts: payload.facts },
+        request: { query: payload.query, facts: requestFacts },
         events: [
           {
             stage: "Pipeline",
@@ -185,7 +202,7 @@ export function useClassificationRun() {
       setResult({
         job_status: "failed",
         error: String(error?.message || error),
-        request: { query: payload.query, facts: payload.facts },
+        request: { query: payload.query, facts: requestFacts },
         events: [
           { stage: "Pipeline", status: "failed", message: String(error?.message || error) },
         ],

@@ -25,7 +25,13 @@ export const EVENT_STAGE_LABELS = {
   Document_Recommendation: "문서 패키지",
 };
 
-export const PRODUCT_FACT_KEYS = ["product_name", "description", "url", "source_urls"];
+export const PRODUCT_FACT_KEYS = [
+  "product_name",
+  "url",
+  "intended_use",
+  "origin_country",
+  "source_urls",
+];
 
 export const RECONSTRUCTION_KEYS = [
   "mode",
@@ -71,6 +77,8 @@ export const LABELS = {
   description: "설명",
   url: "URL",
   source_urls: "근거 URL",
+  intended_use: "상품 용도",
+  origin_country: "상품 원산국",
   mode: "복원 방식",
   used_llm_reconstruction: "LLM 복원 사용",
   fallback_reason: "대체 사유",

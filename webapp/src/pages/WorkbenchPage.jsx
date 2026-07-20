@@ -31,6 +31,156 @@ import {
   statusLabel,
 } from "../lib/format.js";
 
+const INTENDED_USE_OPTIONS = [
+  ["human consumption", "최종 소비용"],
+  ["further processing", "추가 가공용"],
+  ["animal feed", "동물 사료용"],
+  ["non-food use", "비식품용"],
+];
+
+function CreateIngredient(role = "secondary") {
+  return { role, name: "", percentage: "" };
+}
+
+function ValidateStructuredInput(form) {
+  const errors = { ingredientRows: {} };
+  const rows = asList(form.ingredients);
+  const completedRows = [];
+
+  rows.forEach((row, index) => {
+    const name = clean(row?.name);
+    const percentageText = clean(row?.percentage);
+    if (!name && !percentageText) {
+      return;
+    }
+    if (!name) {
+      errors.ingredientRows[index] = "재료명을 입력하세요.";
+      return;
+    }
+    if (name.length > 100 || !/[A-Za-z가-힣]/.test(name)) {
+      errors.ingredientRows[index] = "재료명은 한글 또는 영문을 포함해 100자 이내로 입력하세요.";
+      return;
+    }
+    const percentage = Number(percentageText);
+    if (!percentageText || !Number.isFinite(percentage) || percentage <= 0 || percentage > 100) {
+      errors.ingredientRows[index] = "함유율은 0 초과 100 이하의 숫자로 입력하세요.";
+      return;
+    }
+    completedRows.push({ ...row, name, percentage });
+  });
+
+  const normalizedNames = completedRows.map((row) => row.name.toLocaleLowerCase());
+  if (new Set(normalizedNames).size !== normalizedNames.length) {
+    errors.ingredients = "같은 재료명을 중복해서 입력할 수 없습니다.";
+  } else if (completedRows.reduce((sum, row) => sum + row.percentage, 0) > 100) {
+    errors.ingredients = "성분 함유율 합계는 100%를 넘을 수 없습니다.";
+  } else if (
+    completedRows.length > 0
+    && completedRows.filter((row) => row.role === "primary").length !== 1
+  ) {
+    errors.ingredients = "성분을 입력한 경우 주성분을 정확히 1개 지정하세요.";
+  }
+
+  const originCountry = clean(form.originCountry).toUpperCase();
+  if (originCountry && !/^[A-Z]{2}$/.test(originCountry)) {
+    errors.originCountry = "원산국은 KR, VN처럼 영문 2자리 코드로 입력하세요.";
+  }
+  if (
+    form.intendedUse
+    && !INTENDED_USE_OPTIONS.some(([value]) => value === form.intendedUse)
+  ) {
+    errors.intendedUse = "제공된 상품 용도 중 하나를 선택하세요.";
+  }
+
+  return errors;
+}
+
+function HasFormErrors(errors) {
+  return Boolean(
+    errors.ingredients
+    || errors.originCountry
+    || errors.intendedUse
+    || Object.keys(errors.ingredientRows || {}).length,
+  );
+}
+
+function IngredientInputRows({ rows, errors, onChange, onAdd, onRemove }) {
+  return (
+    <fieldset className="cjs-ingredient-fieldset">
+      <legend>주·부성분</legend>
+      <div className="cjs-field-heading">
+        <small>완제품 기준 재료명과 함유율(%)을 입력하세요.</small>
+        <button
+          type="button"
+          className="cjs-add-button"
+          onClick={onAdd}
+          disabled={rows.length >= 20}
+          aria-label="성분 입력 행 추가"
+        >
+          + 성분 추가
+        </button>
+      </div>
+      <div className="cjs-ingredient-labels" aria-hidden="true">
+        <span>구분</span>
+        <span>재료명</span>
+        <span>함유율 (%)</span>
+        <span />
+      </div>
+      {rows.map((row, index) => {
+        const errorId = `cjs-ingredient-error-${index}`;
+        return (
+          <div className="cjs-ingredient-row-wrap" key={index}>
+            <div className="cjs-ingredient-row">
+              <select
+                className="cjs-input"
+                aria-label={`${index + 1}번째 성분 구분`}
+                value={row.role}
+                onChange={(event) => onChange(index, "role", event.target.value)}
+              >
+                <option value="primary">주성분</option>
+                <option value="secondary">부성분</option>
+              </select>
+              <input
+                type="text"
+                className="cjs-input"
+                aria-label={`${index + 1}번째 재료명`}
+                aria-describedby={errors[index] ? errorId : undefined}
+                placeholder="예: 낙지"
+                value={row.name}
+                onChange={(event) => onChange(index, "name", event.target.value)}
+              />
+              <input
+                type="number"
+                className="cjs-input"
+                aria-label={`${index + 1}번째 함유율`}
+                aria-describedby={errors[index] ? errorId : undefined}
+                min="0.01"
+                max="100"
+                step="0.01"
+                placeholder="예: 60"
+                value={row.percentage}
+                onChange={(event) => onChange(index, "percentage", event.target.value)}
+              />
+              <button
+                type="button"
+                className="cjs-remove-button"
+                onClick={() => onRemove(index)}
+                disabled={rows.length === 1}
+                aria-label={`${index + 1}번째 성분 삭제`}
+              >
+                ×
+              </button>
+            </div>
+            {errors[index] ? (
+              <div id={errorId} className="cjs-field-error">{errors[index]}</div>
+            ) : null}
+          </div>
+        );
+      })}
+    </fieldset>
+  );
+}
+
 function eventLabel(stage) {
   const key = clean(stage);
   return EVENT_STAGE_LABELS[key] || key || "대기";
@@ -344,13 +494,26 @@ function parseCompositionTerms(terms) {
 
 function IntakePanel({ result }) {
   const inputView = asObject(result?.input_processing_view);
+  const pageProductFacts = asObject(inputView.page_product_facts);
+  const inputIngredients = asList(pageProductFacts.ingredients);
   const reconstructedFacts = asList(inputView.reconstructed_product_facts);
   return (
     <div className="cjs-panel">
       <div className="cjs-panel-title">입력 · LLM 복원</div>
       <div className="cjs-understanding-grid">
         <div>
-          <KeyValueRows data={asObject(inputView.page_product_facts)} keys={PRODUCT_FACT_KEYS} limit={6} />
+          <KeyValueRows data={pageProductFacts} keys={PRODUCT_FACT_KEYS} limit={6} />
+          <div className="cjs-subpanel-title">사용자 입력 성분 ({inputIngredients.length}건)</div>
+          <DataTable
+            rows={inputIngredients}
+            limit={20}
+            emptyMessage="사용자가 추가로 입력한 성분이 없습니다."
+            columns={[
+              { key: "role", label: "구분", variant: "pill" },
+              { key: "name", label: "재료명" },
+              { key: "percentage", label: "함유율(%)", variant: "mono" },
+            ]}
+          />
           <div className="cjs-subpanel-title">입력 복원 상태</div>
           <KeyValueRows data={asObject(inputView.reconstruction_status)} keys={RECONSTRUCTION_KEYS} limit={8} />
         </div>
@@ -465,6 +628,7 @@ function UnderstandingPanel({ result }) {
     ["원재료 분류", hints.ingredient_class],
     ["식품 형태", hints.food_form],
     ["가공 상태", hints.processing_state],
+    ["상품 용도", hints.intended_use],
     ["이해 방식", modeLabel],
     ["신뢰도", hints.confidence],
   ].filter(([, value]) => clean(value) !== "");
@@ -772,7 +936,14 @@ function TracePanel({ candidate, trace }) {
 
 export default function WorkbenchPage() {
   const { result, busy, runPipeline, loadRun } = useClassificationRun();
-  const [form, setForm] = useState({ productName: "", url: "", description: "" });
+  const [form, setForm] = useState({
+    productName: "",
+    url: "",
+    ingredients: [CreateIngredient("primary")],
+    intendedUse: "",
+    originCountry: "",
+  });
+  const [formErrors, setFormErrors] = useState({ ingredientRows: {} });
   const [jobIdInput, setJobIdInput] = useState("");
   const [loadError, setLoadError] = useState("");
   const [selectedKey, setSelectedKey] = useState("");
@@ -825,7 +996,47 @@ export default function WorkbenchPage() {
       (candidate, index) => candidateKey(candidate, index) === selectedKey,
     ) || derived.candidates[0] || null;
 
-  const setField = (key) => (event) => setForm((prev) => ({ ...prev, [key]: event.target.value }));
+  const setField = (key) => (event) => {
+    setFormErrors({ ingredientRows: {} });
+    setForm((prev) => ({ ...prev, [key]: event.target.value }));
+  };
+
+  const setIngredient = (index, key, value) => {
+    setFormErrors({ ingredientRows: {} });
+    setForm((prev) => ({
+      ...prev,
+      ingredients: prev.ingredients.map((item, itemIndex) => (
+        itemIndex === index ? { ...item, [key]: value } : item
+      )),
+    }));
+  };
+
+  const addIngredient = () => {
+    setFormErrors({ ingredientRows: {} });
+    setForm((prev) => ({
+      ...prev,
+      ingredients: [...prev.ingredients, CreateIngredient()],
+    }));
+  };
+
+  const removeIngredient = (index) => {
+    setFormErrors({ ingredientRows: {} });
+    setForm((prev) => ({
+      ...prev,
+      ingredients: prev.ingredients.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  };
+
+  const handleRun = (mode) => {
+    if (mode !== "reconstruct") {
+      const nextErrors = ValidateStructuredInput(form);
+      setFormErrors(nextErrors);
+      if (HasFormErrors(nextErrors)) {
+        return;
+      }
+    }
+    runPipeline(mode, form);
+  };
 
   const restoreRun = async () => {
     setLoadError("");
@@ -877,21 +1088,63 @@ export default function WorkbenchPage() {
           />
         </div>
         <div className="cjs-field cjs-field-full">
-          <label htmlFor="cjs-description">설명 / 추가 facts</label>
-          <textarea
-            id="cjs-description"
-            className="cjs-textarea"
-            placeholder="원재료, 형태, 가공 상태, 함량 조건 등을 필요하면 입력"
-            value={form.description}
-            onChange={setField("description")}
+          <IngredientInputRows
+            rows={form.ingredients}
+            errors={formErrors.ingredientRows || {}}
+            onChange={setIngredient}
+            onAdd={addIngredient}
+            onRemove={removeIngredient}
           />
+          {formErrors.ingredients ? (
+            <div className="cjs-field-error">{formErrors.ingredients}</div>
+          ) : null}
+        </div>
+        <div className="cjs-field">
+          <label htmlFor="cjs-intended-use">상품 용도</label>
+          <select
+            id="cjs-intended-use"
+            className="cjs-input"
+            value={form.intendedUse}
+            onChange={setField("intendedUse")}
+            aria-describedby={formErrors.intendedUse ? "cjs-intended-use-error" : undefined}
+          >
+            <option value="">선택하지 않음</option>
+            {INTENDED_USE_OPTIONS.map(([value, label]) => (
+              <option value={value} key={value}>{label}</option>
+            ))}
+          </select>
+          <small>실제 사용 목적을 아는 경우에만 선택하세요.</small>
+          {formErrors.intendedUse ? (
+            <div id="cjs-intended-use-error" className="cjs-field-error">
+              {formErrors.intendedUse}
+            </div>
+          ) : null}
+        </div>
+        <div className="cjs-field cjs-field-wide">
+          <label htmlFor="cjs-origin-country">상품 원산국</label>
+          <input
+            id="cjs-origin-country"
+            type="text"
+            className="cjs-input cjs-uppercase-input"
+            maxLength="2"
+            placeholder="예: KR, VN, CN, US"
+            value={form.originCountry}
+            onChange={setField("originCountry")}
+            aria-describedby={formErrors.originCountry ? "cjs-origin-error" : "cjs-origin-help"}
+          />
+          <small id="cjs-origin-help">원재료 산지가 아닌 완제품의 원산국입니다.</small>
+          {formErrors.originCountry ? (
+            <div id="cjs-origin-error" className="cjs-field-error">
+              {formErrors.originCountry}
+            </div>
+          ) : null}
         </div>
         <div className="cjs-run-actions">
           <button
             type="button"
             className="cjs-primary-button"
             disabled={busy}
-            onClick={() => runPipeline("full", form)}
+            onClick={() => handleRun("full")}
           >
             분류 실행
           </button>
@@ -899,7 +1152,7 @@ export default function WorkbenchPage() {
             type="button"
             className="cjs-secondary-button"
             disabled={busy}
-            onClick={() => runPipeline("cached", form)}
+            onClick={() => handleRun("cached")}
           >
             최근 입력으로 실행
           </button>
@@ -907,7 +1160,7 @@ export default function WorkbenchPage() {
             type="button"
             className="cjs-secondary-button"
             disabled={busy}
-            onClick={() => runPipeline("reconstruct", form)}
+            onClick={() => handleRun("reconstruct")}
           >
             상품 정보만 복원
           </button>
