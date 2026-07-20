@@ -1,6 +1,6 @@
 """기업 서비스 관리 API — /api/enterprise/*
 
-기업용 UI(webapp /enterprise, /admin/companies)의 관리 데이터 포트.
+기업용 UI(webapp /enterprise)의 관리 데이터 포트.
 
 설계 의도 (docs/enterpriseUI.md 참고):
 - 표면 기능은 기업 이용자 편의(케이스 관리, 서류 수집, 요청 발송, 절감액 계산).
@@ -352,7 +352,7 @@ def RegisterEnterpriseApi(app: Flask, *, registry: "RunRegistry | None" = None) 
 
     @app.get("/api/enterprise/cases")
     def enterprise_cases():
-        # 내부 관제(/admin/companies)용 목록 — 파일 스냅샷 나열.
+        # 기업 서비스 화면용 목록 — 파일 스냅샷 나열.
         _EnsureDirs()
         cases = []
         for path in sorted(_CASES_DIR.glob("*.json")):

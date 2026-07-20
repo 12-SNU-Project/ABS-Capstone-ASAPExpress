@@ -118,6 +118,7 @@ class IdentityHintSet:
     ingredientClass: str = field(default="other", metadata=_desc("주요 원재료 계열"))
     foodForm: str = field(default="other", metadata=_desc("상품 형태 힌트"))
     processingState: str = field(default="unknown", metadata=_desc("가공 상태 힌트"))
+    intendedUse: str = field(default="unknown", metadata=_desc("사용자가 명시한 상품 용도"))
     normalizedTariffDescription: str = field(default="", metadata=_desc("관세 분류용 정규 설명"))
     identityTerms: tuple[str, ...] = field(default=(), metadata=_desc("상품 정체성 토큰"))
     compositionTerms: tuple[str, ...] = field(default=(), metadata=_desc("구성 성분 토큰"))
@@ -151,6 +152,7 @@ class IdentityHintSet:
             "ingredient_class": self.ingredientClass,
             "food_form": self.foodForm,
             "processing_state": self.processingState,
+            "intended_use": self.intendedUse,
             "normalized_tariff_description": self.normalizedTariffDescription,
             "identity_terms": list(self.identityTerms),
             "composition_terms": list(self.compositionTerms),

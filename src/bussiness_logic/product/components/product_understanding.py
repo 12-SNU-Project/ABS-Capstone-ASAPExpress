@@ -148,11 +148,19 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         reconstructedTables = self._ReadFactTuple(
             inputReconstruction.get("reconstructed_tables") or [],
         )
+        userIngredients = self._ReadFactTuple(observedFacts.get("ingredients") or [])
+        intendedUse = str(observedFacts.get("intended_use") or "unknown").strip()
+        intendedUseText = (
+            f"intended use: {intendedUse}"
+            if intendedUse and intendedUse != "unknown"
+            else ""
+        )
         classificationText = "\n".join(
             text
             for text in (
                 productName,
                 shortDescription,
+                intendedUseText,
                 *factTexts,
                 *self._FactTexts(productFacts),
             )
@@ -209,11 +217,21 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         # 한→영은 법정 유한 어휘 사전(data/food_type_dictionary.json,
         # 수기 교정 우선). 창작 0 — 존재할 때만.
         identity = self._TranscribeFoodTypeFact(identity, factTexts=factTexts)
+        if intendedUse and intendedUse != "unknown":
+            identity = dataclasses.replace(
+                identity,
+                intendedUse=intendedUse,
+                identityTerms=self._DedupStrings(
+                    [*identity.identityTerms, intendedUse],
+                    limit=80,
+                ),
+            )
         composition = self._BuildCompositionLane(
             factTexts=factTexts,
             productFacts=productFacts,
             reconstructedTables=reconstructedTables,
             coiEvidence=coiEvidence,
+            userIngredients=userIngredients,
         )
         # [8회차-1 (다)] 백과→조성 경로 개통 — 승선(강/중) 문서의 재질
         # 서술 문장에서 법정 어휘 실등장분만 조성 토큰으로 (볼펜 steel/
@@ -563,6 +581,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         productFacts: tuple[dict[str, JsonValue], ...],
         coiEvidence: CoiEvidenceSet,
         reconstructedTables: tuple[dict[str, JsonValue], ...] = (),
+        userIngredients: tuple[dict[str, JsonValue], ...] = (),
     ) -> CompositionFactSet:
         # COI (식품원재료풀이) is composition evidence — it belongs to this lane,
         # not the identity lane. Feed its matched texts into %-parsing and terms.
@@ -581,7 +600,14 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             reconstructedTables,
         )
         factTextValues = ProductUnderstandingComponent._FactTexts(productFacts)
-        text = "\n".join([*factTexts, *factTextValues, *tableTexts, *coiTexts])
+        userIngredientTexts = tuple(
+            f"{item.get('name')}: {item.get('percentage')}%"
+            for item in userIngredients
+            if str(item.get("name") or "").strip()
+        )
+        text = "\n".join(
+            [*factTexts, *factTextValues, *tableTexts, *coiTexts, *userIngredientTexts]
+        )
         extractionTraces: list[CompositionExtractionTrace] = []
         ProductUnderstandingComponent._AppendNutritionPercentExclusionTraces(
             reconstructedTables=reconstructedTables,
@@ -617,6 +643,14 @@ class ProductUnderstandingComponent(BasePipelineComponent):
                     ingredientEntries = [*ingredientEntries, *coi_entries]
             except Exception:  # noqa: BLE001 — COI 실패는 무증거일 뿐
                 pass
+        evidenceIngredientEntries = list(ingredientEntries)
+        userIngredientEntries = ProductUnderstandingComponent._BuildUserIngredientEntries(
+            userIngredients=userIngredients,
+            extractionTraces=extractionTraces,
+        )
+        ingredientEntries = ProductUnderstandingComponent._DedupIngredientEntries(
+            [*ingredientEntries, *userIngredientEntries],
+        )
         percentages = ProductUnderstandingComponent._IngredientPercentagesFromEntries(
             ingredientEntries,
         )
@@ -625,12 +659,23 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             reconstructedTables=reconstructedTables,
             ingredientEntries=ingredientEntries,
         )
+        evidencePrincipalCandidates = (
+            ProductUnderstandingComponent._BuildPrincipalCandidates(
+                evidenceIngredientEntries,
+            )
+        )
+        evidencePrincipalStatus = ProductUnderstandingComponent._PrincipalStatus(
+            evidencePrincipalCandidates,
+        )
         principalCandidates = ProductUnderstandingComponent._BuildPrincipalCandidates(
             ingredientEntries,
         )
         principalStatus = ProductUnderstandingComponent._PrincipalStatus(
             principalCandidates,
         )
+        if evidencePrincipalStatus != "unknown":
+            principalCandidates = evidencePrincipalCandidates
+            principalStatus = evidencePrincipalStatus
         # COI 교차 검증 승격: 라벨 1위 후보와 COI 1위 성분의 정규화 토큰이
         # 겹치면 독립 2근거 일치 → confirmed 승격. 한↔영 혼재 파일이 있어
         # 겹침 실패는 conflict가 아니라 '비교 불가'(중립)로 둔다.
@@ -655,12 +700,53 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             if principalStatus == "confirmed" and principalCandidates
             else ""
         )
+        userPrimaryIngredient = next(
+            (
+                str(item.get("name") or "").strip()
+                for item in userIngredients
+                if item.get("role") == "primary"
+                and str(item.get("name") or "").strip()
+            ),
+            "",
+        )
+        if evidencePrincipalStatus == "unknown" and userPrimaryIngredient:
+            principalIngredient = userPrimaryIngredient
+            principalStatus = "user_provided"
+            declaredCandidate = next(
+                (
+                    dict(candidate)
+                    for candidate in principalCandidates
+                    if str(candidate.get("ingredient_name") or "").casefold()
+                    == userPrimaryIngredient.casefold()
+                ),
+                {"ingredient_name": userPrimaryIngredient},
+            )
+            declaredCandidate.update({
+                "basis": "user_declared_primary",
+                "confidence": 1.0,
+                "role": "primary",
+                "scope": "product",
+                "source_refs": ["user_input:ingredients"],
+            })
+            principalCandidates = [
+                declaredCandidate,
+                *(
+                    candidate
+                    for candidate in principalCandidates
+                    if str(candidate.get("ingredient_name") or "").casefold()
+                    != userPrimaryIngredient.casefold()
+                ),
+            ]
 
         compositionTerms = ProductUnderstandingComponent._CompositionTerms(
             productFacts=productFacts,
             reconstructedTables=reconstructedTables,
             factTexts=factTexts,
             coiTexts=coiTexts,
+        )
+        compositionTerms = ProductUnderstandingComponent._DedupStrings(
+            [*compositionTerms, *userIngredientTexts],
+            limit=80,
         )
         allergenTexts = [
             item
@@ -707,7 +793,17 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             ingredientPercentages=tuple(percentages[:20]),
             componentCompositions=tuple(componentCompositions[:20]),
             compositionTerms=compositionTerms,
-            compositionBasis="label" if percentages else ("coi_text" if coiTexts else "label_text_no_percent"),
+            compositionBasis=(
+                "mixed"
+                if userIngredientEntries and evidenceIngredientEntries
+                else "user_input"
+                if userIngredientEntries
+                else "label"
+                if percentages
+                else "coi_text"
+                if coiTexts
+                else "label_text_no_percent"
+            ),
             containsWrapperOrDough=bool(WRAPPER_RE.search(text)),
             containsSauceOrBroth=bool(SAUCE_BROTH_RE.search(text)),
             allergenTermsExcluded=tuple(allergenTexts[:20]),
@@ -906,6 +1002,53 @@ class ProductUnderstandingComponent(BasePipelineComponent):
                     extractionTraces=extractionTraces,
                 )
         return ProductUnderstandingComponent._DedupIngredientEntries(entries)
+
+    @staticmethod
+    def _BuildUserIngredientEntries(
+        *,
+        userIngredients: tuple[dict[str, JsonValue], ...],
+        extractionTraces: list[CompositionExtractionTrace],
+    ) -> list[dict[str, JsonValue]]:
+        entries: list[dict[str, JsonValue]] = []
+        secondaryOrder = 2
+        for index, ingredient in enumerate(userIngredients):
+            name = str(ingredient.get("name") or "").strip()
+            role = str(ingredient.get("role") or "").strip()
+            percentage = ingredient.get("percentage")
+            if not name or role not in ("primary", "secondary"):
+                continue
+            if not isinstance(percentage, (int, float)):
+                continue
+            orderIndex = 1 if role == "primary" else secondaryOrder
+            if role == "secondary":
+                secondaryOrder += 1
+            sourceRef = f"user_input:ingredients:{index}"
+            entries.append({
+                "ingredient_name": name,
+                "order_index": orderIndex,
+                "scope": "product",
+                "component_name": "",
+                "source_field_name": "user_input.ingredients",
+                "source_refs": [sourceRef],
+                "source_kind": "user_input",
+                "source": "user_input",
+                "role": role,
+                "percent": float(percentage),
+            })
+            extractionTraces.append(
+                CompositionExtractionTrace(
+                    sourceFieldName="user_input.ingredients",
+                    sourceText=f"{name}: {percentage}%",
+                    selectedSpan=name,
+                    outputField="ingredient_entries",
+                    normalizedValue=name,
+                    extractionMethod="user_input",
+                    decisionReason="user_declared_ingredient",
+                    confidence=1.0,
+                    sourceRefs=(sourceRef,),
+                ),
+            )
+        return entries
 
     @staticmethod
     def _ExtendIngredientEntries(

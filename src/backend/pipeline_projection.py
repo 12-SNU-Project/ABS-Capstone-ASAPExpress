@@ -236,6 +236,9 @@ class InputProcessingViewProjector:
                 "description": facts.get("description") or "",
                 "url": url,
                 "source_urls": [str(item) for item in sourceUrls if str(item).strip()],
+                "ingredients": facts.get("ingredients") or [],
+                "intended_use": facts.get("intended_use") or "",
+                "origin_country": facts.get("origin_country") or "",
             },
             "detail_evidence_rows": inputReconstruction.get(
                 "source_evidence_preview",
@@ -358,6 +361,13 @@ class InputProcessingViewProjector:
                     limit=8,
                     textLimit=700,
                 ),
+                "ingredients": self._CompactMappingList(
+                    basicInfo.get("ingredients"),
+                    limit=20,
+                    textLimit=100,
+                ),
+                "intended_use": str(basicInfo.get("intended_use") or ""),
+                "origin_country": str(basicInfo.get("origin_country") or ""),
             },
             "detail_evidence_rows": self._CompactMappingList(
                 inputProcessingView.get("detail_evidence_rows"),
@@ -487,6 +497,7 @@ class UnderstandingViewProjector:
         "ingredient_class",
         "food_form",
         "processing_state",
+        "intended_use",
         "identity_terms",
         "product_form_terms",
         "chapter_hint_terms",

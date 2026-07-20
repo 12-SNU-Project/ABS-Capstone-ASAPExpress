@@ -12,6 +12,7 @@ def CollectKurlyProductFactsIfNeeded(
 ) -> JsonObject:
     """Collect Kurly product facts when the normalized input only has a URL."""
     normalizedFacts = NormalizeProductFacts(facts or {})
+    explicitUserInputFacts = normalizedFacts.get("user_input_facts")
     url = str(normalizedFacts.get("url") or "").strip()
     if (
         url
@@ -32,6 +33,8 @@ def CollectKurlyProductFactsIfNeeded(
             for key, value in collected.items():
                 if value not in ("", [], None):
                     merged[key] = value
+            if isinstance(explicitUserInputFacts, dict) and explicitUserInputFacts:
+                merged["user_input_facts"] = explicitUserInputFacts
             normalizedFacts = NormalizeProductFacts(merged)
         except Exception as exc:  # noqa: BLE001
             normalizedFacts.setdefault("warnings", [])

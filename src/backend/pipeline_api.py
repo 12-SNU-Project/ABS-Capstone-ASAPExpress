@@ -261,14 +261,25 @@ class PipelineApi:
     def StartRunFromPayload(self, payload: JsonMapping) -> tuple[JsonObject, int]:
         try:
             requestPayload = RunCreateRequestPayload.model_validate(payload)
-        except ValidationError:
+        except ValidationError as error:
+            firstError = error.errors()[0] if error.errors() else {}
+            errorLocation = firstError.get("loc") or ("request",)
+            errorField = ".".join(str(part) for part in errorLocation)
+            errorMessage = str(firstError.get("msg") or "Invalid request value.")
             return ApiErrorResponse(
                 error="invalid_run_create_payload",
-                message="Run create payload failed validation.",
-                field="request",
-                hint="Send query/product_name/description/url as strings and facts as an object.",
+                message=errorMessage,
+                field=errorField,
+                hint="Check the structured input field and submit it again.",
             ).ToDict(), 400
-        extraFacts = requestPayload.facts
+        extraFacts = dict(requestPayload.facts)
+        for reservedField in (
+            "ingredients",
+            "intended_use",
+            "origin_country",
+            "user_input_facts",
+        ):
+            extraFacts.pop(reservedField, None)
         productName = str(
             requestPayload.productName or extraFacts.get("product_name") or ""
         ).strip()
@@ -297,6 +308,11 @@ class PipelineApi:
             description=description,
             kurlyUrl=kurlyUrl,
             extraFacts=extraFacts,
+            inputFacts=(
+                requestPayload.inputFacts.ToDict()
+                if requestPayload.inputFacts is not None
+                else None
+            ),
         )
         jobId, reused = self.StartPipelineRun(query=query, facts=facts)
         snapshot = self._registry.BuildUiResult(jobId)
@@ -387,6 +403,7 @@ class PipelineApi:
         description: str,
         kurlyUrl: str,
         extraFacts: JsonMapping | None = None,
+        inputFacts: JsonMapping | None = None,
     ) -> JsonObject:
         facts: JsonObject = dict(extraFacts or {})
         facts.update({
@@ -394,9 +411,14 @@ class PipelineApi:
             "description": description,
             "url": kurlyUrl,
             "source_urls": [kurlyUrl] if kurlyUrl else facts.get("source_urls", []),
-            "origin_country": facts.get("origin_country") or "KR",
-            "intended_use": facts.get("intended_use") or "human consumption",
         })
+        normalizedInputFacts = {
+            key: value
+            for key, value in dict(inputFacts or {}).items()
+            if value not in ("", [], None)
+        }
+        if normalizedInputFacts:
+            facts["user_input_facts"] = normalizedInputFacts
         return facts
 
     def StartPipelineRun(

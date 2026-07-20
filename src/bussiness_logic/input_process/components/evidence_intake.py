@@ -30,6 +30,7 @@ class EvidenceIntakeComponent(BasePipelineComponent):
             "product_name": self.raw_input.get("product_name", ""),
             "description": self.raw_input.get("description", ""),
             "composition": self.raw_input.get("composition", []),
+            "ingredients": self.raw_input.get("ingredients", []),
             "reconstructed_product_facts": self.raw_input.get(
                 "reconstructed_product_facts",
                 [],
@@ -49,8 +50,8 @@ class EvidenceIntakeComponent(BasePipelineComponent):
             "input_reconstruction": self.raw_input.get("input_reconstruction", {}),
             "ocr_text": self.raw_input.get("ocr_text", []),
             "source_urls": self.raw_input.get("source_urls", []),
-            "origin_country": self.raw_input.get("origin_country", "KR"),
-            "intended_use": self.raw_input.get("intended_use", "unknown"),
+            "origin_country": self.raw_input.get("origin_country") or "unknown",
+            "intended_use": self.raw_input.get("intended_use") or "unknown",
             "warnings": self.raw_input.get("warnings", []),
         }
 
@@ -79,8 +80,23 @@ class EvidenceIntakeComponent(BasePipelineComponent):
             "product_id": prod_id,
             "observed_facts": obs,
             "inferred_facts": inferred,
-            "unknowns": ["composition_pct" if not obs["composition"] else "",
-                         "intended_use" if obs["intended_use"] == "unknown" else ""],
+            "unknowns": [
+                "composition_pct"
+                if not obs["composition"] and not obs["ingredients"]
+                else "",
+                "principal_ingredient"
+                if not any(
+                    isinstance(item, dict) and item.get("role") == "primary"
+                    for item in obs["ingredients"]
+                )
+                else "",
+                "origin_country"
+                if obs["origin_country"] == "unknown"
+                else "",
+                "intended_use"
+                if obs["intended_use"] == "unknown"
+                else "",
+            ],
             "evidence_pointers": [],
         }
         pes["unknowns"] = [u for u in pes["unknowns"] if u]

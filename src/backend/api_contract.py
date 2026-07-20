@@ -2,15 +2,38 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from bussiness_logic.utils.json_types import JsonObject
 
 
 RunStatus = Literal["queued", "running", "completed", "failed"]
+IngredientRole = Literal["primary", "secondary"]
+IntendedUse = Literal[
+    "human consumption",
+    "further processing",
+    "animal feed",
+    "non-food use",
+]
+
+ISO_ALPHA2_CODES = frozenset("""
+AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ
+BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ
+CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ
+DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR
+GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY
+HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP
+KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY
+MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ
+NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR
+PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN
+SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW
+TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW
+""".split())
 
 
 class ApiContractModel(BaseModel):
@@ -31,8 +54,50 @@ class ApiErrorResponse(ApiContractModel):
     retryAfterSeconds: int | None = Field(default=None, alias="retry_after_seconds")
 
 
+class IngredientInputPayload(ApiContractModel):
+    role: IngredientRole
+    name: str = Field(min_length=1, max_length=100)
+    percentage: float = Field(gt=0, le=100)
+
+    @field_validator("name")
+    @classmethod
+    def ValidateName(cls, value: str) -> str:
+        normalizedValue = " ".join(value.split())
+        if not re.search(r"[A-Za-z가-힣]", normalizedValue):
+            raise ValueError("Ingredient name must contain a Korean or Latin letter.")
+        return normalizedValue
+
+
+class InputFactsPayload(ApiContractModel):
+    ingredients: list[IngredientInputPayload] = Field(default_factory=list, max_length=20)
+    intendedUse: IntendedUse | None = Field(default=None, alias="intended_use")
+    originCountry: str = Field(default="", alias="origin_country", max_length=2)
+
+    @field_validator("originCountry")
+    @classmethod
+    def ValidateOriginCountry(cls, value: str) -> str:
+        normalizedValue = value.strip().upper()
+        if normalizedValue and normalizedValue not in ISO_ALPHA2_CODES:
+            raise ValueError("Origin country must be a valid ISO alpha-2 code.")
+        return normalizedValue
+
+    @model_validator(mode="after")
+    def ValidateIngredients(self) -> "InputFactsPayload":
+        if not self.ingredients:
+            return self
+        primaryCount = sum(item.role == "primary" for item in self.ingredients)
+        if primaryCount != 1:
+            raise ValueError("Exactly one primary ingredient is required.")
+        normalizedNames = [item.name.casefold() for item in self.ingredients]
+        if len(normalizedNames) != len(set(normalizedNames)):
+            raise ValueError("Ingredient names must not be duplicated.")
+        if sum(item.percentage for item in self.ingredients) > 100:
+            raise ValueError("Ingredient percentages must total 100 or less.")
+        return self
+
+
 class RunCreateRequestPayload(BaseModel):
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     query: str = ""
     productName: str = Field(default="", alias="product_name")
@@ -40,6 +105,7 @@ class RunCreateRequestPayload(BaseModel):
     url: str = ""
     kurlyUrl: str = Field(default="", alias="kurly_url")
     facts: JsonObject = Field(default_factory=dict)
+    inputFacts: InputFactsPayload | None = Field(default=None, alias="input_facts")
 
 
 class RunCreateAcceptedResponse(ApiContractModel):
@@ -60,6 +126,9 @@ class PageProductFactsView(ApiContractModel):
     description: str = ""
     url: str = ""
     sourceUrls: list[str] = Field(default_factory=list, alias="source_urls")
+    ingredients: list[JsonObject] = Field(default_factory=list)
+    intendedUse: str = Field(default="", alias="intended_use")
+    originCountry: str = Field(default="", alias="origin_country")
 
 
 class ReconstructionStatusView(ApiContractModel):

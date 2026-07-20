@@ -134,8 +134,6 @@ def BuildKurlyUrlFactsFromPipelineResult(
         "unresolved_product_facts": unresolved_product_facts,
         "product_fact_conflicts": product_fact_conflicts,
         "reconstructed_fact_texts": reconstructed_fact_texts,
-        "origin_country": "KR",
-        "intended_use": "human consumption",
         "warnings": mergedWarnings,
         "url_intake": {
             "artifact_root": str(productArtifactDirectory),
@@ -380,7 +378,13 @@ def _ReadCachedProductInputFacts(artifactDirectory: Path) -> JsonObject:
     if not artifactPath.exists():
         return {}
     payload = json.loads(artifactPath.read_text(encoding="utf-8"))
-    return dict(payload) if isinstance(payload, dict) else {}
+    facts = dict(payload) if isinstance(payload, dict) else {}
+    # 이전 수집기가 근거 없이 저장한 정확한 기본값만 재사용 시 제거한다.
+    if facts.get("origin_country") == "KR":
+        facts.pop("origin_country")
+    if facts.get("intended_use") == "human consumption":
+        facts.pop("intended_use")
+    return facts
 
 
 def LoadCachedProductInputFacts(product_identifier: str) -> JsonObject:

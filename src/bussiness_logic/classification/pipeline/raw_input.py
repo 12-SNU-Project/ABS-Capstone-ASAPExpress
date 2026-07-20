@@ -60,6 +60,9 @@ def BuildRawInputFromPreparedFacts(
         or inputReconstruction.get("reconstructed_fact_texts")
         or []
     )
+    userInputFacts = normalizedFacts.get("user_input_facts") or {}
+    if not isinstance(userInputFacts, dict):
+        userInputFacts = {}
 
     return {
         "product_name": normalizedFacts.get("product_name") or query,
@@ -75,8 +78,17 @@ def BuildRawInputFromPreparedFacts(
         "reconstructed_fact_texts": reconstructedFactTexts,
         "ocr_text": ocrText,
         "source_urls": sourceUrls,
-        "origin_country": normalizedFacts.get("origin_country") or "KR",
-        "intended_use": normalizedFacts.get("intended_use") or "unknown",
+        "ingredients": userInputFacts.get("ingredients") or [],
+        "origin_country": (
+            userInputFacts.get("origin_country")
+            or normalizedFacts.get("origin_country")
+            or "unknown"
+        ),
+        "intended_use": (
+            userInputFacts.get("intended_use")
+            or normalizedFacts.get("intended_use")
+            or "unknown"
+        ),
         "warnings": normalizedFacts.get("warnings") or [],
         "url_intake": normalizedFacts.get("url_intake") or {},
         "input_reconstruction": inputReconstruction,

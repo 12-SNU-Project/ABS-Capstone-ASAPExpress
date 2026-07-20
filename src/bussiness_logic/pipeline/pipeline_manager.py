@@ -76,7 +76,19 @@ class ExportPipelineManager:
 
         productArtifactId = ResolveProductArtifactId(query, facts)
         runDirectory = self._pipelineOutputsRoot / productArtifactId / effectiveJobId
+        userInputFacts = facts.get("user_input_facts") or {}
+        if not isinstance(userInputFacts, dict):
+            userInputFacts = {}
+        originCountry = (
+            str(
+                userInputFacts.get("origin_country")
+                or facts.get("origin_country")
+                or "unknown"
+            ).strip()
+            or "unknown"
+        )
         return BlackboardStore.create(
+            origin_country=originCountry,
             runtime_mode="webapp",
             run_id=BuildInternalRunId(effectiveJobId),
             run_dir=runDirectory,

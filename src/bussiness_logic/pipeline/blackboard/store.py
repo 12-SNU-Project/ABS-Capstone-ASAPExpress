@@ -113,7 +113,7 @@ class BlackboardStore:
     def create(
         cls,
         *,
-        origin_country: str = "KR",
+        origin_country: str = "unknown",
         destination_market: str = "EU",
         language: str = "ko",
         runtime_mode: str = "prototype",

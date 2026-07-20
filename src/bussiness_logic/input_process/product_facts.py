@@ -12,6 +12,7 @@ def PrepareUserInputFacts(
 ) -> JsonObject:
     """Normalize UI/API facts and optional cached product-input artifact."""
     normalizedFacts = NormalizeProductFacts(facts or {})
+    explicitUserInputFacts = normalizedFacts.get("user_input_facts")
     if normalizedFacts.get("use_cached_product_input"):
         productIdentifier = str(
             normalizedFacts.get("url")
@@ -29,6 +30,8 @@ def PrepareUserInputFacts(
             for key, value in cachedFacts.items():
                 if value not in ("", [], None):
                     merged[key] = value
+            if isinstance(explicitUserInputFacts, dict) and explicitUserInputFacts:
+                merged["user_input_facts"] = explicitUserInputFacts
             merged["use_cached_product_input"] = True
             normalizedFacts = NormalizeProductFacts(merged)
         except FileNotFoundError as exc:

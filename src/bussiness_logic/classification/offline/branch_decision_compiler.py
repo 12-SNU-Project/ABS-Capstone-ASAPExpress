@@ -90,7 +90,10 @@ CRITERION_FIELD_BINDING = {
     # 미결(undecided)로 남는 것이 정직한 동작 (답안지 백로그의 유형별 목록)
     "packaging_presentation": "identity_hints.product_form_terms",
     "dimension_capacity": "composition_facts.ingredient_percentages",
-    "intended_use_function": "identity_hints.normalized_tariff_description;identity_hints.identity_terms",
+    "intended_use_function": (
+        "identity_hints.intended_use;identity_hints.normalized_tariff_description;"
+        "identity_hints.identity_terms"
+    ),
     "technical_specification": "identity_hints.normalized_tariff_description",
     "parts_accessories": "identity_hints.normalized_tariff_description;identity_hints.identity_terms",
     "condition_quality": "identity_hints.processing_state;identity_hints.normalized_tariff_description",
