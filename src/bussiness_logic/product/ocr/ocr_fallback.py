@@ -199,9 +199,6 @@ class ProductOcrArtifactStore:
         for artifactPath in sorted(artifactDirectory.glob(f"{imageStem}.*")):
             if artifactPath.stem == imageStem and artifactPath.is_file():
                 return artifactPath, artifactPath.read_bytes()
-        for artifactPath in sorted(artifactDirectory.glob(f"{imageStem}-tile-*")):
-            if artifactPath.is_file():
-                return artifactPath, artifactPath.read_bytes()
         return None
 
     def PruneUnretainedArtifacts(

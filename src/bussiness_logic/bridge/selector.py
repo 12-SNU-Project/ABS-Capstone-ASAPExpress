@@ -12,7 +12,9 @@ from bussiness_logic.app_config import (
 )
 from bussiness_logic.bridge.probe import (
     DEFAULT_ANTHROPIC_API_KEY_ENV_NAMES,
-    HOSTED_LLM_API_KEY_ENV_NAMES,
+    DEFAULT_GOOGLE_AI_STUDIO_API_KEY_ENV_NAMES,
+    DEFAULT_OPENAI_API_KEY_ENV_NAMES,
+    PRIMARY_LLM_API_KEY_ENV_NAME,
 )
 from bussiness_logic.bridge.schema import (
     LlmRuntimeConfig,
@@ -96,6 +98,15 @@ def BuildLlmRuntimeConfigFromEnv(
         envFilePath,
         projectRootPath,
     )
+    if envFilePath == ".env":
+        configuredEnvFilePath = os.environ.get("ASAP_ENV_FILE")
+        if configuredEnvFilePath:
+            rawEnvFilePath = Path(configuredEnvFilePath).expanduser()
+            envFilePath = (
+                rawEnvFilePath
+                if rawEnvFilePath.is_absolute()
+                else resolvedProjectRootPath / rawEnvFilePath
+            )
     appConfig = LoadAppConfig(resolvedProjectRootPath, appConfigPath)
     envValues = _ReadMergedEnvValues(envFilePath, environment)
     llmConfig = (
@@ -176,13 +187,6 @@ def _BuildOpenAiRuntimeConfig(
 
     extraOptions = _BuildCommonExtraOptions(llmConfig, configEnvValues)
     extraOptions["provider"] = normalizedProviderName
-    apiKey = _ReadConfiguredApiKey(
-        extraOptions,
-        llmConfig,
-        secretEnvValues,
-        HOSTED_LLM_API_KEY_ENV_NAMES,
-    )
-
     if normalizedProviderName in {"google_ai_studio", "google", "gemini"}:
         extraOptions["chat_completions_path"] = _ReadConfigOrEnvString(
             llmConfig.chat_completions_path,
@@ -212,7 +216,12 @@ def _BuildOpenAiRuntimeConfig(
                 or DEFAULT_GOOGLE_AI_STUDIO_ENDPOINT_URL
             ),
             extraOptions=extraOptions,
-            apiKey=apiKey,
+            apiKey=_ReadConfiguredApiKey(
+                extraOptions,
+                llmConfig,
+                secretEnvValues,
+                DEFAULT_GOOGLE_AI_STUDIO_API_KEY_ENV_NAMES,
+            ),
         )
 
     extraOptions["chat_completions_path"] = _ReadConfigOrEnvString(
@@ -243,7 +252,12 @@ def _BuildOpenAiRuntimeConfig(
             or DEFAULT_OPENAI_ENDPOINT_URL
         ),
         extraOptions=extraOptions,
-        apiKey=apiKey,
+        apiKey=_ReadConfiguredApiKey(
+            extraOptions,
+            llmConfig,
+            secretEnvValues,
+            DEFAULT_OPENAI_API_KEY_ENV_NAMES,
+        ),
     )
 
 
@@ -301,7 +315,7 @@ def _BuildApiRuntimeConfig(
         extraOptions,
         llmConfig,
         secretEnvValues,
-        ["EU_EXPORT_LLM_API_KEY"],
+        [PRIMARY_LLM_API_KEY_ENV_NAME],
     )
 
     chatCompletionsPath = _ReadConfigOrEnvString(

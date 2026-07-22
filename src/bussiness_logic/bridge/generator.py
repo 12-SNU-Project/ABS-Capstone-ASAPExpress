@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from bussiness_logic.bridge.probe import (
     DEFAULT_ANTHROPIC_API_KEY_ENV_NAMES,
     DEFAULT_ANTHROPIC_ENDPOINT_URL,
+    DEFAULT_GOOGLE_AI_STUDIO_API_KEY_ENV_NAMES,
     DEFAULT_OPENAI_API_KEY_ENV_NAMES,
     DEFAULT_OPENAI_ENDPOINT_URL,
     DEFAULT_OLLAMA_ENDPOINT_URL,
@@ -667,11 +668,14 @@ def _BuildOpenAiSdkClient(
             "OpenAI SDK is required for structured output generation."
         ) from error
 
-    apiKey = _ReadApiKey(runtimeConfig, DEFAULT_OPENAI_API_KEY_ENV_NAMES)
+    apiKey = _ReadApiKey(runtimeConfig, _OpenAiApiKeyEnvNames(runtimeConfig))
     if apiKey is None:
         raise RuntimeGenerationError(
             "Hosted LLM runtime generation requires {0} or a configured "
-            "runtime API key.".format(PRIMARY_LLM_API_KEY_ENV_NAME)
+            "runtime API key.".format(
+                runtimeConfig.extraOptions.get("api_key_env_name")
+                or _OpenAiApiKeyEnvNames(runtimeConfig)[0]
+            )
         )
 
     sdkBaseUrl = _BuildOpenAiSdkBaseUrl(runtimeDescriptor, runtimeConfig)
@@ -1106,11 +1110,14 @@ def _ReadReasoningEffort(runtimeConfig: LlmRuntimeConfig) -> str | None:
 
 
 def _ReadOpenAiHeaders(runtimeConfig: LlmRuntimeConfig) -> Dict[str, str]:
-    apiKey = _ReadApiKey(runtimeConfig, DEFAULT_OPENAI_API_KEY_ENV_NAMES)
+    apiKey = _ReadApiKey(runtimeConfig, _OpenAiApiKeyEnvNames(runtimeConfig))
     if apiKey is None:
         raise RuntimeGenerationError(
             "Hosted LLM runtime generation requires {0} or a configured "
-            "runtime API key.".format(PRIMARY_LLM_API_KEY_ENV_NAME)
+            "runtime API key.".format(
+                runtimeConfig.extraOptions.get("api_key_env_name")
+                or _OpenAiApiKeyEnvNames(runtimeConfig)[0]
+            )
         )
 
     return {
@@ -1128,6 +1135,16 @@ def _ReadAnthropicHeaders(runtimeConfig: LlmRuntimeConfig) -> Dict[str, str]:
         "x-api-key": apiKey,
         "anthropic-version": DEFAULT_ANTHROPIC_VERSION,
     }
+
+
+def _OpenAiApiKeyEnvNames(runtimeConfig: LlmRuntimeConfig) -> List[str]:
+    if _ReadProviderName(runtimeConfig) in {
+        "google_ai_studio",
+        "google",
+        "gemini",
+    }:
+        return DEFAULT_GOOGLE_AI_STUDIO_API_KEY_ENV_NAMES
+    return DEFAULT_OPENAI_API_KEY_ENV_NAMES
 
 
 def _ReadApiKey(

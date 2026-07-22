@@ -1,0 +1,95 @@
+# Four-way OCR/VLM comparison configuration.
+# Secrets belong in .env.ocr_reconstruction_smoke.
+
+[llm]
+runtime = "openai"
+provider = "google_ai_studio"
+model = "gemini-3.5-flash"
+endpoint_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+chat_completions_path = "/chat/completions"
+timeout_seconds = 120
+supports_response_format = true
+reasoning_effort = "minimal"
+api_key_env = "EU_EXPORT_GOOGLE_AI_STUDIO_KEY"
+
+[llm_profiles.input_reconstruction_gpt]
+runtime = "openai"
+provider = "openai"
+model = "gpt-5-mini"
+supports_response_format = true
+reasoning_effort = "minimal"
+api_key_env = "EU_EXPORT_OPENAI_KEY"
+
+[llm_profiles.input_reconstruction_gemini]
+runtime = "openai"
+provider = "google_ai_studio"
+model = "gemini-3.5-flash"
+api_key_env = "EU_EXPORT_GOOGLE_AI_STUDIO_KEY"
+
+[llm_profiles.input_reconstruction_claude]
+runtime = "anthropic"
+provider = "anthropic"
+model = "claude-sonnet-4-6"
+api_key_env = "EU_EXPORT_ANTHROPIC_KEY"
+
+[llm_profiles.product_vlm_gpt]
+runtime = "openai"
+provider = "openai"
+model = "gpt-5-mini"
+endpoint_url = "https://api.openai.com"
+chat_completions_path = "/v1/chat/completions"
+timeout_seconds = 120
+supports_response_format = true
+reasoning_effort = "minimal"
+api_key_env = "EU_EXPORT_OPENAI_KEY"
+
+[llm_profiles.product_vlm_gemini]
+runtime = "openai"
+provider = "google_ai_studio"
+model = "gemini-3.5-flash"
+endpoint_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+chat_completions_path = "/chat/completions"
+timeout_seconds = 120
+supports_response_format = true
+api_key_env = "EU_EXPORT_GOOGLE_AI_STUDIO_KEY"
+
+[llm_profiles.product_vlm_claude]
+runtime = "anthropic"
+provider = "anthropic"
+model = "claude-sonnet-4-6"
+endpoint_url = "https://api.anthropic.com"
+chat_completions_path = "/v1/messages"
+timeout_seconds = 120
+api_key_env = "EU_EXPORT_ANTHROPIC_KEY"
+
+[kurly_smoke]
+product_urls = [
+    "https://www.kurlyglobal.com/products/m00000188980?_pos=10&_sid=53447f017&_ss=",
+    "https://www.kurlyglobal.com/products/m00000746614?_pos=1&_sid=3d945d484&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000778912?_pos=1&_sid=db436b4fb&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000783348?_pos=1&_sid=88be1f9c5&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000786785?_pos=4&_sid=15f89a768&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000786786?_pos=5&_sid=15f89a768&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000175457?_pos=1&_sid=037397eac&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000216058?_pos=1&_sid=5204ad2dd&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000251660?_pos=1&_sid=5204ad2dd&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000162756?_pos=3&_sid=8a21cd50c&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000194363?_pos=1&_sid=4e989881f&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000785498?_pos=1&_sid=18e926350&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000255883?_pos=1&_sid=69f659b3c&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000795289?_pos=2&_sid=85c9ffbc3&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000739535?_pos=1&_sid=85c9ffbc3&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000795452?_pos=1&_sid=e65cb3ae6&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000795453?_pos=1&_sid=9b7767f0e&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000795471?_pos=1&_sid=f130f5910&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000795489?_pos=1&_sid=9bf8743e9&_ss=r",
+    "https://www.kurlyglobal.com/products/m00000795490?_pos=1&_sid=c1e69aa90&_ss=r",
+]
+run_ocr_fallback = true
+use_structured_ocr = true
+structured_ocr_provider = "paddleocr_vl"
+use_input_reconstruction = true
+use_llm_input_reconstruction = true
+structured_ocr_vl_rec_backend = "mlx-vlm-server"
+structured_ocr_vl_rec_server_url = "http://localhost:8111/"
+structured_ocr_vl_rec_api_model_name = "PaddlePaddle/PaddleOCR-VL-1.6"

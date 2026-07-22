@@ -62,7 +62,7 @@ class BridgeVlmAdapter:
                 ),
                 imageInputs=[
                     LlmImageInput(
-                        mediaType="image/jpeg",
+                        mediaType="image/png",
                         imageBytes=imageBytes,
                         sourceRef="product_ocr_tile",
                     )
@@ -120,9 +120,9 @@ class BridgeVlmAdapter:
         shape = getattr(image, "shape", None)
         if not isinstance(shape, tuple) or len(shape) < 2:
             raise ValueError("VLM adapter requires a decoded image array.")
-        encoded, buffer = cv2.imencode(".jpg", image)
+        encoded, buffer = cv2.imencode(".png", image)
         if not encoded:
-            raise ValueError("VLM input image could not be encoded as JPEG.")
+            raise ValueError("VLM input image could not be encoded as PNG.")
         return bytes(buffer), int(shape[1]), int(shape[0])
 
     def _ReadJsonObject(self, text: str) -> dict[str, object]:

@@ -1162,7 +1162,7 @@ def BuildOcrRegionCrop(
         return None
     if (right - left) * (bottom - top) >= imageWidth * imageHeight * 0.90:
         return None
-    return _EncodeImageBytes(image[top:bottom, left:right], ".jpg"), (
+    return _EncodeImageBytes(image[top:bottom, left:right], ".png"), (
         left,
         top,
         right,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -21,7 +22,14 @@ def BuildPipelineRuntimeAdapter(
     """Build one configured runtime adapter for a pipeline LLM role."""
 
     projectRoot = Path(__file__).resolve().parents[3]
-    envFile = projectRoot / ".env"
+    configuredEnvFile = os.environ.get("ASAP_ENV_FILE")
+    envFile = (
+        Path(configuredEnvFile).expanduser()
+        if configuredEnvFile
+        else projectRoot / ".env"
+    )
+    if not envFile.is_absolute():
+        envFile = projectRoot / envFile
     runtimeConfig = BuildLlmRuntimeConfigFromEnv(
         envFilePath=envFile if envFile.exists() else None,
         projectRootPath=projectRoot,

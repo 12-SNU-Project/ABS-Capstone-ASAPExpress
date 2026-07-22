@@ -1,5 +1,6 @@
 """비밀값이 아닌 앱 실행 설정을 TOML에서 Pydantic model로 읽는다."""
 
+import os
 from enum import Enum
 from pathlib import Path
 from typing import Dict, Optional
@@ -22,6 +23,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 이하 fallback �
 
 
 APP_CONFIG_FILE_NAME = ".appconfig"
+APP_CONFIG_PATH_ENV_NAME = "ASAP_APP_CONFIG_PATH"
 REASONING_EFFORT_VALUES = frozenset({"none", "minimal", "low", "medium", "high"})
 LLM_PROVIDER_SCOPED_FIELDS = frozenset(
     {
@@ -40,7 +42,13 @@ class LlmProfileName(str, Enum):
     """서로 다른 모델 설정을 가질 수 있는 LLM/VLM 호출 용도."""
 
     PRODUCT_VLM = "product_vlm"
+    PRODUCT_VLM_GPT = "product_vlm_gpt"
+    PRODUCT_VLM_GEMINI = "product_vlm_gemini"
+    PRODUCT_VLM_CLAUDE = "product_vlm_claude"
     INPUT_RECONSTRUCTION = "input_reconstruction"
+    INPUT_RECONSTRUCTION_GPT = "input_reconstruction_gpt"
+    INPUT_RECONSTRUCTION_GEMINI = "input_reconstruction_gemini"
+    INPUT_RECONSTRUCTION_CLAUDE = "input_reconstruction_claude"
     IDENTITY_HINT = "identity_hint"
     CLASSIFICATION_SELECTOR = "classification_selector"
     CLASSIFICATION_VALIDATOR = "classification_validator"
@@ -429,6 +437,8 @@ def LoadAppConfig(
     configPath: Optional[str | Path] = None,
 ) -> AppConfig:
     resolvedProjectRootPath = Path(projectRootPath)
+    if configPath is None:
+        configPath = os.environ.get(APP_CONFIG_PATH_ENV_NAME)
     if configPath is not None:
         rawConfigPath = Path(configPath).expanduser()
         resolvedConfigPath = (
