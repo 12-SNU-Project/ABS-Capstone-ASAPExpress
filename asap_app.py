@@ -15,6 +15,10 @@ from urllib.parse import urlparse
 ASAP_ROOT = Path(
     os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parent),
 ).resolve()
+ASAP_APP_CONFIG_PATH = ASAP_ROOT / ".appconfig.asap_app.toml"
+ASAP_ENV_FILE_PATH = ASAP_ROOT / ".env.asap_app"
+os.environ["ASAP_APP_CONFIG_PATH"] = str(ASAP_APP_CONFIG_PATH)
+os.environ["ASAP_ENV_FILE"] = str(ASAP_ENV_FILE_PATH)
 
 import sys
 ASAP_SRC_ROOT = ASAP_ROOT / "src"

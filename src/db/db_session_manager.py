@@ -78,15 +78,21 @@ class DbSessionConfig:
 
 
 def _load_project_dotenv() -> None:
-    """DB 자격증명 단일 소스 정책(2026-07-08): 어떤 엔트리포인트(backend/smoke/
-    compiler)에서 실행되든 프로젝트 루트 .env가 항상 우선한다.
+    """DB 자격증명은 엔트리포인트가 선택한 env 파일에서 읽는다.
     외부 패키지 없이 stdlib만 사용 — 파이썬 환경에 따라 조용히 건너뛰는
-    실패 모드(python-dotenv 미설치)를 원천 제거한다.
-    임시로 다른 DB를 가리키려면 쉘 export가 아니라 .env를 수정할 것."""
+    실패 모드(python-dotenv 미설치)를 원천 제거한다."""
     import os
     from pathlib import Path
 
-    env_path = Path(__file__).resolve().parents[2] / ".env"
+    project_root = Path(__file__).resolve().parents[2]
+    configured_path = os.environ.get("ASAP_ENV_FILE")
+    env_path = (
+        Path(configured_path).expanduser()
+        if configured_path
+        else project_root / ".env"
+    )
+    if not env_path.is_absolute():
+        env_path = project_root / env_path
     try:
         content = env_path.read_text(encoding="utf-8")
     except OSError:

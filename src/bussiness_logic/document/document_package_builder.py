@@ -75,7 +75,15 @@ def _load_document_database_url_from_dotenv() -> str:
     value = os.environ.get(DOCUMENT_DATABASE_URL_ENV, "").strip()
     if value:
         return value
-    env_path = Path(__file__).resolve().parents[3] / ".env"
+    project_root = Path(__file__).resolve().parents[3]
+    configured_path = os.environ.get("ASAP_ENV_FILE")
+    env_path = (
+        Path(configured_path).expanduser()
+        if configured_path
+        else project_root / ".env"
+    )
+    if not env_path.is_absolute():
+        env_path = project_root / env_path
     try:
         content = env_path.read_text(encoding="utf-8")
     except OSError:
