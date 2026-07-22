@@ -19,21 +19,30 @@ from urllib.parse import urlsplit, urlunsplit
 
 PROJECT_ROOT_PATH = Path(__file__).resolve().parent
 
-from bussiness_logic.app_config import LoadAppConfig  # noqa: E402
+from bussiness_logic.app_config import LlmProfileName, LoadAppConfig  # noqa: E402
 from bussiness_logic.artifact_paths import ExtractProductIdFromUrl  # noqa: E402
 from bussiness_logic.utils.json_types import JsonMapping, JsonObject  # noqa: E402
 from bussiness_logic.bridge.factory import (  # noqa: E402
     BuildRuntimeAdapter,
     RuntimeAdapterBuildError,
 )
-from bussiness_logic.bridge.selector import BuildLlmRuntimeConfigFromEnv  # noqa: E402
+from bussiness_logic.bridge.selector import (  # noqa: E402
+    BuildLlmRuntimeConfigFromEnv,
+    UnsupportedLlmRuntimeError,
+)
+from bussiness_logic.bridge.runtime_adapter import (  # noqa: E402
+    BuildOptionalPipelineRuntimeAdapter,
+)
 from bussiness_logic.bridge.schema import LlmGenerationOptions, LlmRequest  # noqa: E402
 from bussiness_logic.input_process.reconstruction import (  # noqa: E402
     ProductInputReconstructionService,
 )
 from bussiness_logic.product.ocr.paddle_ocr import (  # noqa: E402
     PaddleOcrEngine,
-    PaddleOcrVlEngine,
+    ProductStructuredOcrEngine,
+)
+from bussiness_logic.product.ocr.vlm_adapter import (  # noqa: E402
+    BuildProductVlmAdapter,
 )
 from bussiness_logic.product.ocr.ocr_fallback import (  # noqa: E402
     ProductOcrImageDownloader,
@@ -432,7 +441,7 @@ def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--compare-ocr",
         action="store_true",
-        help="동일 이미지의 raw OCR, PP-StructureV3, PaddleOCR-VL 결과를 비교합니다.",
+        help="동일 이미지의 raw OCR, PP-StructureV3, structured VLM 결과를 비교합니다.",
     )
     parser.add_argument(
         "--compare-max-images",
@@ -918,6 +927,7 @@ class KurlyMarketSmokeRunner:
         self._stage1ReviewMode = stage1ReviewMode
         self._runOcrFallback = smokeConfig.run_ocr_fallback
         self._useStructuredOcr = smokeConfig.use_structured_ocr
+        self._structuredOcrProvider = smokeConfig.structured_ocr_provider
         self._maxOcrImageCount = smokeConfig.max_ocr_image_count
         self._structuredOcrMaxTileHeightPixels = (
             smokeConfig.structured_ocr_max_tile_height_pixels
@@ -1227,8 +1237,11 @@ class KurlyMarketSmokeRunner:
             if self._useStructuredOcr:
                 screeningOcrEngine = PaddleOcrEngine()
             ocrEngine = (
-                PaddleOcrVlEngine(
+                ProductStructuredOcrEngine(
                     vlExtraOptions=self._structuredOcrVlExtraOptions,
+                    vlPipeline=BuildProductVlmAdapter(
+                        self._structuredOcrProvider,
+                    ),
                     useProjectionTiling=self._structuredOcrUseProjectionTiling,
                     maxTileHeightPixels=self._structuredOcrMaxTileHeightPixels,
                     maxTileSidePixels=self._structuredOcrMaxTileSidePixels,
@@ -1256,13 +1269,16 @@ class KurlyMarketSmokeRunner:
             reconstructionLogger = self._Logger("_BuildInputReconstructionService")
             try:
                 runtimeAdapter = BuildRuntimeAdapter(
-                    BuildLlmRuntimeConfigFromEnv(projectRootPath=PROJECT_ROOT_PATH),
+                    BuildLlmRuntimeConfigFromEnv(
+                        projectRootPath=PROJECT_ROOT_PATH,
+                        profileName=LlmProfileName.INPUT_RECONSTRUCTION,
+                    ),
                     requireAvailable=True,
                 )
                 reconstructionLogger.info(
                     "pipeline_step=llm_reconstruction component=ProductInputReconstructionService agent=ProductFactReconstructionAgent output_dto=RuntimeAdapter llm_status=adapter_ready"
                 )
-            except RuntimeAdapterBuildError as error:
+            except (RuntimeAdapterBuildError, UnsupportedLlmRuntimeError) as error:
                 reconstructionLogger.warning(
                     "pipeline_step=llm_reconstruction component=ProductInputReconstructionService agent=ProductFactReconstructionAgent output_dto=RuntimeAdapter llm_status=unavailable error={}",
                     error,
@@ -1462,7 +1478,17 @@ class KurlyMarketSmokeRunner:
                 facts=rawInput,
                 store=store,
             )
-            HsCodeClassificationPipeline().Run(context)
+            HsCodeClassificationPipeline(
+                identityHintRuntimeAdapter=BuildOptionalPipelineRuntimeAdapter(
+                    LlmProfileName.IDENTITY_HINT,
+                ),
+                selectionRuntimeAdapter=BuildOptionalPipelineRuntimeAdapter(
+                    LlmProfileName.CLASSIFICATION_SELECTOR,
+                ),
+                validationRuntimeAdapter=BuildOptionalPipelineRuntimeAdapter(
+                    LlmProfileName.CLASSIFICATION_VALIDATOR,
+                ),
+            ).Run(context)
             stepResults = list(context.stepResults)
             componentResults = list(context.componentResults)
             rawInput = context.rawInput
@@ -2232,9 +2258,15 @@ class KurlyMarketSmokeRunner:
                 ),
                 "only_vlm": (
                     self._pipelineOcrEngine
-                    if isinstance(self._pipelineOcrEngine, PaddleOcrVlEngine)
-                    else PaddleOcrVlEngine(
+                    if isinstance(
+                        self._pipelineOcrEngine,
+                        ProductStructuredOcrEngine,
+                    )
+                    else ProductStructuredOcrEngine(
                         vlExtraOptions=self._structuredOcrVlExtraOptions,
+                        vlPipeline=BuildProductVlmAdapter(
+                            self._structuredOcrProvider,
+                        ),
                         useProjectionTiling=(
                             self._structuredOcrUseProjectionTiling
                         ),
@@ -2339,6 +2371,7 @@ class KurlyMarketSmokeRunner:
                 "only_vlm",
                 "production_hybrid",
             ],
+            "structured_ocr_provider": self._structuredOcrProvider,
             "vl_backend": self._structuredOcrVlExtraOptions.get("vl_rec_backend"),
             "candidate_image_count": len(imageUrls),
             "image_count": len(imageResults),
