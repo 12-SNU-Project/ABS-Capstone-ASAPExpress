@@ -44,14 +44,21 @@ _KURLY_OCR_RUNTIME_LOCK = Lock()
 def _BuildKurlyOcrEngines() -> tuple[object, object | None]:
     """프로세스 수명 동안 무거운 Paddle OCR 모델을 재사용한다."""
 
-    from bussiness_logic.product.ocr.paddle_ocr import PaddleOcrEngine, PaddleOcrVlEngine
+    from bussiness_logic.product.ocr.paddle_ocr import (
+        PaddleOcrEngine,
+        ProductStructuredOcrEngine,
+    )
+    from bussiness_logic.product.ocr.vlm_adapter import BuildProductVlmAdapter
 
     smokeConfig = APP_CONFIG.kurly_smoke
     if not smokeConfig.use_structured_ocr:
         return PaddleOcrEngine(), None
     return (
-        PaddleOcrVlEngine(
+        ProductStructuredOcrEngine(
             vlExtraOptions=smokeConfig.BuildStructuredOcrVlExtraOptions(),
+            vlPipeline=BuildProductVlmAdapter(
+                smokeConfig.structured_ocr_provider,
+            ),
             useProjectionTiling=(
                 smokeConfig.structured_ocr_use_projection_tiling
             ),
@@ -334,11 +341,15 @@ def RerunCachedInputReconstruction(product_identifier: str) -> JsonObject:
 def _BuildInputReconstructionService(
     warnings: list[str],
 ) -> "ProductInputReconstructionService | None":
+    from bussiness_logic.app_config import LlmProfileName
     from bussiness_logic.bridge.factory import (
         BuildRuntimeAdapter,
         RuntimeAdapterBuildError,
     )
-    from bussiness_logic.bridge.selector import BuildLlmRuntimeConfigFromEnv
+    from bussiness_logic.bridge.selector import (
+        BuildLlmRuntimeConfigFromEnv,
+        UnsupportedLlmRuntimeError,
+    )
     from bussiness_logic.input_process.reconstruction import (
         ProductInputReconstructionService,
     )
@@ -350,10 +361,13 @@ def _BuildInputReconstructionService(
     if smoke_config.use_llm_input_reconstruction:
         try:
             runtime_adapter = BuildRuntimeAdapter(
-                BuildLlmRuntimeConfigFromEnv(projectRootPath=PROJECT_ROOT),
+                BuildLlmRuntimeConfigFromEnv(
+                    projectRootPath=PROJECT_ROOT,
+                    profileName=LlmProfileName.INPUT_RECONSTRUCTION,
+                ),
                 requireAvailable=True,
             )
-        except RuntimeAdapterBuildError as exc:
+        except (RuntimeAdapterBuildError, UnsupportedLlmRuntimeError) as exc:
             warnings.append(f"llm_input_reconstruction_unavailable: {exc}")
     return ProductInputReconstructionService(
         dictionaryPath=(

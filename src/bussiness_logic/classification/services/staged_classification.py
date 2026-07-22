@@ -673,8 +673,16 @@ def _bti_summon(scope_prefixes: list[str], q_primary: set, q_all: set,
 class StagedClassificationTool:
     tool_name = "StagedClassificationTool"
 
-    def __init__(self, *, keep_per_level: int = 3, rank_top_k: int = 8) -> None:
-        self._adapter = None
+    def __init__(
+        self,
+        *,
+        keep_per_level: int = 3,
+        rank_top_k: int = 8,
+        selectionRuntimeAdapter: object | None = None,
+        validationRuntimeAdapter: object | None = None,
+    ) -> None:
+        self._selectionRuntimeAdapter = selectionRuntimeAdapter
+        self._validationRuntimeAdapter = validationRuntimeAdapter
         self.keep_per_level = keep_per_level
         self.rank_top_k = rank_top_k
 
@@ -2660,12 +2668,6 @@ class StagedClassificationTool:
         return scored
 
     # ---- LLM select (bridge) ---------------------------------------------
-    def _get_adapter(self):
-        if self._adapter is None:
-            from bussiness_logic.bridge.runtime_adapter import BuildPipelineRuntimeAdapter
-            self._adapter = BuildPipelineRuntimeAdapter()
-        return self._adapter
-
     def _llm_select(self, ranked: list[dict[str, Any]], facts: dict[str, list[str]], level: str) -> list[str]:
         if not ranked:
             return []
@@ -2675,6 +2677,8 @@ class StagedClassificationTool:
             "1", "true", "yes", "on",
         ):
             return [r["code"] for r in ranked[: self.keep_per_level]]
+        if self._selectionRuntimeAdapter is None:
+            return []
         from bussiness_logic.bridge.schema import LlmRequest, LlmGenerationOptions
 
         facts_view = {axis: facts.get(axis, [])[:8] for axis in LEVEL_AXES[level]}
@@ -2687,7 +2691,7 @@ class StagedClassificationTool:
             "Prefer nodes whose description matches the commodity + form. No codes outside the candidates."
         )
         try:
-            resp = self._get_adapter().Generate(
+            resp = self._selectionRuntimeAdapter.Generate(
                 LlmRequest(
                     user_prompt=prompt,
                     system_prompt="You pick EU customs classification prefixes. Output one JSON object only.",
@@ -2734,6 +2738,12 @@ class StagedClassificationTool:
             # Recorded dissent is the firing signal; scored alternate chapters
             # alone are normal routing spread, not disagreement.
             return {"verdict": "keep", "fired": False, "reason": "no_disagreement_signal"}
+        if self._validationRuntimeAdapter is None:
+            return {
+                "verdict": "keep",
+                "fired": True,
+                "reason": "classification_validator_runtime_not_configured",
+            }
 
         ih = product_facts.get("identity_hints") or {}
         identity_view = {
@@ -2792,7 +2802,7 @@ class StagedClassificationTool:
         try:
             from bussiness_logic.bridge.schema import LlmRequest, LlmGenerationOptions
 
-            resp = self._get_adapter().Generate(
+            resp = self._validationRuntimeAdapter.Generate(
                 LlmRequest(
                     user_prompt="\n".join(prompt_lines),
                     system_prompt=(

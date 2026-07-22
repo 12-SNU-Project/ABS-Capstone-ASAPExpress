@@ -18,24 +18,34 @@ from bussiness_logic.product.ocr.ocr_image_tiling import (
 )
 from bussiness_logic.product.ocr.paddle_ocr import (
     PaddleOcrEngine,
-    PaddleOcrVlEngine,
-    PaddleStructureOcrEngine,
     ProductOcrEngine,
     ProductOcrError,
     ProductOcrTableResult,
     ProductOcrTileTextResult,
     ProductStructuredOcrResult,
+    ProductStructuredOcrEngine,
+    ProductTableRecognitionEvidence,
+)
+from bussiness_logic.product.ocr.vlm_adapter import (
+    BridgeVlmAdapter,
+    BuildProductVlmAdapter,
+    VlmTableBlock,
+    VlmTableExtraction,
 )
 
 __all__ = [
     "PaddleOcrEngine",
-    "PaddleOcrVlEngine",
-    "PaddleStructureOcrEngine",
     "ProductOcrEngine",
     "ProductOcrError",
     "ProductOcrTableResult",
     "ProductOcrTileTextResult",
     "ProductStructuredOcrResult",
+    "ProductStructuredOcrEngine",
+    "ProductTableRecognitionEvidence",
+    "BridgeVlmAdapter",
+    "BuildProductVlmAdapter",
+    "VlmTableBlock",
+    "VlmTableExtraction",
     "ProductOcrFactNormalizationResult",
     "ProductOcrFactNormalizer",
     "ProductOcrImageTile",

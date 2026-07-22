@@ -40,7 +40,7 @@ from bussiness_logic.utils.json_types import JsonObject
 DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS = 4096
 
 PRODUCT_FACT_RECONSTRUCTION_SYSTEM_PROMPT = """
-You reconstruct canonical product input facts from Korean product summary, Korean product notice, structured table OCR (PaddleOCR-VL/PP-Structure), and raw OCR text.
+You reconstruct canonical product input facts from Korean product summary, Korean product notice, structured table VLM evidence, and raw OCR text.
 Your job is evidence-backed reconstruction, not classification: recover the product label/specification facts that downstream deterministic classifiers can use.
 For every accepted or unresolved fact, return a short evidence trace with source_refs, selected_span, decision_reason, status, and unresolved_reason.
 Do not expose hidden chain-of-thought or long free-form reasoning. Use fixed, short evidence trace fields only.

@@ -7,6 +7,10 @@ import uuid
 from pathlib import Path
 
 from bussiness_logic.pipeline.blackboard import BlackboardStore
+from bussiness_logic.app_config import LlmProfileName
+from bussiness_logic.bridge.runtime_adapter import (
+    BuildOptionalPipelineRuntimeAdapter,
+)
 from bussiness_logic.artifact_paths import BuildSafeArtifactPathSegment
 from bussiness_logic.document.pipeline.document_recommendation_pipeline import (
     DocumentRecommendationPipeline,
@@ -104,7 +108,26 @@ class ExportPipelineManager:
         return [
             PipelineStep("user_input_preparation", UserInputPreparationPipeline()),
             PipelineStep("kurly_product_collection", KurlyProductCollectionPipeline()),
-            PipelineStep("hs_code_classification", HsCodeClassificationPipeline()),
+            PipelineStep(
+                "hs_code_classification",
+                HsCodeClassificationPipeline(
+                    identityHintRuntimeAdapter=(
+                        BuildOptionalPipelineRuntimeAdapter(
+                            LlmProfileName.IDENTITY_HINT,
+                        )
+                    ),
+                    selectionRuntimeAdapter=(
+                        BuildOptionalPipelineRuntimeAdapter(
+                            LlmProfileName.CLASSIFICATION_SELECTOR,
+                        )
+                    ),
+                    validationRuntimeAdapter=(
+                        BuildOptionalPipelineRuntimeAdapter(
+                            LlmProfileName.CLASSIFICATION_VALIDATOR,
+                        )
+                    ),
+                ),
+            ),
             PipelineStep("document_recommendation", DocumentRecommendationPipeline()),
         ]
 

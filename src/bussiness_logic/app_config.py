@@ -1,7 +1,8 @@
 """비밀값이 아닌 앱 실행 설정을 TOML에서 Pydantic model로 읽는다."""
 
+from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from pydantic import (
     BaseModel,
@@ -22,6 +23,28 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 이하 fallback �
 
 APP_CONFIG_FILE_NAME = ".appconfig"
 REASONING_EFFORT_VALUES = frozenset({"none", "minimal", "low", "medium", "high"})
+LLM_PROVIDER_SCOPED_FIELDS = frozenset(
+    {
+        "model",
+        "endpoint_url",
+        "chat_completions_path",
+        "supports_response_format",
+        "reasoning_effort",
+        "api_key_env",
+    }
+)
+HOSTED_LLM_RUNTIME_NAMES = frozenset({"openai", "anthropic"})
+
+
+class LlmProfileName(str, Enum):
+    """서로 다른 모델 설정을 가질 수 있는 LLM/VLM 호출 용도."""
+
+    PRODUCT_VLM = "product_vlm"
+    INPUT_RECONSTRUCTION = "input_reconstruction"
+    IDENTITY_HINT = "identity_hint"
+    CLASSIFICATION_SELECTOR = "classification_selector"
+    CLASSIFICATION_VALIDATOR = "classification_validator"
+    CN_PREDICATE_COMPILER = "cn_predicate_compiler"
 
 
 class LlmAppConfig(BaseModel):
@@ -37,6 +60,7 @@ class LlmAppConfig(BaseModel):
     timeout_seconds: Optional[StrictInt] = None
     supports_response_format: Optional[StrictBool] = None
     reasoning_effort: Optional[StrictStr] = None
+    api_key_env: Optional[StrictStr] = None
 
     @field_validator("reasoning_effort")
     @classmethod
@@ -51,6 +75,18 @@ class LlmAppConfig(BaseModel):
                     ", ".join(sorted(REASONING_EFFORT_VALUES)),
                 )
             )
+        return normalizedValue
+
+    @field_validator("api_key_env")
+    @classmethod
+    def NormalizeApiKeyEnv(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalizedValue = value.strip()
+        if normalizedValue == "":
+            return None
+        if not normalizedValue.replace("_", "").isalnum():
+            raise ValueError("api_key_env must be an environment variable name.")
         return normalizedValue
 
 
@@ -148,6 +184,7 @@ class KurlySmokeAppConfig(BaseModel):
     headless: StrictBool = True
     run_ocr_fallback: StrictBool = True
     use_structured_ocr: StrictBool = True
+    structured_ocr_provider: StrictStr = "paddleocr_vl"
     max_ocr_image_count: StrictInt = 8
     structured_ocr_max_tile_height_pixels: StrictInt = 2400
     structured_ocr_max_tile_side_pixels: StrictInt = 4000
@@ -189,6 +226,16 @@ class KurlySmokeAppConfig(BaseModel):
         if value <= 0:
             raise ValueError("llm_input_reconstruction_max_tokens must be positive.")
         return value
+
+    @field_validator("structured_ocr_provider")
+    @classmethod
+    def NormalizeStructuredOcrProvider(cls, value: str) -> str:
+        normalizedValue = value.strip().lower()
+        if normalizedValue not in {"paddleocr_vl", "llm_bridge"}:
+            raise ValueError(
+                "structured_ocr_provider must be paddleocr_vl or llm_bridge."
+            )
+        return normalizedValue
 
     @field_validator("max_ocr_image_count")
     @classmethod
@@ -325,6 +372,9 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     llm: LlmAppConfig = Field(default_factory=LlmAppConfig)
+    llm_profiles: Dict[LlmProfileName, LlmAppConfig] = Field(
+        default_factory=dict,
+    )
     embedding: EmbeddingAppConfig = Field(default_factory=EmbeddingAppConfig)
     paths: AppPathsConfig = Field(default_factory=AppPathsConfig)
     classification: ClassificationAppConfig = Field(
@@ -335,6 +385,43 @@ class AppConfig(BaseModel):
     ontology_smoke: OntologySmokeAppConfig = Field(
         default_factory=OntologySmokeAppConfig,
     )
+
+    def ResolveLlmProfile(self, profileName: LlmProfileName) -> LlmAppConfig:
+        profileConfig = self.llm_profiles.get(profileName)
+        if profileConfig is None:
+            return self.llm.model_copy(deep=True)
+
+        profileValues = profileConfig.model_dump(exclude_none=True)
+        runtimeChanged = (
+            profileConfig.runtime is not None
+            and profileConfig.runtime.strip().lower()
+            != (self.llm.runtime or "").strip().lower()
+        )
+        providerChanged = (
+            profileConfig.provider is not None
+            and profileConfig.provider.strip().lower()
+            != (self.llm.provider or "").strip().lower()
+        )
+        if not runtimeChanged and not providerChanged:
+            return self.llm.model_copy(update=profileValues, deep=True)
+
+        resolvedValues = self.llm.model_dump()
+        for fieldName in LLM_PROVIDER_SCOPED_FIELDS:
+            resolvedValues.pop(fieldName, None)
+        if runtimeChanged and profileConfig.provider is None:
+            resolvedValues.pop("provider", None)
+        resolvedValues.update(profileValues)
+
+        resolvedRuntime = str(resolvedValues.get("runtime") or "").strip().lower()
+        if (
+            resolvedRuntime in HOSTED_LLM_RUNTIME_NAMES
+            and profileConfig.api_key_env is None
+        ):
+            raise ValueError(
+                "llm_profiles.{0}.api_key_env is required when runtime or "
+                "provider differs from [llm].".format(profileName.value)
+            )
+        return LlmAppConfig.model_validate(resolvedValues)
 
 
 def LoadAppConfig(

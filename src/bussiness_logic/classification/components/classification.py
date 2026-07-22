@@ -10,11 +10,18 @@ from bussiness_logic.utils.json_types import JsonObject
 class ClassificationComponent(BasePipelineComponent):
     component_name = "Classification_Component"
     stage = "Classification"
-    llm_model = "gemma4:26b"  # actual model selected by bridge.RuntimeAdapter
+    llm_model = None
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        selectionRuntimeAdapter: object | None = None,
+        validationRuntimeAdapter: object | None = None,
+    ) -> None:
         super().__init__()
         self._taric_resolver = TaricBranchResolverTool()
+        self._selectionRuntimeAdapter = selectionRuntimeAdapter
+        self._validationRuntimeAdapter = validationRuntimeAdapter
 
     def Run(self, store: BlackboardStore) -> None:
         bb = store.load()
@@ -81,7 +88,16 @@ class ClassificationComponent(BasePipelineComponent):
             if _ds_sig:
                 self.reason(f"Derived state (deterministic): {_ds_sig}")
 
-            stagedTool = StagedClassificationTool()
+            runtimeAdapters = {}
+            if self._selectionRuntimeAdapter is not None:
+                runtimeAdapters["selectionRuntimeAdapter"] = (
+                    self._selectionRuntimeAdapter
+                )
+            if self._validationRuntimeAdapter is not None:
+                runtimeAdapters["validationRuntimeAdapter"] = (
+                    self._validationRuntimeAdapter
+                )
+            stagedTool = StagedClassificationTool(**runtimeAdapters)
             staged = stagedTool.classify(
                 product_facts=product_facts,
                 routing_context=routing,

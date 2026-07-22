@@ -1,0 +1,80 @@
+# Copy this file to .appconfig. Keep secrets in .env, never in this file.
+# Replace example model names with models enabled for each provider account.
+
+[llm]
+runtime = "openai"
+provider = "google_ai_studio"
+model = "gemini-3.5-flash"
+endpoint_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+chat_completions_path = "/chat/completions"
+timeout_seconds = 120
+supports_response_format = true
+api_key_env = "EU_EXPORT_DEFAULT_LLM_API_KEY"
+
+# Vision table extraction. Used only when
+# kurly_smoke.structured_ocr_provider = "llm_bridge".
+[llm_profiles.product_vlm]
+runtime = "openai"
+provider = "openai"
+model = "gpt-4o-mini"
+endpoint_url = "https://api.openai.com"
+chat_completions_path = "/v1/chat/completions"
+timeout_seconds = 120
+supports_response_format = true
+api_key_env = "EU_EXPORT_PRODUCT_VLM_API_KEY"
+
+[llm_profiles.input_reconstruction]
+runtime = "openai"
+provider = "google_ai_studio"
+model = "gemini-3.5-flash"
+endpoint_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+chat_completions_path = "/chat/completions"
+timeout_seconds = 120
+supports_response_format = true
+api_key_env = "EU_EXPORT_INPUT_RECONSTRUCTION_API_KEY"
+
+[llm_profiles.identity_hint]
+runtime = "anthropic"
+provider = "anthropic"
+model = "replace-with-enabled-claude-model"
+endpoint_url = "https://api.anthropic.com"
+chat_completions_path = "/v1/messages"
+timeout_seconds = 120
+api_key_env = "EU_EXPORT_IDENTITY_HINT_API_KEY"
+
+# Used only when ASAP_STAGED_USE_LLM_SELECT=1.
+[llm_profiles.classification_selector]
+runtime = "openai"
+provider = "google_ai_studio"
+model = "gemini-3.5-flash"
+endpoint_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+chat_completions_path = "/chat/completions"
+timeout_seconds = 120
+api_key_env = "EU_EXPORT_CLASSIFICATION_SELECTOR_API_KEY"
+
+[llm_profiles.classification_validator]
+runtime = "openai"
+provider = "openai"
+model = "gpt-4o-mini"
+endpoint_url = "https://api.openai.com"
+chat_completions_path = "/v1/chat/completions"
+timeout_seconds = 120
+supports_response_format = true
+api_key_env = "EU_EXPORT_CLASSIFICATION_VALIDATOR_API_KEY"
+
+[llm_profiles.cn_predicate_compiler]
+runtime = "openai"
+provider = "google_ai_studio"
+model = "gemini-3.5-flash"
+endpoint_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+chat_completions_path = "/chat/completions"
+timeout_seconds = 120
+api_key_env = "EU_EXPORT_CN_PREDICATE_COMPILER_API_KEY"
+
+[kurly_smoke]
+run_ocr_fallback = true
+use_structured_ocr = true
+# paddleocr_vl keeps the current local path. llm_bridge uses product_vlm.
+structured_ocr_provider = "paddleocr_vl"
+use_input_reconstruction = true
+use_llm_input_reconstruction = true

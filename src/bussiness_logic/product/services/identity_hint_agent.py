@@ -13,7 +13,9 @@ from __future__ import annotations
 import json
 import os
 import re
+from typing import Optional
 
+from bussiness_logic.bridge.adapter import RuntimeAdapter
 from bussiness_logic.product.model.product_understanding import (
     DistilledIdentityFacts,
     EncyclopediaEvidenceSet,
@@ -79,7 +81,6 @@ chapter_hint_terms, chapter_hint_source_terms, chapter_hint_basis,
 chapter_hint_status, confidence, needs_review.
 """.strip()
 
-_adapter_cache: list[object] = []
 _chapter_context_cache: list[str] = []
 _chapter_vocab_cache: list[frozenset[str]] = []
 
@@ -141,14 +142,6 @@ def _grounded_typed_field(value: object) -> str:
     if tokens and any(token in _chapter_vocab() for token in tokens):
         return text
     return ""
-
-
-def _get_adapter() -> object:
-    if not _adapter_cache:
-        from bussiness_logic.bridge.runtime_adapter import BuildPipelineRuntimeAdapter
-
-        _adapter_cache.append(BuildPipelineRuntimeAdapter())
-    return _adapter_cache[0]
 
 
 def _extract_json(text: str) -> dict[str, object]:
@@ -268,6 +261,12 @@ def _dedup_strings(
 class IdentityHintAgent:
     """Build bounded HS2 routing hints from product and encyclopedia evidence."""
 
+    def __init__(
+        self,
+        runtimeAdapter: Optional[RuntimeAdapter[object]],
+    ) -> None:
+        self._runtimeAdapter = runtimeAdapter
+
     def BuildIdentityFacts(
         self,
         *,
@@ -283,6 +282,7 @@ class IdentityHintAgent:
             encyclopediaEvidence=encyclopediaEvidence,
             max_tokens=max_tokens,
             factTexts=factTexts,
+            runtimeAdapter=self._runtimeAdapter,
         )
 
 
@@ -293,6 +293,7 @@ def _BuildIdentityFacts(
     encyclopediaEvidence: EncyclopediaEvidenceSet,
     max_tokens: int | None = None,
     factTexts: tuple[str, ...] = (),
+    runtimeAdapter: Optional[RuntimeAdapter[object]],
 ) -> dict[str, object]:
     """Combine evidence into identity fields via one LLM call.
 
@@ -301,6 +302,12 @@ def _BuildIdentityFacts(
     payload; caller overlays regex identity.
     """
     from bussiness_logic.bridge.schema import LlmGenerationOptions, LlmRequest
+
+    if runtimeAdapter is None:
+        return {
+            "understanding_mode": "llm_fallback",
+            "llm_error": "identity_hint_runtime_not_configured",
+        }
 
     tokens = max_tokens if max_tokens is not None else int(
         os.environ.get("ASAP_PRODUCT_UNDERSTANDING_MAX_TOKENS", "4096")
@@ -322,7 +329,7 @@ def _BuildIdentityFacts(
     last_error = ""
     for attempt in range(2):
         try:
-            response = _get_adapter().Generate(
+            response = runtimeAdapter.Generate(
                 LlmRequest(
                     user_prompt=user_prompt,
                     system_prompt=_IDENTITY_SYSTEM_PROMPT,

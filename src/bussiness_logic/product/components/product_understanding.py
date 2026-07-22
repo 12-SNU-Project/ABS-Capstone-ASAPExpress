@@ -121,6 +121,13 @@ class ProductUnderstandingComponent(BasePipelineComponent):
     stage = "Product_Understanding"
     llm_model = None
 
+    def __init__(
+        self,
+        identityHintAgent: IdentityHintAgent | None = None,
+    ) -> None:
+        super().__init__()
+        self._identityHintAgent = identityHintAgent
+
     def Run(self, store: BlackboardStore) -> None:
         bb = store.load()
         pes = bb.get("product_evidence_state") or {}
@@ -438,8 +445,8 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             understandingMode="wikipedia_distilled",
         )
 
-    @staticmethod
     def _MaybeEnrichIdentityWithLlm(
+        self,
         identity: IdentityHintSet,
         *,
         productName: str,
@@ -457,7 +464,14 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         if flag not in ("1", "true", "yes", "on"):
             return identity
 
-        result = IdentityHintAgent().BuildIdentityFacts(
+        if self._identityHintAgent is None:
+            return dataclasses.replace(
+                identity,
+                understandingMode="llm_fallback",
+                llmError="identity_hint_runtime_not_configured",
+            )
+
+        result = self._identityHintAgent.BuildIdentityFacts(
             productName=productName,
             distilledIdentity=distilledIdentity,
             encyclopediaEvidence=encyclopediaEvidence,

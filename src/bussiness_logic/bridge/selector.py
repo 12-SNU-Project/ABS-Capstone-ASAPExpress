@@ -5,8 +5,15 @@ import platform
 from pathlib import Path
 from typing import Dict, Mapping, Optional
 
-from bussiness_logic.app_config import LlmAppConfig, LoadAppConfig
-from bussiness_logic.bridge.probe import HOSTED_LLM_API_KEY_ENV_NAMES
+from bussiness_logic.app_config import (
+    LlmAppConfig,
+    LlmProfileName,
+    LoadAppConfig,
+)
+from bussiness_logic.bridge.probe import (
+    DEFAULT_ANTHROPIC_API_KEY_ENV_NAMES,
+    HOSTED_LLM_API_KEY_ENV_NAMES,
+)
 from bussiness_logic.bridge.schema import (
     LlmRuntimeConfig,
     LlmRuntimeKind,
@@ -18,10 +25,12 @@ DEFAULT_GOOGLE_AI_STUDIO_ENDPOINT_URL = (
 )
 DEFAULT_GOOGLE_AI_STUDIO_CHAT_COMPLETIONS_PATH = "/chat/completions"
 DEFAULT_OPENAI_ENDPOINT_URL = "https://api.openai.com"
+DEFAULT_ANTHROPIC_ENDPOINT_URL = "https://api.anthropic.com"
 DEFAULT_OMLX_ENDPOINT_URL = "http://127.0.0.1:8000"
 DEFAULT_OLLAMA_ENDPOINT_URL = "http://localhost:11434"
 DEFAULT_OPENAI_CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 DEFAULT_OMLX_CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
+DEFAULT_ANTHROPIC_MESSAGES_PATH = "/v1/messages"
 
 
 class UnsupportedLlmRuntimeError(RuntimeError):
@@ -79,8 +88,9 @@ def BuildLlmRuntimeConfigFromEnv(
     osName: Optional[str] = None,
     appConfigPath: Optional[str | Path] = None,
     projectRootPath: Optional[str | Path] = None,
+    profileName: Optional[LlmProfileName] = None,
 ) -> LlmRuntimeConfig:
-    """.appconfig 기본값과 .env/환경 변수 값을 LlmRuntimeConfig로 분배한다."""
+    """.appconfig 설정과 .env 비밀값을 LlmRuntimeConfig로 분배한다."""
 
     resolvedProjectRootPath = _ResolveProjectRootPath(
         envFilePath,
@@ -88,10 +98,15 @@ def BuildLlmRuntimeConfigFromEnv(
     )
     appConfig = LoadAppConfig(resolvedProjectRootPath, appConfigPath)
     envValues = _ReadMergedEnvValues(envFilePath, environment)
-    llmConfig = appConfig.llm
+    llmConfig = (
+        appConfig.ResolveLlmProfile(profileName)
+        if profileName is not None
+        else appConfig.llm
+    )
+    configEnvValues = envValues if profileName is None else {}
     runtimeName = _ReadConfigOrEnvString(
         llmConfig.runtime,
-        envValues,
+        configEnvValues,
         ["EU_EXPORT_LLM_RUNTIME"],
     )
 
@@ -100,18 +115,29 @@ def BuildLlmRuntimeConfigFromEnv(
             osName=osName,
             modelName=_ReadConfigOrEnvString(
                 llmConfig.model,
-                envValues,
+                configEnvValues,
                 ["EU_EXPORT_LLM_MODEL"],
             ),
         )
 
     normalizedRuntimeName = runtimeName.strip().lower()
     if normalizedRuntimeName == LlmRuntimeKind.OPENAI.value:
-        return _BuildOpenAiRuntimeConfig(llmConfig, envValues)
+        return _BuildOpenAiRuntimeConfig(
+            llmConfig,
+            configEnvValues,
+            envValues,
+        )
+    if normalizedRuntimeName == LlmRuntimeKind.ANTHROPIC.value:
+        return _BuildAnthropicRuntimeConfig(
+            llmConfig,
+            configEnvValues,
+            envValues,
+        )
     if normalizedRuntimeName == LlmRuntimeKind.OMLX.value:
         return _BuildApiRuntimeConfig(
             LlmRuntimeKind.OMLX,
             llmConfig,
+            configEnvValues,
             envValues,
             DEFAULT_OMLX_ENDPOINT_URL,
             ["EU_EXPORT_OMLX_ENDPOINT_URL"],
@@ -121,6 +147,7 @@ def BuildLlmRuntimeConfigFromEnv(
         return _BuildApiRuntimeConfig(
             LlmRuntimeKind.OLLAMA,
             llmConfig,
+            configEnvValues,
             envValues,
             DEFAULT_OLLAMA_ENDPOINT_URL,
             ["EU_EXPORT_OLLAMA_ENDPOINT_URL"],
@@ -134,28 +161,32 @@ def BuildLlmRuntimeConfigFromEnv(
 
 def _BuildOpenAiRuntimeConfig(
     llmConfig: LlmAppConfig,
-    envValues: Mapping[str, str],
+    configEnvValues: Mapping[str, str],
+    secretEnvValues: Mapping[str, str],
 ) -> LlmRuntimeConfig:
     providerName = (
         _ReadConfigOrEnvString(
             llmConfig.provider,
-            envValues,
+            configEnvValues,
             ["EU_EXPORT_LLM_PROVIDER"],
         )
         or "openai"
     ).strip()
     normalizedProviderName = providerName.lower()
 
-    extraOptions = _BuildCommonExtraOptions(llmConfig, envValues)
+    extraOptions = _BuildCommonExtraOptions(llmConfig, configEnvValues)
     extraOptions["provider"] = normalizedProviderName
+    apiKey = _ReadConfiguredApiKey(
+        extraOptions,
+        llmConfig,
+        secretEnvValues,
+        HOSTED_LLM_API_KEY_ENV_NAMES,
+    )
 
     if normalizedProviderName in {"google_ai_studio", "google", "gemini"}:
-        apiKey = _ReadFirstEnvValue(envValues, HOSTED_LLM_API_KEY_ENV_NAMES)
-        if apiKey is not None:
-            extraOptions["api_key"] = apiKey
         extraOptions["chat_completions_path"] = _ReadConfigOrEnvString(
             llmConfig.chat_completions_path,
-            envValues,
+            configEnvValues,
             ["EU_EXPORT_LLM_CHAT_COMPLETIONS_PATH"],
         ) or DEFAULT_GOOGLE_AI_STUDIO_CHAT_COMPLETIONS_PATH
 
@@ -163,7 +194,7 @@ def _BuildOpenAiRuntimeConfig(
             runtimeKind=LlmRuntimeKind.OPENAI,
             modelName=_ReadConfigOrEnvString(
                 llmConfig.model,
-                envValues,
+                configEnvValues,
                 [
                     "EU_EXPORT_LLM_MODEL",
                     "EU_EXPORT_GOOGLE_AI_STUDIO_MODEL",
@@ -172,7 +203,7 @@ def _BuildOpenAiRuntimeConfig(
             endpointUrl=(
                 _ReadConfigOrEnvString(
                     llmConfig.endpoint_url,
-                    envValues,
+                    configEnvValues,
                     [
                         "EU_EXPORT_LLM_ENDPOINT_URL",
                         "EU_EXPORT_GOOGLE_AI_STUDIO_ENDPOINT_URL",
@@ -181,23 +212,20 @@ def _BuildOpenAiRuntimeConfig(
                 or DEFAULT_GOOGLE_AI_STUDIO_ENDPOINT_URL
             ),
             extraOptions=extraOptions,
+            apiKey=apiKey,
         )
 
     extraOptions["chat_completions_path"] = _ReadConfigOrEnvString(
         llmConfig.chat_completions_path,
-        envValues,
+        configEnvValues,
         ["EU_EXPORT_LLM_CHAT_COMPLETIONS_PATH"],
     ) or DEFAULT_OPENAI_CHAT_COMPLETIONS_PATH
-
-    apiKey = _ReadFirstEnvValue(envValues, HOSTED_LLM_API_KEY_ENV_NAMES)
-    if apiKey is not None:
-        extraOptions["api_key"] = apiKey
 
     return LlmRuntimeConfig(
         runtimeKind=LlmRuntimeKind.OPENAI,
         modelName=_ReadConfigOrEnvString(
             llmConfig.model,
-            envValues,
+            configEnvValues,
             [
                 "EU_EXPORT_LLM_MODEL",
                 "EU_EXPORT_OPENAI_MODEL",
@@ -206,7 +234,7 @@ def _BuildOpenAiRuntimeConfig(
         endpointUrl=(
             _ReadConfigOrEnvString(
                 llmConfig.endpoint_url,
-                envValues,
+                configEnvValues,
                 [
                     "EU_EXPORT_LLM_ENDPOINT_URL",
                     "EU_EXPORT_OPENAI_ENDPOINT_URL",
@@ -215,32 +243,70 @@ def _BuildOpenAiRuntimeConfig(
             or DEFAULT_OPENAI_ENDPOINT_URL
         ),
         extraOptions=extraOptions,
+        apiKey=apiKey,
+    )
+
+
+def _BuildAnthropicRuntimeConfig(
+    llmConfig: LlmAppConfig,
+    configEnvValues: Mapping[str, str],
+    secretEnvValues: Mapping[str, str],
+) -> LlmRuntimeConfig:
+    extraOptions = _BuildCommonExtraOptions(llmConfig, configEnvValues)
+    extraOptions["provider"] = "anthropic"
+    extraOptions["messages_path"] = _ReadConfigOrEnvString(
+        llmConfig.chat_completions_path,
+        configEnvValues,
+        ["EU_EXPORT_LLM_CHAT_COMPLETIONS_PATH"],
+    ) or DEFAULT_ANTHROPIC_MESSAGES_PATH
+    apiKey = _ReadConfiguredApiKey(
+        extraOptions,
+        llmConfig,
+        secretEnvValues,
+        DEFAULT_ANTHROPIC_API_KEY_ENV_NAMES,
+    )
+    return LlmRuntimeConfig(
+        runtimeKind=LlmRuntimeKind.ANTHROPIC,
+        modelName=_ReadConfigOrEnvString(
+            llmConfig.model,
+            configEnvValues,
+            ["EU_EXPORT_LLM_MODEL", "EU_EXPORT_ANTHROPIC_MODEL"],
+        ),
+        endpointUrl=(
+            _ReadConfigOrEnvString(
+                llmConfig.endpoint_url,
+                configEnvValues,
+                ["EU_EXPORT_LLM_ENDPOINT_URL", "EU_EXPORT_ANTHROPIC_ENDPOINT_URL"],
+            )
+            or DEFAULT_ANTHROPIC_ENDPOINT_URL
+        ),
+        extraOptions=extraOptions,
+        apiKey=apiKey,
     )
 
 
 def _BuildApiRuntimeConfig(
     runtimeKind: LlmRuntimeKind,
     llmConfig: LlmAppConfig,
-    envValues: Mapping[str, str],
+    configEnvValues: Mapping[str, str],
+    secretEnvValues: Mapping[str, str],
     defaultEndpointUrl: str,
     endpointEnvNames: list[str],
     defaultChatCompletionsPath: Optional[str],
 ) -> LlmRuntimeConfig:
-    extraOptions = _BuildCommonExtraOptions(llmConfig, envValues)
+    extraOptions = _BuildCommonExtraOptions(llmConfig, configEnvValues)
     extraOptions["provider"] = runtimeKind.value
 
-    apiKey = _ReadFirstEnvValue(
-        envValues,
-        [
-            "EU_EXPORT_LLM_API_KEY",
-        ],
+    apiKey = _ReadConfiguredApiKey(
+        extraOptions,
+        llmConfig,
+        secretEnvValues,
+        ["EU_EXPORT_LLM_API_KEY"],
     )
-    if apiKey is not None:
-        extraOptions["api_key"] = apiKey
 
     chatCompletionsPath = _ReadConfigOrEnvString(
         llmConfig.chat_completions_path,
-        envValues,
+        configEnvValues,
         ["EU_EXPORT_LLM_CHAT_COMPLETIONS_PATH"],
     )
     if chatCompletionsPath is not None:
@@ -249,7 +315,7 @@ def _BuildApiRuntimeConfig(
         extraOptions["chat_completions_path"] = defaultChatCompletionsPath
 
     endpointUrl = _ReadFirstEnvValue(
-        envValues,
+        configEnvValues,
         [
             "EU_EXPORT_LLM_ENDPOINT_URL",
             *endpointEnvNames,
@@ -262,12 +328,31 @@ def _BuildApiRuntimeConfig(
         runtimeKind=runtimeKind,
         modelName=_ReadConfigOrEnvString(
             llmConfig.model,
-            envValues,
+            configEnvValues,
             ["EU_EXPORT_LLM_MODEL"],
         ),
         endpointUrl=endpointUrl or defaultEndpointUrl,
         extraOptions=extraOptions,
+        apiKey=apiKey,
     )
+
+
+def _ReadConfiguredApiKey(
+    extraOptions: Dict[str, object],
+    llmConfig: LlmAppConfig,
+    envValues: Mapping[str, str],
+    fallbackEnvNames: list[str],
+) -> Optional[str]:
+    configuredEnvName = _ReadConfigString(llmConfig.api_key_env)
+    apiKeyEnvNames = (
+        [configuredEnvName]
+        if configuredEnvName is not None
+        else fallbackEnvNames
+    )
+    apiKey = _ReadFirstEnvValue(envValues, apiKeyEnvNames)
+    if configuredEnvName is not None:
+        extraOptions["api_key_env_name"] = configuredEnvName
+    return apiKey
 
 
 def _ReadMergedEnvValues(

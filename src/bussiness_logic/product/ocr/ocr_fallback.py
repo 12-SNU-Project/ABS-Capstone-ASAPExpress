@@ -1,5 +1,6 @@
 """Product detail image OCR fallback runner."""
 
+import json
 import re
 from pathlib import Path
 from time import perf_counter
@@ -72,6 +73,10 @@ class ProductOcrImageResult(BaseModel):
     structuredOcr: ProductStructuredOcrResult = Field(
         default_factory=ProductStructuredOcrResult,
         alias="structured_ocr",
+    )
+    tableEvidenceArtifactPath: Optional[str] = Field(
+        default=None,
+        alias="table_evidence_artifact_path",
     )
     processingTimes: Dict[str, float] = Field(
         default_factory=dict,
@@ -180,6 +185,9 @@ class ProductOcrArtifactStore:
                 continue
             if artifactPath.is_file():
                 artifactPath.unlink(missing_ok=True)
+        for artifactPath in artifactDirectory.glob("ocr-table-evidence-*.json"):
+            if artifactPath.is_file():
+                artifactPath.unlink(missing_ok=True)
         return artifactDirectory
 
     def ReadReusableImage(
@@ -228,6 +236,42 @@ class ProductOcrArtifactStore:
             imageUrl,
         )
         artifactPath.write_bytes(imageBytes)
+        return artifactPath
+
+    def WriteTableEvidence(
+        self,
+        artifactDirectory: Path,
+        imageIndex: int,
+        imageUrl: str,
+        structuredOcrResult: ProductStructuredOcrResult,
+    ) -> Optional[Path]:
+        tablesWithEvidence = [
+            table
+            for table in structuredOcrResult.tables
+            if table.tableRecognitionEvidence is not None
+        ]
+        if not tablesWithEvidence:
+            return None
+
+        artifactPath = artifactDirectory / (
+            "ocr-table-evidence-{0:02d}.json".format(imageIndex)
+        )
+        artifactPath.write_text(
+            json.dumps(
+                {
+                    "image_index": imageIndex,
+                    "image_url": imageUrl,
+                    "tables": [
+                        table.model_dump(mode="json", by_alias=True)
+                        for table in tablesWithEvidence
+                    ],
+                    "warnings": structuredOcrResult.warnings,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         return artifactPath
 
     def ReplaceImageWithInformativeTiles(
@@ -478,6 +522,12 @@ class ProductOcrFallbackRunner:
                         screeningSummary=screeningSummary,
                         roiBounds=roiBounds,
                     )
+            tableEvidenceArtifactPath = self._artifactStore.WriteTableEvidence(
+                artifactDirectory=artifactDirectory,
+                imageIndex=imageIndex,
+                imageUrl=imageUrl,
+                structuredOcrResult=structuredOcrResult,
+            )
             ocrText = structuredOcrResult.text
             if (
                 not isinstance(ocrText, str)
@@ -491,6 +541,11 @@ class ProductOcrFallbackRunner:
                     imagePath=str(artifactPath) if artifactPath is not None else None,
                     ocrText=ocrText if isinstance(ocrText, str) else "",
                     structuredOcr=structuredOcrResult,
+                    tableEvidenceArtifactPath=(
+                        str(tableEvidenceArtifactPath)
+                        if tableEvidenceArtifactPath is not None
+                        else None
+                    ),
                     processingTimes={
                         key: round(value, 3)
                         for key, value in processingTimes.items()
@@ -517,6 +572,11 @@ class ProductOcrFallbackRunner:
                     imagePath=str(artifactPath) if artifactPath is not None else None,
                     ocrText=ocrText,
                     structuredOcr=structuredOcrResult,
+                    tableEvidenceArtifactPath=(
+                        str(tableEvidenceArtifactPath)
+                        if tableEvidenceArtifactPath is not None
+                        else None
+                    ),
                     processingTimes={
                         key: round(value, 3)
                         for key, value in processingTimes.items()
@@ -530,6 +590,11 @@ class ProductOcrFallbackRunner:
                 imagePaths=[str(path) for path in artifactPaths],
                 ocrText=ocrText,
                 structuredOcr=structuredOcrResult,
+                tableEvidenceArtifactPath=(
+                    str(tableEvidenceArtifactPath)
+                    if tableEvidenceArtifactPath is not None
+                    else None
+                ),
                 processingTimes={
                     key: round(value, 3)
                     for key, value in processingTimes.items()

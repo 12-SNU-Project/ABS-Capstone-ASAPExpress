@@ -28,6 +28,23 @@ class ProductOcrTextRegion:
     bounds: Tuple[int, int, int, int]
 
 
+class ProductTableRecognitionEvidence(BaseModel):
+    """TableRecognitionV2가 반환한 비교용 표 evidence."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    sourceName: str = Field(
+        default="table_recognition_v2",
+        alias="source_name",
+    )
+    html: str = ""
+    cellTexts: List[str] = Field(default_factory=list, alias="cell_texts")
+    cellBounds: List[Tuple[float, float, float, float]] = Field(
+        default_factory=list,
+        alias="cell_bounds",
+    )
+
+
 class ProductOcrTableResult(BaseModel):
     """구조 OCR에서 추출한 단일 표 결과."""
 
@@ -44,6 +61,10 @@ class ProductOcrTableResult(BaseModel):
     validationIssues: List[str] = Field(
         default_factory=list,
         alias="validation_issues",
+    )
+    tableRecognitionEvidence: Optional[ProductTableRecognitionEvidence] = Field(
+        default=None,
+        alias="table_recognition_evidence",
     )
 
 
@@ -388,8 +409,8 @@ class PaddleOcrEngine(ProductOcrEngine):
             self._CollectTextRegionsFromMapping(nestedValue, regions)
 
 
-class PaddleOcrVlEngine(ProductOcrEngine):
-    """PaddleOCR-VL 표 이해 결과를 TableRecognitionV2로 검증한다."""
+class ProductStructuredOcrEngine(ProductOcrEngine):
+    """교체 가능한 VLM 표 이해 결과를 TableRecognitionV2로 검증한다."""
 
     def __init__(
         self,
@@ -445,7 +466,7 @@ class PaddleOcrVlEngine(ProductOcrEngine):
                 rawText, tableBlocks = self._ExtractVlTile(tile)
             except Exception as error:
                 warnings.append(
-                    "paddleocr_vl_failed tile={0}: {1}".format(
+                    "structured_vlm_failed tile={0}: {1}".format(
                         tile.tileIndex or 1,
                         error,
                     )
@@ -501,7 +522,7 @@ class PaddleOcrVlEngine(ProductOcrEngine):
             rawText,
             rawTileTexts,
             fallbackReason=(
-                "paddleocr_vl_failed"
+                "structured_vlm_failed"
                 if successfulVlTileCount == 0
                 else "no_table_detected"
             ),
@@ -575,6 +596,9 @@ class PaddleOcrVlEngine(ProductOcrEngine):
         blockTexts: List[str] = []
         for result in output:
             payload = self._ReadResultPayload(result)
+            bridgeRawText = payload.get("bridge_raw_text")
+            if isinstance(bridgeRawText, str) and bridgeRawText.strip():
+                blockTexts.append(bridgeRawText.strip())
             markdownText = self._ReadMarkdownText(result)
             if markdownText:
                 markdownTexts.append(markdownText)
@@ -627,7 +651,7 @@ class PaddleOcrVlEngine(ProductOcrEngine):
         vlHtml = tableBlock.get("block_content")
         if not isinstance(vlHtml, str) or not self._LooksLikeTableHtml(vlHtml):
             return None, None, (
-                "paddleocr_vl_table_invalid tile={0} table={1}".format(
+                "structured_vlm_table_invalid tile={0} table={1}".format(
                     tile.tileIndex or 1,
                     tableIndex,
                 )
@@ -635,20 +659,31 @@ class PaddleOcrVlEngine(ProductOcrEngine):
         cropResult = self._BuildTableCrop(tile, tableBlock.get("block_bbox"))
         if cropResult is None:
             return None, None, (
-                "paddleocr_vl_table_bbox_invalid tile={0} table={1}".format(
+                "structured_vlm_table_bbox_invalid tile={0} table={1}".format(
                     tile.tileIndex or 1,
                     tableIndex,
                 )
             )
         tableCrop, originalBounds = cropResult
         cellTexts = self._ExtractTextsFromHtml(vlHtml)
-        sourceName = "paddleocr_vl_v1_6"
+        rawSourceName = tableBlock.get("source_name")
+        sourceName = (
+            rawSourceName.strip()
+            if isinstance(rawSourceName, str) and rawSourceName.strip()
+            else "paddleocr_vl_v1_6"
+        )
         validationStatus = "unverified"
         validationIssues: List[str] = []
         validationWarning: Optional[str] = None
+        tableRecognitionEvidence: Optional[ProductTableRecognitionEvidence] = None
         semanticIssues = self._ValidateNutritionUnits(vlHtml)
+        if tableBlock.get("bounds_inferred") is True:
+            semanticIssues.append("vlm_table_bounds_inferred_from_tile")
         try:
             verifiedPayload = self._ReadVerifiedTablePayload(tableCrop)
+            tableRecognitionEvidence = self._BuildTableRecognitionEvidence(
+                verifiedPayload,
+            )
             validationError = self._ValidateVerifiedTablePayload(
                 verifiedPayload,
                 tableCrop,
@@ -669,7 +704,9 @@ class PaddleOcrVlEngine(ProductOcrEngine):
                     )
                 else:
                     validationStatus = "verified"
-                    sourceName = "paddleocr_vl_v1_6+table_recognition_v2_verified"
+                    sourceName = "{0}+table_recognition_v2_verified".format(
+                        sourceName,
+                    )
             else:
                 validationIssues = [validationError, *semanticIssues]
                 validationWarning = self._BuildValidationWarning(
@@ -696,7 +733,33 @@ class PaddleOcrVlEngine(ProductOcrEngine):
             plainText=self._BuildPlainTextFromHtml(vlHtml, cellTexts),
             validationStatus=validationStatus,
             validationIssues=validationIssues,
+            tableRecognitionEvidence=tableRecognitionEvidence,
         ), originalBounds, validationWarning
+
+    def _BuildTableRecognitionEvidence(
+        self,
+        payload: Mapping[str, object],
+    ) -> ProductTableRecognitionEvidence:
+        rawCellBounds = payload.get("cell_box_list")
+        cellBounds: List[Tuple[float, float, float, float]] = []
+        try:
+            cellBoundValues = (
+                []
+                if isinstance(rawCellBounds, (str, bytes, Mapping))
+                else list(rawCellBounds)  # type: ignore[arg-type]
+            )
+        except TypeError:
+            cellBoundValues = []
+        for rawCellBound in cellBoundValues:
+            bounds = self._ReadBox(rawCellBound)
+            if bounds is not None:
+                cellBounds.append(bounds)
+        html = payload.get("pred_html")
+        return ProductTableRecognitionEvidence(
+            html=html if isinstance(html, str) else "",
+            cellTexts=self._ReadCellTexts(payload),
+            cellBounds=cellBounds,
+        )
 
     def _BuildTableCrop(
         self,
@@ -1008,10 +1071,6 @@ class PaddleOcrVlEngine(ProductOcrEngine):
                 )
             )
         return "\n\n".join(tableTexts)
-
-
-PaddleStructureOcrEngine = PaddleOcrVlEngine
-
 
 class _HtmlTableExtractor(HTMLParser):
     def __init__(self) -> None:

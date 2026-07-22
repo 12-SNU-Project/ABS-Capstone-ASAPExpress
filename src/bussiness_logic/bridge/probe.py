@@ -13,6 +13,7 @@ from bussiness_logic.bridge.schema import (
 DEFAULT_OMLX_ENDPOINT_URL = "http://127.0.0.1:8000"
 DEFAULT_OLLAMA_ENDPOINT_URL = "http://localhost:11434"
 DEFAULT_OPENAI_ENDPOINT_URL = "https://api.openai.com"
+DEFAULT_ANTHROPIC_ENDPOINT_URL = "https://api.anthropic.com"
 PRIMARY_LLM_API_KEY_ENV_NAME = "EU_EXPORT_LLM_API_KEY"
 HOSTED_LLM_API_KEY_ENV_NAMES = [
     PRIMARY_LLM_API_KEY_ENV_NAME,
@@ -22,6 +23,11 @@ HOSTED_LLM_API_KEY_ENV_NAMES = [
     "GEMINI_API_KEY",
 ]
 DEFAULT_OPENAI_API_KEY_ENV_NAMES = HOSTED_LLM_API_KEY_ENV_NAMES
+DEFAULT_ANTHROPIC_API_KEY_ENV_NAMES = [
+    PRIMARY_LLM_API_KEY_ENV_NAME,
+    "EU_EXPORT_ANTHROPIC_API_KEY",
+    "ANTHROPIC_API_KEY",
+]
 
 
 class UnsupportedRuntimeProbeError(RuntimeError):
@@ -54,6 +60,15 @@ def ProbeRuntimeDependency(
             DEFAULT_OPENAI_API_KEY_ENV_NAMES,
             "LLM API key setting is available.",
             "LLM API key setting is missing.",
+        )
+
+    if runtimeConfig.runtimeKind == LlmRuntimeKind.ANTHROPIC:
+        return _ProbeApiKeyRuntime(
+            runtimeConfig,
+            DEFAULT_ANTHROPIC_ENDPOINT_URL,
+            DEFAULT_ANTHROPIC_API_KEY_ENV_NAMES,
+            "Anthropic API key setting is available.",
+            "Anthropic API key setting is missing.",
         )
 
     raise UnsupportedRuntimeProbeError(
@@ -92,9 +107,9 @@ def _ProbeApiKeyRuntime(
         endpointUrl=endpointUrl,
         limitations=[
             "Set {0} in .env for hosted LLM APIs.".format(
-                PRIMARY_LLM_API_KEY_ENV_NAME,
+                runtimeConfig.extraOptions.get("api_key_env_name")
+                or PRIMARY_LLM_API_KEY_ENV_NAME,
             ),
-            "Alternatively pass extraOptions['api_key'] in LlmRuntimeConfig.",
         ],
     )
 
@@ -133,9 +148,13 @@ def _ReadApiKey(
     runtimeConfig: LlmRuntimeConfig,
     apiKeyEnvNames: List[str],
 ) -> Optional[str]:
-    optionValue = runtimeConfig.extraOptions.get("api_key")
-    if isinstance(optionValue, str) and optionValue.strip() != "":
-        return optionValue.strip()
+    if runtimeConfig.apiKey is not None:
+        return runtimeConfig.apiKey.get_secret_value()
+
+    configuredEnvName = runtimeConfig.extraOptions.get("api_key_env_name")
+    if isinstance(configuredEnvName, str) and configuredEnvName.strip() != "":
+        envValue = os.environ.get(configuredEnvName.strip())
+        return envValue.strip() if envValue is not None and envValue.strip() else None
 
     for envName in apiKeyEnvNames:
         envValue = os.environ.get(envName)

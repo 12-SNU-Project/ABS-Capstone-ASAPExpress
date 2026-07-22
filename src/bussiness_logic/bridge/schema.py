@@ -3,7 +3,7 @@
 from enum import Enum
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from bussiness_logic.utils.json_types import JsonObject
 
@@ -23,6 +23,7 @@ class LlmRuntimeKind(str, Enum):
     OMLX = "omlx"
     OLLAMA = "ollama"
     OPENAI = "openai"
+    ANTHROPIC = "anthropic"
 
 
 class LlmResponseFormat(str, Enum):
@@ -81,6 +82,17 @@ class LlmGenerationOptions(BaseModel):
     )
 
 
+class LlmImageInput(BaseModel):
+    """멀티모달 runtime 요청에 전달하는 단일 이미지."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    mediaType: str = Field(alias="media_type")
+    imageBytes: bytes = Field(alias="image_bytes", exclude=True, repr=False)
+    sourceRef: Optional[str] = Field(default=None, alias="source_ref")
+    detail: str = "auto"
+
+
 class LlmRuntimeConfig(BaseModel):
     """adapter에 전달할 런타임 설정."""
 
@@ -90,6 +102,12 @@ class LlmRuntimeConfig(BaseModel):
     modelName: Optional[str] = Field(default=None, alias="model_name")
     executablePath: Optional[str] = Field(default=None, alias="executable_path")
     endpointUrl: Optional[str] = Field(default=None, alias="endpoint_url")
+    apiKey: Optional[SecretStr] = Field(
+        default=None,
+        alias="api_key",
+        exclude=True,
+        repr=False,
+    )
     extraOptions: Dict[str, object] = Field(default_factory=dict, alias="extra_options")
 
 
@@ -118,6 +136,10 @@ class LlmRequest(BaseModel):
     userPrompt: str = Field(alias="user_prompt")
     systemPrompt: Optional[str] = Field(default=None, alias="system_prompt")
     contextChunks: List[str] = Field(default_factory=list, alias="context_chunks")
+    imageInputs: List[LlmImageInput] = Field(
+        default_factory=list,
+        alias="image_inputs",
+    )
     responseFormat: LlmResponseFormat = Field(
         default=LlmResponseFormat.TEXT,
         alias="response_format",

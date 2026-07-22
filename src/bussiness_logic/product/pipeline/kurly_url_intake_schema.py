@@ -244,6 +244,10 @@ class KurlyUrlIntakeResult(BaseModel):
                 len(imageResult.structuredOcr.tables)
                 for imageResult in successfulImageResults
             ),
+            "table_evidence_artifact_count": sum(
+                imageResult.tableEvidenceArtifactPath is not None
+                for imageResult in self.ocrImageResults
+            ),
             "raw_tile_text_count": sum(
                 len(imageResult.structuredOcr.rawTileTexts)
                 for imageResult in successfulImageResults
@@ -288,6 +292,9 @@ class KurlyUrlIntakeResult(BaseModel):
                             else None
                         ),
                         "image_paths": list(imageResult.imagePaths),
+                        "table_evidence_artifact_path": (
+                            imageResult.tableEvidenceArtifactPath
+                        ),
                         "text_length": len(imageResult.ocrText),
                         "used_structured_tables": (
                             imageResult.structuredOcr.usedStructuredTables

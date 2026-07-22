@@ -1,5 +1,6 @@
 """LLM runtime별 generate callable 구현."""
 
+import base64
 import json
 import os
 from http.client import HTTPException
@@ -10,6 +11,8 @@ from urllib.request import Request, urlopen
 from pydantic import BaseModel
 
 from bussiness_logic.bridge.probe import (
+    DEFAULT_ANTHROPIC_API_KEY_ENV_NAMES,
+    DEFAULT_ANTHROPIC_ENDPOINT_URL,
     DEFAULT_OPENAI_API_KEY_ENV_NAMES,
     DEFAULT_OPENAI_ENDPOINT_URL,
     DEFAULT_OLLAMA_ENDPOINT_URL,
@@ -30,6 +33,8 @@ from bussiness_logic.bridge.schema import (
 
 DEFAULT_HTTP_TIMEOUT_SECONDS = 120
 DEFAULT_OPENAI_CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
+DEFAULT_ANTHROPIC_MESSAGES_PATH = "/v1/messages"
+DEFAULT_ANTHROPIC_VERSION = "2023-06-01"
 
 
 class RuntimeGenerationError(RuntimeError):
@@ -47,6 +52,7 @@ def GenerateRuntimeResponse(
         LlmRuntimeKind.OMLX: _GenerateWithOpenAiCompatibleRuntime,
         LlmRuntimeKind.OLLAMA: _GenerateWithOllamaRuntime,
         LlmRuntimeKind.OPENAI: _GenerateWithOpenAiRuntime,
+        LlmRuntimeKind.ANTHROPIC: _GenerateWithAnthropicRuntime,
     }
     generator = generators.get(runtimeDescriptor.runtimeKind)
     if generator is not None:
@@ -254,6 +260,10 @@ def _GenerateWithOpenAiCompatibleRuntime(
     runtimeConfig: LlmRuntimeConfig,
     request: LlmRequest,
 ) -> LlmResponse:
+    if request.imageInputs:
+        raise RuntimeGenerationError(
+            "Image inputs require an OpenAI or Anthropic hosted runtime."
+        )
     endpointUrl = _BuildEndpointUrl(
         runtimeDescriptor.endpointUrl or DEFAULT_OMLX_ENDPOINT_URL,
         _ReadStringOption(
@@ -301,6 +311,10 @@ def _GenerateWithOllamaRuntime(
     runtimeConfig: LlmRuntimeConfig,
     request: LlmRequest,
 ) -> LlmResponse:
+    if request.imageInputs:
+        raise RuntimeGenerationError(
+            "Image inputs are not implemented for the Ollama bridge."
+        )
     endpointUrl = _BuildEndpointUrl(
         runtimeDescriptor.endpointUrl or DEFAULT_OLLAMA_ENDPOINT_URL,
         "/api/generate",
@@ -328,6 +342,44 @@ def _GenerateWithOllamaRuntime(
         rawResponse=responseData,
         limitations=[
             "LLM output is draft reasoning and must not be treated as official determination.",
+        ],
+    )
+
+
+def _GenerateWithAnthropicRuntime(
+    runtimeDescriptor: RuntimeDescriptor,
+    runtimeConfig: LlmRuntimeConfig,
+    request: LlmRequest,
+) -> LlmResponse:
+    endpointUrl = _BuildEndpointUrl(
+        runtimeDescriptor.endpointUrl or DEFAULT_ANTHROPIC_ENDPOINT_URL,
+        _ReadStringOption(
+            runtimeConfig,
+            "messages_path",
+            DEFAULT_ANTHROPIC_MESSAGES_PATH,
+        ),
+    )
+    responseData = _PostJson(
+        endpointUrl,
+        _BuildAnthropicPayload(runtimeConfig, request),
+        _ReadTimeoutSeconds(runtimeConfig),
+        _ReadAnthropicHeaders(runtimeConfig),
+    )
+    providerFinishReason = _ReadOptionalString(responseData, "stop_reason")
+    responseModelName = _ReadOptionalString(responseData, "model")
+    return LlmResponse(
+        generatedText=_ExtractAnthropicText(responseData),
+        runtimeKind=runtimeConfig.runtimeKind,
+        modelName=responseModelName or runtimeConfig.modelName,
+        responseFormat=request.responseFormat,
+        finishReason=_NormalizeFinishReason(providerFinishReason),
+        providerFinishReason=providerFinishReason,
+        tokenUsage=_ExtractAnthropicTokenUsage(responseData),
+        responseId=_ExtractResponseId(responseData),
+        runtimePath="anthropic_http_messages",
+        rawResponse=responseData,
+        limitations=[
+            "Anthropic API output is draft reasoning and must not be treated as official determination.",
         ],
     )
 
@@ -377,6 +429,31 @@ def _BuildOpenAiChatPayload(
     if reasoningEffort is not None:
         payload["reasoning_effort"] = reasoningEffort
 
+    return payload
+
+
+def _BuildAnthropicPayload(
+    runtimeConfig: LlmRuntimeConfig,
+    request: LlmRequest,
+) -> Dict[str, object]:
+    payload: Dict[str, object] = {
+        "model": _ReadModelName(runtimeConfig),
+        "max_tokens": request.generationOptions.maxTokens or 4096,
+        "messages": [
+            {
+                "role": "user",
+                "content": _BuildAnthropicUserContent(request),
+            }
+        ],
+    }
+    systemContent = _BuildSystemContent(request)
+    if systemContent:
+        payload["system"] = systemContent
+    payload["temperature"] = request.generationOptions.temperature
+    if request.generationOptions.topP is not None:
+        payload["top_p"] = request.generationOptions.topP
+    if request.generationOptions.stopSequences:
+        payload["stop_sequences"] = list(request.generationOptions.stopSequences)
     return payload
 
 
@@ -442,14 +519,64 @@ def _BuildOllamaPayload(
     return payload
 
 
-def _BuildChatMessages(request: LlmRequest) -> List[Dict[str, str]]:
-    messages: List[Dict[str, str]] = []
+def _BuildChatMessages(request: LlmRequest) -> List[Dict[str, object]]:
+    messages: List[Dict[str, object]] = []
     systemContent = _BuildSystemContent(request)
     if systemContent != "":
         messages.append({"role": "system", "content": systemContent})
 
-    messages.append({"role": "user", "content": request.userPrompt})
+    if request.imageInputs:
+        content: List[Dict[str, object]] = [
+            {"type": "text", "text": request.userPrompt},
+        ]
+        content.extend(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": _BuildImageDataUrl(
+                        imageInput.mediaType,
+                        imageInput.imageBytes,
+                    ),
+                    "detail": imageInput.detail,
+                },
+            }
+            for imageInput in request.imageInputs
+        )
+        messages.append({"role": "user", "content": content})
+    else:
+        messages.append({"role": "user", "content": request.userPrompt})
     return messages
+
+
+def _BuildAnthropicUserContent(request: LlmRequest) -> List[Dict[str, object]]:
+    content = [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": imageInput.mediaType,
+                "data": base64.b64encode(imageInput.imageBytes).decode("ascii"),
+            },
+        }
+        for imageInput in request.imageInputs
+    ]
+    userPrompt = request.userPrompt
+    if request.responseFormat == LlmResponseFormat.JSON_SCHEMA:
+        userPrompt = "{0}\n\nReturn JSON matching this schema:\n{1}".format(
+            userPrompt,
+            json.dumps(_ReadResponseSchema(request), ensure_ascii=False),
+        )
+    elif request.responseFormat == LlmResponseFormat.JSON_OBJECT:
+        userPrompt = "{0}\n\nReturn only one JSON object.".format(userPrompt)
+    content.append({"type": "text", "text": userPrompt})
+    return content
+
+
+def _BuildImageDataUrl(mediaType: str, imageBytes: bytes) -> str:
+    return "data:{0};base64,{1}".format(
+        mediaType,
+        base64.b64encode(imageBytes).decode("ascii"),
+    )
 
 
 def _BuildSystemContent(request: LlmRequest) -> str:
@@ -543,8 +670,8 @@ def _BuildOpenAiSdkClient(
     apiKey = _ReadApiKey(runtimeConfig, DEFAULT_OPENAI_API_KEY_ENV_NAMES)
     if apiKey is None:
         raise RuntimeGenerationError(
-            "Hosted LLM runtime generation requires {0} or "
-            "extraOptions['api_key'].".format(PRIMARY_LLM_API_KEY_ENV_NAME)
+            "Hosted LLM runtime generation requires {0} or a configured "
+            "runtime API key.".format(PRIMARY_LLM_API_KEY_ENV_NAME)
         )
 
     sdkBaseUrl = _BuildOpenAiSdkBaseUrl(runtimeDescriptor, runtimeConfig)
@@ -748,6 +875,19 @@ def _ExtractOllamaProviderFinishReason(
     return None
 
 
+def _ExtractAnthropicText(responseData: Dict[str, object]) -> str:
+    content = responseData.get("content")
+    if not isinstance(content, list):
+        return ""
+    return "\n".join(
+        str(block.get("text"))
+        for block in content
+        if isinstance(block, dict)
+        and block.get("type") == "text"
+        and block.get("text") is not None
+    )
+
+
 def _NormalizeFinishReason(
     providerFinishReason: str | None,
 ) -> LlmFinishReason:
@@ -755,7 +895,7 @@ def _NormalizeFinishReason(
         return LlmFinishReason.UNKNOWN
 
     normalizedReason = providerFinishReason.strip().lower()
-    if normalizedReason in {"stop", "complete", "completed"}:
+    if normalizedReason in {"stop", "complete", "completed", "end_turn"}:
         return LlmFinishReason.STOP
     if normalizedReason in {"length", "max_tokens", "max_token", "token_limit"}:
         return LlmFinishReason.LENGTH
@@ -793,6 +933,25 @@ def _ExtractOllamaTokenUsage(responseData: Dict[str, object]) -> LlmTokenUsage:
     )
 
 
+def _ExtractAnthropicTokenUsage(
+    responseData: Dict[str, object],
+) -> LlmTokenUsage:
+    usage = responseData.get("usage")
+    if not isinstance(usage, dict):
+        return LlmTokenUsage()
+    inputTokens = _ReadOptionalInt(usage, "input_tokens")
+    outputTokens = _ReadOptionalInt(usage, "output_tokens")
+    return LlmTokenUsage(
+        inputTokens=inputTokens,
+        outputTokens=outputTokens,
+        totalTokens=(
+            inputTokens + outputTokens
+            if inputTokens is not None and outputTokens is not None
+            else None
+        ),
+    )
+
+
 def _ExtractResponseId(responseData: Dict[str, object]) -> str | None:
     responseId = responseData.get("id")
     if isinstance(responseId, str) and responseId.strip() != "":
@@ -808,6 +967,16 @@ def _ReadOptionalInt(data: Dict[str, object], fieldName: str) -> int | None:
     if isinstance(value, int):
         return value
 
+    return None
+
+
+def _ReadOptionalString(
+    data: Dict[str, object],
+    fieldName: str,
+) -> str | None:
+    value = data.get(fieldName)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
     return None
 
 
@@ -851,8 +1020,8 @@ def _ReadTimeoutSeconds(runtimeConfig: LlmRuntimeConfig) -> int:
 
 def _ReadHeaders(runtimeConfig: LlmRuntimeConfig) -> Dict[str, str]:
     headers: Dict[str, str] = {}
-    apiKey = runtimeConfig.extraOptions.get("api_key")
-    if isinstance(apiKey, str) and apiKey.strip() != "":
+    apiKey = _ReadApiKey(runtimeConfig, [PRIMARY_LLM_API_KEY_ENV_NAME])
+    if apiKey is not None:
         headers["Authorization"] = "Bearer {0}".format(apiKey)
         headers["x-api-key"] = apiKey
 
@@ -940,8 +1109,8 @@ def _ReadOpenAiHeaders(runtimeConfig: LlmRuntimeConfig) -> Dict[str, str]:
     apiKey = _ReadApiKey(runtimeConfig, DEFAULT_OPENAI_API_KEY_ENV_NAMES)
     if apiKey is None:
         raise RuntimeGenerationError(
-            "Hosted LLM runtime generation requires {0} or "
-            "extraOptions['api_key'].".format(PRIMARY_LLM_API_KEY_ENV_NAME)
+            "Hosted LLM runtime generation requires {0} or a configured "
+            "runtime API key.".format(PRIMARY_LLM_API_KEY_ENV_NAME)
         )
 
     return {
@@ -949,13 +1118,29 @@ def _ReadOpenAiHeaders(runtimeConfig: LlmRuntimeConfig) -> Dict[str, str]:
     }
 
 
+def _ReadAnthropicHeaders(runtimeConfig: LlmRuntimeConfig) -> Dict[str, str]:
+    apiKey = _ReadApiKey(runtimeConfig, DEFAULT_ANTHROPIC_API_KEY_ENV_NAMES)
+    if apiKey is None:
+        raise RuntimeGenerationError(
+            "Anthropic runtime generation requires its configured API key."
+        )
+    return {
+        "x-api-key": apiKey,
+        "anthropic-version": DEFAULT_ANTHROPIC_VERSION,
+    }
+
+
 def _ReadApiKey(
     runtimeConfig: LlmRuntimeConfig,
     apiKeyEnvNames: List[str],
 ) -> str | None:
-    optionValue = runtimeConfig.extraOptions.get("api_key")
-    if isinstance(optionValue, str) and optionValue.strip() != "":
-        return optionValue.strip()
+    if runtimeConfig.apiKey is not None:
+        return runtimeConfig.apiKey.get_secret_value()
+
+    configuredEnvName = runtimeConfig.extraOptions.get("api_key_env_name")
+    if isinstance(configuredEnvName, str) and configuredEnvName.strip() != "":
+        envValue = os.environ.get(configuredEnvName.strip())
+        return envValue.strip() if envValue is not None and envValue.strip() else None
 
     for envName in apiKeyEnvNames:
         envValue = os.environ.get(envName)

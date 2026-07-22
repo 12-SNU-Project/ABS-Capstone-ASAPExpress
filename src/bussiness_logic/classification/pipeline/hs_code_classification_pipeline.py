@@ -8,6 +8,7 @@ from bussiness_logic.input_process.components.evidence_intake import EvidenceInt
 from bussiness_logic.product.components.product_understanding import (
     ProductUnderstandingComponent,
 )
+from bussiness_logic.product.services.identity_hint_agent import IdentityHintAgent
 from bussiness_logic.classification.pipeline.raw_input import (
     BuildRawInputFromPreparedFacts,
 )
@@ -35,6 +36,17 @@ class _BuildClassificationRawInputStep:
 
 
 class HsCodeClassificationPipeline:
+    def __init__(
+        self,
+        *,
+        identityHintRuntimeAdapter: object | None = None,
+        selectionRuntimeAdapter: object | None = None,
+        validationRuntimeAdapter: object | None = None,
+    ) -> None:
+        self._identityHintRuntimeAdapter = identityHintRuntimeAdapter
+        self._selectionRuntimeAdapter = selectionRuntimeAdapter
+        self._validationRuntimeAdapter = validationRuntimeAdapter
+
     def Run(self, context: PipelineContext) -> None:
         PipelineStep(
             "build_raw_input",
@@ -58,7 +70,9 @@ class HsCodeClassificationPipeline:
             ),
             PipelineStep(
                 "product_understanding",
-                ProductUnderstandingComponent(),
+                ProductUnderstandingComponent(
+                    IdentityHintAgent(self._identityHintRuntimeAdapter),
+                ),
             ),
             PipelineStep(
                 "hs2_routing",
@@ -66,6 +80,9 @@ class HsCodeClassificationPipeline:
             ),
             PipelineStep(
                 "classification",
-                ClassificationComponent(),
+                ClassificationComponent(
+                    selectionRuntimeAdapter=self._selectionRuntimeAdapter,
+                    validationRuntimeAdapter=self._validationRuntimeAdapter,
+                ),
             ),
         )
