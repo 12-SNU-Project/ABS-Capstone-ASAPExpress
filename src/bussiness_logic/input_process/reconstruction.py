@@ -1212,6 +1212,8 @@ class ProductInputEvidenceBuilder:
     ) -> None:
         for imageIndex, imageResult in enumerate(ocrImageResults, start=1):
             for tableIndex, table in enumerate(imageResult.structuredOcr.tables, start=1):
+                if table.validationStatus != "verified":
+                    continue
                 self._AppendRecord(
                     records,
                     sourceType=VLM_TABLE_SOURCE_TYPE,

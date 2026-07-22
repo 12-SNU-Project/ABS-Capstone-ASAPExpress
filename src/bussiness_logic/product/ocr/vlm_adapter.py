@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import List, Optional, Tuple
+from html import escape
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,13 +20,23 @@ from bussiness_logic.bridge.schema import (
 )
 
 
+class VlmTableRow(BaseModel):
+    """VLM이 표에서 직접 전사한 단일 key/value 행."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    key: str = ""
+    values: List[str] = Field(default_factory=list)
+    sourceText: str = Field(default="", alias="source_text")
+
+
 class VlmTableBlock(BaseModel):
     """VLM이 이미지에서 직접 관측한 단일 표."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    html: str
-    bounds: Optional[Tuple[float, float, float, float]] = None
+    tableName: str = Field(default="", alias="table_name")
+    rows: List[VlmTableRow] = Field(default_factory=list)
 
 
 class VlmTableExtraction(BaseModel):
@@ -44,7 +55,7 @@ class BridgeVlmAdapter:
         self._runtimeAdapter = runtimeAdapter
 
     def predict(self, image: object) -> list[dict[str, object]]:
-        imageBytes, imageWidth, imageHeight = self._EncodeImage(image)
+        imageBytes = self._EncodeImage(image)
         response = self._runtimeAdapter.Generate(
             LlmRequest(
                 systemPrompt=(
@@ -53,12 +64,11 @@ class BridgeVlmAdapter:
                     "Return one JSON object matching the requested schema."
                 ),
                 userPrompt=(
-                    "Extract every visible table. Preserve row and column relations "
-                    "as minimal HTML table markup. bounds must be [left, top, right, "
-                    "bottom] pixel coordinates relative to this image. Put other "
-                    "visible text in raw_text. Return empty fields when not visible. "
-                    "Use exactly this shape: {\"raw_text\":\"\",\"tables\":["
-                    "{\"html\":\"<table>...</table>\",\"bounds\":[0,0,1,1]}]}."
+                    "Extract every visible table as ordered rows. Copy text exactly; "
+                    "do not normalize, correct, infer, or merge values. Each row must "
+                    "contain key, ordered values, and source_text copied from the "
+                    "visible row. Put visible non-table text in raw_text. Return empty "
+                    "fields when not visible."
                 ),
                 imageInputs=[
                     LlmImageInput(
@@ -83,17 +93,16 @@ class BridgeVlmAdapter:
         sourceName = self._BuildSourceName()
         tableBlocks = []
         for table in extraction.tables:
-            bounds = table.bounds
-            boundsInferred = bounds is None
-            if bounds is None:
-                bounds = (0.0, 0.0, float(imageWidth), float(imageHeight))
+            if not table.rows:
+                continue
             tableBlocks.append(
                 {
                     "block_label": "table",
-                    "block_content": table.html,
-                    "block_bbox": list(bounds),
+                    "block_content": self._BuildTableHtml(table),
+                    "block_bbox": None,
                     "source_name": sourceName,
-                    "bounds_inferred": boundsInferred,
+                    "table_name": table.tableName,
+                    "source_rows": [row.sourceText for row in table.rows],
                 }
             )
         return [
@@ -112,7 +121,22 @@ class BridgeVlmAdapter:
             runtimeConfig.modelName or "default",
         )
 
-    def _EncodeImage(self, image: object) -> tuple[bytes, int, int]:
+    def _BuildTableHtml(self, table: VlmTableBlock) -> str:
+        rows = []
+        for row in table.rows:
+            cells = "".join(
+                "<td>{0}</td>".format(escape(value))
+                for value in row.values
+            )
+            rows.append(
+                "<tr><th>{0}</th>{1}</tr>".format(
+                    escape(row.key),
+                    cells or "<td></td>",
+                )
+            )
+        return "<table>{0}</table>".format("".join(rows))
+
+    def _EncodeImage(self, image: object) -> bytes:
         try:
             import cv2
         except ImportError as error:
@@ -123,7 +147,7 @@ class BridgeVlmAdapter:
         encoded, buffer = cv2.imencode(".png", image)
         if not encoded:
             raise ValueError("VLM input image could not be encoded as PNG.")
-        return bytes(buffer), int(shape[1]), int(shape[0])
+        return bytes(buffer)
 
     def _ReadJsonObject(self, text: str) -> dict[str, object]:
         rawText = str(text or "").strip()

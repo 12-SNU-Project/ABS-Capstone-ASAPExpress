@@ -2,9 +2,11 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from html.parser import HTMLParser
 from math import ceil, floor
 import re
+import unicodedata
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
@@ -14,6 +16,9 @@ from bussiness_logic.product.ocr.ocr_image_tiling import (
     ProductOcrImageTilePlanner,
 )
 from bussiness_logic.utils import NormalizeWhiteSpace
+
+TABLE_GROUNDING_TEXT_COVERAGE_THRESHOLD = 0.72
+TABLE_GROUNDING_TOKEN_SIMILARITY_THRESHOLD = 0.8
 
 
 class ProductOcrError(RuntimeError):
@@ -45,6 +50,65 @@ class ProductTableRecognitionEvidence(BaseModel):
     )
 
 
+class ProductTableLayoutRegion(BaseModel):
+    """PP-Structure layout box와 실제 VLM crop 선택 결과."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    label: str = ""
+    score: Optional[float] = None
+    reportedBounds: Optional[Tuple[float, float, float, float]] = Field(
+        default=None,
+        alias="reported_bounds",
+    )
+    cropBounds: Optional[Tuple[int, int, int, int]] = Field(
+        default=None,
+        alias="crop_bounds",
+    )
+    selectedForVlm: bool = Field(default=False, alias="selected_for_vlm")
+    recognitionPayloadAvailable: bool = Field(
+        default=False,
+        alias="recognition_payload_available",
+    )
+    issues: List[str] = Field(default_factory=list)
+
+
+class ProductTableLayoutDiagnostic(BaseModel):
+    """타일 하나의 PP-Structure layout 관측 결과."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    tileIndex: Optional[int] = Field(default=None, alias="tile_index")
+    tileOriginX: int = Field(default=0, alias="tile_origin_x")
+    tileOriginY: int = Field(default=0, alias="tile_origin_y")
+    imageWidth: int = Field(alias="image_width")
+    imageHeight: int = Field(alias="image_height")
+    layoutPayloadAvailable: bool = Field(
+        default=False,
+        alias="layout_payload_available",
+    )
+    rawRegionCount: int = Field(default=0, alias="raw_region_count")
+    regions: List[ProductTableLayoutRegion] = Field(default_factory=list)
+    parseIssues: List[str] = Field(default_factory=list, alias="parse_issues")
+    directRecognitionAttempted: bool = Field(
+        default=False,
+        alias="direct_recognition_attempted",
+    )
+    directRecognitionPayloadCount: int = Field(
+        default=0,
+        alias="direct_recognition_payload_count",
+    )
+    directRecognitionTables: List[ProductTableRecognitionEvidence] = Field(
+        default_factory=list,
+        alias="direct_recognition_tables",
+    )
+    directRecognitionError: Optional[str] = Field(
+        default=None,
+        alias="direct_recognition_error",
+    )
+    error: Optional[str] = None
+
+
 class ProductOcrTableResult(BaseModel):
     """구조 OCR에서 추출한 단일 표 결과."""
 
@@ -52,11 +116,13 @@ class ProductOcrTableResult(BaseModel):
 
     tableIndex: int = Field(alias="table_index")
     sourceName: str = Field(default="structured_ocr", alias="source_name")
+    tableName: str = Field(default="", alias="table_name")
     pageIndex: Optional[int] = Field(default=None, alias="page_index")
     tileIndex: Optional[int] = Field(default=None, alias="tile_index")
     html: str = ""
     cellTexts: List[str] = Field(default_factory=list, alias="cell_texts")
     plainText: str = Field(default="", alias="plain_text")
+    sourceRows: List[str] = Field(default_factory=list, alias="source_rows")
     validationStatus: str = Field(default="unverified", alias="validation_status")
     validationIssues: List[str] = Field(
         default_factory=list,
@@ -65,6 +131,132 @@ class ProductOcrTableResult(BaseModel):
     tableRecognitionEvidence: Optional[ProductTableRecognitionEvidence] = Field(
         default=None,
         alias="table_recognition_evidence",
+    )
+
+
+class ProductOcrTableCandidate(BaseModel):
+    """VLM 원본 후보의 감사 snapshot과 승인 전 검증 상태."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    tableIndex: int = Field(alias="table_index")
+    sourceName: str = Field(default="structured_ocr", alias="source_name")
+    tableName: str = Field(default="", alias="table_name")
+    tileIndex: Optional[int] = Field(default=None, alias="tile_index")
+    html: str = ""
+    cellTexts: List[str] = Field(default_factory=list, alias="cell_texts")
+    plainText: str = Field(default="", alias="plain_text")
+    sourceRows: List[str] = Field(default_factory=list, alias="source_rows")
+    reportedBounds: Optional[Tuple[float, float, float, float]] = Field(
+        default=None,
+        alias="reported_bounds",
+    )
+    localizationStatus: str = Field(
+        default="unavailable",
+        alias="localization_status",
+    )
+    validationStatus: str = Field(default="candidate", alias="validation_status")
+    validationIssues: List[str] = Field(
+        default_factory=list,
+        alias="validation_issues",
+    )
+    tableRecognitionEvidence: Optional[ProductTableRecognitionEvidence] = Field(
+        default=None,
+        alias="table_recognition_evidence",
+    )
+
+
+class ProductOcrRegionGroundingMatch(BaseModel):
+    """VLM cell과 일치한 screening OCR 영역."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    regionIndex: int = Field(alias="region_index")
+    text: str
+    bounds: Tuple[int, int, int, int]
+    matchScore: float = Field(alias="match_score")
+
+
+class ProductOcrCellGroundingDiagnostic(BaseModel):
+    """VLM cell 하나의 OCR 근거 일치 결과."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    cellIndex: int = Field(alias="cell_index")
+    role: str
+    text: str
+    status: str
+    textCoverage: float = Field(alias="text_coverage")
+    textTokens: List[str] = Field(default_factory=list, alias="text_tokens")
+    missingTextTokens: List[str] = Field(
+        default_factory=list,
+        alias="missing_text_tokens",
+    )
+    numericTokens: List[str] = Field(
+        default_factory=list,
+        alias="numeric_tokens",
+    )
+    missingNumericTokens: List[str] = Field(
+        default_factory=list,
+        alias="missing_numeric_tokens",
+    )
+    matchedRegions: List[ProductOcrRegionGroundingMatch] = Field(
+        default_factory=list,
+        alias="matched_regions",
+    )
+    issues: List[str] = Field(default_factory=list)
+
+
+class ProductOcrTableRowGroundingDiagnostic(BaseModel):
+    """VLM table row의 OCR grounding 진단."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    rowIndex: int = Field(alias="row_index")
+    sourceText: str = Field(default="", alias="source_text")
+    status: str
+    derivedBounds: Optional[Tuple[int, int, int, int]] = Field(
+        default=None,
+        alias="derived_bounds",
+    )
+    cells: List[ProductOcrCellGroundingDiagnostic] = Field(default_factory=list)
+    issues: List[str] = Field(default_factory=list)
+
+
+class ProductOcrTableGroundingDiagnostic(BaseModel):
+    """VLM 후보 표와 screening OCR 사이의 smoke 전용 비교 결과."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    tableIndex: int = Field(alias="table_index")
+    sourceName: str = Field(default="", alias="source_name")
+    tableName: str = Field(default="", alias="table_name")
+    matchingPolicy: str = Field(
+        default="ocr_region_row_v1",
+        alias="matching_policy",
+    )
+    coordinateSpace: str = Field(
+        default="original_image",
+        alias="coordinate_space",
+    )
+    textCoverageThreshold: float = Field(
+        default=TABLE_GROUNDING_TEXT_COVERAGE_THRESHOLD,
+        alias="text_coverage_threshold",
+    )
+    tokenSimilarityThreshold: float = Field(
+        default=TABLE_GROUNDING_TOKEN_SIMILARITY_THRESHOLD,
+        alias="token_similarity_threshold",
+    )
+    status: str
+    rowCount: int = Field(alias="row_count")
+    groundedRowCount: int = Field(alias="grounded_row_count")
+    rejectedRowCount: int = Field(alias="rejected_row_count")
+    derivedBounds: Optional[Tuple[int, int, int, int]] = Field(
+        default=None,
+        alias="derived_bounds",
+    )
+    rows: List[ProductOcrTableRowGroundingDiagnostic] = Field(
+        default_factory=list,
     )
 
 
@@ -78,7 +270,7 @@ class ProductOcrTileTextResult(BaseModel):
 
 
 class ProductStructuredOcrResult(BaseModel):
-    """표 우선 OCR 결과와 fallback 상태를 함께 보존한다."""
+    """원본 후보와 Reconstruction에 승인된 표를 분리해 보존한다."""
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
@@ -96,6 +288,18 @@ class ProductStructuredOcrResult(BaseModel):
     )
     fallbackReason: Optional[str] = Field(default=None, alias="fallback_reason")
     tables: List[ProductOcrTableResult] = Field(default_factory=list)
+    tableCandidates: List[ProductOcrTableCandidate] = Field(
+        default_factory=list,
+        alias="table_candidates",
+    )
+    layoutDiagnostics: List[ProductTableLayoutDiagnostic] = Field(
+        default_factory=list,
+        alias="layout_diagnostics",
+    )
+    tableGroundingDiagnostics: List[ProductOcrTableGroundingDiagnostic] = Field(
+        default_factory=list,
+        alias="table_grounding_diagnostics",
+    )
     warnings: List[str] = Field(default_factory=list)
 
     @computed_field(alias="raw_table_ocr")
@@ -410,7 +614,7 @@ class PaddleOcrEngine(ProductOcrEngine):
 
 
 class ProductStructuredOcrEngine(ProductOcrEngine):
-    """교체 가능한 VLM 표 이해 결과를 TableRecognitionV2로 검증한다."""
+    """PP-Structure 표 영역에서 VLM 행을 추출하고 교차 검증한다."""
 
     def __init__(
         self,
@@ -426,6 +630,7 @@ class ProductStructuredOcrEngine(ProductOcrEngine):
         tileOverlapPixels: int = 240,
         allowHardCutFallback: bool = False,
         tableCropPaddingPixels: int = 24,
+        enableDirectTableRecognitionDiagnostic: bool = False,
         vlPipeline: object = None,
         tablePipeline: object = None,
     ) -> None:
@@ -435,6 +640,9 @@ class ProductStructuredOcrEngine(ProductOcrEngine):
         self._vlExtraOptions = dict(vlExtraOptions or {})
         self._tableExtraOptions = dict(tableExtraOptions or {})
         self._tableCropPaddingPixels = max(0, tableCropPaddingPixels)
+        self._enableDirectTableRecognitionDiagnostic = (
+            enableDirectTableRecognitionDiagnostic
+        )
         self._tilePlanner = ProductOcrImageTilePlanner(
             useImageTiling=useImageTiling,
             useProjectionTiling=useProjectionTiling,
@@ -458,47 +666,159 @@ class ProductStructuredOcrEngine(ProductOcrEngine):
         warnings: List[str] = list(tilePlan.warnings)
         rawTileTexts: List[ProductOcrTileTextResult] = []
         successfulVlTileCount = 0
+        tableCandidates: List[ProductOcrTableCandidate] = []
+        layoutDiagnostics: List[ProductTableLayoutDiagnostic] = []
         tablesWithBounds: List[
             Tuple[ProductOcrTableResult, Tuple[int, int, int, int]]
         ] = []
         for tile in tilePlan.tiles:
             try:
-                rawText, tableBlocks = self._ExtractVlTile(tile)
+                detectedTableInputs, layoutDiagnostic = (
+                    self._BuildDetectedTableInputs(tile)
+                )
             except Exception as error:
                 warnings.append(
-                    "structured_vlm_failed tile={0}: {1}".format(
+                    "table_layout_detection_failed tile={0}: {1}".format(
                         tile.tileIndex or 1,
                         error,
                     )
                 )
-                continue
-            successfulVlTileCount += 1
-            if rawText:
-                rawTileTexts.append(
-                    ProductOcrTileTextResult(
-                        tileIndex=tile.tileIndex,
-                        text=rawText,
+                detectedTableInputs = []
+                imageHeight, imageWidth = tile.image.shape[:2]
+                layoutDiagnostic = ProductTableLayoutDiagnostic(
+                    tileIndex=tile.tileIndex,
+                    tileOriginX=tile.originX,
+                    tileOriginY=tile.originY,
+                    imageWidth=imageWidth,
+                    imageHeight=imageHeight,
+                    error="{0}: {1}".format(type(error).__name__, error),
+                )
+            layoutDiagnostics.append(layoutDiagnostic)
+            if detectedTableInputs:
+                warnings.append(
+                    "table_layout_detected tile={0} count={1}".format(
+                        tile.tileIndex or 1,
+                        len(detectedTableInputs),
                     )
                 )
-            for tableBlock in tableBlocks:
-                tableResult, originalBounds, validationWarning = (
-                    self._BuildTableResultFromVlBlock(
+            else:
+                warnings.append(
+                    "table_layout_not_detected tile={0}".format(
+                        tile.tileIndex or 1,
+                    )
+                )
+                detectedTableInputs = [(tile, None, None)]
+
+            for vlTile, detectedBounds, recognitionPayload in detectedTableInputs:
+                try:
+                    rawText, tableBlocks = self._ExtractVlTile(vlTile)
+                except Exception as error:
+                    warnings.append(
+                        "structured_vlm_failed tile={0}: {1}".format(
+                            tile.tileIndex or 1,
+                            error,
+                        )
+                    )
+                    continue
+                successfulVlTileCount += 1
+                if rawText:
+                    rawTileTexts.append(
+                        ProductOcrTileTextResult(
+                            tileIndex=tile.tileIndex,
+                            text=rawText,
+                        )
+                    )
+                for tableBlock in tableBlocks:
+                    localizedBlock = dict(tableBlock)
+                    if detectedBounds is not None:
+                        localizedBlock.update(
+                            {
+                                "block_bbox": list(detectedBounds),
+                                "bounds_inferred": False,
+                                "localization_source": (
+                                    "table_recognition_v2_layout"
+                                ),
+                            }
+                        )
+                    tableIndex = len(tableCandidates) + 1
+                    tableCandidate = self._BuildTableCandidate(
                         tile,
-                        tableBlock,
-                        tableIndex=len(tablesWithBounds) + 1,
+                        localizedBlock,
+                        tableIndex=tableIndex,
                     )
-                )
-                if validationWarning is not None:
-                    warnings.append(validationWarning)
-                if tableResult is None or originalBounds is None:
-                    continue
-                if self._IsDuplicateTable(
-                    tablesWithBounds,
-                    tableResult,
-                    originalBounds,
-                ):
-                    continue
-                tablesWithBounds.append((tableResult, originalBounds))
+                    tableResult, originalBounds, validationWarning = (
+                        self._BuildTableResultFromVlBlock(
+                            tile,
+                            localizedBlock,
+                            tableIndex=tableIndex,
+                            verifiedPayload=recognitionPayload,
+                        )
+                    )
+                    if validationWarning is not None:
+                        warnings.append(validationWarning)
+                    if tableResult is None or originalBounds is None:
+                        issue = (
+                            "invalid_table_html"
+                            if validationWarning is not None
+                            and "table_invalid" in validationWarning
+                            else "invalid_table_bbox"
+                        )
+                        tableCandidates.append(
+                            tableCandidate.model_copy(
+                                update={
+                                    "validationStatus": "rejected",
+                                    "localizationStatus": (
+                                        tableCandidate.localizationStatus
+                                        if issue == "invalid_table_html"
+                                        else "invalid"
+                                    ),
+                                    "validationIssues": [issue],
+                                }
+                            )
+                        )
+                        continue
+                    if self._IsDuplicateTable(
+                        tablesWithBounds,
+                        tableResult,
+                        originalBounds,
+                    ):
+                        tableCandidates.append(
+                            tableCandidate.model_copy(
+                                update={
+                                    "localizationStatus": (
+                                        self._ReadLocalizationStatus(localizedBlock)
+                                    ),
+                                    "validationStatus": "rejected",
+                                    "validationIssues": [
+                                        "duplicate_table_candidate"
+                                    ],
+                                }
+                            )
+                        )
+                        continue
+                    isVerified = tableResult.validationStatus == "verified"
+                    tableCandidates.append(
+                        tableCandidate.model_copy(
+                            update={
+                                "localizationStatus": (
+                                    self._ReadLocalizationStatus(localizedBlock)
+                                ),
+                                "validationStatus": (
+                                    "structure_verified"
+                                    if isVerified
+                                    else "rejected"
+                                ),
+                                "validationIssues": list(
+                                    tableResult.validationIssues
+                                ),
+                                "tableRecognitionEvidence": (
+                                    tableResult.tableRecognitionEvidence
+                                ),
+                            }
+                        )
+                    )
+                    if isVerified:
+                        tablesWithBounds.append((tableResult, originalBounds))
 
         tables = [
             table.model_copy(update={"tableIndex": tableIndex})
@@ -515,6 +835,8 @@ class ProductStructuredOcrEngine(ProductOcrEngine):
                 rawTileTexts=rawTileTexts,
                 usedStructuredTables=True,
                 tables=tables,
+                tableCandidates=tableCandidates,
+                layoutDiagnostics=layoutDiagnostics,
                 warnings=warnings,
             )
 
@@ -524,8 +846,12 @@ class ProductStructuredOcrEngine(ProductOcrEngine):
             fallbackReason=(
                 "structured_vlm_failed"
                 if successfulVlTileCount == 0
+                else "table_candidates_rejected"
+                if tableCandidates
                 else "no_table_detected"
             ),
+            tableCandidates=tableCandidates,
+            layoutDiagnostics=layoutDiagnostics,
             warnings=warnings,
         )
 
@@ -547,6 +873,8 @@ class ProductStructuredOcrEngine(ProductOcrEngine):
         rawText: str,
         rawTileTexts: List[ProductOcrTileTextResult],
         fallbackReason: str,
+        tableCandidates: List[ProductOcrTableCandidate],
+        layoutDiagnostics: List[ProductTableLayoutDiagnostic],
         warnings: List[str],
     ) -> ProductStructuredOcrResult:
         return ProductStructuredOcrResult(
@@ -555,8 +883,250 @@ class ProductStructuredOcrEngine(ProductOcrEngine):
             textMergeMode="raw_only",
             rawTileTexts=rawTileTexts,
             fallbackReason=fallbackReason,
+            tableCandidates=tableCandidates,
+            layoutDiagnostics=layoutDiagnostics,
             warnings=list(warnings),
         )
+
+    def _BuildDetectedTableInputs(
+        self,
+        tile: ProductOcrImageTile,
+    ) -> Tuple[
+        List[
+            Tuple[
+                ProductOcrImageTile,
+                Optional[Tuple[int, int, int, int]],
+                Optional[Mapping[str, object]],
+            ]
+        ],
+        ProductTableLayoutDiagnostic,
+    ]:
+        output = self._ReadInitializedTablePipeline().predict(
+            tile.image,
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_layout_detection=True,
+            use_ocr_model=True,
+        )
+        detectedInputs: List[
+            Tuple[
+                ProductOcrImageTile,
+                Optional[Tuple[int, int, int, int]],
+                Optional[Mapping[str, object]],
+            ]
+        ] = []
+        layoutRegions: List[ProductTableLayoutRegion] = []
+        layoutPayloadAvailable = False
+        rawRegionCount = 0
+        parseIssues: List[str] = []
+        imageHeight, imageWidth = tile.image.shape[:2]
+        for result in output:
+            payload = self._ReadResultPayload(result)
+            layoutPayload = payload.get("layout_det_res")
+            if not isinstance(layoutPayload, Mapping):
+                continue
+            layoutPayloadAvailable = True
+            layoutBoxes = layoutPayload.get("boxes", [])
+            if not isinstance(layoutBoxes, list):
+                parseIssues.append("invalid_layout_boxes")
+                layoutBoxes = []
+            rawRegionCount += len(layoutBoxes)
+            tablePayloads = payload.get("table_res_list")
+            tablePayloadList = (
+                tablePayloads if isinstance(tablePayloads, list) else []
+            )
+            tablePayloadIndex = 0
+            for layoutBox in layoutBoxes:
+                if not isinstance(layoutBox, Mapping):
+                    continue
+                rawLabel = layoutBox.get("label")
+                label = rawLabel.strip() if isinstance(rawLabel, str) else ""
+                reportedBounds = self._ReadBox(layoutBox.get("coordinate"))
+                score = self._ReadOptionalFloat(layoutBox.get("score"))
+                if label.lower() != "table":
+                    layoutRegions.append(
+                        ProductTableLayoutRegion(
+                            label=label,
+                            score=score,
+                            reportedBounds=reportedBounds,
+                            issues=["label_not_table"],
+                        )
+                    )
+                    continue
+                tablePayload = (
+                    tablePayloadList[tablePayloadIndex]
+                    if tablePayloadIndex < len(tablePayloadList)
+                    and isinstance(tablePayloadList[tablePayloadIndex], Mapping)
+                    else {}
+                )
+                tablePayloadIndex += 1
+                if reportedBounds is None:
+                    layoutRegions.append(
+                        ProductTableLayoutRegion(
+                            label=label,
+                            score=score,
+                            issues=["invalid_bounds"],
+                            recognitionPayloadAvailable=bool(tablePayload),
+                        )
+                    )
+                    continue
+                localBounds = (
+                    floor(reportedBounds[0]),
+                    floor(reportedBounds[1]),
+                    ceil(reportedBounds[2]),
+                    ceil(reportedBounds[3]),
+                )
+                cropResult = self._BuildTableCrop(tile, localBounds)
+                if cropResult is None:
+                    layoutRegions.append(
+                        ProductTableLayoutRegion(
+                            label=label,
+                            score=score,
+                            reportedBounds=reportedBounds,
+                            recognitionPayloadAvailable=bool(tablePayload),
+                            issues=["invalid_crop_bounds"],
+                        )
+                    )
+                    continue
+                tableCrop, _ = cropResult
+                cropBounds = (
+                    max(0, localBounds[0] - self._tableCropPaddingPixels),
+                    max(0, localBounds[1] - self._tableCropPaddingPixels),
+                    min(
+                        imageWidth,
+                        localBounds[2] + self._tableCropPaddingPixels,
+                    ),
+                    min(
+                        imageHeight,
+                        localBounds[3] + self._tableCropPaddingPixels,
+                    ),
+                )
+                layoutRegions.append(
+                    ProductTableLayoutRegion(
+                        label=label,
+                        score=score,
+                        reportedBounds=reportedBounds,
+                        cropBounds=cropBounds,
+                        selectedForVlm=True,
+                        recognitionPayloadAvailable=bool(tablePayload),
+                        issues=(
+                            []
+                            if tablePayload
+                            else ["recognition_payload_unavailable"]
+                        ),
+                    )
+                )
+                detectedInputs.append(
+                    (
+                        ProductOcrImageTile(
+                            tileIndex=tile.tileIndex,
+                            image=tableCrop,
+                        ),
+                        localBounds,
+                        self._NormalizeDetectedTablePayload(
+                            tablePayload,
+                            localBounds,
+                        ),
+                    )
+                )
+        if not layoutPayloadAvailable:
+            parseIssues.append("layout_payload_unavailable")
+        elif rawRegionCount == 0 and not parseIssues:
+            parseIssues.append("no_layout_boxes")
+        directRecognitionAttempted = False
+        directRecognitionPayloadCount = 0
+        directRecognitionTables: List[ProductTableRecognitionEvidence] = []
+        directRecognitionError: Optional[str] = None
+        if (
+            not detectedInputs
+            and self._enableDirectTableRecognitionDiagnostic
+        ):
+            directRecognitionAttempted = True
+            (
+                directRecognitionPayloadCount,
+                directRecognitionTables,
+                directRecognitionError,
+            ) = self._ReadDirectTableRecognitionDiagnostic(tile.image)
+        return detectedInputs, ProductTableLayoutDiagnostic(
+            tileIndex=tile.tileIndex,
+            tileOriginX=tile.originX,
+            tileOriginY=tile.originY,
+            imageWidth=imageWidth,
+            imageHeight=imageHeight,
+            layoutPayloadAvailable=layoutPayloadAvailable,
+            rawRegionCount=rawRegionCount,
+            regions=layoutRegions,
+            parseIssues=list(dict.fromkeys(parseIssues)),
+            directRecognitionAttempted=directRecognitionAttempted,
+            directRecognitionPayloadCount=directRecognitionPayloadCount,
+            directRecognitionTables=directRecognitionTables,
+            directRecognitionError=directRecognitionError,
+        )
+
+    def _ReadDirectTableRecognitionDiagnostic(
+        self,
+        image: object,
+    ) -> Tuple[int, List[ProductTableRecognitionEvidence], Optional[str]]:
+        try:
+            output = self._ReadInitializedTablePipeline().predict(
+                image,
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_layout_detection=False,
+                use_ocr_model=True,
+            )
+            payloadCount = 0
+            tables: List[ProductTableRecognitionEvidence] = []
+            for result in output:
+                payload = self._ReadResultPayload(result)
+                tablePayloads = payload.get("table_res_list")
+                if not isinstance(tablePayloads, list):
+                    continue
+                payloadCount += len(tablePayloads)
+                tables.extend(
+                    self._BuildTableRecognitionEvidence(tablePayload).model_copy(
+                        update={"sourceName": "table_recognition_v2_direct"}
+                    )
+                    for tablePayload in tablePayloads
+                    if isinstance(tablePayload, Mapping)
+                )
+            return payloadCount, tables, None
+        except Exception as error:
+            return 0, [], "{0}: {1}".format(type(error).__name__, error)
+
+    def _ReadOptionalFloat(self, value: object) -> Optional[float]:
+        try:
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _NormalizeDetectedTablePayload(
+        self,
+        payload: Mapping[str, object],
+        tableBounds: Tuple[int, int, int, int],
+    ) -> Mapping[str, object]:
+        normalizedPayload = dict(payload)
+        rawCellBounds = payload.get("cell_box_list")
+        cellBoundValues = rawCellBounds if isinstance(rawCellBounds, list) else []
+        cropLeft = max(
+            0,
+            tableBounds[0] - self._tableCropPaddingPixels,
+        )
+        cropTop = max(
+            0,
+            tableBounds[1] - self._tableCropPaddingPixels,
+        )
+        normalizedPayload["cell_box_list"] = [
+            [
+                bounds[0] - cropLeft,
+                bounds[1] - cropTop,
+                bounds[2] - cropLeft,
+                bounds[3] - cropTop,
+            ]
+            for rawCellBound in cellBoundValues
+            if (bounds := self._ReadBox(rawCellBound)) is not None
+        ]
+        return normalizedPayload
 
     def _ReadInitializedVlPipeline(self) -> object:
         if self._vlPipeline is not None:
@@ -596,6 +1166,7 @@ class ProductStructuredOcrEngine(ProductOcrEngine):
         blockTexts: List[str] = []
         for result in output:
             payload = self._ReadResultPayload(result)
+            isBridgePayload = "bridge_raw_text" in payload
             bridgeRawText = payload.get("bridge_raw_text")
             if isinstance(bridgeRawText, str) and bridgeRawText.strip():
                 blockTexts.append(bridgeRawText.strip())
@@ -606,7 +1177,11 @@ class ProductStructuredOcrEngine(ProductOcrEngine):
                 if not isinstance(block, Mapping):
                     continue
                 content = block.get("block_content")
-                if isinstance(content, str) and content.strip():
+                if (
+                    not isBridgePayload
+                    and isinstance(content, str)
+                    and content.strip()
+                ):
                     blockTexts.append(content.strip())
                 if block.get("block_label") == "table":
                     tableBlocks.append(block)
@@ -643,6 +1218,7 @@ class ProductStructuredOcrEngine(ProductOcrEngine):
         tile: ProductOcrImageTile,
         tableBlock: Mapping[str, object],
         tableIndex: int,
+        verifiedPayload: Optional[Mapping[str, object]] = None,
     ) -> Tuple[
         Optional[ProductOcrTableResult],
         Optional[Tuple[int, int, int, int]],
@@ -656,12 +1232,23 @@ class ProductStructuredOcrEngine(ProductOcrEngine):
                     tableIndex,
                 )
             )
-        cropResult = self._BuildTableCrop(tile, tableBlock.get("block_bbox"))
+        reportedBounds = self._ReadBox(tableBlock.get("block_bbox"))
+        cropResult = self._BuildTableCrop(tile, reportedBounds)
         if cropResult is None:
+            imageHeight, imageWidth = tile.image.shape[:2]
+            boundsText = (
+                "none"
+                if reportedBounds is None
+                else ",".join("{0:g}".format(value) for value in reportedBounds)
+            )
             return None, None, (
-                "structured_vlm_table_bbox_invalid tile={0} table={1}".format(
+                "structured_vlm_table_bbox_invalid tile={0} table={1} "
+                "image={2}x{3} bbox={4}".format(
                     tile.tileIndex or 1,
                     tableIndex,
+                    imageWidth,
+                    imageHeight,
+                    boundsText,
                 )
             )
         tableCrop, originalBounds = cropResult
@@ -680,7 +1267,8 @@ class ProductStructuredOcrEngine(ProductOcrEngine):
         if tableBlock.get("bounds_inferred") is True:
             semanticIssues.append("vlm_table_bounds_inferred_from_tile")
         try:
-            verifiedPayload = self._ReadVerifiedTablePayload(tableCrop)
+            if verifiedPayload is None:
+                verifiedPayload = self._ReadVerifiedTablePayload(tableCrop)
             tableRecognitionEvidence = self._BuildTableRecognitionEvidence(
                 verifiedPayload,
             )
@@ -727,14 +1315,72 @@ class ProductStructuredOcrEngine(ProductOcrEngine):
         return ProductOcrTableResult(
             tableIndex=tableIndex,
             sourceName=sourceName,
+            tableName=self._ReadTableName(tableBlock),
             tileIndex=tile.tileIndex,
             html=vlHtml,
             cellTexts=cellTexts,
             plainText=self._BuildPlainTextFromHtml(vlHtml, cellTexts),
+            sourceRows=self._ReadSourceRows(tableBlock),
             validationStatus=validationStatus,
             validationIssues=validationIssues,
             tableRecognitionEvidence=tableRecognitionEvidence,
         ), originalBounds, validationWarning
+
+    def _BuildTableCandidate(
+        self,
+        tile: ProductOcrImageTile,
+        tableBlock: Mapping[str, object],
+        tableIndex: int,
+    ) -> ProductOcrTableCandidate:
+        rawHtml = tableBlock.get("block_content")
+        html = rawHtml if isinstance(rawHtml, str) else ""
+        cellTexts = self._ExtractTextsFromHtml(html) if html else []
+        reportedBounds = self._ReadBox(tableBlock.get("block_bbox"))
+        return ProductOcrTableCandidate(
+            tableIndex=tableIndex,
+            sourceName=self._ReadTableSourceName(tableBlock),
+            tableName=self._ReadTableName(tableBlock),
+            tileIndex=tile.tileIndex,
+            html=html,
+            cellTexts=cellTexts,
+            plainText=self._BuildPlainTextFromHtml(html, cellTexts),
+            sourceRows=self._ReadSourceRows(tableBlock),
+            reportedBounds=reportedBounds,
+            localizationStatus=(
+                self._ReadLocalizationStatus(tableBlock)
+                if reportedBounds is not None
+                else "invalid"
+            ),
+        )
+
+    def _ReadTableSourceName(self, tableBlock: Mapping[str, object]) -> str:
+        rawSourceName = tableBlock.get("source_name")
+        return (
+            rawSourceName.strip()
+            if isinstance(rawSourceName, str) and rawSourceName.strip()
+            else "paddleocr_vl_v1_6"
+        )
+
+    def _ReadTableName(self, tableBlock: Mapping[str, object]) -> str:
+        rawTableName = tableBlock.get("table_name")
+        return (
+            NormalizeWhiteSpace(rawTableName)
+            if isinstance(rawTableName, str)
+            else ""
+        )
+
+    def _ReadSourceRows(self, tableBlock: Mapping[str, object]) -> List[str]:
+        rawSourceRows = tableBlock.get("source_rows")
+        if not isinstance(rawSourceRows, list):
+            return []
+        return [
+            NormalizeWhiteSpace(sourceRow)
+            for sourceRow in rawSourceRows
+            if isinstance(sourceRow, str) and NormalizeWhiteSpace(sourceRow)
+        ]
+
+    def _ReadLocalizationStatus(self, tableBlock: Mapping[str, object]) -> str:
+        return "inferred" if tableBlock.get("bounds_inferred") is True else "valid"
 
     def _BuildTableRecognitionEvidence(
         self,
@@ -805,7 +1451,7 @@ class ProductStructuredOcrEngine(ProductOcrEngine):
         options: Dict[str, object] = {
             "use_doc_orientation_classify": False,
             "use_doc_unwarping": False,
-            "use_layout_detection": False,
+            "use_layout_detection": True,
             "use_ocr_model": True,
             **self._tableExtraOptions,
         }
@@ -1108,12 +1754,297 @@ class _HtmlTableExtractor(HTMLParser):
             self._currentCellParts.append(normalizedText)
 
 
+def BuildTableGroundingDiagnostics(
+    tableCandidates: Sequence[ProductOcrTableCandidate],
+    textRegions: Sequence[ProductOcrTextRegion],
+) -> List[ProductOcrTableGroundingDiagnostic]:
+    """VLM 후보 row를 screening OCR 근거와 비교하되 승인에는 사용하지 않는다."""
+
+    return [
+        _BuildTableGroundingDiagnostic(tableCandidate, textRegions)
+        for tableCandidate in tableCandidates
+    ]
+
+
+def _BuildTableGroundingDiagnostic(
+    tableCandidate: ProductOcrTableCandidate,
+    textRegions: Sequence[ProductOcrTextRegion],
+) -> ProductOcrTableGroundingDiagnostic:
+    parser = _HtmlTableExtractor()
+    parser.feed(tableCandidate.html)
+    rows: List[ProductOcrTableRowGroundingDiagnostic] = []
+    for rowIndex, rowCells in enumerate(parser.rows, start=1):
+        cells = [
+            _BuildCellGroundingDiagnostic(
+                cellIndex=cellIndex,
+                role="key" if cellIndex == 1 else "value",
+                text=cellText,
+                textRegions=textRegions,
+            )
+            for cellIndex, cellText in enumerate(rowCells, start=1)
+            if NormalizeWhiteSpace(cellText)
+        ]
+        grounded = bool(cells) and all(cell.status == "grounded" for cell in cells)
+        issues = [
+            "cell_{0}_{1}".format(cell.cellIndex, issue)
+            for cell in cells
+            for issue in cell.issues
+        ]
+        if not cells:
+            issues.append("empty_row")
+        rows.append(
+            ProductOcrTableRowGroundingDiagnostic(
+                rowIndex=rowIndex,
+                sourceText=(
+                    tableCandidate.sourceRows[rowIndex - 1]
+                    if rowIndex <= len(tableCandidate.sourceRows)
+                    else ""
+                ),
+                status="grounded" if grounded else "rejected",
+                derivedBounds=_BuildRegionUnion(
+                    [
+                        region.bounds
+                        for cell in cells
+                        for region in cell.matchedRegions
+                    ]
+                ),
+                cells=cells,
+                issues=list(dict.fromkeys(issues)),
+            )
+        )
+
+    groundedRowCount = sum(row.status == "grounded" for row in rows)
+    status = (
+        "grounded"
+        if rows and groundedRowCount == len(rows)
+        else "partial"
+        if groundedRowCount > 0
+        else "rejected"
+    )
+    return ProductOcrTableGroundingDiagnostic(
+        tableIndex=tableCandidate.tableIndex,
+        sourceName=tableCandidate.sourceName,
+        tableName=tableCandidate.tableName,
+        status=status,
+        rowCount=len(rows),
+        groundedRowCount=groundedRowCount,
+        rejectedRowCount=len(rows) - groundedRowCount,
+        derivedBounds=_BuildRegionUnion(
+            [row.derivedBounds for row in rows if row.derivedBounds is not None]
+        ),
+        rows=rows,
+    )
+
+
+def _BuildCellGroundingDiagnostic(
+    cellIndex: int,
+    role: str,
+    text: str,
+    textRegions: Sequence[ProductOcrTextRegion],
+) -> ProductOcrCellGroundingDiagnostic:
+    normalizedText = _NormalizeGroundingText(text)
+    textTokens = _ExtractGroundingTextTokens(text)
+    numericTokens = _ExtractGroundingNumericTokens(text)
+    matches = _FindGroundingRegionMatches(
+        normalizedText,
+        textTokens,
+        numericTokens,
+        textRegions,
+    )
+    matchedTexts = [match.text for match in matches]
+    textCoverage = _CalculateGroundingCoverage(normalizedText, matchedTexts)
+    missingTextTokens = [
+        token
+        for token in textTokens
+        if not _IsGroundingTextTokenSupported(token, matchedTexts)
+    ]
+    matchedNumericTokens = {
+        token
+        for matchedText in matchedTexts
+        for token in _ExtractGroundingNumericTokens(matchedText)
+    }
+    missingNumericTokens = [
+        token for token in numericTokens if token not in matchedNumericTokens
+    ]
+    issues: List[str] = []
+    if not matches:
+        issues.append("no_ocr_region_match")
+    if textCoverage < TABLE_GROUNDING_TEXT_COVERAGE_THRESHOLD:
+        issues.append(
+            "text_coverage_below_{0:g}".format(
+                TABLE_GROUNDING_TEXT_COVERAGE_THRESHOLD,
+            )
+        )
+    if missingTextTokens:
+        issues.append(
+            "text_tokens_missing:{0}".format(",".join(missingTextTokens))
+        )
+    if missingNumericTokens:
+        issues.append(
+            "numeric_tokens_missing:{0}".format(",".join(missingNumericTokens))
+        )
+    return ProductOcrCellGroundingDiagnostic(
+        cellIndex=cellIndex,
+        role=role,
+        text=NormalizeWhiteSpace(text),
+        status="grounded" if not issues else "rejected",
+        textCoverage=round(textCoverage, 4),
+        textTokens=textTokens,
+        missingTextTokens=missingTextTokens,
+        numericTokens=numericTokens,
+        missingNumericTokens=missingNumericTokens,
+        matchedRegions=matches,
+        issues=issues,
+    )
+
+
+def _FindGroundingRegionMatches(
+    normalizedText: str,
+    textTokens: Sequence[str],
+    numericTokens: Sequence[str],
+    textRegions: Sequence[ProductOcrTextRegion],
+) -> List[ProductOcrRegionGroundingMatch]:
+    if not normalizedText:
+        return []
+    matches: List[ProductOcrRegionGroundingMatch] = []
+    for regionIndex, region in enumerate(textRegions, start=1):
+        normalizedRegionText = _NormalizeGroundingText(region.text)
+        if not normalizedRegionText:
+            continue
+        score = _BuildGroundingMatchScore(normalizedText, normalizedRegionText)
+        regionNumericTokens = set(_ExtractGroundingNumericTokens(region.text))
+        hasNumericEvidence = bool(set(numericTokens) & regionNumericTokens)
+        hasTextEvidence = any(
+            _IsGroundingTextTokenSupported(token, [region.text])
+            for token in textTokens
+            if len(token) >= 2
+        )
+        isShortText = len(normalizedText) <= 3
+        isMatch = (
+            hasNumericEvidence or hasTextEvidence
+            if isShortText
+            else normalizedText in normalizedRegionText
+            or normalizedRegionText in normalizedText
+            or score >= TABLE_GROUNDING_TEXT_COVERAGE_THRESHOLD
+            or hasNumericEvidence
+            or hasTextEvidence
+        )
+        if not isMatch:
+            continue
+        matches.append(
+            ProductOcrRegionGroundingMatch(
+                regionIndex=regionIndex,
+                text=region.text,
+                bounds=region.bounds,
+                matchScore=round(score, 4),
+            )
+        )
+    return matches
+
+
+def _BuildGroundingMatchScore(left: str, right: str) -> float:
+    if not left or not right:
+        return 0.0
+    matcher = SequenceMatcher(None, left, right, autojunk=False)
+    longestMatch = matcher.find_longest_match().size
+    return max(matcher.ratio(), longestMatch / min(len(left), len(right)))
+
+
+def _CalculateGroundingCoverage(
+    normalizedText: str,
+    matchedTexts: Sequence[str],
+) -> float:
+    if not normalizedText:
+        return 0.0
+    coveredCharacters = [False] * len(normalizedText)
+    minimumMatchLength = 1 if len(normalizedText) <= 3 else 2
+    for matchedText in matchedTexts:
+        normalizedMatchedText = _NormalizeGroundingText(matchedText)
+        for match in SequenceMatcher(
+            None,
+            normalizedText,
+            normalizedMatchedText,
+            autojunk=False,
+        ).get_matching_blocks():
+            if match.size < minimumMatchLength:
+                continue
+            for characterIndex in range(match.a, match.a + match.size):
+                coveredCharacters[characterIndex] = True
+    return sum(coveredCharacters) / len(coveredCharacters)
+
+
+def _ExtractGroundingTextTokens(text: str) -> List[str]:
+    normalizedText = unicodedata.normalize("NFKC", text or "").lower()
+    unitTokens = {"g", "kg", "mg", "l", "ml", "kcal"}
+    return list(
+        dict.fromkeys(
+            token
+            for token in re.findall(r"[a-z]+|[가-힣]+", normalizedText)
+            if token not in unitTokens
+        )
+    )
+
+
+def _ExtractGroundingNumericTokens(text: str) -> List[str]:
+    normalizedText = unicodedata.normalize("NFKC", text or "").lower()
+    matches = re.findall(
+        r"(?<!\d)(\d+(?:[.,]\d+)?)\s*(mg|g|kg|ml|l|%|kcal)?",
+        normalizedText,
+    )
+    return list(
+        dict.fromkeys(
+            "{0}:{1}".format(value.replace(",", ""), unit or "#")
+            for value, unit in matches
+        )
+    )
+
+
+def _IsGroundingTextTokenSupported(
+    token: str,
+    matchedTexts: Sequence[str],
+) -> bool:
+    for matchedText in matchedTexts:
+        normalizedMatchedText = _NormalizeGroundingText(matchedText)
+        regionTokens = _ExtractGroundingTextTokens(matchedText)
+        if len(token) <= 2:
+            if token in regionTokens:
+                return True
+            continue
+        if token in normalizedMatchedText:
+            return True
+        if any(
+            SequenceMatcher(None, token, regionToken, autojunk=False).ratio()
+            >= TABLE_GROUNDING_TOKEN_SIMILARITY_THRESHOLD
+            for regionToken in regionTokens
+        ):
+            return True
+    return False
+
+
+def _NormalizeGroundingText(text: str) -> str:
+    normalizedText = unicodedata.normalize("NFKC", text or "").lower()
+    return "".join(character for character in normalizedText if character.isalnum())
+
+
+def _BuildRegionUnion(
+    boundsValues: Sequence[Tuple[int, int, int, int]],
+) -> Optional[Tuple[int, int, int, int]]:
+    if not boundsValues:
+        return None
+    return (
+        min(bounds[0] for bounds in boundsValues),
+        min(bounds[1] for bounds in boundsValues),
+        max(bounds[2] for bounds in boundsValues),
+        max(bounds[3] for bounds in boundsValues),
+    )
+
+
 def BuildOcrRegionCrop(
     imageBytes: bytes,
     textRegions: Sequence[ProductOcrTextRegion],
     anchorLabels: Sequence[str],
 ) -> Optional[Tuple[bytes, Tuple[int, int, int, int]]]:
-    """영양정보 anchor가 차지하는 영역만 VLM 입력으로 자른다."""
+    """지정한 상품정보 anchor를 포함하는 VLM 입력 영역을 자른다."""
 
     compactLabels = tuple(
         NormalizeWhiteSpace(label).lower().replace(" ", "")

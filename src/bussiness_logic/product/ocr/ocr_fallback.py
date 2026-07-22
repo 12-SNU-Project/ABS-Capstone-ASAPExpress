@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from bussiness_logic.artifact_paths import ExtractProductIdFromUrl
 from bussiness_logic.product.ocr.paddle_ocr import (
     BuildOcrRegionCrop,
+    BuildTableGroundingDiagnostics,
     ProductOcrEngine,
     ProductOcrTextRegion,
     ProductOcrTileTextResult,
@@ -53,6 +54,10 @@ OCR_SCREENING_NUTRITION_LABELS = (
     "포화지방",
     "콜레스테롤",
     "단백질",
+)
+OCR_SCREENING_STRUCTURED_LABELS = (
+    *OCR_SCREENING_FOOD_DETAIL_LABELS,
+    *OCR_SCREENING_NUTRITION_LABELS,
 )
 OCR_SCREENING_QUANTITY_PATTERN = re.compile(
     r"\d+(?:[.,]\d+)?\s*(?:mg|g|kg|ml|l|%|kcal|㎎|㎏|㎖)",
@@ -242,12 +247,12 @@ class ProductOcrArtifactStore:
         imageUrl: str,
         structuredOcrResult: ProductStructuredOcrResult,
     ) -> Optional[Path]:
-        tablesWithEvidence = [
-            table
-            for table in structuredOcrResult.tables
-            if table.tableRecognitionEvidence is not None
-        ]
-        if not tablesWithEvidence:
+        if (
+            not structuredOcrResult.tables
+            and not structuredOcrResult.tableCandidates
+            and not structuredOcrResult.layoutDiagnostics
+            and not structuredOcrResult.tableGroundingDiagnostics
+        ):
             return None
 
         artifactPath = artifactDirectory / (
@@ -260,7 +265,21 @@ class ProductOcrArtifactStore:
                     "image_url": imageUrl,
                     "tables": [
                         table.model_dump(mode="json", by_alias=True)
-                        for table in tablesWithEvidence
+                        for table in structuredOcrResult.tables
+                    ],
+                    "table_candidates": [
+                        candidate.model_dump(mode="json", by_alias=True)
+                        for candidate in structuredOcrResult.tableCandidates
+                    ],
+                    "layout_diagnostics": [
+                        diagnostic.model_dump(mode="json", by_alias=True)
+                        for diagnostic in structuredOcrResult.layoutDiagnostics
+                    ],
+                    "table_grounding_diagnostics": [
+                        diagnostic.model_dump(mode="json", by_alias=True)
+                        for diagnostic in (
+                            structuredOcrResult.tableGroundingDiagnostics
+                        )
                     ],
                     "warnings": structuredOcrResult.warnings,
                 },
@@ -362,6 +381,8 @@ class ProductOcrFallbackRunner:
         artifactStore: Optional[ProductOcrArtifactStore] = None,
         textQualityEvaluator: Optional[ProductOcrTextQualityEvaluator] = None,
         screeningEngine: Optional[ProductOcrEngine] = None,
+        useStructuredOcrRegionCrop: bool = True,
+        enableTableGroundingDiagnostic: bool = False,
     ) -> None:
         self._ocrEngine = ocrEngine
         self._screeningEngine = screeningEngine
@@ -372,6 +393,8 @@ class ProductOcrFallbackRunner:
         self._textQualityEvaluator = (
             textQualityEvaluator or ProductOcrTextQualityEvaluator()
         )
+        self._useStructuredOcrRegionCrop = useStructuredOcrRegionCrop
+        self._enableTableGroundingDiagnostic = enableTableGroundingDiagnostic
 
     def Run(
         self,
@@ -495,12 +518,12 @@ class ProductOcrFallbackRunner:
             else:
                 structuredInputBytes = imageBytes
                 roiBounds: Optional[Tuple[int, int, int, int]] = None
-                if screeningRegions:
+                if screeningRegions and self._useStructuredOcrRegionCrop:
                     startedAt = perf_counter()
                     regionCrop = BuildOcrRegionCrop(
                         imageBytes,
                         screeningRegions,
-                        OCR_SCREENING_NUTRITION_LABELS,
+                        OCR_SCREENING_STRUCTURED_LABELS,
                     )
                     processingTimes["roi_build"] = perf_counter() - startedAt
                     if regionCrop is not None:
@@ -519,6 +542,20 @@ class ProductOcrFallbackRunner:
                         screeningSummary=screeningSummary,
                         roiBounds=roiBounds,
                     )
+            if (
+                self._enableTableGroundingDiagnostic
+                and structuredOcrResult.tableCandidates
+            ):
+                structuredOcrResult = structuredOcrResult.model_copy(
+                    update={
+                        "tableGroundingDiagnostics": (
+                            BuildTableGroundingDiagnostics(
+                                structuredOcrResult.tableCandidates,
+                                screeningRegions,
+                            )
+                        )
+                    }
+                )
             tableEvidenceArtifactPath = self._artifactStore.WriteTableEvidence(
                 artifactDirectory=artifactDirectory,
                 imageIndex=imageIndex,
@@ -627,7 +664,9 @@ class ProductOcrFallbackRunner:
             else []
         )
         roiWarning = (
-            "structured_ocr_roi_applied bounds={0},{1},{2},{3}".format(
+            "structured_ocr_full_image_requested"
+            if not self._useStructuredOcrRegionCrop
+            else "structured_ocr_roi_applied bounds={0},{1},{2},{3}".format(
                 *roiBounds,
             )
             if roiBounds is not None
@@ -648,6 +687,9 @@ class ProductOcrFallbackRunner:
                 update={
                     "fallbackReason": structuredResult.fallbackReason,
                     "textMergeMode": "screened_raw_only",
+                    "tables": [],
+                    "tableCandidates": structuredResult.tableCandidates,
+                    "layoutDiagnostics": structuredResult.layoutDiagnostics,
                     "warnings": warnings,
                 }
             )
