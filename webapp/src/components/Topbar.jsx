@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { House } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import logo from "../assets/asap_black.png";
 import {
@@ -32,32 +33,35 @@ export default function Topbar() {
 
   return (
     <header id="app-topbar" className="app-topbar">
-      <Link to={toolbarItems[0].to} className="app-topbar-logo-link">
-        <span
-          className="app-topbar-logo"
-          role="img"
-          aria-label="ASAP"
-          style={{ WebkitMaskImage: `url(${logo})`, maskImage: `url(${logo})` }}
-        />
-      </Link>
-      <nav className="app-topbar-tabs">
-        {toolbarItems.map((item) => {
-          const active = activePath === item.to;
-          return (
-            <Link
-              key={item.to}
-              to={item.to}
-              aria-current={active ? "page" : undefined}
-              className={`app-topbar-tab ${active ? "active" : ""}`}
-            >
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-      <Link to="/" className="app-topbar-tab app-topbar-home">
-        처음으로
-      </Link>
+      <div className="app-topbar-inner">
+        <Link to={toolbarItems[0].to} className="app-topbar-logo-link" aria-label="ASAP 작업공간">
+          <span
+            className="app-topbar-logo"
+            role="img"
+            aria-label="ASAP"
+            style={{ WebkitMaskImage: `url(${logo})`, maskImage: `url(${logo})` }}
+          />
+        </Link>
+        <nav className="app-topbar-tabs" aria-label="주요 화면">
+          {toolbarItems.map((item) => {
+            const active = activePath === item.to;
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                aria-current={active ? "page" : undefined}
+                className={`app-topbar-tab ${active ? "active" : ""}`}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+        <Link to="/" className="app-topbar-tab app-topbar-home">
+          <House aria-hidden="true" />
+          처음으로
+        </Link>
+      </div>
     </header>
   );
 }

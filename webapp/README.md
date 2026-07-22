@@ -32,7 +32,8 @@ dev 모드의 `/api/*` 요청은 Vite 프록시가 `http://127.0.0.1:8060`으로
 npm run build   # dist/ 생성 → asap_app.py가 자동 서빙
 ```
 
-`dist/`를 별도 origin에서 서빙하면 `.appconfig`의 `allowed_frontend_origins`에 해당 origin을 추가해야 한다.
+`dist/`를 별도 origin에서 서빙하면 `.appconfig.asap_app.toml`의
+`allowed_frontend_origins`에 해당 origin을 추가해야 한다.
 
 ## 구조
 

@@ -1,13 +1,88 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@theme inline {
+  --font-sans: var(--app-font-sans);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-destructive: var(--destructive);
+  --color-needs-review: var(--needs-review);
+  --color-needs-review-foreground: var(--needs-review-foreground);
+  --color-official-source: var(--official-source);
+  --color-official-source-foreground: var(--official-source-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 2px);
+}
+
+:root {
+  --app-font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --background: oklch(0.98 0.004 255);
+  --foreground: oklch(0.21 0.03 258);
+  --surface: oklch(1 0 0);
+  --surface-muted: oklch(0.96 0.008 255);
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+  --popover: var(--surface);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.42 0.14 260);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.95 0.012 255);
+  --secondary-foreground: oklch(0.28 0.04 258);
+  --muted: oklch(0.95 0.008 255);
+  --muted-foreground: oklch(0.49 0.03 258);
+  --accent: oklch(0.94 0.025 255);
+  --accent-foreground: oklch(0.34 0.1 260);
+  --success: oklch(0.5 0.13 151);
+  --success-foreground: oklch(0.99 0 0);
+  --warning: oklch(0.68 0.14 75);
+  --warning-foreground: oklch(0.25 0.045 55);
+  --destructive: oklch(0.58 0.22 27);
+  --needs-review: oklch(0.62 0.15 65);
+  --needs-review-foreground: oklch(0.99 0 0);
+  --official-source: oklch(0.48 0.11 235);
+  --official-source-foreground: oklch(0.99 0 0);
+  --border: oklch(0.9 0.012 255);
+  --input: oklch(0.9 0.012 255);
+  --ring: oklch(0.55 0.13 260);
+  --radius: 0.625rem;
+  --shadow-surface: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px rgb(15 23 42 / 0.04);
+}
+
 * {
   box-sizing: border-box;
+  border-color: var(--border);
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  background: #f8fafc;
-  color: #111827;
-  font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--app-font-sans);
   font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -25,19 +100,29 @@ textarea {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  background: var(--background);
 }
 
 .app-topbar {
   position: sticky;
   top: 0;
   z-index: 80;
+  min-height: 64px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklch, var(--surface) 96%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.app-topbar-inner {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 16px 24px;
-  padding: 18px 28px;
-  border-bottom: 1px solid #e5e7eb;
-  background: #ffffff;
+  gap: 12px 24px;
+  width: 100%;
+  max-width: 1600px;
+  min-height: 64px;
+  margin: 0 auto;
+  padding: 0 28px;
 }
 
 .app-topbar-logo-link {
@@ -47,14 +132,11 @@ textarea {
   text-decoration: none;
 }
 
-/* 검정 PNG를 mask로 써서 브랜드 그라디언트로 채색 — 은은한 sheen이 흐른다 */
 .app-topbar-logo {
   display: block;
-  width: clamp(178px, 17vw, 240px);
-  height: 38px;
-  background: linear-gradient(115deg, #5b2fc4, #6d3fd6 35%, #a855f7 55%, #c084fc 70%, #6d3fd6 90%);
-  background-size: 220% 100%;
-  animation: logo-sheen 7s ease-in-out infinite;
+  width: 136px;
+  height: 30px;
+  background: var(--primary);
   mask-repeat: no-repeat;
   mask-position: left center;
   mask-size: contain;
@@ -85,12 +167,21 @@ textarea {
 }
 
 .app-topbar-tab {
-  padding: 8px 14px;
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
   border-radius: 8px;
   font-size: 14px;
   font-weight: 600;
-  color: #475569;
+  color: var(--muted-foreground);
   text-decoration: none;
+}
+
+.app-topbar-tab svg {
+  width: 16px;
+  height: 16px;
 }
 
 .app-topbar-home {
@@ -99,27 +190,27 @@ textarea {
 
 .app-topbar-tab:hover,
 .app-topbar-tab.active {
-  color: #111827;
-  background: #f1f5f9;
+  color: var(--foreground);
+  background: var(--surface-muted);
 }
 
 :where(a, button, input, select, textarea, summary):focus-visible {
-  outline: 3px solid #8b5cf6;
+  outline: 3px solid color-mix(in oklch, var(--ring) 55%, transparent);
   outline-offset: 2px;
 }
 
 .app-main {
   width: 100%;
-  max-width: 1280px;
+  max-width: 1440px;
   margin: 0 auto;
   padding: 24px 28px;
   min-width: 0;
 }
 
 @media (max-width: 720px) {
-  .app-topbar {
+  .app-topbar-inner {
     gap: 10px 14px;
-    padding: 14px 16px;
+    padding: 10px 16px;
   }
 
   .app-topbar-tabs {

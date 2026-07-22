@@ -76,8 +76,6 @@
   font-weight: 600;
 }
 
-.cjs-primary-button,
-.cjs-secondary-button,
 .cjs-candidate-card {
   font: inherit;
 }
@@ -368,34 +366,6 @@
   color: #dc2626;
   font-size: 12px;
   font-weight: 750;
-}
-
-.cjs-primary-button,
-.cjs-secondary-button {
-  min-height: 42px;
-  padding: 0 18px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.cjs-primary-button {
-  border: 0;
-  background: linear-gradient(135deg, var(--cjs-accent), #c084fc);
-  color: #ffffff;
-}
-
-.cjs-secondary-button {
-  border: 1px solid var(--cjs-border);
-  background: var(--cjs-surface-strong);
-  color: var(--cjs-text);
-}
-
-.cjs-primary-button:disabled,
-.cjs-secondary-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.56;
 }
 
 .cjs-workspace {
@@ -978,10 +948,6 @@ summary.cjs-panel-title {
   border-top: 1px solid var(--cjs-border);
 }
 
-.cjs-project-add-row .cjs-primary-button {
-  flex: none;
-}
-
 @media (max-width: 1120px) {
   .cjs-workspace {
     grid-template-columns: 1fr;
@@ -1030,11 +996,6 @@ summary.cjs-panel-title {
 
   .cjs-ingredient-row .cjs-input:nth-child(1) {
     grid-column: 1 / -1;
-  }
-
-  .cjs-primary-button,
-  .cjs-secondary-button {
-    width: 100%;
   }
 
   .cjs-run-restore-controls {

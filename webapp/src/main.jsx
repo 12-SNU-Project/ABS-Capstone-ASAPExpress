@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
-import Topbar from "./components/Topbar";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import AppShell from "@/components/layout/AppShell";
 import AdminPage from "./pages/AdminPage";
 import ConsumerPage from "./pages/ConsumerPage";
 import DocumentPage from "./pages/DocumentPage";
@@ -17,24 +17,19 @@ import "./styles/consumer.css";
 import "./styles/enterprise.css";
 
 function ApplicationLayout() {
-  const isIntroduction = useLocation().pathname === "/";
-
   return (
-    <div className="app-shell">
-      {isIntroduction ? null : <Topbar />}
-      <main className={isIntroduction ? "introduction-main" : "app-main"}>
-        <Routes>
-          <Route path="/" element={<IntroductionPage />} />
-          <Route path="/classification" element={<WorkbenchPage />} />
-          <Route path="/admin" element={<AdminPage />} />
-          <Route path="/admin/companies" element={<Navigate to="/enterprise" replace />} />
-          <Route path="/consumer" element={<ConsumerPage />} />
-          <Route path="/enterprise" element={<EnterprisePage />} />
-          <Route path="/document/:jobId/:taric10" element={<DocumentPage />} />
-          <Route path="*" element={<Navigate to="/classification" replace />} />
-        </Routes>
-      </main>
-    </div>
+    <AppShell>
+      <Routes>
+        <Route path="/" element={<IntroductionPage />} />
+        <Route path="/classification" element={<WorkbenchPage />} />
+        <Route path="/admin" element={<AdminPage />} />
+        <Route path="/admin/companies" element={<Navigate to="/enterprise" replace />} />
+        <Route path="/consumer" element={<ConsumerPage />} />
+        <Route path="/enterprise" element={<EnterprisePage />} />
+        <Route path="/document/:jobId/:taric10" element={<DocumentPage />} />
+        <Route path="*" element={<Navigate to="/classification" replace />} />
+      </Routes>
+    </AppShell>
   );
 }
 
