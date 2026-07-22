@@ -1469,31 +1469,12 @@ export default function DocumentPackageDetail({ packageData }) {
 
   return (
     <div className="ddv-shell">
-      <section className="ddv-overview-band">
-        <div>
-          <span>TARIC10</span>
-          <strong>{clean(pkg.taric10) || "-"}</strong>
-        </div>
-        <div>
-          <span>CN8</span>
-          <strong>{clean(pkg.cn8) || "-"}</strong>
-        </div>
-        <div>
-          <span>수입요건 묶음</span>
-          <strong>{viewModel.requirementGroups.length}건</strong>
-        </div>
-        <div>
-          <span>기본서류</span>
-          <strong>{viewModel.baselineRows.length}건</strong>
-        </div>
-      </section>
-
       <FlowNav activeKey={activeFlow} counts={counts} onSelect={setActiveFlow} />
 
       {activeFlow === FLOW_KEYS.REQUIREMENTS ? (
         <FlowPanel
           title={activeItem.title}
-          description="taric_master_table의 한국 적용 measure에서 certificate/declaration code를 추출하고, taric_cert_table의 묶음명과 표시 설명으로 정리합니다."
+          description="선택한 TARIC10에 연결된 EU 수입요건과 제출·신고 조건을 묶어 확인합니다."
         >
           <CertificateGroupCards groups={viewModel.requirementGroups} />
         </FlowPanel>
@@ -1502,7 +1483,7 @@ export default function DocumentPackageDetail({ packageData }) {
       {activeFlow === FLOW_KEYS.DUTY ? (
         <FlowPanel
           title={activeItem.title}
-          description="FTA/특혜세율, suspension·quota·end-use, 기본세율 순서로 적용 후보를 정리합니다."
+          description="FTA 특혜세율, 관세 유예·할당·특정 용도 조건, 기본세율 순서로 적용 가능성을 확인합니다."
         >
           <DutyBranchView priority={viewModel.dutyPriority} rows={viewModel.dutyRows} />
         </FlowPanel>
@@ -1511,7 +1492,7 @@ export default function DocumentPackageDetail({ packageData }) {
       {activeFlow === FLOW_KEYS.BASELINE ? (
         <FlowPanel
           title={activeItem.title}
-          description="baseline_table 성격의 기본 통관 서류만 표시하고, certificate code 묶음에서 이미 다룬 CHED/COI/IUU/CITES 성격의 중복 서류는 제외합니다."
+          description="기본 통관서류를 표시하고, 앞 단계에서 다룬 조건부 증명서는 중복하지 않습니다."
         >
           <MiniTable
             rows={viewModel.baselineRows}

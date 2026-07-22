@@ -421,6 +421,15 @@ def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
         help="브라우저를 열어 appconfig URL의 스크롤 과정을 표시합니다.",
     )
     parser.add_argument(
+        "--url",
+        action="append",
+        dest="product_urls",
+        help=(
+            "검사할 상품 URL입니다. 지정하면 .appconfig 목록 대신 이 URL만 "
+            "사용하며 여러 번 지정할 수 있습니다."
+        ),
+    )
+    parser.add_argument(
         "--compare-ocr",
         action="store_true",
         help="동일 이미지의 raw OCR, PP-StructureV3, PaddleOCR-VL 결과를 비교합니다.",
@@ -435,7 +444,7 @@ def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--check-ui-binding",
         action="store_true",
-        help="현재 Dash Reconstruction Drawer 바인딩 가능 여부를 함께 검사합니다.",
+        help="현재 React Classification 입력 복원 DTO 바인딩을 함께 검사합니다.",
     )
     parser.add_argument(
         "--reuse-ocr-image-artifacts",
@@ -891,13 +900,14 @@ class KurlyMarketSmokeRunner:
         writeSummaryArtifact: bool | None = None,
         reuseOcrImageArtifacts: bool = True,
         useCachedProductInput: bool = False,
+        productUrls: Sequence[str] | None = None,
     ) -> None:
         _LoadDotEnvDefaults(PROJECT_ROOT_PATH / ".env")
         appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
         pathConfig = appConfig.paths
         smokeConfig = appConfig.kurly_smoke
 
-        self._productUrls = list(smokeConfig.product_urls)
+        self._productUrls = list(productUrls or smokeConfig.product_urls)
         self._timeoutSeconds = smokeConfig.timeout_seconds
         self._scrollCount = smokeConfig.scroll_count
         self._headless = False if showBrowser else smokeConfig.headless
@@ -3474,4 +3484,5 @@ if __name__ == "__main__":
         writeSummaryArtifact=cliArguments.write_summary_artifact,
         reuseOcrImageArtifacts=cliArguments.reuse_ocr_image_artifacts,
         useCachedProductInput=cliArguments.use_cached_product_input,
+        productUrls=cliArguments.product_urls,
     ).Run()

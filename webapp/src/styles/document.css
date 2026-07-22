@@ -9,6 +9,8 @@
   background: var(--doc-bg);
   min-height: 100%;
   color: var(--doc-ink);
+  font-size: 15px;
+  line-height: 1.5;
 }
 
 .docpage-header {
@@ -52,22 +54,24 @@
 
 .docpage-title {
   margin: 10px 0 8px;
-  font-size: clamp(2rem, 3vw, 3rem);
-  line-height: 0.95;
+  font-size: clamp(1.9rem, 3vw, 2.5rem);
+  line-height: 1.08;
   letter-spacing: 0;
 }
 
 .docpage-subtitle {
   color: var(--doc-muted);
+  font-size: 15px;
+  line-height: 1.5;
   max-width: 760px;
 }
 
 .docpage-pill {
   border: 1px solid var(--doc-line);
   background: var(--doc-panel);
-  backdrop-filter: blur(14px);
   border-radius: 999px;
-  padding: 12px 18px;
+  padding: 8px 12px;
+  font-size: 13px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -84,8 +88,8 @@
   color: var(--doc-muted);
   border: 1px solid var(--doc-line);
   background: rgba(255, 255, 255, 0.68);
-  border-radius: 999px;
-  padding: 10px 14px;
+  border-radius: 6px;
+  padding: 8px 12px;
 }
 
 .docpage-tab.active {
@@ -97,7 +101,7 @@
 .docpage-error,
 .docpage-loading {
   border: 1px solid var(--doc-line);
-  border-radius: 20px;
+  border-radius: 8px;
   padding: 14px 18px;
   margin-bottom: 18px;
   background: rgba(255, 255, 255, 0.7);
@@ -113,34 +117,6 @@
   gap: 20px;
 }
 
-.ddv-overview-band {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.ddv-overview-band > div {
-  border: 1px solid var(--doc-line);
-  border-radius: 16px;
-  background: var(--doc-panel);
-  padding: 16px;
-  min-width: 0;
-}
-
-.ddv-overview-band span {
-  display: block;
-  color: var(--doc-muted);
-  font-size: 0.86rem;
-  margin-bottom: 8px;
-}
-
-.ddv-overview-band strong {
-  display: block;
-  font-size: 1.25rem;
-  line-height: 1.2;
-  overflow-wrap: anywhere;
-}
-
 .ddv-flow-nav {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -151,18 +127,18 @@
   position: relative;
   appearance: none;
   border: 1px solid var(--doc-line);
-  border-radius: 18px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.82);
   color: var(--doc-ink);
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 8px 12px;
   align-items: center;
-  min-height: 104px;
-  padding: 16px;
+  min-height: 88px;
+  padding: 14px;
   text-align: left;
   cursor: pointer;
-  box-shadow: 0 12px 28px rgba(24, 32, 24, 0.06);
+  box-shadow: 0 4px 12px rgba(24, 32, 24, 0.04);
 }
 
 .ddv-flow-button:not(:last-child)::after {
@@ -206,11 +182,10 @@
 
 .ddv-flow-panel {
   border: 1px solid var(--doc-line);
-  border-radius: 24px;
+  border-radius: 12px;
   background: var(--doc-panel);
-  backdrop-filter: blur(16px);
-  padding: 22px;
-  box-shadow: 0 20px 50px rgba(24, 32, 24, 0.08);
+  padding: 20px;
+  box-shadow: 0 8px 24px rgba(24, 32, 24, 0.05);
 }
 
 .ddv-flow-panel-head {
@@ -237,14 +212,20 @@
 .ddv-requirement-list {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 14px;
+  gap: 0;
 }
 
 .ddv-procedure-card {
-  border: 1px solid rgba(24, 32, 24, 0.1);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.82);
-  padding: 16px;
+  border: 0;
+  border-top: 1px solid var(--doc-line);
+  border-radius: 0;
+  background: transparent;
+  padding: 18px 0;
+}
+
+.ddv-procedure-card:first-child {
+  border-top: 0;
+  padding-top: 0;
 }
 
 .ddv-prearrival-shell {
@@ -258,10 +239,10 @@
 }
 
 .ddv-checklist-panel {
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(24, 32, 24, 0.1);
-  border-radius: 18px;
-  padding: 16px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
 }
 
 .ddv-checklist-head {
@@ -284,7 +265,7 @@
   align-items: flex-start;
   background: rgba(246, 250, 253, 0.86);
   border: 1px solid rgba(24, 32, 24, 0.08);
-  border-radius: 14px;
+  border-radius: 8px;
   display: flex;
   gap: 12px;
   justify-content: space-between;
@@ -349,16 +330,17 @@
   border-radius: 999px;
   color: var(--doc-muted);
   flex: 0 0 auto;
-  font-size: 0.76rem;
+  font-size: 0.8rem;
   font-weight: 800;
   padding: 5px 8px;
 }
 
 .ddv-final-docs {
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(22, 97, 168, 0.18);
-  border-radius: 18px;
-  padding: 16px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--doc-line);
+  border-radius: 0;
+  padding: 18px 0 0;
 }
 
 .ddv-result-section {
@@ -422,13 +404,14 @@
 
 .ddv-final-doc-row {
   align-items: flex-start;
-  background: rgba(246, 250, 253, 0.9);
-  border: 1px solid rgba(24, 32, 24, 0.08);
-  border-radius: 12px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--doc-line);
+  border-radius: 0;
   display: flex;
   gap: 12px;
   justify-content: space-between;
-  padding: 11px 12px;
+  padding: 11px 0;
 }
 
 .ddv-final-doc-row strong {
@@ -500,10 +483,11 @@
 }
 
 .ddv-check-group {
-  background: rgba(246, 250, 253, 0.86);
-  border: 1px solid rgba(24, 32, 24, 0.08);
-  border-radius: 12px;
-  padding: 12px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--doc-line);
+  border-radius: 0;
+  padding: 12px 0 0;
 }
 
 .ddv-check-group > strong {
@@ -511,13 +495,18 @@
   margin-bottom: 8px;
 }
 
+.ddv-check-group:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
 .ddv-procedure-card.exporter,
 .ddv-procedure-card.broker {
-  background: rgba(255, 255, 255, 0.9);
+  background: transparent;
 }
 
 .ddv-procedure-card.exporter {
-  padding: 18px;
+  padding-inline: 0;
 }
 
 .ddv-procedure-card-head {
@@ -609,17 +598,18 @@
 }
 
 .ddv-group-guidance {
-  border: 1px solid rgba(109, 63, 214, 0.16);
-  border-radius: 14px;
-  background: rgba(109, 63, 214, 0.08);
+  border: 0;
+  border-left: 3px solid rgba(109, 63, 214, 0.45);
+  border-radius: 0;
+  background: transparent;
   margin-top: 14px;
-  padding: 18px;
+  padding: 2px 0 2px 16px;
   width: 100%;
 }
 
 .ddv-group-guidance.compact {
   margin-top: 0;
-  padding: 14px;
+  padding: 2px 0 2px 16px;
 }
 
 .ddv-group-guidance h3,
@@ -732,9 +722,10 @@
 }
 
 .ddv-footnote-guide {
-  border: 1px solid rgba(109, 63, 214, 0.14);
+  border: 0;
+  border-left: 3px solid rgba(109, 63, 214, 0.32);
   background: rgba(109, 63, 214, 0.08);
-  border-radius: 12px;
+  border-radius: 0;
   display: grid;
   grid-template-columns: 70px 1fr;
   gap: 10px;
@@ -774,11 +765,12 @@
 }
 
 .ddv-review-grid > div {
-  border: 1px solid rgba(109, 63, 214, 0.12);
-  border-radius: 14px;
-  background: #f8fafc;
+  border: 0;
+  border-left: 2px solid rgba(109, 63, 214, 0.22);
+  border-radius: 0;
+  background: transparent;
   min-width: 0;
-  padding: 14px;
+  padding: 2px 12px;
 }
 
 .ddv-review-grid span {
@@ -798,11 +790,12 @@
 }
 
 .ddv-broker-section {
-  border: 1px solid rgba(24, 32, 24, 0.08);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.72);
+  border: 0;
+  border-top: 1px solid var(--doc-line);
+  border-radius: 0;
+  background: transparent;
   margin-top: 14px;
-  padding: 14px;
+  padding: 14px 0 0;
 }
 
 .ddv-broker-section h3 {
@@ -836,10 +829,11 @@
 }
 
 .ddv-source-section-list {
-  background: rgba(255, 255, 255, 0.62);
-  border: 1px solid rgba(24, 32, 24, 0.08);
-  border-radius: 12px;
-  padding: 12px;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid var(--doc-line);
+  border-radius: 0;
+  padding: 2px 0 2px 12px;
 }
 
 .ddv-source-section-list > strong {
@@ -925,10 +919,10 @@
 }
 
 .ddv-duty-priority-section {
-  border: 1px solid rgba(24, 32, 24, 0.08);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.68);
-  padding: 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
 }
 
 .ddv-duty-priority-head {
@@ -956,9 +950,9 @@
 
 .ddv-branch-card {
   border: 1px solid rgba(24, 32, 24, 0.1);
-  border-radius: 18px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.86);
-  padding: 18px;
+  padding: 16px;
 }
 
 .ddv-branch-card.success {
@@ -1009,7 +1003,7 @@
   border: 1px solid rgba(24, 32, 24, 0.1);
   border-radius: 999px;
   color: var(--doc-muted);
-  font-size: 0.74rem;
+  font-size: 0.8rem;
   font-style: normal;
   line-height: 1;
   padding: 5px 8px;
@@ -1055,7 +1049,7 @@
 .ddv-duty-units span,
 .ddv-duty-units em {
   border-radius: 999px;
-  font-size: 0.74rem;
+  font-size: 0.8rem;
   line-height: 1;
   padding: 5px 8px;
 }
@@ -1318,7 +1312,6 @@
     border-radius: 22px;
   }
 
-  .ddv-overview-band,
   .ddv-flow-nav {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1332,8 +1325,8 @@
   }
 
   .ddv-flow-panel {
-    padding: 18px;
-    border-radius: 20px;
+    padding: 16px;
+    border-radius: 12px;
   }
 
   .ddv-duty-flow {
@@ -1346,14 +1339,13 @@
 }
 
 @media (max-width: 560px) {
-  .ddv-overview-band,
   .ddv-flow-nav,
   .ddv-procedure-grid {
     grid-template-columns: 1fr;
   }
 
   .ddv-flow-button {
-    min-height: 88px;
+    min-height: 72px;
   }
 
   .ddv-cert-row {

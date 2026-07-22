@@ -6,7 +6,19 @@ body {
   margin: 0;
   min-height: 100vh;
   background: #f8fafc;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro", "Apple SD Gothic Neo", sans-serif;
+  color: #111827;
+  font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }
 
 .app-shell {
@@ -60,6 +72,12 @@ body {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .app-topbar-logo {
+    animation: none;
+  }
+}
+
 .app-topbar-tabs {
   display: flex;
   align-items: center;
@@ -85,12 +103,34 @@ body {
   background: #f1f5f9;
 }
 
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 3px solid #8b5cf6;
+  outline-offset: 2px;
+}
+
 .app-main {
   width: 100%;
   max-width: 1280px;
   margin: 0 auto;
   padding: 24px 28px;
   min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .app-topbar {
+    gap: 10px 14px;
+    padding: 14px 16px;
+  }
+
+  .app-topbar-tabs {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .app-main {
+    padding: 18px 16px;
+  }
 }
 
 /* 서류 추천 페이지 (팀원 데모 렌더러 호스팅) */

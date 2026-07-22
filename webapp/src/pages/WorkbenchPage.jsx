@@ -373,8 +373,8 @@ function ClassificationFlow({ activeStep, onSelect }) {
     <div className="cjs-panel cjs-classification-flow">
       <div className="cjs-classification-flow-heading">
         <div>
-          <div className="cjs-panel-title">기본 분류 흐름</div>
-          <small>실제 결과를 검토하는 순서이며 예외·검증 로직은 결과 검토에서 확인합니다.</small>
+          <div className="cjs-panel-title">품목 분류 결과 확인</div>
+          <small>전체 처리 과정의 ‘품목 분류’ 결과를 읽는 4개 화면입니다.</small>
         </div>
         <strong>
           {activeIndex + 1}/{CLASSIFICATION_STEPS.length} · {CLASSIFICATION_STEPS[activeIndex][1]}

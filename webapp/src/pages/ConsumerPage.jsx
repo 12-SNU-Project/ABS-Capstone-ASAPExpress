@@ -127,7 +127,7 @@ export default function ConsumerPage() {
             <i /><i /><i /><i /><i /><i />
           </span>
         </div>
-        <p>상품 링크 하나로 EU 수출 관세 코드를 찾아드립니다</p>
+        <p>상품 링크 하나로 EU 수출 품목분류 후보를 간단히 확인합니다</p>
       </div>
 
       <div className="consumer-input-card">
@@ -186,6 +186,9 @@ export default function ConsumerPage() {
               <div className="consumer-taric-label">
                 TARIC10 {taricChoices(primary).length === 1 ? taricChoices(primary)[0] : taricChoices(primary).length ? `${taricChoices(primary).length}개 후보` : "확인 중"}
               </div>
+              <p className="consumer-review-warning">
+                자동 추천 후보이며, 최종 품목분류는 세관·관세 전문가의 확인이 필요합니다.
+              </p>
               <CandidateDocuments candidate={primary} jobId={jobId} />
               {asList(primary.similar_ebti_cases).length ? (
                 <details className="consumer-precedents">

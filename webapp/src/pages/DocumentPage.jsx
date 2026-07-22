@@ -90,6 +90,7 @@ export default function DocumentPage() {
           </div>
         </div>
         <div className="docpage-actions">
+          {clean(packageData?.cn8) ? <div className="docpage-pill">CN8 {clean(packageData.cn8)}</div> : null}
           <div className="docpage-pill">TARIC10 {clean(packageData?.taric10) || taric10}</div>
           {!caseId ? (
             <button type="button" className="docpage-save" disabled={!packageData || saving} onClick={saveToEnterprise}>

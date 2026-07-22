@@ -15,6 +15,8 @@
   min-width: 0;
   max-width: 100%;
   color: var(--cjs-text);
+  font-size: 15px;
+  line-height: 1.5;
 }
 
 .cjs-hero,
@@ -62,7 +64,7 @@
 .cjs-title {
   margin: 4px 0 0;
   color: var(--cjs-text);
-  font-size: 26px;
+  font-size: 28px;
   line-height: 1.08;
   letter-spacing: 0;
 }
@@ -70,7 +72,7 @@
 .cjs-subtitle {
   margin-top: 5px;
   color: var(--cjs-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -523,7 +525,8 @@ summary.cjs-panel-title {
 }
 
 .cjs-classification-flow {
-  border-color: color-mix(in srgb, var(--cjs-accent) 24%, var(--cjs-border));
+  border-color: var(--cjs-border);
+  box-shadow: none;
 }
 
 .cjs-classification-flow-heading {
@@ -554,19 +557,19 @@ summary.cjs-panel-title {
 .cjs-classification-step-nav {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  gap: 0;
+  border-bottom: 1px solid var(--cjs-border);
 }
 
 .cjs-classification-step-nav button {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 2px 9px;
-  align-items: center;
+  gap: 3px;
   min-width: 0;
-  padding: 10px;
-  border: 1px solid var(--cjs-border);
-  border-radius: 4px;
-  background: var(--cjs-surface-strong);
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
   color: var(--cjs-muted);
   cursor: pointer;
   font: inherit;
@@ -574,14 +577,8 @@ summary.cjs-panel-title {
 }
 
 .cjs-classification-step-nav button > span {
-  grid-row: 1 / 3;
-  display: grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--cjs-muted) 12%, transparent);
-  font-size: 11px;
+  color: var(--cjs-muted);
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -593,17 +590,16 @@ summary.cjs-panel-title {
 
 .cjs-classification-step-nav button small {
   overflow-wrap: anywhere;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .cjs-classification-step-nav button.active {
-  border-color: var(--cjs-accent);
-  background: color-mix(in srgb, var(--cjs-accent) 8%, var(--cjs-surface-strong));
+  border-bottom-color: var(--cjs-accent);
+  background: color-mix(in srgb, var(--cjs-accent) 5%, transparent);
 }
 
 .cjs-classification-step-nav button.active > span {
-  background: var(--cjs-accent);
-  color: #ffffff;
+  color: var(--cjs-accent);
 }
 
 .cjs-review-warning {
@@ -1466,7 +1462,7 @@ summary.cjs-panel-title {
 
 .cjs-stage-item-label small {
   color: var(--cjs-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   overflow-wrap: anywhere;
 }
@@ -1715,7 +1711,7 @@ summary.cjs-panel-title {
 
 .cjs-precedent-ref {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--cjs-accent);
   margin-bottom: 4px;
@@ -1729,12 +1725,12 @@ summary.cjs-panel-title {
 
 .cjs-precedent-diff {
   margin-top: 4px;
-  font-size: 11px;
+  font-size: 12px;
   color: #d97706;
 }
 
 .cjs-precedent-body {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
   margin-bottom: 4px;
   overflow-wrap: anywhere;
@@ -1804,7 +1800,7 @@ summary.cjs-panel-title {
 
 .cjs-precedent-more summary {
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   color: var(--cjs-accent);
   user-select: none;
@@ -1821,7 +1817,7 @@ summary.cjs-panel-title {
   display: inline-block;
   padding: 1px 8px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.03em;
 }
@@ -1849,13 +1845,13 @@ summary.cjs-panel-title {
 
 .cjs-stage-trace-head b { font-size: 13px; letter-spacing: 0.04em; color: var(--cjs-accent); }
 
-.cjs-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.cjs-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .cjs-mono.dim { color: var(--cjs-muted); }
 .cjs-mono.ok { color: #15803d; font-weight: 800; }
 .cjs-decision {
   padding: 1px 8px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 .cjs-decision.d-confirmed { background: rgba(22, 163, 74, 0.13); color: #15803d; }
@@ -1864,7 +1860,7 @@ summary.cjs-panel-title {
 .cjs-residual {
   padding: 1px 8px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   background: rgba(100, 116, 139, 0.14);
   color: #64748b;
@@ -1879,12 +1875,12 @@ summary.cjs-panel-title {
   line-height: 1.5;
 }
 
-.cjs-trace-detail.full { font-size: 12px; color: var(--cjs-muted); }
+.cjs-trace-detail.full { font-size: 13px; color: var(--cjs-muted); }
 
 .cjs-trace-more { margin-top: 6px; }
 .cjs-trace-more summary {
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   color: var(--cjs-accent);
   user-select: none;
@@ -1904,12 +1900,12 @@ summary.cjs-panel-title {
   background: var(--cjs-surface-strong);
 }
 
-.cjs-validator b { font-size: 11px; color: #7c3aed; }
-.cjs-validator em { font-style: normal; font-size: 11px; color: #b45309; }
+.cjs-validator b { font-size: 12px; color: #7c3aed; }
+.cjs-validator em { font-style: normal; font-size: 12px; color: #b45309; }
 
 .cjs-summons {
   margin: 6px 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--cjs-text);
 }
 
@@ -1957,7 +1953,7 @@ summary.cjs-panel-title {
 }
 
 .cjs-stage-summon b {
-  font-size: 10.5px;
+  font-size: 12px;
   letter-spacing: 0.05em;
   color: #7c3aed;
 }
@@ -1966,6 +1962,29 @@ summary.cjs-panel-title {
 
 .cjs-stage-summon em {
   font-style: normal;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--cjs-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cjs-progressbar span {
+    animation: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .cjs-stage-nav,
+  .cjs-classification-step-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .cjs-classification-pager {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .cjs-classification-pager button {
+    width: 100%;
+    padding-inline: 8px;
+  }
 }
