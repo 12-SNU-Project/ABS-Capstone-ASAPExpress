@@ -18,6 +18,13 @@ from time import perf_counter
 from urllib.parse import urlsplit, urlunsplit
 
 PROJECT_ROOT_PATH = Path(__file__).resolve().parent
+SRC_ROOT_PATH = PROJECT_ROOT_PATH / "src"
+APP_CONFIG_PATH = PROJECT_ROOT_PATH / ".appconfig.kurly_market_smoke.toml"
+ENV_FILE_PATH = PROJECT_ROOT_PATH / ".env.kurly_market_smoke"
+os.environ["ASAP_APP_CONFIG_PATH"] = str(APP_CONFIG_PATH)
+os.environ["ASAP_ENV_FILE"] = str(ENV_FILE_PATH)
+if str(SRC_ROOT_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT_PATH))
 
 from bussiness_logic.app_config import LlmProfileName, LoadAppConfig  # noqa: E402
 from bussiness_logic.artifact_paths import ExtractProductIdFromUrl  # noqa: E402
@@ -434,7 +441,7 @@ def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
         action="append",
         dest="product_urls",
         help=(
-            "검사할 상품 URL입니다. 지정하면 .appconfig 목록 대신 이 URL만 "
+            "검사할 상품 URL입니다. 지정하면 Kurly smoke config 목록 대신 "
             "사용하며 여러 번 지정할 수 있습니다."
         ),
     )
@@ -911,7 +918,7 @@ class KurlyMarketSmokeRunner:
         useCachedProductInput: bool = False,
         productUrls: Sequence[str] | None = None,
     ) -> None:
-        _LoadDotEnvDefaults(PROJECT_ROOT_PATH / ".env")
+        _LoadDotEnvDefaults(ENV_FILE_PATH)
         appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
         pathConfig = appConfig.paths
         smokeConfig = appConfig.kurly_smoke
@@ -1078,7 +1085,7 @@ class KurlyMarketSmokeRunner:
         if not self._productUrls:
             runLogger.warning(
                 (
-                    "실행할 상품 URL이 없습니다. .appconfig의 "
+                    "실행할 상품 URL이 없습니다. Kurly smoke config의 "
                     "[kurly_smoke].product_urls에 국내/해외 Kurly 상품 링크를 "
                     "넣어주세요."
                 )

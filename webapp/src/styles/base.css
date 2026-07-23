@@ -103,35 +103,6 @@ textarea {
   background: var(--background);
 }
 
-.app-topbar {
-  position: sticky;
-  top: 0;
-  z-index: 80;
-  min-height: 64px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in oklch, var(--surface) 96%, transparent);
-  backdrop-filter: blur(12px);
-}
-
-.app-topbar-inner {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px 24px;
-  width: 100%;
-  max-width: 1600px;
-  min-height: 64px;
-  margin: 0 auto;
-  padding: 0 28px;
-}
-
-.app-topbar-logo-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-decoration: none;
-}
-
 .app-topbar-logo {
   display: block;
   width: 136px;
@@ -155,43 +126,18 @@ textarea {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
   .app-topbar-logo {
     animation: none;
   }
-}
-
-.app-topbar-tabs {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.app-topbar-tab {
-  display: inline-flex;
-  min-height: 36px;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 12px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--muted-foreground);
-  text-decoration: none;
-}
-
-.app-topbar-tab svg {
-  width: 16px;
-  height: 16px;
-}
-
-.app-topbar-home {
-  margin-left: auto;
-}
-
-.app-topbar-tab:hover,
-.app-topbar-tab.active {
-  color: var(--foreground);
-  background: var(--surface-muted);
 }
 
 :where(a, button, input, select, textarea, summary):focus-visible {
@@ -208,100 +154,7 @@ textarea {
 }
 
 @media (max-width: 720px) {
-  .app-topbar-inner {
-    gap: 10px 14px;
-    padding: 10px 16px;
-  }
-
-  .app-topbar-tabs {
-    order: 3;
-    width: 100%;
-    overflow-x: auto;
-  }
-
   .app-main {
     padding: 18px 16px;
   }
-}
-
-/* 서류 추천 페이지 (팀원 데모 렌더러 호스팅) */
-.docpage {
-  display: grid;
-  gap: 14px;
-}
-
-.docpage-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: end;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.docpage-eyebrow a {
-  color: #6d3fd6;
-  font-size: 12px;
-  font-weight: 900;
-  text-decoration: none;
-}
-
-.docpage-title {
-  margin: 4px 0 4px;
-  color: #111827;
-  font-size: 24px;
-  font-weight: 950;
-}
-
-.docpage-subtitle {
-  color: #64748b;
-  font-size: 13px;
-}
-
-.docpage-pill {
-  flex: 0 0 auto;
-  border: 1px solid #dbe3ef;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #6d3fd6;
-  font-size: 12px;
-  font-weight: 900;
-  padding: 8px 12px;
-}
-
-.docpage-tabs {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.docpage-tab {
-  border: 1px solid #dbe3ef;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #475569;
-  font-size: 12px;
-  font-weight: 800;
-  padding: 6px 12px;
-  text-decoration: none;
-}
-
-.docpage-tab.active {
-  border-color: #6d3fd6;
-  color: #6d3fd6;
-  background: #f6f1ff;
-}
-
-.docpage-error {
-  border: 1px solid #fecaca;
-  border-radius: 8px;
-  background: #fef2f2;
-  color: #7f1d1d;
-  padding: 12px;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.docpage-loading {
-  color: #64748b;
-  font-size: 13px;
 }

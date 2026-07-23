@@ -11,6 +11,7 @@ const STATUS_LABELS = {
   done: "완료",
   ok: "정상",
   warn: "확인 필요",
+  "needs-review": "전문가 검토 필요",
   skipped: "건너뜀",
 };
 

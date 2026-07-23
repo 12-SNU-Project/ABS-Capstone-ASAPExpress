@@ -70,3 +70,11 @@ export function GetPipelineStageState(result, viewModel, key) {
   }
   return "idle";
 }
+
+export function CompletedPipelineStage(result) {
+  const isReconstruction = clean(result?.job_id).startsWith("reconstruct_")
+    || asList(result?.events).some(
+      (event) => clean(event?.stage) === "Input_Reconstruction",
+    );
+  return isReconstruction ? "product_collection" : "classification";
+}

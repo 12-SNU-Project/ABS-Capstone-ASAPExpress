@@ -6,7 +6,7 @@ export const STAGES = [
 
 export const CLASSIFICATION_STEPS = [
   ["understanding", "상품 이해", "상품 정체·성분 정리"],
-  ["routing", "HS2 Routing", "HS2 후보 비교"],
+  ["routing", "후보 탐색", "HS2 후보 비교"],
   ["hierarchy", "계층 분류", "HS4 → HS6 → CN8"],
   ["review", "결과 검토", "판단 근거·판례"],
 ];

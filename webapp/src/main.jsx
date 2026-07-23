@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import AppShell from "@/components/layout/AppShell";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import AdminPage from "./pages/AdminPage";
 import ConsumerPage from "./pages/ConsumerPage";
 import DocumentPage from "./pages/DocumentPage";
@@ -35,9 +36,11 @@ function ApplicationLayout() {
 
 function App() {
   return (
-    <BrowserRouter>
-      <ApplicationLayout />
-    </BrowserRouter>
+    <TooltipProvider>
+      <BrowserRouter>
+        <ApplicationLayout />
+      </BrowserRouter>
+    </TooltipProvider>
   );
 }
 

@@ -14,7 +14,7 @@ import {
   trueDetails,
   verdictLabel,
 } from "@/lib/traceContract.js";
-import { BuildCandidateHierarchy } from "@/lib/labels.js";
+import { BuildCandidateHierarchy, UnderstandingValueLabel } from "@/lib/labels.js";
 import { asList, asObject, clean } from "@/lib/format.js";
 import { PrecedentSummary } from "./EvidenceElements";
 
@@ -56,6 +56,35 @@ function StagePrecedentRow({ row, stageCode }) {
   );
 }
 
+function RuleTerms(value) {
+  const values = Array.isArray(value) ? value : String(value || "").split(/[;,]/);
+  return values
+    .map((item) => clean(item).replace(/[\[\]'\"]/g, ""))
+    .map(UnderstandingValueLabel)
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function CandidateRuleSummary({ entry }) {
+  const rows = [
+    ["일치한 상품 사실", RuleTerms(entry?.matched)],
+    ["포함 기준", RuleTerms(entry?.incl)],
+    ["배제 기준", RuleTerms(entry?.excl)],
+    ["충돌한 사실", RuleTerms(entry?.neg_matched)],
+  ].filter(([, values]) => values.length);
+  if (!rows.length) return null;
+  return (
+    <dl className="mt-3 grid gap-2 rounded-lg border bg-surface-muted p-3 text-xs sm:grid-cols-2">
+      {rows.map(([label, values]) => (
+        <div className="grid gap-1" key={label}>
+          <dt className="font-semibold text-muted-foreground">{label}</dt>
+          <dd className="m-0 leading-5 text-foreground">{values.join(" · ")}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 function StageEvidenceBlock({ stage, cn8, summons }) {
   const entry = stageEntryForCode(stage, cn8);
   const stageName = clean(asObject(stage).stage);
@@ -73,6 +102,7 @@ function StageEvidenceBlock({ stage, cn8, summons }) {
         {decision ? <span className={`cjs-decision d-${decision}`}>{decisionLabel(decision)}</span> : null}
         {entry?.residual ? <span className="cjs-residual">기타 항목</span> : null}
       </div>
+      <CandidateRuleSummary entry={entry} />
       {stageSummons.map((row, index) => (
         <StagePrecedentRow row={row} stageCode={clean(entry?.code)} key={index} />
       ))}
@@ -148,12 +178,13 @@ function ClassificationBasisLabel(value) {
   return basis.replaceAll("_", " ");
 }
 
-function ClassificationHierarchyNode({ node }) {
+function ClassificationHierarchyNode({ node, selectedCn8 }) {
   const children = asList(node.children);
   const basis = ClassificationBasisLabel(node.basis || node.description);
+  const selected = node.level === "CN8" && clean(node.code) === clean(selectedCn8);
   return (
     <li>
-      <div className={`cjs-hierarchy-node ${node.recommended ? "recommended" : ""}`}>
+      <div className={`cjs-hierarchy-node ${node.recommended ? "recommended" : ""} ${selected ? "selected" : ""}`}>
         <span className="cjs-hierarchy-marker">{node.level}</span>
         <div className="cjs-hierarchy-copy">
           <strong>{node.code}</strong>
@@ -165,7 +196,7 @@ function ClassificationHierarchyNode({ node }) {
         </div>
         <div className="cjs-hierarchy-meta">
           {node.level === "CN8" ? (
-            <span>{node.rank}순위{node.recommended ? " · 시스템 추천" : ""}</span>
+            <span>{node.rank}순위{node.recommended ? " · 시스템 추천" : ""}{selected ? " · 현재 선택" : ""}</span>
           ) : null}
           {Number.isFinite(Number(node.score)) ? <small>단계 비교값 {node.score}</small> : null}
         </div>
@@ -173,7 +204,7 @@ function ClassificationHierarchyNode({ node }) {
       {children.length ? (
         <ul>
           {children.map((child) => (
-            <ClassificationHierarchyNode node={child} key={`${child.level}-${child.code}`} />
+            <ClassificationHierarchyNode node={child} selectedCn8={selectedCn8} key={`${child.level}-${child.code}`} />
           ))}
         </ul>
       ) : null}
@@ -181,7 +212,7 @@ function ClassificationHierarchyNode({ node }) {
   );
 }
 
-export function ClassificationHierarchy({ candidates, selectedPath }) {
+export function ClassificationHierarchy({ candidates, selectedPath, selectedCn8 }) {
   const tree = BuildCandidateHierarchy(candidates, asObject(selectedPath));
   const hasCandidates = asList(tree.children).length > 0;
   return (
@@ -195,7 +226,7 @@ export function ClassificationHierarchy({ candidates, selectedPath }) {
       </div>
       {hasCandidates ? (
         <ul className="cjs-hierarchy-tree" aria-label="HS 코드 후보 계층 트리">
-          <ClassificationHierarchyNode node={tree} />
+          <ClassificationHierarchyNode node={tree} selectedCn8={selectedCn8} />
         </ul>
       ) : (
         <div className="cjs-muted">계층 분류 후보가 기록되지 않았습니다.</div>

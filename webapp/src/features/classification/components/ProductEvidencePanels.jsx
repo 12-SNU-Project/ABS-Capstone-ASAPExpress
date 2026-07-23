@@ -1,7 +1,11 @@
 import DataTable from "@/components/DataTable";
-import KeyValueRows from "@/components/KeyValueRows";
+import { Database, ImageOff, ScanSearch, TriangleAlert } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RECONSTRUCTION_KEYS, UnderstandingValueLabel } from "@/lib/labels.js";
 import { asList, asObject, clean, labelFor } from "@/lib/format.js";
+import { BuildImageEvidenceItems } from "@/features/classification/model/imageEvidenceAdapter.js";
 import { EvidenceTerms, FactLabel } from "./EvidenceElements";
 
 const INTENDED_USE_OPTIONS = [
@@ -25,6 +29,9 @@ function ParseCompositionTerms(terms) {
 
 function ReconstructionValueLabel(key, value) {
   const text = clean(value);
+  if (key === "used_llm_reconstruction" && typeof value === "boolean") {
+    return value ? "사용함" : "사용하지 않음";
+  }
   if (key === "mode") {
     return {
       fallback_reconstruction: "규칙 기반 복원",
@@ -81,60 +88,140 @@ export function ProductCollectionPanel({ result }) {
       ReconstructionValueLabel(key, value),
     ]),
   );
-  const warnings = [
-    ...asList(inputView.product_fact_conflicts),
-    ...asList(inputView.warnings),
-  ].map(ReconstructionWarningLabel).filter(
-    (warning, index, all) => warning && all.indexOf(warning) === index,
-  );
+  const conflicts = asList(inputView.product_fact_conflicts)
+    .map(ReconstructionWarningLabel)
+    .filter((warning, index, all) => warning && all.indexOf(warning) === index);
+  const warnings = asList(inputView.warnings)
+    .map(ReconstructionWarningLabel)
+    .filter((warning, index, all) => warning && all.indexOf(warning) === index);
+  const reviewWarnings = warnings.filter((warning) => /근거|유보|사용할 수 없|오류|실패|확인/.test(warning));
+  const informationalWarnings = warnings.filter((warning) => !reviewWarnings.includes(warning));
   const collectedFacts = [
     ["상품명", pageProductFacts.product_name],
-    ["상품 용도", pageProductFacts.intended_use],
+    [
+      "상품 용도",
+      INTENDED_USE_OPTIONS.find(([value]) => value === clean(pageProductFacts.intended_use))?.[1]
+        || pageProductFacts.intended_use,
+    ],
     ["상품 원산국", pageProductFacts.origin_country],
   ].filter(([, value]) => clean(value) !== "");
 
+  const imageItems = BuildImageEvidenceItems(inputView);
+
   return (
-    <div className="cjs-panel">
-      <div className="cjs-panel-title">KurlyProductCollectionPipeline · 수집 및 입력 복원</div>
-      <div className="cjs-collection-stack">
-        <section>
-          <div className="cjs-subpanel-title cjs-first">수집된 상품 기본 정보</div>
-          <div className="cjs-fact-tiles cjs-collection-fact-tiles">
-            {collectedFacts.map(([label, value]) => (
-              <div className="cjs-fact-tile" key={label}>
-                <span>{label}</span>
-                <strong>{clean(value)}</strong>
-              </div>
-            ))}
+    <div className="grid min-w-0 gap-4">
+      <CollectionActivityPanel
+        collectedFactCount={collectedFacts.length}
+        reconstructedFactCount={reconstructedFacts.length}
+        unresolvedFactCount={unresolvedFacts.length}
+        status={reconstructionStatus.mode}
+      />
+      <EvidenceAcquisitionPanel items={imageItems} />
+      <ExtractedFactsPanel
+        collectedFacts={collectedFacts}
+        description={pageProductFacts.description}
+        reconstructedFacts={reconstructedFacts}
+      />
+      <div className="grid gap-4 xl:grid-cols-[minmax(260px,0.75fr)_minmax(0,1.25fr)]">
+        <ReconstructionStatusPanel
+          status={reconstructionStatus}
+          conflicts={conflicts}
+          reviewWarnings={reviewWarnings}
+          informationalWarnings={informationalWarnings}
+        />
+        <UnresolvedFactsPanel facts={unresolvedFacts} />
+      </div>
+    </div>
+  );
+}
+
+function CollectionActivityPanel({ collectedFactCount, reconstructedFactCount, unresolvedFactCount, status }) {
+  return (
+    <Card className="gap-0 shadow-[var(--shadow-surface)]">
+      <CardHeader className="border-b">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle>상품 정보 수집</CardTitle>
+            <CardDescription>페이지 수집, OCR/VLM 근거 복원과 사실 검증 결과입니다.</CardDescription>
           </div>
-          {clean(pageProductFacts.description) ? (
-            <>
-              <div className="cjs-subpanel-title">상품 설명</div>
-              <p className="cjs-desc-text">{clean(pageProductFacts.description)}</p>
-            </>
-          ) : null}
-        </section>
-        <section>
-          <div className="cjs-subpanel-title cjs-first">입력 복원 상태</div>
-          <div className="cjs-reconstruction-status">
-            <KeyValueRows data={reconstructionStatus} keys={RECONSTRUCTION_KEYS} limit={8} />
+          <Badge variant="secondary">{clean(status) ? ReconstructionValueLabel("mode", status) : "수집 상태 확인 중"}</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="grid grid-cols-3 divide-x p-0">
+        {[
+          ["기본 정보", collectedFactCount],
+          ["복원 Facts", reconstructedFactCount],
+          ["미해결", unresolvedFactCount],
+        ].map(([label, count]) => (
+          <div className="px-4 py-3" key={label}>
+            <span className="block text-xs text-muted-foreground">{label}</span>
+            <strong className="mt-1 block text-xl tabular-nums">{count}</strong>
           </div>
-          {warnings.length ? (
-            <>
-              <div className="cjs-subpanel-title">복원 경고 ({warnings.length}건)</div>
-              <ul className="cjs-warning-list">
-                {warnings.slice(0, 12).map((warning, index) => <li key={index}>{warning}</li>)}
-              </ul>
-            </>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function EvidenceAcquisitionPanel({ items }) {
+  return (
+    <Card className="gap-0 shadow-[var(--shadow-surface)]">
+      <CardHeader className="border-b">
+        <div className="flex items-center gap-2">
+          <ScanSearch className="size-4 text-primary" aria-hidden="true" />
+          <CardTitle>이미지 근거 처리</CardTitle>
+        </div>
+        <CardDescription>수집 이미지의 OCR/VLM 처리 상태를 표시하는 영역입니다.</CardDescription>
+      </CardHeader>
+      <CardContent className="py-5">
+        {items.length ? (
+          <div className="text-sm text-muted-foreground">이미지 상태 계약이 연결되었습니다.</div>
+        ) : (
+          <div className="flex items-start gap-3 rounded-lg border border-dashed bg-surface-muted/50 p-4">
+            <ImageOff className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <div>
+              <strong className="text-sm">이미지별 처리 상태가 snapshot에 제공되지 않습니다.</strong>
+              <p className="mt-1 mb-0 text-xs leading-5 text-muted-foreground">집계 결과와 복원 Facts는 표시하지만, 이미지 URL과 단계별 상태가 없어 애니메이션 Stack은 생성하지 않습니다.</p>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ExtractedFactsPanel({ collectedFacts, description, reconstructedFacts }) {
+  return (
+    <Card className="gap-0 shadow-[var(--shadow-surface)]">
+      <CardHeader className="border-b">
+        <div className="flex items-center gap-2"><Database className="size-4 text-primary" /><CardTitle>수집·복원 Facts</CardTitle></div>
+        <CardDescription>수집된 기본 정보와 구조화된 근거를 한 영역에서 검토합니다.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-5 py-4">
+        <div className="divide-y rounded-lg border">
+          {collectedFacts.length ? collectedFacts.map(([label, value]) => (
+            <div className="grid grid-cols-[110px_minmax(0,1fr)] gap-4 px-3 py-2.5" key={label}>
+              <span className="text-xs font-medium text-muted-foreground">{label}</span>
+              <strong className="text-sm font-medium">{clean(value)}</strong>
+            </div>
+          )) : <p className="m-0 px-3 py-4 text-sm text-muted-foreground">수집된 기본 정보가 없습니다.</p>}
+          {clean(description) ? (
+            <div className="grid grid-cols-[110px_minmax(0,1fr)] gap-4 px-3 py-2.5">
+              <span className="text-xs font-medium text-muted-foreground">상품 설명</span>
+              <p className="m-0 text-sm leading-6">{clean(description)}</p>
+            </div>
           ) : null}
-        </section>
-        <section>
-          <div className="cjs-subpanel-title cjs-first">복원 fact 표 ({reconstructedFacts.length}건)</div>
+        </div>
+        <div>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="m-0 text-sm font-semibold">복원 Facts 표</h3>
+            <Badge variant="outline">{reconstructedFacts.length}건</Badge>
+          </div>
           <DataTable
             rows={reconstructedFacts}
             limit={30}
             className="cjs-reconstruction-table"
-            emptyMessage="LLM 복원이 만든 구조화 fact가 없습니다."
+            emptyMessage="복원된 구조화 fact가 없습니다."
             columns={[
               { key: "field_name", label: "필드", variant: "mono" },
               { key: "normalized_value", label: "값" },
@@ -142,22 +229,74 @@ export function ProductCollectionPanel({ result }) {
               { key: "validation_status", label: "상태", variant: "pill" },
             ]}
           />
-          <div className="cjs-subpanel-title">확정하지 못한 항목 ({unresolvedFacts.length}건)</div>
-          <DataTable
-            rows={unresolvedFacts}
-            limit={20}
-            className="cjs-unresolved-table"
-            emptyMessage="별도로 유보된 복원 항목이 없습니다."
-            columns={[
-              { key: "field_name", label: "필드", variant: "mono" },
-              { key: "normalized_value", label: "값" },
-              { key: "source_refs", label: "출처", variant: "mono" },
-              { key: "validation_status", label: "상태", variant: "pill" },
-            ]}
-          />
-        </section>
-      </div>
-    </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ReconstructionStatusPanel({ status, conflicts, reviewWarnings, informationalWarnings }) {
+  const entries = RECONSTRUCTION_KEYS
+    .filter((key) => status[key] !== undefined && clean(status[key]) !== "")
+    .map((key) => [labelFor(key), status[key]]);
+  return (
+    <Card className="gap-0 shadow-[var(--shadow-surface)]">
+      <CardHeader className="border-b"><CardTitle>입력 복원 상태</CardTitle></CardHeader>
+      <CardContent className="grid gap-3 py-4">
+        <div className="divide-y">
+          {entries.map(([label, value]) => (
+            <div className="grid grid-cols-[minmax(100px,0.8fr)_minmax(0,1.2fr)] gap-3 py-2" key={label}>
+              <span className="text-xs text-muted-foreground">{label}</span>
+              <strong className="break-words text-xs font-medium">{clean(value)}</strong>
+            </div>
+          ))}
+        </div>
+        <WarningGroup title="처리 차단" tone="blocking" items={conflicts} />
+        <WarningGroup title="검토 필요" tone="review" items={reviewWarnings} />
+        <WarningGroup title="참고" tone="info" items={informationalWarnings} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function WarningGroup({ title, tone, items }) {
+  if (!items.length) return null;
+  const className = tone === "blocking"
+    ? "border-destructive/30 bg-destructive/5"
+    : tone === "review"
+      ? "border-needs-review/30 bg-needs-review/5"
+      : "bg-surface-muted";
+  return (
+    <Alert className={className}>
+      <TriangleAlert className="size-4" />
+      <AlertTitle>{title} · {items.length}건</AlertTitle>
+      <AlertDescription><ul className="m-0 grid gap-1 pl-4">{items.slice(0, 8).map((item) => <li key={item}>{item}</li>)}</ul></AlertDescription>
+    </Alert>
+  );
+}
+
+function UnresolvedFactsPanel({ facts }) {
+  return (
+    <Card className="gap-0 shadow-[var(--shadow-surface)]">
+      <CardHeader className="border-b">
+        <div className="flex items-center justify-between gap-2"><CardTitle>확정하지 못한 Facts</CardTitle><Badge variant="outline">{facts.length}건</Badge></div>
+        <CardDescription>근거가 부족하거나 검증을 통과하지 못해 분류 입력으로 확정하지 않은 항목입니다.</CardDescription>
+      </CardHeader>
+      <CardContent className="py-4">
+        <DataTable
+          rows={facts}
+          limit={20}
+          className="cjs-unresolved-table"
+          emptyMessage="별도로 유보된 복원 항목이 없습니다."
+          columns={[
+            { key: "field_name", label: "필드", variant: "mono" },
+            { key: "normalized_value", label: "값" },
+            { key: "source_refs", label: "출처", variant: "mono" },
+            { key: "validation_status", label: "상태", variant: "pill" },
+          ]}
+        />
+      </CardContent>
+    </Card>
   );
 }
 
