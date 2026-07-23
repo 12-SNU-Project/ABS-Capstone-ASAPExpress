@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { RECONSTRUCTION_KEYS, UnderstandingValueLabel } from "@/lib/labels.js";
 import { asList, asObject, clean, labelFor } from "@/lib/format.js";
 import { BuildImageEvidenceItems } from "@/features/classification/model/imageEvidenceAdapter.js";
+import { NormalizeWarning } from "@/features/classification/model/warningViewModel.js";
 import { EvidenceTerms, FactLabel } from "./EvidenceElements";
 
 const INTENDED_USE_OPTIONS = [
@@ -48,7 +49,8 @@ function ReconstructionValueLabel(key, value) {
 }
 
 function ReconstructionWarningLabel(value) {
-  const warning = clean(value);
+  const source = typeof value === "string" ? {} : asObject(value);
+  const warning = clean(typeof value === "string" ? value : source.message || source.detail || source.warning || source.code);
   if (warning.startsWith("llm_input_reconstruction_unavailable:")) {
     return "입력 복원 LLM을 사용할 수 없어 규칙 기반 복원을 사용했습니다.";
   }
@@ -59,6 +61,16 @@ function ReconstructionWarningLabel(value) {
     return "성분값을 뒷받침할 라벨 또는 OCR 근거가 충분하지 않아 유보했습니다.";
   }
   return warning.replaceAll("_", " ");
+}
+
+function NormalizeReconstructionWarning(value, defaultSeverity) {
+  const localizedMessage = ReconstructionWarningLabel(value);
+  if (!localizedMessage) return null;
+  const source = typeof value === "string" ? {} : asObject(value);
+  return NormalizeWarning(
+    { ...source, message: localizedMessage },
+    { defaultSeverity },
+  );
 }
 
 export function ProductCollectionPanel({ result }) {
@@ -89,13 +101,21 @@ export function ProductCollectionPanel({ result }) {
     ]),
   );
   const conflicts = asList(inputView.product_fact_conflicts)
-    .map(ReconstructionWarningLabel)
-    .filter((warning, index, all) => warning && all.indexOf(warning) === index);
+    .map((warning) => NormalizeReconstructionWarning(warning, "blocking"))
+    .filter((warning, index, all) => (
+      warning && all.findIndex((item) => item?.message === warning.message) === index
+    ));
   const warnings = asList(inputView.warnings)
-    .map(ReconstructionWarningLabel)
-    .filter((warning, index, all) => warning && all.indexOf(warning) === index);
-  const reviewWarnings = warnings.filter((warning) => /근거|유보|사용할 수 없|오류|실패|확인/.test(warning));
-  const informationalWarnings = warnings.filter((warning) => !reviewWarnings.includes(warning));
+    .map((warning) => NormalizeReconstructionWarning(warning, "informational"))
+    .filter((warning, index, all) => (
+      warning && all.findIndex((item) => item?.message === warning.message) === index
+    ));
+  const normalizedWarnings = [...conflicts, ...warnings].filter((warning, index, all) => (
+    all.findIndex((item) => item.message === warning.message) === index
+  ));
+  const blockingWarnings = normalizedWarnings.filter((warning) => warning.severity === "blocking");
+  const reviewWarnings = normalizedWarnings.filter((warning) => warning.severity === "needs-review");
+  const informationalWarnings = normalizedWarnings.filter((warning) => warning.severity === "informational");
   const collectedFacts = [
     ["상품명", pageProductFacts.product_name],
     [
@@ -125,7 +145,7 @@ export function ProductCollectionPanel({ result }) {
       <div className="grid gap-4 xl:grid-cols-[minmax(260px,0.75fr)_minmax(0,1.25fr)]">
         <ReconstructionStatusPanel
           status={reconstructionStatus}
-          conflicts={conflicts}
+          blockingWarnings={blockingWarnings}
           reviewWarnings={reviewWarnings}
           informationalWarnings={informationalWarnings}
         />
@@ -235,7 +255,7 @@ function ExtractedFactsPanel({ collectedFacts, description, reconstructedFacts }
   );
 }
 
-function ReconstructionStatusPanel({ status, conflicts, reviewWarnings, informationalWarnings }) {
+function ReconstructionStatusPanel({ status, blockingWarnings, reviewWarnings, informationalWarnings }) {
   const entries = RECONSTRUCTION_KEYS
     .filter((key) => status[key] !== undefined && clean(status[key]) !== "")
     .map((key) => [labelFor(key), status[key]]);
@@ -251,7 +271,7 @@ function ReconstructionStatusPanel({ status, conflicts, reviewWarnings, informat
             </div>
           ))}
         </div>
-        <WarningGroup title="처리 차단" tone="blocking" items={conflicts} />
+        <WarningGroup title="처리 차단" tone="blocking" items={blockingWarnings} />
         <WarningGroup title="검토 필요" tone="review" items={reviewWarnings} />
         <WarningGroup title="참고" tone="info" items={informationalWarnings} />
       </CardContent>
@@ -270,7 +290,7 @@ function WarningGroup({ title, tone, items }) {
     <Alert className={className}>
       <TriangleAlert className="size-4" />
       <AlertTitle>{title} · {items.length}건</AlertTitle>
-      <AlertDescription><ul className="m-0 grid gap-1 pl-4">{items.slice(0, 8).map((item) => <li key={item}>{item}</li>)}</ul></AlertDescription>
+      <AlertDescription><ul className="m-0 grid gap-1 pl-4">{items.slice(0, 8).map((item) => <li key={`${item.code}_${item.message}`}>{item.message}</li>)}</ul></AlertDescription>
     </Alert>
   );
 }

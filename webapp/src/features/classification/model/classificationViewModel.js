@@ -15,11 +15,67 @@ function EventStatus(result, stageNames) {
   return status;
 }
 
-function NormalizeStageState(status) {
+export function NormalizeStageState(status) {
   const value = clean(status).toLowerCase();
   if (["completed", "complete", "done"].includes(value)) return "done";
-  if (["running", "queued", "submitting", "failed", "skipped"].includes(value)) return value;
+  if (["needs-review", "needs_review", "review_required"].includes(value)) return "needs-review";
+  if (value === "submitting") return "queued";
+  if (["idle", "running", "queued", "failed", "skipped"].includes(value)) return value;
   return "idle";
+}
+
+export function NormalizeTariffCode(value) {
+  return clean(value).replace(/\D/g, "");
+}
+
+function PackageMatchLevel(taricKey, group, candidate) {
+  const targetTaric10 = NormalizeTariffCode(candidate?.taric10);
+  const targetCn8 = NormalizeTariffCode(candidate?.cn8) || targetTaric10.slice(0, 8);
+  const targetHs6 = NormalizeTariffCode(candidate?.hs6) || targetCn8.slice(0, 6);
+  const packages = asList(group);
+  const codes = packages.length ? packages : [{}];
+
+  if (targetTaric10 && codes.some((item) => (
+    NormalizeTariffCode(asObject(item).taric10 || taricKey) === targetTaric10
+  ))) return "taric10";
+  if (targetCn8 && codes.some((item) => {
+    const source = asObject(item);
+    const taric10 = NormalizeTariffCode(source.taric10 || taricKey);
+    return (NormalizeTariffCode(source.cn8) || taric10.slice(0, 8)) === targetCn8;
+  })) return "cn8";
+  if (targetHs6 && codes.some((item) => {
+    const source = asObject(item);
+    const taric10 = NormalizeTariffCode(source.taric10 || taricKey);
+    const cn8 = NormalizeTariffCode(source.cn8) || taric10.slice(0, 8);
+    return (NormalizeTariffCode(source.hs6) || cn8.slice(0, 6)) === targetHs6;
+  })) return "hs6";
+  return "none";
+}
+
+export function BuildDocumentPackageOptions(packagesByTaric, candidate) {
+  const options = Object.entries(asObject(packagesByTaric)).map(([taric, group]) => ({
+    taric,
+    group,
+    matchLevel: PackageMatchLevel(taric, group, candidate),
+  }));
+  const bestLevel = ["taric10", "cn8", "hs6"]
+    .find((level) => options.some((option) => option.matchLevel === level));
+  return options.map((option) => ({
+    ...option,
+    matchLevel: option.matchLevel === bestLevel ? option.matchLevel : "none",
+  }));
+}
+
+export function ResolveDocumentPackageSelection(options, currentSelection = {}) {
+  const rows = asList(options);
+  const currentTaric = clean(currentSelection.taric);
+  if (currentSelection.manual && rows.some((option) => option.taric === currentTaric)) {
+    return { taric: currentTaric, manual: true };
+  }
+  const best = ["taric10", "cn8", "hs6"]
+    .map((level) => rows.find((option) => option.matchLevel === level))
+    .find(Boolean);
+  return { taric: clean(best?.taric), manual: false };
 }
 
 export function useClassificationViewModel(result) {

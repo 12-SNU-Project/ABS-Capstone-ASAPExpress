@@ -6,6 +6,10 @@ export const JOB_STORAGE_KEY = "asap-cjs-job-id";
 
 const ACTIVE_STATUSES = ["submitting", "queued", "running"];
 
+export function ShouldConnectRunSnapshot(snapshot) {
+  return ACTIVE_STATUSES.includes(clean(snapshot?.job_status).toLowerCase());
+}
+
 function ReadStoredJobId() {
   try {
     return window.sessionStorage.getItem(JOB_STORAGE_KEY) || "";
@@ -38,14 +42,120 @@ export function IsCurrentRunOperation(currentOperationId, candidateOperationId) 
   return currentOperationId === candidateOperationId;
 }
 
+export function CreateRunLifecycle() {
+  let activeOperationId = 0;
+  let activeController = null;
+  let restoreOperationId = 0;
+  let restoreController = null;
+  let eventSource = null;
+
+  function CloseEventSource() {
+    if (!eventSource) return;
+    eventSource.close();
+    eventSource = null;
+  }
+
+  function BeginActiveOperation() {
+    activeOperationId += 1;
+    activeController?.abort();
+    activeController = new AbortController();
+    return { id: activeOperationId, signal: activeController.signal };
+  }
+
+  function BeginRestoreOperation() {
+    restoreOperationId += 1;
+    restoreController?.abort();
+    restoreController = new AbortController();
+    return { id: restoreOperationId, signal: restoreController.signal };
+  }
+
+  function CancelRestoreOperation() {
+    restoreOperationId += 1;
+    restoreController?.abort();
+    restoreController = null;
+  }
+
+  function IsCurrentActiveOperation(operation) {
+    return IsCurrentRunOperation(activeOperationId, operation?.id);
+  }
+
+  function IsCurrentRestoreOperation(operation) {
+    return IsCurrentRunOperation(restoreOperationId, operation?.id);
+  }
+
+  function CommitRestoreOperation(operation) {
+    if (!IsCurrentRestoreOperation(operation)) return null;
+    const activeOperation = BeginActiveOperation();
+    CloseEventSource();
+    return activeOperation;
+  }
+
+  function AttachEventSource(source) {
+    if (eventSource === source) return;
+    CloseEventSource();
+    eventSource = source;
+  }
+
+  function ReleaseEventSource(source) {
+    if (eventSource === source) eventSource = null;
+  }
+
+  function IsCurrentEventSource(source, operation) {
+    return eventSource === source && IsCurrentActiveOperation(operation);
+  }
+
+  function Dispose() {
+    activeOperationId += 1;
+    restoreOperationId += 1;
+    activeController?.abort();
+    restoreController?.abort();
+    CloseEventSource();
+  }
+
+  return {
+    AttachEventSource,
+    BeginActiveOperation,
+    BeginRestoreOperation,
+    CancelRestoreOperation,
+    CloseEventSource,
+    CommitRestoreOperation,
+    Dispose,
+    IsCurrentActiveOperation,
+    IsCurrentEventSource,
+    IsCurrentRestoreOperation,
+    ReleaseEventSource,
+  };
+}
+
+export function ShouldPrepareRunTransition(targetJobId, currentJobId) {
+  const target = clean(targetJobId);
+  return Boolean(target) && target !== clean(currentJobId);
+}
+
+export async function PrepareRunSnapshot(targetJobId, lifecycle, loadSnapshot) {
+  const restoreOperation = lifecycle.BeginRestoreOperation();
+  try {
+    const snapshot = await loadSnapshot(restoreOperation.signal);
+    if (!lifecycle.IsCurrentRestoreOperation(restoreOperation)) {
+      return { status: "stale", restoreOperation };
+    }
+    return { status: "ready", restoreOperation, snapshot, targetJobId };
+  } catch (error) {
+    if (IsAbortError(error) || !lifecycle.IsCurrentRestoreOperation(restoreOperation)) {
+      return { status: "stale", restoreOperation };
+    }
+    return { status: "failed", restoreOperation, error };
+  }
+}
+
 export function useClassificationRun(initialJobId = "") {
   const [result, setResultState] = useState(null);
   const [restoring, setRestoring] = useState(false);
   const [restorableJobId, setRestorableJobId] = useState("");
-  const sseRef = useRef(null);
   const resultRef = useRef(null);
-  const operationIdRef = useRef(0);
-  const requestAbortRef = useRef(null);
+  const lifecycleRef = useRef(null);
+  if (!lifecycleRef.current) lifecycleRef.current = CreateRunLifecycle();
+  const lifecycle = lifecycleRef.current;
 
   const SetResult = useCallback((next) => {
     resultRef.current = next || {};
@@ -59,24 +169,14 @@ export function useClassificationRun(initialJobId = "") {
     setRestorableJobId(normalizedJobId);
   }, []);
 
-  const CloseSse = useCallback(() => {
-    if (sseRef.current) {
-      sseRef.current.close();
-      sseRef.current = null;
-    }
-  }, []);
-
   const BeginOperation = useCallback(() => {
-    operationIdRef.current += 1;
-    requestAbortRef.current?.abort();
-    const controller = new AbortController();
-    requestAbortRef.current = controller;
-    return { id: operationIdRef.current, signal: controller.signal };
-  }, []);
+    lifecycle.CancelRestoreOperation();
+    return lifecycle.BeginActiveOperation();
+  }, [lifecycle]);
 
   const IsCurrentOperation = useCallback((operation) => (
-    IsCurrentRunOperation(operationIdRef.current, operation.id)
-  ), []);
+    lifecycle.IsCurrentActiveOperation(operation)
+  ), [lifecycle]);
 
   const HydrateRun = useCallback(async (jobId, operation) => {
     const snapshot = await getJson(
@@ -91,15 +191,14 @@ export function useClassificationRun(initialJobId = "") {
 
   const OpenSse = useCallback((jobId, operation) => {
     if (!IsCurrentOperation(operation)) return;
-    CloseSse();
     const currentEvents = Array.isArray(resultRef.current?.events)
       ? resultRef.current.events.length
       : 0;
     const source = openRunEventSource(jobId, currentEvents);
-    sseRef.current = source;
+    lifecycle.AttachEventSource(source);
 
     const IsCurrentSource = () => (
-      IsCurrentOperation(operation) && sseRef.current === source
+      lifecycle.IsCurrentEventSource(source, operation)
     );
 
     source.addEventListener("pipeline_event", (event) => {
@@ -124,7 +223,7 @@ export function useClassificationRun(initialJobId = "") {
         });
       } catch (error) {
         source.close();
-        if (sseRef.current === source) sseRef.current = null;
+        lifecycle.ReleaseEventSource(source);
         SetResult({ ...(resultRef.current || {}), job_status: "failed", error: String(error) });
       }
     });
@@ -132,7 +231,7 @@ export function useClassificationRun(initialJobId = "") {
     source.addEventListener("run_complete", async () => {
       if (!IsCurrentSource()) return;
       source.close();
-      sseRef.current = null;
+      lifecycle.ReleaseEventSource(source);
       try {
         await HydrateRun(jobId, operation);
       } catch (error) {
@@ -146,34 +245,53 @@ export function useClassificationRun(initialJobId = "") {
         });
       }
     });
-  }, [CloseSse, HydrateRun, IsCurrentOperation, SetResult]);
+  }, [HydrateRun, IsCurrentOperation, SetResult, lifecycle]);
 
   const loadRun = useCallback(async (jobId) => {
     const targetJobId = clean(jobId);
     if (!targetJobId) throw new Error("job_id를 입력하세요.");
-    const operation = BeginOperation();
-    CloseSse();
+    if (!ShouldPrepareRunTransition(targetJobId, resultRef.current?.job_id)) {
+      return resultRef.current;
+    }
     setRestoring(true);
+    let restoreOperation = null;
     try {
-      const snapshot = await HydrateRun(targetJobId, operation);
-      if (
-        snapshot
-        && ACTIVE_STATUSES.includes(clean(snapshot.job_status).toLowerCase())
-      ) {
-        OpenSse(targetJobId, operation);
+      const preparation = await PrepareRunSnapshot(
+        targetJobId,
+        lifecycle,
+        (signal) => getJson(
+          `/api/runs/${encodeURIComponent(targetJobId)}`,
+          { signal },
+        ),
+      );
+      restoreOperation = preparation.restoreOperation;
+      if (preparation.status === "stale") return null;
+      if (preparation.status === "failed") throw preparation.error;
+      const snapshot = preparation.snapshot;
+      const operation = lifecycle.CommitRestoreOperation(restoreOperation);
+      if (!operation) return null;
+      const restoredJobId = clean(snapshot?.job_id) || targetJobId;
+      SetResult(snapshot);
+      RememberRestorableJob(restoredJobId);
+      if (ShouldConnectRunSnapshot(snapshot)) {
+        OpenSse(restoredJobId, operation);
       }
       return snapshot;
     } catch (error) {
-      if (IsAbortError(error) || !IsCurrentOperation(operation)) return null;
+      if (IsAbortError(error) || !lifecycle.IsCurrentRestoreOperation(restoreOperation)) {
+        return null;
+      }
       throw error;
     } finally {
-      if (IsCurrentOperation(operation)) setRestoring(false);
+      if (restoreOperation && lifecycle.IsCurrentRestoreOperation(restoreOperation)) {
+        setRestoring(false);
+      }
     }
-  }, [BeginOperation, CloseSse, HydrateRun, IsCurrentOperation, OpenSse]);
+  }, [OpenSse, RememberRestorableJob, SetResult, lifecycle]);
 
   const runPipeline = useCallback(async (mode, form) => {
     const operation = BeginOperation();
-    CloseSse();
+    lifecycle.CloseEventSource();
     setRestoring(false);
     const productName = clean(form.productName);
     const url = clean(form.url);
@@ -286,26 +404,23 @@ export function useClassificationRun(initialJobId = "") {
     }
   }, [
     BeginOperation,
-    CloseSse,
     HydrateRun,
     IsCurrentOperation,
     OpenSse,
     RememberRestorableJob,
     SetResult,
+    lifecycle,
   ]);
 
   useEffect(() => {
     const targetJobId = clean(initialJobId) || ReadStoredJobId();
     if (!targetJobId || clean(resultRef.current?.job_id) === targetJobId) return undefined;
     const operation = BeginOperation();
-    CloseSse();
+    lifecycle.CloseEventSource();
     setRestoring(true);
     HydrateRun(targetJobId, operation)
       .then((snapshot) => {
-        if (
-          snapshot
-          && ACTIVE_STATUSES.includes(clean(snapshot.job_status).toLowerCase())
-        ) {
+        if (ShouldConnectRunSnapshot(snapshot)) {
           OpenSse(targetJobId, operation);
         }
       })
@@ -325,19 +440,15 @@ export function useClassificationRun(initialJobId = "") {
     return undefined;
   }, [
     BeginOperation,
-    CloseSse,
     HydrateRun,
     IsCurrentOperation,
     OpenSse,
     SetResult,
     initialJobId,
+    lifecycle,
   ]);
 
-  useEffect(() => () => {
-    operationIdRef.current += 1;
-    requestAbortRef.current?.abort();
-    CloseSse();
-  }, [CloseSse]);
+  useEffect(() => () => lifecycle.Dispose(), [lifecycle]);
 
   const busy = restoring || ACTIVE_STATUSES.includes(clean(result?.job_status).toLowerCase());
 

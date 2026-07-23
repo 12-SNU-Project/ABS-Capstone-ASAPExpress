@@ -3,6 +3,10 @@ import { FileSearch, FolderPlus } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  BuildDocumentPackageOptions,
+  ResolveDocumentPackageSelection,
+} from "@/features/classification/model/classificationViewModel.js";
 import { importClassification } from "@/lib/enterpriseApi.js";
 import { asList, asObject, clean } from "@/lib/format.js";
 import { cn } from "@/lib/utils";
@@ -21,16 +25,31 @@ function PackageSummary(group) {
   return { basicCount, conditionalCount, unresolvedCount: unresolved.size };
 }
 
-export default function DocumentRecommendationPanel({ result, viewModel }) {
+const MATCH_LABELS = {
+  taric10: "TARIC10 일치",
+  cn8: "CN8 일치",
+  hs6: "HS6 일치",
+};
+
+export default function DocumentRecommendationPanel({ result, viewModel, selectedCandidate }) {
   const navigate = useNavigate();
   const jobId = clean(result?.job_id || result?.run_id);
-  const packages = Object.entries(viewModel.packagesByTaric);
-  const [selectedTaric, setSelectedTaric] = useState("");
+  const packages = BuildDocumentPackageOptions(viewModel.packagesByTaric, selectedCandidate);
+  const [packageSelection, setPackageSelection] = useState({
+    jobId: "",
+    taric: "",
+    manual: false,
+  });
   const [savingProject, setSavingProject] = useState(false);
   const [projectError, setProjectError] = useState("");
+  const currentSelection = packageSelection.jobId === jobId
+    ? packageSelection
+    : { taric: "", manual: false };
+  const resolvedSelection = ResolveDocumentPackageSelection(packages, currentSelection);
+  const selectedTaric = resolvedSelection.taric;
+  const hasCandidateMatch = packages.some((option) => option.matchLevel !== "none");
 
   useEffect(() => {
-    setSelectedTaric("");
     setProjectError("");
   }, [jobId]);
 
@@ -62,7 +81,12 @@ export default function DocumentRecommendationPanel({ result, viewModel }) {
       </div>
       {packages.length ? (
         <div className="divide-y">
-          {packages.map(([taric, group]) => {
+          {!hasCandidateMatch ? (
+            <div className="border-b bg-needs-review/5 px-4 py-3 text-sm text-needs-review sm:px-5">
+              선택 후보와 직접 연결된 문서 패키지가 없습니다. 다른 후보 패키지를 비교해 선택하세요.
+            </div>
+          ) : null}
+          {packages.map(({ taric, group, matchLevel }) => {
             const summary = PackageSummary(group);
             const selected = selectedTaric === taric;
             return (
@@ -74,17 +98,21 @@ export default function DocumentRecommendationPanel({ result, viewModel }) {
                     name="document-project-package"
                     value={taric}
                     checked={selectedTaric === taric}
-                    onChange={() => setSelectedTaric(taric)}
+                    onChange={() => setPackageSelection({ jobId, taric, manual: true })}
+                    onClick={() => setPackageSelection({ jobId, taric, manual: true })}
                   />
                   <span className="min-w-0">
                     <small className="block text-xs text-muted-foreground">TARIC10</small>
                     <strong className="block truncate font-mono text-base">{taric}</strong>
+                    <Badge className="mt-1" variant={matchLevel === "none" ? "outline" : "secondary"}>
+                      {matchLevel === "none" ? "다른 후보" : `선택 후보 · ${MATCH_LABELS[matchLevel]}`}
+                    </Badge>
                   </span>
                 </label>
                 <span><small className="block text-xs text-muted-foreground">기본 서류</small><strong className="text-sm">{summary.basicCount}건</strong></span>
                 <span><small className="block text-xs text-muted-foreground">조건부 서류</small><strong className="text-sm">{summary.conditionalCount}건</strong></span>
                 <span><small className="block text-xs text-muted-foreground">미해결 사실</small><strong className={summary.unresolvedCount ? "text-sm text-needs-review" : "text-sm text-success"}>{summary.unresolvedCount}건</strong></span>
-                <span><small className="block text-xs text-muted-foreground">프로젝트 상태</small><strong className="text-sm">{selected ? "등록 준비" : "미선택"}</strong></span>
+                <span><small className="block text-xs text-muted-foreground">선택 상태</small><strong className="text-sm">{selected ? "선택됨" : "미선택"}</strong></span>
                 <Link
                   className={cn(buttonVariants({ variant: "outline" }), "gap-1.5")}
                   to={`/document/${encodeURIComponent(jobId)}/${encodeURIComponent(taric)}`}

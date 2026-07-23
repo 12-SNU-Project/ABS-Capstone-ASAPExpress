@@ -16,6 +16,34 @@ function DocumentKey(document, index) {
   return clean(document.documentId || document.baselineDocumentId || document.documentName) || `document-${index}`;
 }
 
+function DetailText(value) {
+  if (!value || typeof value !== "object") return clean(value);
+  return clean(
+    value.label_ko
+    || value.label
+    || value.text
+    || value.title
+    || value.code
+    || value.href
+    || value.url,
+  );
+}
+
+function DetailList({ label, items }) {
+  const values = asList(items).map(DetailText).filter(Boolean);
+  if (!values.length) return null;
+  return (
+    <div className="grid gap-1 sm:col-span-2">
+      <dt className="text-xs font-semibold text-muted-foreground">{label}</dt>
+      <dd className="m-0 leading-6 text-foreground">
+        <ul className="m-0 grid gap-1 pl-5">
+          {values.map((value) => <li key={value}>{value}</li>)}
+        </ul>
+      </dd>
+    </div>
+  );
+}
+
 function DocumentCard({ document, selected, onSelect }) {
   const condition = clean(document.detail) || asList(document.fields).join(", ");
   const unresolvedCount = Number(document.unresolvedCount || 0);
@@ -47,13 +75,24 @@ function DocumentCard({ document, selected, onSelect }) {
 
 function SelectedDocumentDetail({ document }) {
   const reduceMotion = useReducedMotion();
+  const sourceMetadata = document.sourceMetadata || {};
   const rows = [
     ["적용 조건", clean(document.detail) || "별도 적용 조건 없음"],
     ["준비 주체", clean(document.preparedBy) || "추가 확인 필요"],
     ["제출 대상", clean(document.submittedTo) || "추가 확인 필요"],
     ["필수 기재 항목", asList(document.fields).join(", ") || "연결된 필드 정보 없음"],
     ["연결 수입요건", clean(document.groupName) || "기본 통관 준비서류"],
+    ["추천 사유", clean(document.recommendationReason) || "기본 문서 요건에 따라 포함"],
   ];
+  const officialLinks = asList(document.officialLinks)
+    .map((item) => {
+      const candidateHref = clean(item?.href || item?.url || item);
+      return {
+        label: DetailText(item),
+        href: /^https?:\/\//i.test(candidateHref) ? candidateHref : "",
+      };
+    })
+    .filter((item) => item.label);
   return (
     <motion.section
       key={DocumentKey(document, 0)}
@@ -74,6 +113,34 @@ function SelectedDocumentDetail({ document }) {
             <dd className="m-0 break-words leading-6 text-foreground">{value}</dd>
           </div>
         ))}
+        <DetailList label="준비 근거" items={document.requiredEvidence} />
+        <DetailList label="관련 규정" items={document.regulations} />
+        <DetailList label="CELEX 참조" items={document.celexReferences} />
+        <DetailList label="검증 메모" items={document.verificationNotes} />
+        {clean(sourceMetadata.documentCode) ? (
+          <div className="grid gap-1">
+            <dt className="text-xs font-semibold text-muted-foreground">원본 문서 코드</dt>
+            <dd className="m-0 break-words leading-6 text-foreground">{sourceMetadata.documentCode}</dd>
+          </div>
+        ) : null}
+        {officialLinks.length ? (
+          <div className="grid gap-1 sm:col-span-2">
+            <dt className="text-xs font-semibold text-muted-foreground">공식 출처</dt>
+            <dd className="m-0 grid gap-1">
+              {officialLinks.map((link) => link.href ? (
+                <a
+                  className="break-all text-primary underline-offset-4 hover:underline"
+                  href={link.href}
+                  key={`${link.href}_${link.label}`}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {link.label}
+                </a>
+              ) : <span key={link.label}>{link.label}</span>)}
+            </dd>
+          </div>
+        ) : null}
       </dl>
     </motion.section>
   );

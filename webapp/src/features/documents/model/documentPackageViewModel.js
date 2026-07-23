@@ -327,6 +327,7 @@ function buildCertificateGroups(pkg) {
         regulationReferences: new Set(),
         celexIds: new Set(),
         officialLinks: [],
+        officialLinkDetails: [],
         sourceSections: [],
         summaries: new Set(),
         actionSteps: new Set(),
@@ -406,10 +407,15 @@ function buildCertificateGroups(pkg) {
       splitTokens(guidance.a2m_celex_ids).forEach((celexId) => group.celexIds.add(celexId));
       parseJsonList(guidance.a2m_official_links_json)
         .map((link) => asObject(link))
-        .map((link) => firstNonEmpty(link.text, link.href))
-        .filter(Boolean)
+        .filter((link) => firstNonEmpty(link.text, link.href))
         .slice(0, 8)
-        .forEach((link) => group.officialLinks.push(link));
+        .forEach((link) => {
+          group.officialLinks.push(firstNonEmpty(link.text, link.href));
+          group.officialLinkDetails.push({
+            label: firstNonEmpty(link.text, link.href),
+            href: clean(link.href),
+          });
+        });
       parseJsonList(guidance.a2m_key_sections_json)
         .map((section) => asObject(section))
         .map((section) => firstNonEmpty(section.heading_ko, section.heading_en))
@@ -469,6 +475,7 @@ function buildCertificateGroups(pkg) {
       regulationReferences: unique(Array.from(group.regulationReferences)),
       celexIds: unique(Array.from(group.celexIds)),
       officialLinks: unique(Array.from(group.officialLinks)),
+      officialLinkDetails: cloneDetailList(group.officialLinkDetails),
       sourceSections: unique(Array.from(group.sourceSections)),
       summaries: unique(Array.from(group.summaries)),
       actionSteps: unique(Array.from(group.actionSteps)),
@@ -511,10 +518,16 @@ function buildA2mGuidelineGroups(pkg) {
     const sections = parseJsonList(source.key_sections_json)
       .map((section) => asObject(section))
       .filter((section) => clean(section.summary_ko));
-    const officialLinks = parseJsonList(source.official_links_json)
+    const officialLinkDetails = parseJsonList(source.official_links_json)
       .map((link) => asObject(link))
-      .map((link) => firstNonEmpty(link.text, link.href))
-      .filter(Boolean)
+      .filter((link) => firstNonEmpty(link.text, link.href))
+      .slice(0, 8)
+      .map((link) => ({
+        label: firstNonEmpty(link.text, link.href),
+        href: clean(link.href),
+      }));
+    const officialLinks = officialLinkDetails
+      .map((link) => link.label)
       .slice(0, 8);
     const sourceSections = sections
       .map((section) => firstNonEmpty(section.heading_ko, section.heading_en))
@@ -535,6 +548,7 @@ function buildA2mGuidelineGroups(pkg) {
       regulationReferences: splitTokens(source.regulation_refs),
       celexIds: splitTokens(source.celex_ids),
       officialLinks,
+      officialLinkDetails,
       sourceSections,
       summaries: splitLines(source.exporter_summary_ko),
       actionSteps: splitLines(source.exporter_action_steps_ko),
@@ -705,6 +719,60 @@ function cardHasCertOverlap(card, certificateCodes) {
   return Array.from(cardCerts).some((code) => certificateCodes.has(code));
 }
 
+function cloneDetailList(...values) {
+  const seen = new Set();
+  const items = [];
+  values.flatMap((value) => {
+    if (Array.isArray(value)) return value;
+    return value === null || value === undefined || clean(value) === "" ? [] : [value];
+  }).forEach((item) => {
+    const cloned = item && typeof item === "object" ? { ...item } : item;
+    const key = typeof cloned === "object" ? JSON.stringify(cloned) : clean(cloned);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    items.push(cloned);
+  });
+  return items;
+}
+
+function cloneSourceMetadata(...values) {
+  return values.reduce((result, value) => {
+    Object.entries(asObject(value)).forEach(([key, item]) => {
+      if (Array.isArray(item)) result[key] = cloneDetailList(result[key], item);
+      else if (item && typeof item === "object") result[key] = { ...item };
+      else result[key] = item;
+    });
+    return result;
+  }, {});
+}
+
+function BuildFinalRecommendedDocument(baseDocument, recommendationContext = {}) {
+  const base = asObject(baseDocument);
+  const context = asObject(recommendationContext);
+  const missingFacts = cloneDetailList(base.missingFacts, context.missingFacts);
+  const unresolvedConditions = cloneDetailList(
+    base.unresolvedConditions,
+    context.unresolvedConditions,
+  );
+  const unresolvedCount = cloneDetailList(missingFacts, unresolvedConditions).length
+    || Number(context.unresolvedCount ?? base.unresolvedCount ?? 0);
+  return {
+    ...base,
+    ...context,
+    fields: cloneDetailList(base.fields, context.fields),
+    requiredEvidence: cloneDetailList(base.requiredEvidence, context.requiredEvidence),
+    regulations: cloneDetailList(base.regulations, context.regulations),
+    celexReferences: cloneDetailList(base.celexReferences, context.celexReferences),
+    officialLinks: cloneDetailList(base.officialLinks, context.officialLinks),
+    verificationNotes: cloneDetailList(base.verificationNotes, context.verificationNotes),
+    matchedConditions: cloneDetailList(base.matchedConditions, context.matchedConditions),
+    missingFacts,
+    unresolvedConditions,
+    unresolvedCount,
+    sourceMetadata: cloneSourceMetadata(base.sourceMetadata, context.sourceMetadata),
+  };
+}
+
 function buildBaselineRows(pkg, certificateGroups) {
   const certificateCodes = new Set(
     certificateGroups.flatMap((group) => group.codes.map((code) => code.code)),
@@ -734,13 +802,35 @@ function buildBaselineRows(pkg, certificateGroups) {
         requiredLevel: statusLabel(source.required_level),
         preparedBy: firstNonEmpty(source.prepared_by_ko, source.prepared_by),
         submittedTo: firstNonEmpty(source.submitted_to_ko, source.submitted_to),
-        unresolvedCount: unique([
-          ...asList(source.missing_facts),
-          ...asList(source.unresolved_conditions),
-        ]).length,
+        missingFacts: cloneDetailList(source.missing_facts),
+        unresolvedConditions: cloneDetailList(source.unresolved_conditions),
+        unresolvedCount: cloneDetailList(
+          source.missing_facts,
+          source.unresolved_conditions,
+        ).length,
         fields: asList(source.fields)
           .map((field) => evidenceLabelKo(asObject(field).label_ko || asObject(field).label || asObject(field).field_key))
           .filter(Boolean),
+        requiredEvidence: cloneDetailList(source.required_evidence, source.requiredEvidence),
+        regulations: cloneDetailList(
+          source.regulations,
+          source.regulation_references,
+          source.legal_bases,
+        ),
+        celexReferences: cloneDetailList(source.celex_references, source.celex_ids),
+        officialLinks: cloneDetailList(source.official_links),
+        verificationNotes: cloneDetailList(source.verification_notes),
+        sourceMetadata: {
+          ...asObject(source.source_metadata),
+          documentCode: clean(source.document_code),
+          decisionStatus: clean(source.decision_status),
+          sourceBindings: cloneDetailList(source.source_bindings),
+          preChecks: cloneDetailList(source.pre_checks),
+          postRequirements: cloneDetailList(source.post_requirements),
+          preTaricLinks: cloneDetailList(source.pre_taric_links),
+          postTaricLinks: cloneDetailList(source.post_taric_links),
+          taricCertificates: cloneDetailList(source.taric_certificates),
+        },
       };
     });
   }
@@ -775,24 +865,29 @@ function buildPreArrivalModel(baselineRows, requirementGroups, checkedGroups) {
   );
   const docs = new Map();
 
-  function addDoc(key, payload) {
-    if (!key || docs.has(key)) {
-      return;
-    }
-    docs.set(key, payload);
+  function addDoc(key, baseDocument, recommendationContext) {
+    if (!key) return;
+    docs.set(
+      key,
+      BuildFinalRecommendedDocument(
+        docs.get(key) || baseDocument,
+        recommendationContext,
+      ),
+    );
   }
 
   baselineRows.forEach((row) => {
     if (!isRequiredLevel(row.requiredLevelRaw)) {
       return;
     }
-    addDoc(`baseline:${row.documentId}`, {
-      documentName: row.documentName,
+    addDoc(`baseline:${row.documentId}`, row, {
       source: "기본 필수 서류",
       detail: row.fields.length ? joinList(row.fields) : "",
       baselineDocumentId: row.documentId,
       bucket: "baseline",
-      unresolvedCount: row.unresolvedCount,
+      recommendationStatus: "recommended",
+      matchedConditions: ["기본 통관 준비서류"],
+      recommendationReason: "기본 필수 통관서류로 포함됐습니다.",
     });
   });
 
@@ -815,17 +910,38 @@ function buildPreArrivalModel(baselineRows, requirementGroups, checkedGroups) {
       if (itemType === "document" && docModes.has(mode)) {
         const baselineId = clean(item.baseline_document_id);
         const docKey = baselineId ? `baseline:${baselineId}` : `requirement:${label}`;
-        addDoc(docKey, {
+        const missingFacts = cloneDetailList(item.missing_facts);
+        const unresolvedConditions = cloneDetailList(item.unresolved_conditions);
+        addDoc(docKey, baselineById.get(baselineId) || {}, {
           documentName: label,
           source: baselineId ? "조건부 기본 서류" : "수입요건 추가 서류",
           detail: clean(item.item_detail_ko),
           baselineDocumentId: baselineId,
           groupName: group.groupName,
           bucket: baselineId ? "baseline" : "requirement",
-          unresolvedCount: unique([
-            ...asList(item.missing_facts),
-            ...asList(item.unresolved_conditions),
-          ]).length,
+          recommendationStatus: "recommended",
+          matchedConditions: unique(asList(group.codes).map((code) => code.whenRequired).filter(Boolean)),
+          missingFacts,
+          unresolvedConditions,
+          recommendationReason: clean(item.item_detail_ko),
+          requiredEvidence: group.requiredEvidenceItems,
+          regulations: [...asList(group.legalBases), ...asList(group.regulationReferences)],
+          celexReferences: group.celexIds,
+          officialLinks: asList(group.officialLinkDetails).length
+            ? group.officialLinkDetails
+            : group.officialLinks,
+          verificationNotes: [
+            ...asList(group.verificationDetails),
+            ...asList(group.verificationSources),
+          ],
+          sourceMetadata: {
+            sourceType: clean(group.sourceType),
+            groupId: clean(group.groupId),
+            a2mCode: clean(group.a2mCode),
+            measureTypes: cloneDetailList(group.measureTypes),
+            sourceCodes: cloneDetailList(group.sourceCodes),
+            certificateCodes: asList(group.codes).map((code) => clean(code.code)).filter(Boolean),
+          },
         });
         documentItems.push({ label, detail: clean(item.item_detail_ko), mode });
         return;
@@ -910,6 +1026,7 @@ export {
   buildDutyPriority,
   dutyPriorityCount,
   buildDutyBranches,
+  BuildFinalRecommendedDocument,
   buildBaselineRows,
   buildPreArrivalModel,
   BuildDocumentPackageViewModel,

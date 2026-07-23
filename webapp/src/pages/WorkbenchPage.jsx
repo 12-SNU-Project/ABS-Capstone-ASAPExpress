@@ -203,7 +203,11 @@ export default function WorkbenchPage() {
             </>
           ) : null}
           {activeStage === "document_recommendation" ? (
-            <DocumentRecommendationPanel result={result} viewModel={viewModel} />
+            <DocumentRecommendationPanel
+              result={result}
+              viewModel={viewModel}
+              selectedCandidate={selectedCandidate}
+            />
           ) : null}
             </>
           )}

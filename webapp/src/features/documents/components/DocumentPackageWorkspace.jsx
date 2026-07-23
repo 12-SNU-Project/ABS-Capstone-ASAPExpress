@@ -466,8 +466,10 @@ function PreArrivalCards({ model, onToggle }) {
 
 export default function DocumentPackageWorkspace({ packageData }) {
   const [activeFlow, setActiveFlow] = useState(FLOW_KEYS.REQUIREMENTS);
-  const [requirementChecks, setRequirementChecks] = useState({});
+  const [requirementChecksByPackage, setRequirementChecksByPackage] = useState({});
   const pkg = asObject(packageData);
+  const packageKey = clean(pkg.document_package_id || pkg.taric10) || "document-package";
+  const requirementChecks = requirementChecksByPackage[packageKey] || {};
   const reduceMotion = useReducedMotion();
 
   const viewModel = useMemo(() => BuildDocumentPackageViewModel(pkg), [pkg]);
@@ -478,9 +480,12 @@ export default function DocumentPackageWorkspace({ packageData }) {
   );
 
   function handleRequirementToggle(key, checked) {
-    setRequirementChecks((current) => ({
+    setRequirementChecksByPackage((current) => ({
       ...current,
-      [key]: checked,
+      [packageKey]: {
+        ...current[packageKey],
+        [key]: checked,
+      },
     }));
   }
 
