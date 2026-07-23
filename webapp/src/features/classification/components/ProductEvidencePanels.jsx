@@ -64,13 +64,9 @@ function ReconstructionWarningLabel(value) {
 }
 
 function NormalizeReconstructionWarning(value, defaultSeverity) {
-  const localizedMessage = ReconstructionWarningLabel(value);
-  if (!localizedMessage) return null;
-  const source = typeof value === "string" ? {} : asObject(value);
-  return NormalizeWarning(
-    { ...source, message: localizedMessage },
-    { defaultSeverity },
-  );
+  const warning = NormalizeWarning(value, { defaultSeverity });
+  if (!warning) return null;
+  return { ...warning, message: ReconstructionWarningLabel(warning) };
 }
 
 export function ProductCollectionPanel({ result }) {

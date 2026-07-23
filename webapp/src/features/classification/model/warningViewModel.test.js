@@ -32,4 +32,26 @@ test("단순 확인 문구를 처리 차단으로 과장하지 않는다", () =>
 test("빈 경고는 렌더링 모델을 만들지 않는다", () => {
   assert.equal(NormalizeWarning(""), null);
   assert.equal(NormalizeWarning({}), null);
+  assert.equal(NormalizeWarning(null), null);
+  assert.equal(NormalizeWarning(undefined), null);
+});
+
+test("JSON 문자열 경고는 구조화 값으로 복구한다", () => {
+  const warning = NormalizeWarning(
+    '{"code":"OCR_MISSING","detail":"OCR 근거 부족","severity":"needs_review","field":"origin"}',
+  );
+
+  assert.deepEqual(warning, {
+    code: "OCR_MISSING",
+    message: "OCR 근거 부족",
+    severity: "needs-review",
+    field: "origin",
+    source: "",
+    severitySource: "serialized-contract",
+  });
+});
+
+test("경고 객체가 아닌 JSON과 잘못된 JSON 원문은 노출하지 않는다", () => {
+  assert.equal(NormalizeWarning('{"value":"not a warning"}'), null);
+  assert.equal(NormalizeWarning("{invalid json}"), null);
 });

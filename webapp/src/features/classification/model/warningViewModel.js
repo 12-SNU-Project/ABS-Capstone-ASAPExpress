@@ -20,10 +20,34 @@ function InferSeverity(message) {
   return "";
 }
 
+function IsWarningObject(value) {
+  const source = asObject(value);
+  return ["message", "detail", "warning", "code", "severity", "field", "source"]
+    .some((key) => clean(source[key]));
+}
+
+export function TryParseSerializedWarning(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return IsWarningObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function NormalizeWarning(warning, { defaultSeverity = "informational" } = {}) {
-  const sourceWarning = typeof warning === "string" ? {} : asObject(warning);
+  const serializedWarning = TryParseSerializedWarning(warning);
+  const looksSerialized = typeof warning === "string"
+    && warning.trim().startsWith("{")
+    && warning.trim().endsWith("}");
+  if (looksSerialized && !serializedWarning) return null;
+  const sourceWarning = serializedWarning
+    || (typeof warning === "string" ? {} : asObject(warning));
   const message = clean(
-    typeof warning === "string"
+    typeof warning === "string" && !serializedWarning
       ? warning
       : sourceWarning.message || sourceWarning.detail || sourceWarning.warning || sourceWarning.code,
   );
@@ -38,6 +62,8 @@ export function NormalizeWarning(warning, { defaultSeverity = "informational" } 
     severity: contractSeverity || heuristicSeverity || fallbackSeverity,
     field: clean(sourceWarning.field),
     source: clean(sourceWarning.source),
-    severitySource: contractSeverity ? "contract" : heuristicSeverity ? "heuristic" : "default",
+    severitySource: contractSeverity
+      ? serializedWarning ? "serialized-contract" : "contract"
+      : heuristicSeverity ? "heuristic" : "default",
   };
 }

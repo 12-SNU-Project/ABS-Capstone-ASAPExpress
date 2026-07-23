@@ -107,7 +107,6 @@ export function GetPipelineStageState(result, viewModel, key) {
     return result?.input_processing_view || viewModel.candidates.length ? "done" : "idle";
   }
   if (key === "classification") {
-    if (viewModel.candidates.length) return "done";
     const event = NormalizeStageState(EventStatus(result, [
       "Input_Intake",
       "Evidence_Intake_Component",
@@ -117,6 +116,7 @@ export function GetPipelineStageState(result, viewModel, key) {
       "Classification_Component",
     ]));
     if (event !== "idle") return event;
+    if (viewModel.candidates.length) return "done";
     return ComponentDone(result, "classification") ? "done" : "idle";
   }
   if (key === "document_recommendation") {

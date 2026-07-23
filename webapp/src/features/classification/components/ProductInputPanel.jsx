@@ -269,11 +269,17 @@ function ProductInputSummary({ form, requestFacts, jobId, onEdit }) {
   );
 }
 
-export default function ProductInputPanel({ busy, result, onRun, onRestore, compact = false }) {
+export default function ProductInputPanel({
+  busy,
+  result,
+  restoreError,
+  onRun,
+  onRestore,
+  compact = false,
+}) {
   const [form, setForm] = useState(CreateEmptyProductForm);
   const [formErrors, setFormErrors] = useState({ ingredientRows: {} });
   const [jobIdInput, setJobIdInput] = useState("");
-  const [loadError, setLoadError] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
   const resultJobId = clean(result?.job_id);
   const requestFacts = asObject(result?.request?.facts);
@@ -321,13 +327,8 @@ export default function ProductInputPanel({ busy, result, onRun, onRestore, comp
     onRun(mode, form);
   };
   const Restore = async () => {
-    setLoadError("");
-    try {
-      const restored = await onRestore(jobIdInput);
-      if (restored) setEditorOpen(false);
-    } catch (error) {
-      setLoadError(String(error?.message || error));
-    }
+    const restored = await onRestore(jobIdInput);
+    if (restored) setEditorOpen(false);
   };
   const formContent = (
     <div className="grid gap-5">
@@ -345,7 +346,7 @@ export default function ProductInputPanel({ busy, result, onRun, onRestore, comp
         }}
       />
       <RunActionBar busy={busy} onRun={Run} />
-      <JobRestore busy={busy} jobIdInput={jobIdInput} loadError={loadError} onJobIdChange={setJobIdInput} onRestore={Restore} />
+      <JobRestore busy={busy} jobIdInput={jobIdInput} loadError={restoreError} onJobIdChange={setJobIdInput} onRestore={Restore} />
     </div>
   );
 

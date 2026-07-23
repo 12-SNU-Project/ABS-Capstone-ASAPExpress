@@ -37,9 +37,11 @@ export default function WorkbenchPage() {
     result,
     busy,
     restoring,
+    restoreError,
     restorableJobId,
     runPipeline,
     loadRun,
+    clearRestoreError,
   } = useClassificationRun(jobQuery);
   const [selectedKey, setSelectedKey] = useState("");
   const [activeStage, setActiveStage] = useState("classification");
@@ -53,7 +55,7 @@ export default function WorkbenchPage() {
   );
 
   useEffect(() => {
-    if (!restorableJobId || jobQuery === restorableJobId) return;
+    if (!restorableJobId || jobQuery) return;
     const nextParams = new URLSearchParams(searchParams);
     nextParams.set("job", restorableJobId);
     setSearchParams(nextParams, { replace: true });
@@ -99,7 +101,26 @@ export default function WorkbenchPage() {
 
   const RestoreRun = async (jobId) => {
     const snapshot = await loadRun(jobId);
-    followStageRef.current = true;
+    if (snapshot) {
+      followStageRef.current = true;
+      const restoredJobId = clean(snapshot?.job_id) || clean(jobId);
+      if (restoredJobId && restoredJobId !== jobQuery) {
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.set("job", restoredJobId);
+        setSearchParams(nextParams, { replace: true });
+      }
+    }
+    return snapshot;
+  };
+
+  const StartRun = async (mode, form) => {
+    const snapshot = await runPipeline(mode, form);
+    const nextJobId = clean(snapshot?.job_id);
+    if (nextJobId && nextJobId !== jobQuery) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set("job", nextJobId);
+      setSearchParams(nextParams, { replace: true });
+    }
     return snapshot;
   };
 
@@ -111,8 +132,7 @@ export default function WorkbenchPage() {
   ) || defaultCandidate;
   const resultStatus = clean(result?.job_status).toLowerCase();
   const hasRun = Boolean(
-    restoring
-    || clean(result?.job_id)
+    clean(result?.job_id)
     || result?.error
     || ["submitting", "queued", "running", "completed", "complete", "done"].includes(resultStatus)
     || result?.input_processing_view
@@ -128,11 +148,26 @@ export default function WorkbenchPage() {
         badge="분류 워크스페이스"
       />
 
+      {restoring ? (
+        <div className="rounded-lg border bg-surface px-4 py-3 text-sm text-muted-foreground" role="status">
+          요청한 작업의 snapshot을 확인하는 중입니다. 현재 작업은 전환이 확정될 때까지 유지됩니다.
+        </div>
+      ) : null}
+      {restoreError && hasRun ? (
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm" role="alert">
+          <span>{restoreError}</span>
+          <button className="shrink-0 font-medium text-muted-foreground hover:text-foreground" type="button" onClick={clearRestoreError}>
+            닫기
+          </button>
+        </div>
+      ) : null}
+
       <div className={hasRun ? "grid min-w-0 gap-4 lg:grid-cols-[minmax(250px,300px)_minmax(0,1fr)]" : "mx-auto w-full max-w-[1040px]"}>
         <ProductInputPanel
           busy={busy}
           result={result}
-          onRun={runPipeline}
+          restoreError={restoreError}
+          onRun={StartRun}
           onRestore={RestoreRun}
           compact={hasRun}
         />
@@ -148,12 +183,6 @@ export default function WorkbenchPage() {
               restoring={restoring}
             />
             <main className="grid min-w-0 content-start gap-4">
-          {restoring ? (
-            <div className="rounded-xl border bg-surface p-6 text-sm text-muted-foreground" role="status">
-              저장된 snapshot과 현재 실행 상태를 동기화하는 중입니다.
-            </div>
-          ) : (
-            <>
           {activeStage === "product_collection" ? (
             <ProductCollectionPanel result={result} />
           ) : null}
@@ -209,8 +238,6 @@ export default function WorkbenchPage() {
               selectedCandidate={selectedCandidate}
             />
           ) : null}
-            </>
-          )}
             </main>
           </section>
         ) : null}

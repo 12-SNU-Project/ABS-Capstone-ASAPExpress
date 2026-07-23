@@ -29,6 +29,26 @@ test("실행 이벤트와 결과 DTO를 파이프라인 표시 상태로 변환�
   );
 });
 
+test("분류 단계는 최신 이벤트를 후보 fallback보다 우선한다", () => {
+  const emptyViewModel = { candidates: [] };
+  const candidateViewModel = { candidates: [{ cn8: "19023010" }] };
+  const StageState = (events, viewModel = candidateViewModel) => (
+    GetPipelineStageState({ events }, viewModel, "classification")
+  );
+
+  assert.equal(StageState([], emptyViewModel), "idle");
+  assert.equal(StageState([]), "done");
+  assert.equal(StageState([{ stage: "Classification_Component", status: "running" }]), "running");
+  assert.equal(StageState([{ stage: "Classification_Component", status: "needs-review" }]), "needs-review");
+  assert.equal(StageState([
+    { stage: "Classification_Component", status: "needs-review" },
+    { stage: "Classification_Component", status: "done" },
+  ]), "done");
+  assert.equal(StageState([{ stage: "Classification_Component", status: "failed" }]), "failed");
+  assert.equal(StageState([{ stage: "Classification_Component", status: "needs_review" }]), "needs-review");
+  assert.equal(StageState([{ stage: "Classification_Component", status: "review_required" }]), "needs-review");
+});
+
 test("입력 복원 완료 결과는 상품 정보 수집 단계에 머문다", () => {
   assert.equal(
     CompletedPipelineStage({

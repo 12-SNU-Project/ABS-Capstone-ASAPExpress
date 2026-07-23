@@ -151,6 +151,7 @@ export async function PrepareRunSnapshot(targetJobId, lifecycle, loadSnapshot) {
 export function useClassificationRun(initialJobId = "") {
   const [result, setResultState] = useState(null);
   const [restoring, setRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState("");
   const [restorableJobId, setRestorableJobId] = useState("");
   const resultRef = useRef(null);
   const lifecycleRef = useRef(null);
@@ -247,12 +248,22 @@ export function useClassificationRun(initialJobId = "") {
     });
   }, [HydrateRun, IsCurrentOperation, SetResult, lifecycle]);
 
-  const loadRun = useCallback(async (jobId) => {
+  const clearRestoreError = useCallback(() => setRestoreError(""), []);
+
+  const PrepareAndCommitRunTransition = useCallback(async (
+    jobId,
+    { clearStoredOnFailure = false } = {},
+  ) => {
     const targetJobId = clean(jobId);
-    if (!targetJobId) throw new Error("job_id를 입력하세요.");
+    if (!targetJobId) {
+      setRestoreError("job_id를 입력하세요.");
+      return null;
+    }
     if (!ShouldPrepareRunTransition(targetJobId, resultRef.current?.job_id)) {
+      setRestoreError("");
       return resultRef.current;
     }
+    setRestoreError("");
     setRestoring(true);
     let restoreOperation = null;
     try {
@@ -281,7 +292,9 @@ export function useClassificationRun(initialJobId = "") {
       if (IsAbortError(error) || !lifecycle.IsCurrentRestoreOperation(restoreOperation)) {
         return null;
       }
-      throw error;
+      if (clearStoredOnFailure) ClearStoredJobId();
+      setRestoreError(`작업을 불러오지 못했습니다. ${String(error?.message || error)}`);
+      return null;
     } finally {
       if (restoreOperation && lifecycle.IsCurrentRestoreOperation(restoreOperation)) {
         setRestoring(false);
@@ -289,9 +302,15 @@ export function useClassificationRun(initialJobId = "") {
     }
   }, [OpenSse, RememberRestorableJob, SetResult, lifecycle]);
 
+  const loadRun = useCallback(
+    (jobId) => PrepareAndCommitRunTransition(jobId),
+    [PrepareAndCommitRunTransition],
+  );
+
   const runPipeline = useCallback(async (mode, form) => {
     const operation = BeginOperation();
     lifecycle.CloseEventSource();
+    setRestoreError("");
     setRestoring(false);
     const productName = clean(form.productName);
     const url = clean(form.url);
@@ -414,43 +433,25 @@ export function useClassificationRun(initialJobId = "") {
 
   useEffect(() => {
     const targetJobId = clean(initialJobId) || ReadStoredJobId();
-    if (!targetJobId || clean(resultRef.current?.job_id) === targetJobId) return undefined;
-    const operation = BeginOperation();
-    lifecycle.CloseEventSource();
-    setRestoring(true);
-    HydrateRun(targetJobId, operation)
-      .then((snapshot) => {
-        if (ShouldConnectRunSnapshot(snapshot)) {
-          OpenSse(targetJobId, operation);
-        }
-      })
-      .catch((error) => {
-        if (IsAbortError(error) || !IsCurrentOperation(operation)) return;
-        if (!clean(initialJobId)) ClearStoredJobId();
-        SetResult({
-          job_id: targetJobId,
-          job_status: "failed",
-          error: String(error?.message || error),
-          events: [{ stage: "Restore", status: "failed", message: "기존 작업 복원 실패" }],
-        });
-      })
-      .finally(() => {
-        if (IsCurrentOperation(operation)) setRestoring(false);
-      });
+    if (!targetJobId) return undefined;
+    PrepareAndCommitRunTransition(targetJobId, {
+      clearStoredOnFailure: !clean(initialJobId),
+    });
     return undefined;
-  }, [
-    BeginOperation,
-    HydrateRun,
-    IsCurrentOperation,
-    OpenSse,
-    SetResult,
-    initialJobId,
-    lifecycle,
-  ]);
+  }, [PrepareAndCommitRunTransition, initialJobId]);
 
   useEffect(() => () => lifecycle.Dispose(), [lifecycle]);
 
   const busy = restoring || ACTIVE_STATUSES.includes(clean(result?.job_status).toLowerCase());
 
-  return { result, busy, restoring, restorableJobId, runPipeline, loadRun };
+  return {
+    result,
+    busy,
+    restoring,
+    restoreError,
+    restorableJobId,
+    runPipeline,
+    loadRun,
+    clearRestoreError,
+  };
 }
