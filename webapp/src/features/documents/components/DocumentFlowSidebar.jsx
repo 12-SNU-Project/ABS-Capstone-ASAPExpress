@@ -31,16 +31,16 @@ export default function DocumentFlowSidebar({ activeKey, counts, onSelect }) {
               <button
                 key={item.key}
                 type="button"
-                className={`group relative grid grid-cols-[40px_minmax(0,1fr)] gap-3 rounded-lg px-0 py-3 text-left transition-colors duration-150 ${active ? "bg-primary/5" : "hover:bg-muted"}`}
+                className={`group relative grid grid-cols-[40px_minmax(0,1fr)] gap-3 rounded-lg px-0 py-4 text-left transition-colors duration-150 ${active ? "bg-primary/5" : "hover:bg-muted"}`}
                 onClick={() => onSelect(item.key)}
                 aria-current={active ? "step" : undefined}
               >
-                <span className={`relative z-10 grid size-10 place-items-center rounded-full border text-xs font-bold ${active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-surface text-muted-foreground"}`}>
+                <span className={`relative z-10 grid size-10 place-items-center rounded-full border text-sm font-bold ${active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-surface text-muted-foreground"}`}>
                   {item.step}
                 </span>
                 <span className="min-w-0 self-center pr-3">
-                  <strong className="block text-sm font-semibold text-foreground">{item.shortTitle}</strong>
-                  <small className="mt-0.5 block text-xs text-muted-foreground">
+                  <strong className="block text-base font-semibold leading-6 text-foreground">{item.shortTitle}</strong>
+                  <small className="mt-1 block text-sm leading-5 text-muted-foreground">
                     {active ? "검토 중" : count ? `${count}건 확인 가능` : "자료 없음"}
                   </small>
                 </span>

@@ -17,13 +17,16 @@ export function BuildCandidateHierarchy(candidates, selectedPath = {}) {
   const root = {
     level: "HS2",
     code: String(selectedPath?.hs2 || firstCode.slice(0, 2)),
+    description: String(selectedPath?.hs2_description || ""),
     children: [],
   };
-  const GetOrAdd = (children, level, code, score) => {
+  const GetOrAdd = (children, level, code, score, description) => {
     let node = children.find((item) => item.code === code);
     if (!node) {
-      node = { level, code, score, children: [] };
+      node = { level, code, score, description: String(description || ""), children: [] };
       children.push(node);
+    } else if (!node.description && description) {
+      node.description = String(description);
     }
     return node;
   };
@@ -41,8 +44,8 @@ export function BuildCandidateHierarchy(candidates, selectedPath = {}) {
     const hs4 = String(hs4Data.code || hs6.slice(0, 4));
     if (!hs4 || !hs6 || !cn8) return;
 
-    const hs4Node = GetOrAdd(root.children, "HS4", hs4, hs4Data.score);
-    const hs6Node = GetOrAdd(hs4Node.children, "HS6", hs6, hs6Data.score);
+    const hs4Node = GetOrAdd(root.children, "HS4", hs4, hs4Data.score, hs4Data.description);
+    const hs6Node = GetOrAdd(hs4Node.children, "HS6", hs6, hs6Data.score, hs6Data.description);
     hs6Node.children.push({
       level: "CN8",
       code: cn8,

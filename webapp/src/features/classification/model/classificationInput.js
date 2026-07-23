@@ -7,6 +7,14 @@ export const INTENDED_USE_OPTIONS = [
   ["non-food use", "비식품용"],
 ];
 
+export function GetIntendedUseLabel(value, emptyLabel = "미입력") {
+  const normalized = clean(value);
+  if (!normalized || ["__none__", "_none_", "none"].includes(normalized.toLowerCase())) {
+    return emptyLabel;
+  }
+  return INTENDED_USE_OPTIONS.find(([option]) => option === normalized)?.[1] || normalized;
+}
+
 export function CreateIngredient(role = "secondary") {
   return { role, name: "", percentage: "" };
 }

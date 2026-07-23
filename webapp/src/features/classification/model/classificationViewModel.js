@@ -53,17 +53,46 @@ function PackageMatchLevel(taricKey, group, candidate) {
 }
 
 export function BuildDocumentPackageOptions(packagesByTaric, candidate) {
-  const options = Object.entries(asObject(packagesByTaric)).map(([taric, group]) => ({
+  if (!candidate) return [];
+  const entries = Object.entries(asObject(packagesByTaric));
+  const candidateId = clean(candidate.candidate_id);
+  if (candidateId) {
+    const candidateOptions = entries.flatMap(([taric, group]) => {
+      const matchingGroup = asList(group).filter(
+        (item) => clean(asObject(item).candidate_id) === candidateId,
+      );
+      if (!matchingGroup.length) return [];
+      const matchLevel = PackageMatchLevel(taric, matchingGroup, candidate);
+      return [{
+        taric,
+        group: matchingGroup,
+        matchLevel: matchLevel === "none" ? "branch" : matchLevel,
+      }];
+    });
+    if (candidateOptions.length) return candidateOptions;
+  }
+
+  const options = entries.map(([taric, group]) => ({
     taric,
     group,
     matchLevel: PackageMatchLevel(taric, group, candidate),
   }));
-  const bestLevel = ["taric10", "cn8", "hs6"]
-    .find((level) => options.some((option) => option.matchLevel === level));
-  return options.map((option) => ({
-    ...option,
-    matchLevel: option.matchLevel === bestLevel ? option.matchLevel : "none",
-  }));
+  const targetCn8 = NormalizeTariffCode(candidate.cn8)
+    || NormalizeTariffCode(candidate.taric10).slice(0, 8);
+  if (targetCn8) {
+    const cn8Branches = options.filter(
+      (option) => ["taric10", "cn8"].includes(option.matchLevel),
+    );
+    if (cn8Branches.length) return cn8Branches;
+  }
+  const targetHs6 = NormalizeTariffCode(candidate.hs6) || targetCn8.slice(0, 6);
+  if (targetHs6) {
+    const hs6Branches = options.filter(
+      (option) => ["taric10", "cn8", "hs6"].includes(option.matchLevel),
+    );
+    if (hs6Branches.length) return hs6Branches;
+  }
+  return options.filter((option) => option.matchLevel === "taric10");
 }
 
 export function ResolveDocumentPackageSelection(options, currentSelection = {}) {
@@ -72,7 +101,7 @@ export function ResolveDocumentPackageSelection(options, currentSelection = {}) 
   if (currentSelection.manual && rows.some((option) => option.taric === currentTaric)) {
     return { taric: currentTaric, manual: true };
   }
-  const best = ["taric10", "cn8", "hs6"]
+  const best = ["taric10", "cn8", "hs6", "branch"]
     .map((level) => rows.find((option) => option.matchLevel === level))
     .find(Boolean);
   return { taric: clean(best?.taric), manual: false };

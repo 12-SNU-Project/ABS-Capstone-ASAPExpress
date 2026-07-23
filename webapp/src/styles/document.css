@@ -19,47 +19,6 @@
 
 
 
-.ddv-check-list {
-  display: grid;
-  gap: 8px;
-  line-height: 1.48;
-  margin: 0;
-  padding-left: 18px;
-}
-
-.ddv-check-list strong {
-  display: block;
-}
-
-.ddv-check-list span {
-  color: var(--muted-foreground);
-  display: block;
-  margin-top: 2px;
-}
-
-.ddv-check-group-list {
-  display: grid;
-  gap: 10px;
-}
-
-.ddv-check-group {
-  background: transparent;
-  border: 0;
-  border-top: 1px solid var(--border);
-  border-radius: 0;
-  padding: 12px 0 0;
-}
-
-.ddv-check-group > strong {
-  display: block;
-  margin-bottom: 8px;
-}
-
-.ddv-check-group:first-child {
-  border-top: 0;
-  padding-top: 0;
-}
-
 .ddv-procedure-card.exporter,
 .ddv-procedure-card.broker {
   background: transparent;
@@ -78,6 +37,7 @@
 }
 
 .ddv-procedure-card-head strong {
+  font-size: 1.125rem;
   line-height: 1.35;
 }
 
@@ -86,7 +46,7 @@
   background: color-mix(in oklch, var(--primary) 10%, transparent);
   border-radius: 999px;
   padding: 5px 8px;
-  font-size: 0.78rem;
+  font-size: 0.875rem;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -112,19 +72,21 @@
 
 .ddv-cert-row strong {
   display: block;
-  line-height: 1.35;
+  font-size: 1rem;
+  line-height: 1.5;
 }
 
 .ddv-cert-row p {
   color: var(--muted-foreground);
+  font-size: 1rem;
   margin: 4px 0 0;
-  line-height: 1.45;
+  line-height: 1.6;
 }
 
 .ddv-cert-row em {
   display: block;
   color: var(--muted-foreground);
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   font-style: normal;
   line-height: 1.45;
   margin-top: 6px;
@@ -149,12 +111,13 @@
 .ddv-guidance-checkpoints strong {
   display: block;
   margin: 0 0 8px;
-  font-size: 0.92rem;
+  font-size: 1.05rem;
 }
 
 .ddv-group-guidance p {
   color: var(--foreground);
-  line-height: 1.55;
+  font-size: 1rem;
+  line-height: 1.65;
   margin: 0;
   max-width: 920px;
 }
@@ -171,7 +134,7 @@
 
 .ddv-guidance-section strong {
   display: block;
-  font-size: 0.9rem;
+  font-size: 1rem;
   margin-bottom: 8px;
 }
 
@@ -179,8 +142,9 @@
 .ddv-guidance-section ol {
   color: var(--foreground);
   display: grid;
+  font-size: 1rem;
   gap: 7px;
-  line-height: 1.5;
+  line-height: 1.65;
   margin: 0;
   padding-left: 20px;
 }
@@ -188,6 +152,48 @@
 .ddv-guidance-section li::marker {
   color: var(--primary);
   font-weight: 800;
+}
+
+.ddv-guidance-section .ddv-guidance-step-list {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ddv-guidance-step {
+  align-items: start;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 30px minmax(0, 1fr);
+  padding: 9px 10px;
+  transition: background-color 180ms ease-out, color 180ms ease-out;
+}
+
+.ddv-guidance-step:hover {
+  background: color-mix(in oklch, var(--primary) 6%, transparent);
+}
+
+.ddv-guidance-step-number {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  display: inline-flex;
+  font-size: 0.8rem;
+  font-weight: 800;
+  height: 26px;
+  justify-content: center;
+  transition: background-color 180ms ease-out, border-color 180ms ease-out, color 180ms ease-out;
+  width: 26px;
+}
+
+.ddv-guidance-step:hover .ddv-guidance-step-number {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
 }
 
 .ddv-guidance-checkpoints {
@@ -198,7 +204,8 @@
 
 .ddv-guidance-checkpoints ul {
   color: var(--muted-foreground);
-  line-height: 1.5;
+  font-size: 1rem;
+  line-height: 1.65;
   margin: 0;
   padding-left: 18px;
 }
@@ -225,7 +232,7 @@
 
 .ddv-footnote-guidelines h3 {
   margin: 0;
-  font-size: 0.92rem;
+  font-size: 1rem;
 }
 
 .ddv-footnote-guide {
@@ -246,7 +253,8 @@
 
 .ddv-footnote-guide p {
   color: var(--foreground);
-  line-height: 1.48;
+  font-size: 1rem;
+  line-height: 1.6;
   margin: 0;
 }
 
@@ -258,7 +266,7 @@
 .ddv-footnote-guide em {
   display: block;
   color: var(--muted-foreground);
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   font-style: normal;
   margin-top: 8px;
   overflow-wrap: anywhere;
@@ -283,7 +291,7 @@
 .ddv-review-grid span {
   color: var(--muted-foreground);
   display: block;
-  font-size: 0.78rem;
+  font-size: 0.875rem;
   font-weight: 800;
   margin-bottom: 6px;
   text-transform: uppercase;
@@ -291,8 +299,8 @@
 
 .ddv-review-grid strong {
   display: block;
-  font-size: 0.92rem;
-  line-height: 1.35;
+  font-size: 1rem;
+  line-height: 1.6;
   overflow-wrap: anywhere;
 }
 
@@ -301,13 +309,13 @@
   border-top: 1px solid var(--border);
   border-radius: 0;
   background: transparent;
-  margin-top: 14px;
-  padding: 14px 0 0;
+  margin-top: 20px;
+  padding: 18px 0 0;
 }
 
 .ddv-broker-section h3 {
-  font-size: 0.94rem;
-  margin: 0 0 10px;
+  font-size: 1.125rem;
+  margin: 0 0 12px;
 }
 
 .ddv-broker-review-list {
@@ -322,7 +330,8 @@
 
 .ddv-broker-review-list p {
   color: var(--foreground);
-  line-height: 1.48;
+  font-size: 1rem;
+  line-height: 1.6;
   margin: 0;
 }
 
@@ -330,7 +339,8 @@
   color: var(--muted-foreground);
   display: grid;
   gap: 6px;
-  line-height: 1.45;
+  font-size: 0.95rem;
+  line-height: 1.65;
   margin: 0;
   padding-left: 18px;
 }
@@ -345,13 +355,14 @@
 
 .ddv-source-section-list > strong {
   display: block;
-  font-size: 0.86rem;
+  font-size: 0.95rem;
   margin-bottom: 8px;
 }
 
 .ddv-source-grid {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
 }
 
 .ddv-footnote-guidelines.broker {
@@ -383,7 +394,6 @@
   }
 }
 
-
 .ddv-duty-flow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -411,13 +421,13 @@
 
 .ddv-duty-priority-head strong {
   color: var(--foreground);
-  font-size: 1rem;
+  font-size: 1.125rem;
 }
 
 .ddv-duty-priority-head span {
   color: var(--muted-foreground);
-  font-size: 0.9rem;
-  line-height: 1.45;
+  font-size: 1rem;
+  line-height: 1.6;
 }
 
 .ddv-duty-priority-grid {
@@ -446,7 +456,7 @@
 .ddv-branch-card span {
   color: var(--muted-foreground);
   display: block;
-  font-size: 0.88rem;
+  font-size: 0.95rem;
   margin-bottom: 10px;
 }
 
@@ -458,15 +468,16 @@
 
 .ddv-branch-card p {
   color: var(--muted-foreground);
-  line-height: 1.5;
+  font-size: 1rem;
+  line-height: 1.6;
   margin: 12px 0 0;
 }
 
 .ddv-branch-card small {
   color: var(--muted-foreground);
   display: block;
-  font-size: 0.78rem;
-  line-height: 1.4;
+  font-size: 0.875rem;
+  line-height: 1.5;
   margin-top: 10px;
 }
 
@@ -481,7 +492,7 @@
   border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
   border-radius: 999px;
   color: var(--muted-foreground);
-  font-size: 0.8rem;
+  font-size: 0.875rem;
   font-style: normal;
   line-height: 1;
   padding: 5px 8px;
@@ -504,14 +515,14 @@
 
 .ddv-duty-branch-row span {
   color: var(--muted-foreground);
-  font-size: 0.8rem;
-  line-height: 1.35;
+  font-size: 0.9rem;
+  line-height: 1.5;
   margin: 0;
 }
 
 .ddv-duty-branch-row strong {
-  font-size: 0.92rem;
-  line-height: 1.35;
+  font-size: 1rem;
+  line-height: 1.5;
   text-align: right;
 }
 
@@ -527,7 +538,7 @@
 .ddv-duty-units span,
 .ddv-duty-units em {
   border-radius: 999px;
-  font-size: 0.8rem;
+  font-size: 0.875rem;
   line-height: 1;
   padding: 5px 8px;
 }

@@ -30,8 +30,8 @@ test("CN8 후보들의 공통 코드를 병합해 계층 트리를 만든다", (
     classification_basis: [`basis ${cn8}`],
     candidate_static_tree: {
       nodes: [
-        { level: "hs4", code: hs4, score: 10 },
-        { level: "hs6", code: hs6, score: 5 },
+        { level: "hs4", code: hs4, score: 10, description: `HS4 ${hs4}` },
+        { level: "hs6", code: hs6, score: 5, description: `HS6 ${hs6}` },
         { level: "cn8", code: cn8, score: rank, description: `candidate ${rank}` },
       ],
     },
@@ -47,6 +47,8 @@ test("CN8 후보들의 공통 코드를 병합해 계층 트리를 만든다", (
   assert.deepEqual(tree.children.map((node) => node.code), ["1605", "1603"]);
   assert.deepEqual(tree.children[0].children.map((node) => node.code), ["160555", "160530"]);
   assert.deepEqual(tree.children[0].children[1].children.map((node) => node.code), ["16053010", "16053090"]);
+  assert.equal(tree.children[0].description, "HS4 1605");
+  assert.equal(tree.children[0].children[0].description, "HS6 160555");
   assert.equal(tree.children[0].children[0].children[0].recommended, true);
 });
 

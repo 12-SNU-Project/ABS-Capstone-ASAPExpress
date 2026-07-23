@@ -1,4 +1,4 @@
-import { AlertCircle, Check, Circle, Clock3, LoaderCircle, Minus } from "lucide-react";
+import { AlertCircle, Check, Circle, Clock3, LoaderCircle, LockKeyhole, Minus } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { EVENT_STAGE_LABELS, STAGES } from "@/lib/labels.js";
 import { asList, clean, statusLabel } from "@/lib/format.js";
@@ -57,7 +57,15 @@ const STATE_TONES = {
   idle: "border-border bg-surface text-muted-foreground",
 };
 
-export default function PipelineStageRail({ result, viewModel, activeStage, onSelect, busy, restoring }) {
+export default function PipelineStageRail({
+  result,
+  viewModel,
+  activeStage,
+  onSelect,
+  busy,
+  restoring,
+  documentReady,
+}) {
   const reduceMotion = useReducedMotion();
   const info = restoring
     ? { label: "기존 작업 복원", status: "running", message: "저장된 실행 결과를 불러오는 중입니다." }
@@ -86,37 +94,42 @@ export default function PipelineStageRail({ result, viewModel, activeStage, onSe
         </div>
       ) : null}
 
-      <nav className="mt-4 flex min-w-0 items-center overflow-x-auto pb-1" aria-label="전체 처리 단계">
+      <nav className="mt-4 grid min-w-0 gap-3 sm:grid-cols-3" aria-label="전체 처리 단계">
         {STAGES.map(([key, label], index) => {
           const state = DisplayStageState(GetPipelineStageState(result, viewModel, key));
           const active = activeStage === key;
+          const locked = key === "document_recommendation" && !documentReady;
+          const markerState = locked ? "idle" : state;
           const connectorDone = ["done", "skipped"].includes(state);
           return (
-            <div className="flex min-w-0 flex-1 items-center" key={key}>
+            <div className="relative min-w-0" key={key}>
               <button
                 type="button"
-                className={`flex min-w-[148px] flex-1 items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors duration-200 ${active ? "border-primary bg-primary/5" : "border-transparent hover:bg-muted"}`}
+                className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-60 ${active ? "border-primary bg-primary/5" : "border-transparent hover:bg-muted"}`}
                 aria-current={active ? "step" : undefined}
                 onClick={() => onSelect(key)}
+                disabled={locked}
               >
                 <motion.span
-                  key={state}
+                  key={markerState}
                   initial={{ opacity: 0.55 }}
                   animate={{ opacity: 1 }}
                   transition={{ duration: reduceMotion ? 0 : 0.18 }}
-                  className={`grid size-7 shrink-0 place-items-center rounded-full border [&>svg]:size-3.5 ${STATE_TONES[state] || STATE_TONES.idle}`}
+                  className={`grid size-7 shrink-0 place-items-center rounded-full border [&>svg]:size-3.5 ${STATE_TONES[markerState] || STATE_TONES.idle}`}
                   aria-hidden="true"
                 >
-                  <StageIcon state={state} />
+                  {locked ? <LockKeyhole /> : <StageIcon state={state} />}
                 </motion.span>
                 <span className="min-w-0">
                   <strong className="block truncate text-sm font-semibold text-foreground">{label}</strong>
-                  <small className="block text-xs text-muted-foreground">{statusLabel(state)}</small>
+                  <small className="block text-xs text-muted-foreground">
+                    {locked ? "후보 선택 필요" : statusLabel(state)}
+                  </small>
                 </span>
               </button>
               {index < STAGES.length - 1 ? (
                 <motion.span
-                  className="mx-1 h-px min-w-4 flex-1"
+                  className="absolute top-1/2 left-full hidden h-px w-3 sm:block"
                   animate={{ backgroundColor: connectorDone ? "var(--success)" : "var(--border)" }}
                   transition={{ duration: reduceMotion ? 0 : 0.18 }}
                   aria-hidden="true"

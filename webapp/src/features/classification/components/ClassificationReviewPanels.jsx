@@ -180,7 +180,7 @@ function ClassificationBasisLabel(value) {
 
 function ClassificationHierarchyNode({ node, selectedCn8 }) {
   const children = asList(node.children);
-  const basis = ClassificationBasisLabel(node.basis || node.description);
+  const description = ClassificationBasisLabel(node.description);
   const selected = node.level === "CN8" && clean(node.code) === clean(selectedCn8);
   return (
     <li>
@@ -188,17 +188,12 @@ function ClassificationHierarchyNode({ node, selectedCn8 }) {
         <span className="cjs-hierarchy-marker">{node.level}</span>
         <div className="cjs-hierarchy-copy">
           <strong>{node.code}</strong>
-          {node.level === "CN8" ? (
-            <small>{basis || "후보 설명이 기록되지 않았습니다."}</small>
-          ) : (
-            <small>하위 분기 {children.length}개</small>
-          )}
-        </div>
-        <div className="cjs-hierarchy-meta">
-          {node.level === "CN8" ? (
-            <span>{node.rank}순위{node.recommended ? " · 시스템 추천" : ""}{selected ? " · 현재 선택" : ""}</span>
-          ) : null}
-          {Number.isFinite(Number(node.score)) ? <small>단계 비교값 {node.score}</small> : null}
+          <small>
+            {description || `${node.level} ${node.code}의 공식 품목 설명이 결과에 포함되지 않았습니다.`}
+          </small>
+          <div className="cjs-hierarchy-meta">
+            {Number.isFinite(Number(node.score)) ? <small>단계 비교값 {node.score}</small> : null}
+          </div>
         </div>
       </div>
       {children.length ? (
@@ -239,6 +234,14 @@ export function ClassificationHierarchy({ candidates, selectedPath, selectedCn8 
 }
 
 export function ClassificationEvidencePanel({ candidate, trace }) {
+  if (!candidate) {
+    return (
+      <div className="cjs-panel">
+        <div className="cjs-panel-title">선택 후보 결정 근거</div>
+        <div className="cjs-muted">왼쪽 분류 후보를 선택하면 판단 메모와 단계별 근거가 표시됩니다.</div>
+      </div>
+    );
+  }
   const basis = asList(candidate?.classification_basis).map(ClassificationBasisLabel);
   const validator = asObject(trace?.validator);
   const citations = asList(candidate?.classification_citations);

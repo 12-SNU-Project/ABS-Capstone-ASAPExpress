@@ -6,15 +6,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { RECONSTRUCTION_KEYS, UnderstandingValueLabel } from "@/lib/labels.js";
 import { asList, asObject, clean, labelFor } from "@/lib/format.js";
 import { BuildImageEvidenceItems } from "@/features/classification/model/imageEvidenceAdapter.js";
+import { GetIntendedUseLabel } from "@/features/classification/model/classificationInput.js";
 import { NormalizeWarning } from "@/features/classification/model/warningViewModel.js";
 import { EvidenceTerms, FactLabel } from "./EvidenceElements";
-
-const INTENDED_USE_OPTIONS = [
-  ["human consumption", "최종 소비용"],
-  ["further processing", "추가 가공용"],
-  ["animal feed", "동물 사료용"],
-  ["non-food use", "비식품용"],
-];
 
 function ParseCompositionTerms(terms) {
   return asList(terms)
@@ -116,8 +110,7 @@ export function ProductCollectionPanel({ result }) {
     ["상품명", pageProductFacts.product_name],
     [
       "상품 용도",
-      INTENDED_USE_OPTIONS.find(([value]) => value === clean(pageProductFacts.intended_use))?.[1]
-        || pageProductFacts.intended_use,
+      GetIntendedUseLabel(pageProductFacts.intended_use, ""),
     ],
     ["상품 원산국", pageProductFacts.origin_country],
   ].filter(([, value]) => clean(value) !== "");
@@ -377,8 +370,7 @@ export function ProductUnderstandingPanel({ result }) {
     .filter((value, index, all) => value && all.indexOf(value) === index)
     .join(" · ");
   const intendedUse = clean(hints.intended_use);
-  const intendedUseLabel = INTENDED_USE_OPTIONS.find(([value]) => value === intendedUse)?.[1]
-    || (HasValue(intendedUse) ? intendedUse : "");
+  const intendedUseLabel = GetIntendedUseLabel(intendedUse, "");
   const processingState = HasValue(composition.processing_state)
     ? composition.processing_state
     : hints.processing_state;

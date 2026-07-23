@@ -81,7 +81,7 @@ test("관세 코드는 구분 기호를 제거해 비교한다", () => {
   assert.equal(NormalizeTariffCode("1605 55-00 00"), "1605550000");
 });
 
-test("문서 패키지는 TARIC10, CN8, HS6 순으로 후보와 연결한다", () => {
+test("candidate_id가 없으면 선택 후보의 CN8 Branch를 우선 연결한다", () => {
   const packages = {
     "1605550000": [{ taric10: "1605 55 00 00" }],
     "1605550090": [{ cn8: "16055500" }],
@@ -96,11 +96,9 @@ test("문서 패키지는 TARIC10, CN8, HS6 순으로 후보와 연결한다", (
 
   assert.deepEqual(options.map((option) => option.matchLevel), [
     "taric10",
-    "none",
-    "none",
-    "none",
+    "cn8",
   ]);
-  assert.equal(options.length, 4);
+  assert.equal(options.length, 2);
   assert.deepEqual(ResolveDocumentPackageSelection(options), {
     taric: "1605550000",
     manual: false,
@@ -126,21 +124,37 @@ test("직접 매칭이 없으면 임의 패키지를 선택하지 않는다", ()
     { "2106900000": [{ taric10: "2106900000" }] },
     { taric10: "1605550000" },
   );
+  assert.equal(options.length, 0);
   assert.deepEqual(ResolveDocumentPackageSelection(options), { taric: "", manual: false });
 });
 
 test("사용자의 문서 패키지 수동 선택은 후보 변경 후에도 보존한다", () => {
-  const options = BuildDocumentPackageOptions(
-    {
-      "1605550000": [{ taric10: "1605550000" }],
-      "2106900000": [{ taric10: "2106900000" }],
-    },
-    { taric10: "1605550000" },
-  );
+  const options = [
+    { taric: "1605550000", matchLevel: "taric10" },
+    { taric: "2106900000", matchLevel: "none" },
+  ];
   assert.deepEqual(
     ResolveDocumentPackageSelection(options, { taric: "2106900000", manual: true }),
     { taric: "2106900000", manual: true },
   );
+});
+
+test("candidate_id로 선택 후보의 TARIC Branch만 남긴다", () => {
+  const options = BuildDocumentPackageOptions(
+    {
+      "1601009919": [{ candidate_id: "cand_001", taric10: "1601009919" }],
+      "1601009999": [{ candidate_id: "cand_001", taric10: "1601009999" }],
+      "1902199090": [{ candidate_id: "cand_002", taric10: "1902199090" }],
+    },
+    {
+      candidate_id: "cand_001",
+      cn8: "16010099",
+      taric10: "1601009999",
+    },
+  );
+
+  assert.deepEqual(options.map((option) => option.taric), ["1601009919", "1601009999"]);
+  assert.equal(ResolveDocumentPackageSelection(options).taric, "1601009999");
 });
 
 test("수동 선택 전에는 후보 변경에 맞춰 기본 패키지를 다시 선택한다", () => {

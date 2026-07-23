@@ -44,11 +44,21 @@ export default function WorkbenchPage() {
     clearRestoreError,
   } = useClassificationRun(jobQuery);
   const [selectedKey, setSelectedKey] = useState("");
+  const [selectedJobId, setSelectedJobId] = useState("");
   const [activeStage, setActiveStage] = useState("classification");
   const [classificationStep, setClassificationStep] = useState("understanding");
   const followStageRef = useRef(true);
   const followClassificationRef = useRef(true);
   const viewModel = useClassificationViewModel(result);
+  const defaultCandidate = viewModel.candidates.find((candidate) => candidate.llm_recommended)
+    || viewModel.candidates[0]
+    || null;
+  const resultJobId = clean(result?.job_id || result?.run_id);
+  const selectedCandidate = selectedJobId === resultJobId
+    ? viewModel.candidates.find(
+      (candidate, index) => candidateKey(candidate, index) === selectedKey,
+    ) || null
+    : null;
   const trace = useMemo(
     () => extractTrace(viewModel.candidateSet),
     [viewModel.candidateSet],
@@ -69,10 +79,23 @@ export default function WorkbenchPage() {
   }, [busy]);
 
   useEffect(() => {
+    setSelectedKey("");
+    setSelectedJobId("");
+    setActiveStage((current) => (
+      current === "document_recommendation" ? "classification" : current
+    ));
+  }, [resultJobId]);
+
+  useEffect(() => {
     if (!followStageRef.current) return;
     const status = clean(result?.job_status).toLowerCase();
     if (["completed", "complete", "done"].includes(status)) {
-      setActiveStage(CompletedPipelineStage(result));
+      const completedStage = CompletedPipelineStage(result);
+      setActiveStage(
+        completedStage === "document_recommendation" && !selectedCandidate
+          ? "classification"
+          : completedStage,
+      );
       return;
     }
     let latest = "product_collection";
@@ -80,8 +103,11 @@ export default function WorkbenchPage() {
       const state = GetPipelineStageState(result, viewModel, key);
       if (["done", "running", "completed"].includes(state)) latest = key;
     });
+    if (latest === "document_recommendation" && !selectedCandidate) {
+      latest = "classification";
+    }
     setActiveStage(latest);
-  }, [result, viewModel, busy]);
+  }, [result, viewModel, busy, selectedCandidate]);
 
   useEffect(() => {
     if (followClassificationRef.current) {
@@ -90,13 +116,21 @@ export default function WorkbenchPage() {
   }, [result]);
 
   const PickStage = (key) => {
+    if (key === "document_recommendation" && !selectedCandidate) return;
     followStageRef.current = false;
     setActiveStage(key);
   };
 
   const PickClassificationStep = (key) => {
+    followStageRef.current = false;
     followClassificationRef.current = false;
     setClassificationStep(key);
+  };
+
+  const SelectCandidate = (key) => {
+    followStageRef.current = false;
+    setSelectedJobId(resultJobId);
+    setSelectedKey(key);
   };
 
   const RestoreRun = async (jobId) => {
@@ -124,12 +158,6 @@ export default function WorkbenchPage() {
     return snapshot;
   };
 
-  const defaultCandidate = viewModel.candidates.find((candidate) => candidate.llm_recommended)
-    || viewModel.candidates[0]
-    || null;
-  const selectedCandidate = viewModel.candidates.find(
-    (candidate, index) => candidateKey(candidate, index) === selectedKey,
-  ) || defaultCandidate;
   const resultStatus = clean(result?.job_status).toLowerCase();
   const hasRun = Boolean(
     clean(result?.job_id)
@@ -141,12 +169,14 @@ export default function WorkbenchPage() {
 
   return (
     <div className="classification-js-shell grid min-w-0 gap-4">
-      <WorkspaceHeader
-        eyebrow="ASAP Classification"
-        title="EU 수출 품목분류"
-        description="상품 정보를 읽고 HS6/CN8 후보와 TARIC10 서류 연결 지점을 확인합니다."
-        badge="분류 워크스페이스"
-      />
+      <div className={hasRun ? "" : "mx-auto w-full max-w-[1040px]"}>
+        <WorkspaceHeader
+          eyebrow="ASAP Classification"
+          title="EU 수출 품목분류"
+          description="상품 정보를 읽고 HS6/CN8 후보와 TARIC10 서류 연결 지점을 확인합니다."
+          badge="분류 워크스페이스"
+        />
+      </div>
 
       {restoring ? (
         <div className="rounded-lg border bg-surface px-4 py-3 text-sm text-muted-foreground" role="status">
@@ -181,6 +211,7 @@ export default function WorkbenchPage() {
               onSelect={PickStage}
               busy={busy}
               restoring={restoring}
+              documentReady={Boolean(selectedCandidate)}
             />
             <main className="grid min-w-0 content-start gap-4">
           {activeStage === "product_collection" ? (
@@ -211,15 +242,15 @@ export default function WorkbenchPage() {
                   <ClassificationHierarchy
                     candidates={viewModel.candidates}
                     selectedPath={viewModel.candidateSet.selected_path}
-                    selectedCn8={selectedCandidate?.cn8}
+                    selectedCn8={selectedCandidate?.cn8 || defaultCandidate?.cn8}
                   />
                 ) : null}
                 {classificationStep === "review" ? (
-                  <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
+                  <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
                     <TariffCandidateList
                       candidates={viewModel.candidates}
-                      selectedKey={selectedKey}
-                      onSelect={setSelectedKey}
+                      selectedKey={selectedJobId === resultJobId ? selectedKey : ""}
+                      onSelect={SelectCandidate}
                     />
                     <ClassificationEvidencePanel candidate={selectedCandidate} trace={trace} />
                   </div>

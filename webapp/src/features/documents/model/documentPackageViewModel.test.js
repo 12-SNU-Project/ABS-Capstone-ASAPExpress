@@ -110,3 +110,21 @@ test("사용자가 적용한 수입요건만 조건부 최종서류에 추가한
     ["상업송장", "위생증명서"],
   );
 });
+
+test("필수 baseline 문서를 요건에서 다시 참조해도 필수 출처를 유지한다", () => {
+  const baseline = BuildDocumentPackageViewModel(packageData).baselineRows;
+  const requirement = {
+    groupName: "공통 서류 확인",
+    groupId: "common",
+    preparationItemRows: [{
+      item_type: "document",
+      recommendation_mode: "always_required_document",
+      item_name_ko: "상업송장",
+      baseline_document_id: "commercial_invoice",
+    }],
+  };
+
+  const [document] = buildPreArrivalModel(baseline, [requirement], {}).finalDocuments;
+  assert.equal(document.documentName, "상업송장");
+  assert.equal(document.source, "기본 필수 서류");
+});

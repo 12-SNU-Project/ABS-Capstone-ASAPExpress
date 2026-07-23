@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { PencilLine, Plus, Trash2 } from "lucide-react";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,10 +23,16 @@ import {
   BuildProductFormFromResult,
   CreateEmptyProductForm,
   CreateIngredient,
+  GetIntendedUseLabel,
   HasProductInputErrors,
   INTENDED_USE_OPTIONS,
   ValidateProductRunInput,
 } from "@/features/classification/model/classificationInput.js";
+
+const INGREDIENT_ROLE_LABELS = {
+  primary: "주성분",
+  secondary: "부성분",
+};
 
 function FieldError({ id, children }) {
   if (!children) return null;
@@ -59,7 +64,7 @@ export function IngredientEditor({ rows, errors, onChange, onAdd, onRemove }) {
               <div className="grid min-w-0 gap-2 sm:grid-cols-[120px_minmax(0,1fr)_120px_36px]">
                 <Select value={row.role} onValueChange={(value) => onChange(index, "role", value)}>
                   <SelectTrigger className="h-10 w-full" aria-label={`${index + 1}번째 성분 구분`}>
-                    <SelectValue />
+                    <SelectValue>{(value) => INGREDIENT_ROLE_LABELS[value] || "부성분"}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="primary">주성분</SelectItem>
@@ -163,7 +168,7 @@ function TradeContextFields({ form, errors, onFieldChange, ingredientProps }) {
           <label className="text-sm font-medium" htmlFor="intended-use">상품 용도</label>
           <Select value={form.intendedUse || "__none__"} onValueChange={(value) => onFieldChange("intendedUse")({ target: { value: value === "__none__" ? "" : value } })}>
             <SelectTrigger id="intended-use" className="h-10 w-full" aria-invalid={Boolean(errors.intendedUse)}>
-              <SelectValue placeholder="선택하지 않음" />
+              <SelectValue>{(value) => GetIntendedUseLabel(value, "선택하지 않음")}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__none__">선택하지 않음</SelectItem>
@@ -206,35 +211,37 @@ function RunActionBar({ busy, onRun }) {
 
 function JobRestore({ busy, jobIdInput, loadError, onJobIdChange, onRestore }) {
   return (
-    <Accordion defaultValue={["restore"]} className="border-t">
-      <AccordionItem value="restore" className="border-0">
-        <AccordionTrigger className="py-4 hover:no-underline">기존 작업 불러오기</AccordionTrigger>
-        <AccordionContent className="grid gap-2 pb-1">
-          <label className="text-sm font-medium" htmlFor="job-id">작업 번호</label>
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-            <Input
-              id="job-id"
-              className="h-10"
-              placeholder="job_..."
-              value={jobIdInput}
-              onChange={(event) => onJobIdChange(event.target.value)}
-              onKeyDown={(event) => event.key === "Enter" && onRestore()}
-              disabled={busy}
-            />
-            <Button type="button" variant="outline" size="lg" disabled={busy} onClick={onRestore}>불러오기</Button>
-          </div>
-          <p className="m-0 text-xs leading-5 text-muted-foreground">백엔드에 남아 있는 작업 번호의 snapshot과 진행 중 SSE를 다시 연결합니다.</p>
-          <FieldError>{loadError}</FieldError>
-        </AccordionContent>
-      </AccordionItem>
-    </Accordion>
+    <section className="grid gap-4 rounded-lg bg-surface-muted px-5 py-4" aria-labelledby="job-restore-title">
+      <div>
+        <h3 id="job-restore-title" className="m-0 text-sm font-semibold text-foreground">기존 작업 불러오기</h3>
+        <p className="mt-1 mb-0 text-xs leading-5 text-muted-foreground">
+          작업 번호로 저장된 결과와 진행 상태를 다시 연결합니다.
+        </p>
+      </div>
+      <div className="grid gap-2">
+        <label className="text-sm font-semibold" htmlFor="job-id">작업 번호</label>
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <Input
+            id="job-id"
+            className="h-11 bg-surface px-3"
+            placeholder="job_..."
+            value={jobIdInput}
+            onChange={(event) => onJobIdChange(event.target.value)}
+            onKeyDown={(event) => event.key === "Enter" && onRestore()}
+            disabled={busy}
+          />
+          <Button className="h-11 px-4" type="button" variant="outline" disabled={busy} onClick={onRestore}>불러오기</Button>
+        </div>
+        <FieldError>{loadError}</FieldError>
+      </div>
+    </section>
   );
 }
 
 function ProductInputSummary({ form, requestFacts, jobId, onEdit }) {
   const userInputFacts = asObject(requestFacts.user_input_facts);
   const intendedUse = clean(userInputFacts.intended_use || form.intendedUse);
-  const intendedUseLabel = INTENDED_USE_OPTIONS.find(([value]) => value === intendedUse)?.[1] || "미입력";
+  const intendedUseLabel = GetIntendedUseLabel(intendedUse);
   const origin = clean(userInputFacts.origin_country || form.originCountry) || "미입력";
   const ingredients = form.ingredients.filter((item) => clean(item.name));
   const primaryIngredients = ingredients.filter((item) => item.role === "primary");
@@ -352,7 +359,7 @@ export default function ProductInputPanel({
 
   if (!compact) {
     return (
-      <Card className="mx-auto w-full max-w-[1000px] shadow-[var(--shadow-surface)]">
+      <Card className="mx-auto w-full max-w-[1040px] shadow-[var(--shadow-surface)]">
         <CardHeader className="border-b">
           <CardTitle className="text-xl">상품 정보 입력</CardTitle>
           <CardDescription>상품 출처와 확인된 분류 보정 정보를 입력해 분석을 시작합니다.</CardDescription>

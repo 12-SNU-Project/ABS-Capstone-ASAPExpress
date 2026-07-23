@@ -25,10 +25,9 @@ export default function TariffCandidateList({ candidates, selectedKey, onSelect 
   if (!candidates.length) {
     return <div className="rounded-xl border bg-surface p-5 text-sm text-muted-foreground">분류 후보가 아직 생성되지 않았습니다.</div>;
   }
-  const defaultIndex = Math.max(candidates.findIndex((candidate) => candidate.llm_recommended), 0);
   const activeKey = candidates.some((candidate, index) => candidateKey(candidate, index) === selectedKey)
     ? selectedKey
-    : candidateKey(candidates[defaultIndex], defaultIndex);
+    : "";
 
   return (
     <section className="min-w-0 rounded-xl border bg-surface shadow-[var(--shadow-surface)]">
@@ -37,7 +36,9 @@ export default function TariffCandidateList({ candidates, selectedKey, onSelect 
           <h3 className="m-0 text-sm font-semibold">분류 후보</h3>
           <Badge variant="secondary">{candidates.length}건</Badge>
         </div>
-        <p className="mt-1 mb-0 text-xs leading-5 text-muted-foreground">후보를 선택하면 오른쪽 근거가 갱신됩니다.</p>
+        <p className="mt-1 mb-0 text-xs leading-5 text-muted-foreground">
+          후보를 직접 선택하면 근거가 표시되고 서류 추천 단계가 활성화됩니다.
+        </p>
       </div>
       <div className="divide-y">
         {candidates.map((candidate, index) => {

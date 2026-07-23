@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import DocumentPackageDetail from "@/components/DocumentPackageDetail";
 import WorkspaceHeader from "@/components/layout/WorkspaceHeader";
 import { importClassification } from "@/lib/enterpriseApi.js";
@@ -25,6 +23,19 @@ export default function DocumentPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const selectedCandidateId = clean(packageData?.candidate_id);
+  const selectedCn8 = clean(packageData?.cn8);
+  const candidatePackages = selectedCandidateId
+    ? packages.filter((pkg) => clean(pkg.candidate_id) === selectedCandidateId)
+    : [];
+  const cn8Packages = selectedCn8
+    ? packages.filter((pkg) => clean(pkg.cn8) === selectedCn8)
+    : [];
+  const visiblePackages = candidatePackages.length
+    ? candidatePackages
+    : cn8Packages.length
+      ? cn8Packages
+      : packages;
 
   const PackagePath = (target) => (
     `/document/${encodeURIComponent(jobId)}/${encodeURIComponent(target)}${caseId ? `?caseId=${encodeURIComponent(caseId)}` : ""}`
@@ -89,7 +100,7 @@ export default function DocumentPage() {
   }, [jobId, taric10]);
 
   return (
-    <div className="grid min-w-0 gap-4">
+    <div className="grid min-w-0 gap-5">
       <Link className="w-fit text-sm font-semibold text-primary hover:underline" to={returnTarget}>
         ← {caseId ? "프로젝트 서류 관리" : "품목 분류"}
       </Link>
@@ -97,43 +108,38 @@ export default function DocumentPage() {
         eyebrow="EU Import Documents"
         title="TARIC 상세 서류 추천"
         description="선택한 TARIC10에 적용될 수 있는 서류와 확인 조건을 검토합니다. 최종 제출 요건은 관할기관 또는 전문가의 확인이 필요합니다."
-        badge="서류 검토 워크스페이스"
-        actions={(
-          <div className="flex flex-wrap justify-end gap-2">
-            {clean(packageData?.cn8) ? <Badge variant="secondary">CN8 {clean(packageData.cn8)}</Badge> : null}
-            <Badge variant="outline">TARIC10 {clean(packageData?.taric10) || taric10}</Badge>
-          {!caseId ? (
-              <Button type="button" disabled={!packageData || saving} onClick={saveToEnterprise}>
-              {saving ? "등록 중..." : "기업 프로젝트에 추가"}
-              </Button>
-          ) : null}
-          </div>
-        )}
+        actions={!caseId ? (
+          <Button type="button" disabled={!packageData || saving} onClick={saveToEnterprise}>
+            {saving ? "등록 중..." : "기업 프로젝트에 추가"}
+          </Button>
+        ) : null}
       />
 
-      {packages.length > 1 ? (
-        <section className="rounded-xl border bg-surface p-3 shadow-[var(--shadow-surface)]">
-          <div className="sm:hidden">
-            <Select value={clean(packageData?.taric10) || taric10} onValueChange={(target) => navigate(PackagePath(target))}>
-              <SelectTrigger className="w-full" aria-label="TARIC 서류 패키지 선택">
-                <SelectValue placeholder="TARIC10 선택" />
-              </SelectTrigger>
-              <SelectContent>
-                {packages.map((pkg) => {
-                  const target = clean(pkg.taric10 || pkg.document_package_id);
-                  return <SelectItem value={target} key={clean(pkg.document_package_id) || target}>{target}</SelectItem>;
-                })}
-              </SelectContent>
-            </Select>
+      {visiblePackages.length > 1 ? (
+        <section className="flex flex-col gap-3 rounded-xl border bg-surface px-4 py-4 shadow-[var(--shadow-surface)] sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div className="min-w-0">
+            <h2 className="m-0 text-base font-semibold text-foreground">TARIC Branch 선택</h2>
+            <p className="mt-1 mb-0 text-sm leading-6 text-muted-foreground">
+              선택 후보의 CN8 {selectedCn8 || "-"}에 연결된 {visiblePackages.length}개 Branch입니다.
+            </p>
           </div>
-          <Tabs className="hidden sm:block" value={clean(packageData?.taric10) || taric10} onValueChange={(target) => navigate(PackagePath(target))}>
-            <TabsList className="h-auto max-w-full flex-wrap justify-start">
-              {packages.map((pkg) => {
+          <Select value={clean(packageData?.taric10) || taric10} onValueChange={(target) => navigate(PackagePath(target))}>
+            <SelectTrigger className="w-full sm:w-[320px]" aria-label="TARIC 서류 패키지 선택">
+              <SelectValue placeholder="TARIC10 선택" />
+            </SelectTrigger>
+            <SelectContent>
+              {visiblePackages.map((pkg, index) => {
                 const target = clean(pkg.taric10 || pkg.document_package_id);
-                return <TabsTrigger value={target} key={clean(pkg.document_package_id) || target}>{target}</TabsTrigger>;
+                const branchIndex = Number(pkg.taric10_branch_index) || index + 1;
+                const suffix = pkg.taric10_is_recommended ? " · 추천" : "";
+                return (
+                  <SelectItem value={target} key={clean(pkg.document_package_id) || target}>
+                    Branch {branchIndex} · {target}{suffix}
+                  </SelectItem>
+                );
               })}
-            </TabsList>
-          </Tabs>
+            </SelectContent>
+          </Select>
         </section>
       ) : null}
 

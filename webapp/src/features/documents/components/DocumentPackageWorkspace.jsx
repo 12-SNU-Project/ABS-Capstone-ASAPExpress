@@ -1,6 +1,20 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from "@/components/ui/carousel";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import DocumentFlowSidebar from "@/features/documents/components/DocumentFlowSidebar";
 import DocumentRecommendationCarousel from "@/features/documents/components/DocumentRecommendationCarousel";
@@ -13,6 +27,7 @@ import {
   stripListMarker,
   buildEvidenceSourceGroups,
   unique,
+  isRequiredLevel,
   dutyPriorityCount,
   buildDutyBranches,
   buildPreArrivalModel,
@@ -20,15 +35,15 @@ import {
 } from "../model/documentPackageViewModel.js";
 
 function EmptyBlock({ message }) {
-  return <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">{message}</div>;
+  return <div className="rounded-lg border border-dashed p-6 text-center text-base leading-6 text-muted-foreground">{message}</div>;
 }
 
 function FlowPanel({ title, description, children }) {
   return (
-    <section className="min-w-0 rounded-xl border bg-surface p-4 shadow-[var(--shadow-surface)] sm:p-6">
-      <div className="mb-5 border-b pb-4">
-        <h2 className="m-0 text-lg font-semibold text-foreground">{title}</h2>
-        {description ? <p className="mt-1.5 mb-0 max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p> : null}
+    <section className="min-w-0 rounded-xl border bg-surface p-5 shadow-[var(--shadow-surface)] sm:p-6">
+      <div className="mb-6 border-b pb-5">
+        <h2 className="m-0 text-xl font-semibold tracking-[-0.01em] text-foreground">{title}</h2>
+        {description ? <p className="mt-2 mb-0 max-w-4xl text-base leading-7 text-muted-foreground">{description}</p> : null}
       </div>
       {children}
     </section>
@@ -189,17 +204,47 @@ function RequirementViewSwitch({ activeView, onChange }) {
 }
 
 function GuidanceSection({ title, items, ordered = false }) {
+  const reduceMotion = useReducedMotion();
   const rows = unique(items);
   if (!rows.length) {
     return null;
   }
-  const ListTag = ordered ? "ol" : "ul";
+  if (ordered) {
+    return (
+      <div className="ddv-guidance-section">
+        <strong>{title}</strong>
+        <ol className="ddv-guidance-step-list">
+          {rows.map((item, index) => (
+            <motion.li
+              className="ddv-guidance-step"
+              initial={reduceMotion ? false : { opacity: 0, x: 14 }}
+              key={item}
+              transition={{
+                duration: reduceMotion ? 0 : 0.24,
+                delay: reduceMotion ? 0 : Math.min(index * 0.05, 0.2),
+                ease: [0.22, 1, 0.36, 1],
+              }}
+              viewport={{ once: true, amount: 0.55 }}
+              whileHover={reduceMotion ? undefined : {
+                x: 4,
+                transition: { duration: 0.18, delay: 0, ease: "easeOut" },
+              }}
+              whileInView={{ opacity: 1, x: 0 }}
+            >
+              <span className="ddv-guidance-step-number">{String(index + 1).padStart(2, "0")}</span>
+              <span>{stripListMarker(item)}</span>
+            </motion.li>
+          ))}
+        </ol>
+      </div>
+    );
+  }
   return (
     <div className="ddv-guidance-section">
       <strong>{title}</strong>
-      <ListTag>
-        {rows.map((item) => <li key={item}>{ordered ? stripListMarker(item) : item}</li>)}
-      </ListTag>
+      <ul>
+        {rows.map((item) => <li key={item}>{item}</li>)}
+      </ul>
     </div>
   );
 }
@@ -210,19 +255,19 @@ function ExporterRequirementCard({ group }) {
     ? group.verificationDetails
     : [];
   return (
-    <article className="ddv-procedure-card exporter">
+    <article className="ddv-procedure-card exporter w-full">
       <div className="ddv-procedure-card-head">
         <strong>{group.groupName}</strong>
         <span>{group.codes.length ? `${group.codes.length} codes` : group.a2mCode || "guideline"}</span>
       </div>
       <div className="ddv-group-guidance">
-        <h3>수출자 가이드</h3>
         {summaryItems.length ? (
           summaryItems.map((item) => <p key={item}>{item}</p>)
         ) : (
           <p>이 TARIC 수입요건 묶음의 적용 여부를 먼저 확인하고, 연결된 certificate/declaration code와 footnote를 기준으로 세부 신고 경로를 검토합니다.</p>
         )}
         <GuidanceSection title="진행 순서" items={group.actionSteps} ordered />
+        <GuidanceSection title="준비 자료" items={group.requiredEvidenceItems} />
         {fallbackItems.length ? (
           <div className="ddv-guidance-checkpoints">
             <strong>확인할 사항</strong>
@@ -373,92 +418,200 @@ function CertificateGroupCards({ groups }) {
   return (
     <>
       <RequirementViewSwitch activeView={activeView} onChange={setActiveView} />
-      <div className="ddv-requirement-list">
-        {groups.map((group) =>
-          activeView === REQUIREMENT_VIEW_KEYS.EXPORTER ? (
-            <ExporterRequirementCard group={group} key={group.groupName} />
-          ) : (
+      {activeView === REQUIREMENT_VIEW_KEYS.EXPORTER ? (
+        groups.length === 1 ? (
+          <ExporterRequirementCard group={groups[0]} />
+        ) : (
+          <Carousel className="pb-12" opts={{ align: "start", loop: false }} aria-label="수출자 준비자료 그룹">
+            <CarouselContent className="items-stretch">
+              {groups.map((group) => (
+                <CarouselItem className="flex" key={group.groupName}>
+                  <ExporterRequirementCard group={group} />
+                </CarouselItem>
+              ))}
+            </CarouselContent>
+            <CarouselPrevious className="top-auto right-12 bottom-0 left-auto my-0" aria-label="이전 준비자료 그룹" />
+            <CarouselNext className="top-auto right-4 bottom-0 my-0" aria-label="다음 준비자료 그룹" />
+          </Carousel>
+        )
+      ) : (
+        <div className="ddv-requirement-list">
+          {groups.map((group) => (
             <BrokerRequirementCard group={group} key={group.groupName} />
-          ),
-        )}
-      </div>
+          ))}
+        </div>
+      )}
     </>
+  );
+}
+
+function RequirementDocumentLabels(row, mode) {
+  return unique(asList(row.preparationItemRows)
+    .map((item) => asObject(item))
+    .filter((item) => clean(item.item_type) === "document" && clean(item.recommendation_mode) === mode)
+    .map((item) => clean(item.item_name_ko || item.baseline_document_id))
+    .filter(Boolean));
+}
+
+function PreArrivalRequirementDetail({ row }) {
+  const summaryItems = asList(row.summaries?.length ? row.summaries : row.exporterGuidance);
+  const alwaysDocuments = RequirementDocumentLabels(row, "always_required_document");
+  const conditionalDocuments = RequirementDocumentLabels(row, "conditional_required_document");
+  const checkItems = asList(row.checkItems);
+
+  return (
+    <div className="grid gap-5 px-4 pb-6">
+      <section>
+        <h4 className="mb-2 text-sm font-semibold text-muted-foreground">적용 판단 요약</h4>
+        <div className="grid gap-2">
+          {summaryItems.length ? summaryItems.slice(0, 2).map((item) => (
+            <p className="m-0 text-base leading-7 text-foreground" key={item}>{item}</p>
+          )) : (
+            <p className="m-0 text-base leading-7 text-muted-foreground">연결된 판단 요약이 없습니다.</p>
+          )}
+        </div>
+      </section>
+
+      {alwaysDocuments.length ? (
+        <section className="border-t pt-5">
+          <h4 className="mb-2 text-sm font-semibold text-muted-foreground">요건 공통 준비 서류</h4>
+          <p className="m-0 text-base leading-7 text-foreground">{alwaysDocuments.join(", ")}</p>
+        </section>
+      ) : null}
+
+      {conditionalDocuments.length ? (
+        <section className="border-t pt-5">
+          <h4 className="mb-2 text-sm font-semibold text-muted-foreground">조건 충족 시 추가 서류</h4>
+          <p className="m-0 text-base leading-7 text-needs-review">{conditionalDocuments.join(", ")}</p>
+        </section>
+      ) : null}
+
+      {checkItems.length ? (
+        <section className="border-t pt-5">
+          <h4 className="mb-3 text-sm font-semibold text-muted-foreground">확인·보관 사항</h4>
+          <ul className="m-0 grid gap-3 pl-5">
+            {checkItems.map((item) => (
+              <li className="text-base leading-7" key={`${row.key}_${item.mode}_${item.label}_${item.detail}`}>
+                <strong className="block font-semibold text-foreground">{item.label}</strong>
+                {item.detail && item.detail !== item.label ? (
+                  <span className="block text-muted-foreground">{item.detail}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </div>
   );
 }
 
 function PreArrivalCards({ model, onToggle }) {
   const rows = asList(model.groups);
-  const checkGroups = rows.filter((row) => row.checkItems.length);
+  const [selectedRequirementKey, setSelectedRequirementKey] = useState("");
+  const selectedRequirement = rows.find((row) => row.key === selectedRequirementKey);
+  const selectedRequirementIndex = rows.findIndex((row) => row.key === selectedRequirementKey);
+  const selectedConditionalDocuments = useMemo(() => {
+    const documents = new Map();
+    rows.filter((row) => row.applies).forEach((row) => {
+      RequirementDocumentLabels(row, "conditional_required_document").forEach((label) => {
+        const current = documents.get(label) || { label, groupKeys: [], groupNames: [] };
+        if (!current.groupKeys.includes(row.key)) current.groupKeys.push(row.key);
+        if (!current.groupNames.includes(row.groupName)) current.groupNames.push(row.groupName);
+        documents.set(label, current);
+      });
+    });
+    return Array.from(documents.values());
+  }, [rows]);
   return (
     <div className="grid min-w-0 gap-6">
-      <section className="rounded-xl border bg-surface-muted p-4">
-        <div className="mb-4">
-          <strong className="text-base font-semibold">수입요건 적용 여부</strong>
-          <p className="mt-1 mb-0 text-sm text-muted-foreground">확인된 요건만 선택하면 최종 추천 서류가 즉시 갱신됩니다.</p>
+      <section className="rounded-xl border bg-surface-muted p-4 md:p-5">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <strong className="text-lg font-semibold">조건부 요건 해당 여부</strong>
+            <p className="mt-1 mb-0 text-base leading-6 text-muted-foreground">해당하는 조건만 선택하고, 요건별 공통·추가 준비 서류는 상세에서 확인합니다.</p>
+          </div>
+          <span className="text-base font-semibold text-muted-foreground">{rows.length}개 요건</span>
         </div>
-        <div className="grid gap-2">
-          {rows.length ? rows.map((row, index) => {
-            const summaryItems = row.summaries?.length ? row.summaries : row.exporterGuidance;
-            const conditionalDocs = unique(row.documentItems
-              .filter((item) => item.mode === "conditional_required_document")
-              .map((item) => item.label));
-            return (
-              <article className={`flex items-start justify-between gap-3 rounded-lg border p-3 transition-colors ${row.applies ? "border-primary/40 bg-primary/5" : "bg-surface"}`} key={row.key}>
-                <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
+        {rows.length ? (
+          <div className="grid gap-x-6 md:grid-cols-2">
+            {rows.map((row, index) => {
+              const checkboxId = `pre-arrival-requirement-${index}`;
+              return (
+                <div className={`flex min-w-0 items-start gap-3 border-t px-1 py-3 ${row.applies ? "bg-primary/5" : ""}`} key={row.key}>
                   <Checkbox
-                    className="mt-1"
+                    className="mt-0.5"
+                    id={checkboxId}
                     checked={row.applies}
                     onCheckedChange={(checked) => onToggle(row.key, checked === true)}
                   />
-                  <div className="min-w-0">
-                    <strong className="block text-sm"><span className="mr-2 font-mono text-primary">{String(index + 1).padStart(2, "0")}</span>{row.groupName}</strong>
-                    {summaryItems.slice(0, 2).map((item) => <p className="mt-1 mb-0 text-sm leading-5 text-muted-foreground" key={item}>{item}</p>)}
-                    {conditionalDocs.length ? (
-                      <em className="mt-2 block text-xs not-italic text-needs-review">해당 시 추가: {conditionalDocs.join(", ")}</em>
-                    ) : null}
-                  </div>
-                </label>
-                <span className={`shrink-0 text-xs font-semibold ${row.applies ? "text-primary" : "text-muted-foreground"}`}>{row.applies ? "적용" : "미확인"}</span>
-              </article>
-            );
-          }) : <EmptyBlock message="추가로 판정할 조건부 수입요건이 없습니다. 기본 필수 서류는 아래에서 계속 확인할 수 있습니다." />}
-        </div>
+                  <label className="min-w-0 flex-1 cursor-pointer text-base font-semibold leading-6" htmlFor={checkboxId}>
+                    {row.groupName}
+                  </label>
+                  <button
+                    type="button"
+                    className="shrink-0 text-sm font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => setSelectedRequirementKey(row.key)}
+                  >
+                    내용 보기
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <EmptyBlock message="추가로 판정할 조건부 수입요건이 없습니다. 기본 필수 서류는 아래에서 계속 확인할 수 있습니다." />
+        )}
       </section>
 
-      <section className="min-w-0">
-        <div className="mb-4 flex items-center justify-between gap-3 pr-24">
-          <strong className="text-base font-semibold">선택 결과에 따른 최종 추천 서류</strong>
-          <span className="text-sm font-semibold text-muted-foreground">{model.finalDocuments.length}건</span>
+      <Dialog
+        open={Boolean(selectedRequirement)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedRequirementKey("");
+        }}
+      >
+        <DialogContent>
+          {selectedRequirement ? (
+            <>
+              <DialogHeader className="border-b pr-14">
+                <DialogTitle className="text-xl font-semibold">{selectedRequirement.groupName}</DialogTitle>
+                <DialogDescription>
+                  수입요건 {String(selectedRequirementIndex + 1).padStart(2, "0")} / {String(rows.length).padStart(2, "0")}
+                  {" · "}
+                  {selectedRequirement.applies ? "조건부 적용 선택됨" : "조건부 미선택"}
+                </DialogDescription>
+              </DialogHeader>
+              <PreArrivalRequirementDetail row={selectedRequirement} />
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <section className="min-w-0 rounded-xl border bg-surface p-4 md:p-5">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <strong className="text-lg font-semibold">이번 선택으로 추가된 조건부 서류</strong>
+          <span className="text-base font-semibold text-muted-foreground">{selectedConditionalDocuments.length}건</span>
         </div>
-        <DocumentRecommendationCarousel
-          documents={model.finalDocuments}
-          emptyMessage="선택 결과에 따라 추천할 서류가 없습니다."
-        />
-        <section className="mt-6 border-t pt-5">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <strong className="text-sm font-semibold">확인·보관 사항</strong>
-            <span className="text-xs text-muted-foreground">{checkGroups.length}개 요건</span>
-          </div>
-          {checkGroups.length ? (
-            <div className="ddv-check-group-list">
-              {checkGroups.map((row) => (
-                <div className="ddv-check-group" key={`${row.key}_checks`}>
-                  <strong>{row.groupName}</strong>
-                  <ul className="ddv-check-list">
-                    {row.checkItems.map((item) => (
-                      <li key={`${row.key}_${item.mode}_${item.label}_${item.detail}`}>
-                        <strong>{item.label}</strong>
-                        {item.detail && item.detail !== item.label ? <span>{item.detail}</span> : null}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyBlock message="표시할 확인/보관 사항이 없습니다." />
-          )}
-        </section>
+        {selectedConditionalDocuments.length ? (
+          <ul className="m-0 grid gap-x-6 p-0 md:grid-cols-2">
+            {selectedConditionalDocuments.map((document) => (
+              <li className="grid list-none gap-1 border-t py-3" key={document.label}>
+                <strong className="text-base font-semibold text-foreground">{document.label}</strong>
+                <span className="text-sm leading-6 text-muted-foreground">
+                  연결 요건 · {document.groupNames.join(", ")}
+                </span>
+                <button
+                  type="button"
+                  className="mt-1 w-fit text-sm font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => setSelectedRequirementKey(document.groupKeys[0])}
+                >
+                  요건 내용 보기
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="m-0 text-base leading-7 text-muted-foreground">현재 선택으로 새로 추가된 조건부 서류가 없습니다.</p>
+        )}
       </section>
     </div>
   );
@@ -473,6 +626,10 @@ export default function DocumentPackageWorkspace({ packageData }) {
   const reduceMotion = useReducedMotion();
 
   const viewModel = useMemo(() => BuildDocumentPackageViewModel(pkg), [pkg]);
+  const requiredBaselineRows = useMemo(
+    () => viewModel.baselineRows.filter((row) => isRequiredLevel(row.requiredLevelRaw)),
+    [viewModel.baselineRows],
+  );
 
   const preArrivalModel = useMemo(
     () => buildPreArrivalModel(viewModel.baselineRows, viewModel.requirementGroups, requirementChecks),
@@ -496,13 +653,13 @@ export default function DocumentPackageWorkspace({ packageData }) {
   const counts = {
     [FLOW_KEYS.REQUIREMENTS]: viewModel.requirementGroups.length,
     [FLOW_KEYS.DUTY]: dutyPriorityCount(viewModel.dutyPriority) || viewModel.dutyRows.length,
-    [FLOW_KEYS.BASELINE]: viewModel.baselineRows.length,
-    [FLOW_KEYS.PRE_ARRIVAL]: preArrivalModel.finalDocuments.length,
+    [FLOW_KEYS.BASELINE]: requiredBaselineRows.length,
+    [FLOW_KEYS.PRE_ARRIVAL]: preArrivalModel.groups.length,
   };
   const activeItem = FLOW_ITEMS.find((item) => item.key === activeFlow) || FLOW_ITEMS[0];
 
   return (
-    <div className="grid min-w-0 gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
+    <div className="grid min-w-0 gap-5 md:grid-cols-[232px_minmax(0,1fr)]">
       <DocumentFlowSidebar activeKey={activeFlow} counts={counts} onSelect={setActiveFlow} />
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
@@ -534,21 +691,20 @@ export default function DocumentPackageWorkspace({ packageData }) {
         {activeFlow === FLOW_KEYS.BASELINE ? (
         <FlowPanel
           title={activeItem.title}
-          description="기본 통관서류를 표시하고, 앞 단계에서 다룬 조건부 증명서는 중복하지 않습니다."
+          description="기본 필수 통관서류만 표시합니다. 조건부 서류와 요건별 준비자료는 입항 전 단계에서 확인합니다."
         >
-          <div className="pr-0 sm:pr-24">
-            <DocumentRecommendationCarousel
-              documents={viewModel.baselineRows}
-              emptyMessage="표시할 기본 통관 서류가 없습니다."
-            />
-          </div>
+          <DocumentRecommendationCarousel
+            documents={requiredBaselineRows}
+            emptyMessage="표시할 기본 통관 서류가 없습니다."
+            layout="navigator"
+          />
         </FlowPanel>
       ) : null}
 
         {activeFlow === FLOW_KEYS.PRE_ARRIVAL ? (
         <FlowPanel
           title={activeItem.title}
-          description="수입요건 해당 여부를 체크하고, 기본 필수 서류와 조건부 추가 서류를 중복 없이 정리합니다."
+          description="조건부 요건 해당 여부를 선택하고, 선택으로 추가되는 문서와 준비 근거를 확인합니다."
         >
           <PreArrivalCards model={preArrivalModel} onToggle={handleRequirementToggle} />
         </FlowPanel>

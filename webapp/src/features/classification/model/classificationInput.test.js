@@ -3,9 +3,16 @@ import test from "node:test";
 import {
   BuildProductFormFromResult,
   CreateEmptyProductForm,
+  GetIntendedUseLabel,
   HasProductInputErrors,
   ValidateProductRunInput,
 } from "./classificationInput.js";
+
+test("내부 상품 용도 값을 사용자 라벨로 바꾼다", () => {
+  assert.equal(GetIntendedUseLabel("human consumption"), "최종 소비용");
+  assert.equal(GetIntendedUseLabel("__none__", "선택하지 않음"), "선택하지 않음");
+  assert.equal(GetIntendedUseLabel("_none_"), "미입력");
+});
 
 test("상품 정보 복원은 URL 또는 기존 product_id를 요구한다", () => {
   const form = { ...CreateEmptyProductForm(), productName: "상품명만 입력" };

@@ -909,12 +909,15 @@ function buildPreArrivalModel(baselineRows, requirementGroups, checkedGroups) {
       }
       if (itemType === "document" && docModes.has(mode)) {
         const baselineId = clean(item.baseline_document_id);
+        const baselineDocument = baselineById.get(baselineId);
         const docKey = baselineId ? `baseline:${baselineId}` : `requirement:${label}`;
         const missingFacts = cloneDetailList(item.missing_facts);
         const unresolvedConditions = cloneDetailList(item.unresolved_conditions);
-        addDoc(docKey, baselineById.get(baselineId) || {}, {
+        addDoc(docKey, baselineDocument || {}, {
           documentName: label,
-          source: baselineId ? "조건부 기본 서류" : "수입요건 추가 서류",
+          source: baselineId
+            ? (isRequiredLevel(baselineDocument?.requiredLevelRaw) ? "기본 필수 서류" : "조건부 기본 서류")
+            : "수입요건 추가 서류",
           detail: clean(item.item_detail_ko),
           baselineDocumentId: baselineId,
           groupName: group.groupName,
@@ -1019,6 +1022,7 @@ export {
   buildEvidenceSourceGroups,
   unique,
   statusLabel,
+  isRequiredLevel,
   groupKey,
   buildCertificateGroups,
   buildA2mGuidelineGroups,
