@@ -57,7 +57,11 @@ def _WaitForPort(host: str, port: int, timeoutSeconds: float = 60.0) -> bool:
 
 def _StartMlxVlmServerIfNeeded() -> subprocess.Popen[bytes] | None:
     smokeConfig = appConfig.kurly_smoke
-    if smokeConfig.structured_ocr_vl_rec_backend != "mlx-vlm-server":
+    if (
+        not smokeConfig.use_structured_ocr
+        or smokeConfig.structured_ocr_provider != "paddleocr_vl"
+        or smokeConfig.structured_ocr_vl_rec_backend != "mlx-vlm-server"
+    ):
         return None
 
     serverUrl = smokeConfig.structured_ocr_vl_rec_server_url or "http://localhost:8111/"

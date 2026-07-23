@@ -63,7 +63,7 @@ allowed_frontend_origins = [
 [kurly_smoke]
 run_ocr_fallback = true
 use_structured_ocr = true
-structured_ocr_provider = "paddleocr_vl"
+structured_ocr_provider = "llm_bridge"
 use_input_reconstruction = true
 use_llm_input_reconstruction = true
 structured_ocr_vl_rec_backend = "mlx-vlm-server"
