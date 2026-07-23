@@ -6,31 +6,42 @@ const STAGES = [
   {
     id: "route",
     index: "01",
-    label: "Route",
+    label: "수출 경로",
+    englishLabel: "Route",
     title: "한국에서 유럽 시장까지",
     summary: "수출 시나리오의 출발지와 도착 규제 시장을 먼저 구분합니다.",
   },
   {
     id: "collect",
     index: "02",
-    label: "Collect",
+    label: "상품 근거",
+    englishLabel: "Collect",
     title: "상품 근거를 구조화",
     summary: "페이지와 이미지에서 분류에 필요한 상품 사실을 복원합니다.",
   },
   {
     id: "classify",
     index: "03",
-    label: "Classify",
+    label: "품목 분류",
+    englishLabel: "Classify",
     title: "근거에 따라 후보를 좁히기",
     summary: "포함·제외 조건을 비교하며 HS에서 TARIC 후보까지 계층을 확장합니다.",
   },
   {
     id: "documents",
     index: "04",
-    label: "Documents",
+    label: "서류 검토",
+    englishLabel: "Documents",
     title: "조건에 맞는 서류 검토",
     summary: "선택 후보와 수출 조건을 기준으로 준비 서류의 우선순위를 구분합니다.",
   },
+];
+
+const LABEL_ENTRY_OFFSETS = [
+  { x: 72, y: 0 },
+  { x: 0, y: 48 },
+  { x: -72, y: 0 },
+  { x: 0, y: -48 },
 ];
 
 function TradeRouteVisual({ active, reduceMotion }) {
@@ -261,7 +272,10 @@ export default function HeroStorySequence() {
             aria-current={index === activeIndex ? "step" : undefined}
           >
             <span>{stage.index}</span>
-            <strong>{stage.label}</strong>
+            <div>
+              <strong>{stage.label}</strong>
+              <small>{stage.englishLabel}</small>
+            </div>
           </li>
         ))}
       </ol>
@@ -278,18 +292,29 @@ export default function HeroStorySequence() {
               transition={{ duration: reduceMotion ? 0 : 0.28, ease: "easeOut" }}
               aria-hidden={!active}
             >
-              <header className="introduction-stage-caption">
-                <p>{stage.index} / 04</p>
+              <motion.header
+                className="introduction-stage-caption"
+                initial={false}
+                animate={active
+                  ? { opacity: 1, x: 0, y: 0 }
+                  : { opacity: 0, ...LABEL_ENTRY_OFFSETS[index] }}
+                transition={{
+                  duration: reduceMotion ? 0 : 0.52,
+                  ease: [0.22, 1, 0.36, 1],
+                }}
+              >
                 <div>
                   <h2>{stage.title}</h2>
                   <p>{stage.summary}</p>
                 </div>
-              </header>
-              <StageVisual
-                stage={stage.id}
-                active={active && pageVisible && inView}
-                reduceMotion={reduceMotion}
-              />
+              </motion.header>
+              <div className={`introduction-stage-visual is-${stage.id}`}>
+                <StageVisual
+                  stage={stage.id}
+                  active={active && pageVisible && inView}
+                  reduceMotion={reduceMotion}
+                />
+              </div>
             </motion.section>
           );
         })}

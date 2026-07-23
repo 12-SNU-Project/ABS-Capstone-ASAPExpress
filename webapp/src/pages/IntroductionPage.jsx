@@ -18,6 +18,8 @@ function IntroductionHero() {
 
       <div className="introduction-editorial-rule" aria-hidden="true" />
 
+      <HeroStorySequence />
+
       <div className="introduction-hero-content">
         <article className="introduction-hero-copy">
           <p className="introduction-eyebrow">KOREA TO EUROPE · TRADE COMPLIANCE</p>
@@ -34,15 +36,12 @@ function IntroductionHero() {
             <ArrowUpRight aria-hidden="true" />
           </Link>
         </article>
-
-        <section className="introduction-figure" aria-label="상품 분류와 서류 검토 흐름">
-          <HeroStorySequence />
-          <p className="introduction-figure-note">
-            시스템이 제시하는 분류와 서류는 검토 후보이며, 최종 판단은 관세 당국 또는
-            자격을 갖춘 전문가의 확인이 필요합니다.
-          </p>
-        </section>
       </div>
+
+      <p className="introduction-review-note">
+        시스템이 제시하는 분류와 서류는 검토 후보이며, 최종 판단은 관세 당국 또는
+        자격을 갖춘 전문가의 확인이 필요합니다.
+      </p>
     </section>
   );
 }
