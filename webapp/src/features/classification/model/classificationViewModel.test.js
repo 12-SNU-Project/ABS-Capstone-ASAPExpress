@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   BuildDocumentPackageOptions,
+  ActiveUserQuestions,
   CompletedPipelineStage,
   GetPipelineStageState,
   NormalizeStageState,
@@ -74,6 +75,27 @@ test("needs-review 파이프라인 상태와 alias를 정규화한다", () => {
       "document_recommendation",
     ),
     "needs-review",
+  );
+});
+
+test("사용자 응답 대기 상태와 활성 질문만 UI에 전달한다", () => {
+  assert.equal(NormalizeStageState("awaiting_input"), "awaiting-input");
+  assert.equal(
+    GetPipelineStageState(
+      { job_status: "awaiting_input" },
+      { candidates: [] },
+      "classification",
+    ),
+    "awaiting-input",
+  );
+  assert.deepEqual(
+    ActiveUserQuestions({
+      user_questions: [
+        { user_question_id: "uq_1", question_text: "질문 1", active: true },
+        { user_question_id: "uq_2", question_text: "질문 2", active: false },
+      ],
+    }).map((question) => question.user_question_id),
+    ["uq_1"],
   );
 });
 

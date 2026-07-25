@@ -5,6 +5,8 @@ const STATUS_LABELS = {
   submitting: "등록 중",
   queued: "대기열",
   running: "실행 중",
+  awaiting_input: "사용자 응답 대기",
+  "awaiting-input": "사용자 응답 대기",
   completed: "완료",
   complete: "완료",
   failed: "실패",

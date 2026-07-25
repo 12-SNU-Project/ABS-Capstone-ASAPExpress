@@ -19,6 +19,7 @@ export function NormalizeStageState(status) {
   const value = clean(status).toLowerCase();
   if (["completed", "complete", "done"].includes(value)) return "done";
   if (["needs-review", "needs_review", "review_required"].includes(value)) return "needs-review";
+  if (["awaiting-input", "awaiting_input"].includes(value)) return "awaiting-input";
   if (value === "submitting") return "queued";
   if (["idle", "running", "queued", "failed", "skipped"].includes(value)) return value;
   return "idle";
@@ -136,6 +137,9 @@ export function GetPipelineStageState(result, viewModel, key) {
     return result?.input_processing_view || viewModel.candidates.length ? "done" : "idle";
   }
   if (key === "classification") {
+    if (clean(result?.job_status).toLowerCase() === "awaiting_input") {
+      return "awaiting-input";
+    }
     const event = NormalizeStageState(EventStatus(result, [
       "Input_Intake",
       "Evidence_Intake_Component",
@@ -154,6 +158,13 @@ export function GetPipelineStageState(result, viewModel, key) {
     return asList(result?.document_packages).length || result?.document_package ? "done" : "idle";
   }
   return "idle";
+}
+
+export function ActiveUserQuestions(result) {
+  return asList(result?.user_questions).filter(
+    (question) => question?.active && clean(question.user_question_id)
+      && clean(question.question_text),
+  );
 }
 
 export function CompletedPipelineStage(result) {

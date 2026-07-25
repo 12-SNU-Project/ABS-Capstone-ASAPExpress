@@ -85,6 +85,7 @@ test("실행 중인 복원 snapshot에는 새 EventSource를 연결할 수 있�
 
   assert.equal(ShouldConnectRunSnapshot(preparation.snapshot), true);
   assert.equal(ShouldConnectRunSnapshot({ job_status: "completed" }), false);
+  assert.equal(ShouldConnectRunSnapshot({ job_status: "awaiting_input" }), false);
   lifecycle.AttachEventSource(nextSource);
 
   assert.equal(lifecycle.IsCurrentEventSource(nextSource, nextOperation), true);

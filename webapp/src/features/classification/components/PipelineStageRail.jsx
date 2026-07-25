@@ -1,4 +1,4 @@
-import { AlertCircle, Check, Circle, Clock3, LoaderCircle, LockKeyhole, Minus } from "lucide-react";
+import { AlertCircle, Check, Circle, CircleHelp, Clock3, LoaderCircle, LockKeyhole, Minus } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { EVENT_STAGE_LABELS, STAGES } from "@/lib/labels.js";
 import { asList, clean, statusLabel } from "@/lib/format.js";
@@ -18,6 +18,13 @@ function GetCurrentStageInfo(result) {
   if (result?.error) return { label: "처리 오류", status: "failed", message: result.error };
   if (["completed", "complete"].includes(status)) {
     return { label: "전체 완료", status: "done", message: "분류 결과와 서류 연결 정보를 확인할 수 있습니다." };
+  }
+  if (status === "awaiting_input") {
+    return {
+      label: "사용자 응답 대기",
+      status: "awaiting-input",
+      message: "분류 조건 질문에 답하면 중단 지점부터 계속 실행합니다.",
+    };
   }
   if (!lastRelevant) {
     return { label: "분석 대기", status: "idle", message: "상품 정보를 입력하고 분류를 실행하세요." };
@@ -41,6 +48,7 @@ function StageIcon({ state }) {
     queued: Clock3,
     failed: AlertCircle,
     "needs-review": AlertCircle,
+    "awaiting-input": CircleHelp,
     idle: Circle,
   };
   const Icon = icons[state] || Circle;
@@ -54,6 +62,7 @@ const STATE_TONES = {
   queued: "border-primary/50 bg-primary/10 text-primary",
   failed: "border-destructive bg-destructive text-white",
   "needs-review": "border-needs-review bg-needs-review text-needs-review-foreground",
+  "awaiting-input": "border-warning bg-warning/15 text-warning-foreground",
   idle: "border-border bg-surface text-muted-foreground",
 };
 
@@ -84,7 +93,7 @@ export default function PipelineStageRail({
         <span className="text-xs font-semibold text-muted-foreground">{completed}/{STAGES.length} 완료</span>
       </div>
 
-      {busy || result?.error ? (
+      {busy || info.status === "awaiting-input" || result?.error ? (
         <div className={`mt-3 flex gap-3 rounded-lg border px-3 py-2.5 ${result?.error ? "border-destructive/30 bg-destructive/5" : "bg-surface-muted"}`} role={result?.error ? "alert" : "status"}>
           <StageIcon state={DisplayStageState(info.status)} />
           <div className="min-w-0">

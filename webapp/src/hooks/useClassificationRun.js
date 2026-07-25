@@ -153,6 +153,8 @@ export function useClassificationRun(initialJobId = "") {
   const [restoring, setRestoring] = useState(false);
   const [restoreError, setRestoreError] = useState("");
   const [restorableJobId, setRestorableJobId] = useState("");
+  const [answering, setAnswering] = useState(false);
+  const [answerError, setAnswerError] = useState("");
   const resultRef = useRef(null);
   const lifecycleRef = useRef(null);
   if (!lifecycleRef.current) lifecycleRef.current = CreateRunLifecycle();
@@ -212,14 +214,14 @@ export function useClassificationRun(initialJobId = "") {
         const partial = payload.partial_result && typeof payload.partial_result === "object"
           ? payload.partial_result
           : {};
+        const nextStatus = ["awaiting_input", "completed", "failed"].includes(payload.status)
+          ? payload.status
+          : "running";
         SetResult({
           ...previous,
           ...partial,
           job_id: jobId,
-          job_status:
-            payload.stage === "Pipeline" && ["completed", "failed"].includes(payload.status)
-              ? payload.status
-              : "running",
+          job_status: nextStatus,
           events: nextEvents,
         });
       } catch (error) {
@@ -229,7 +231,7 @@ export function useClassificationRun(initialJobId = "") {
       }
     });
 
-    source.addEventListener("run_complete", async () => {
+    const FinishStream = async () => {
       if (!IsCurrentSource()) return;
       source.close();
       lifecycle.ReleaseEventSource(source);
@@ -245,7 +247,9 @@ export function useClassificationRun(initialJobId = "") {
           error: previous.error || `최종 실행 결과를 불러오지 못했습니다. ${String(error?.message || error)}`,
         });
       }
-    });
+    };
+    source.addEventListener("run_complete", FinishStream);
+    source.addEventListener("run_paused", FinishStream);
   }, [HydrateRun, IsCurrentOperation, SetResult, lifecycle]);
 
   const clearRestoreError = useCallback(() => setRestoreError(""), []);
@@ -406,7 +410,9 @@ export function useClassificationRun(initialJobId = "") {
         ],
       });
       const snapshot = await HydrateRun(submittedJobId, operation);
-      if (snapshot) OpenSse(submittedJobId, operation);
+      if (snapshot && ShouldConnectRunSnapshot(snapshot)) {
+        OpenSse(submittedJobId, operation);
+      }
       return snapshot;
     } catch (error) {
       if (IsAbortError(error) || !IsCurrentOperation(operation)) return null;
@@ -431,6 +437,38 @@ export function useClassificationRun(initialJobId = "") {
     lifecycle,
   ]);
 
+  const answerQuestions = useCallback(async (answers) => {
+    const jobId = clean(resultRef.current?.job_id);
+    if (!jobId) return null;
+    const operation = BeginOperation();
+    lifecycle.CloseEventSource();
+    setAnswerError("");
+    setAnswering(true);
+    try {
+      const snapshot = await postJson(
+        `/api/runs/${encodeURIComponent(jobId)}/question-answers`,
+        { answers },
+        { signal: operation.signal },
+      );
+      if (!IsCurrentOperation(operation)) return null;
+      SetResult(snapshot);
+      RememberRestorableJob(jobId);
+      return snapshot;
+    } catch (error) {
+      if (IsAbortError(error) || !IsCurrentOperation(operation)) return null;
+      setAnswerError(String(error?.message || error));
+      return null;
+    } finally {
+      setAnswering(false);
+    }
+  }, [
+    BeginOperation,
+    IsCurrentOperation,
+    RememberRestorableJob,
+    SetResult,
+    lifecycle,
+  ]);
+
   useEffect(() => {
     const targetJobId = clean(initialJobId) || ReadStoredJobId();
     if (!targetJobId) return undefined;
@@ -442,15 +480,20 @@ export function useClassificationRun(initialJobId = "") {
 
   useEffect(() => () => lifecycle.Dispose(), [lifecycle]);
 
-  const busy = restoring || ACTIVE_STATUSES.includes(clean(result?.job_status).toLowerCase());
+  const busy = restoring
+    || answering
+    || ACTIVE_STATUSES.includes(clean(result?.job_status).toLowerCase());
 
   return {
     result,
     busy,
     restoring,
+    answering,
+    answerError,
     restoreError,
     restorableJobId,
     runPipeline,
+    answerQuestions,
     loadRun,
     clearRestoreError,
   };

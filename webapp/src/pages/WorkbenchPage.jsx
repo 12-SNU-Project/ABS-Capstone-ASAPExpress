@@ -19,7 +19,9 @@ import {
 } from "@/features/classification/components/ProductEvidencePanels";
 import TariffCandidateList from "@/features/classification/components/TariffCandidateList";
 import TariffRoutingPanel from "@/features/classification/components/TariffRoutingPanel";
+import UserQuestionPanel from "@/features/classification/components/UserQuestionPanel";
 import {
+  ActiveUserQuestions,
   CompletedPipelineStage,
   GetPipelineStageState,
   useClassificationViewModel,
@@ -37,9 +39,12 @@ export default function WorkbenchPage() {
     result,
     busy,
     restoring,
+    answering,
+    answerError,
     restoreError,
     restorableJobId,
     runPipeline,
+    answerQuestions,
     loadRun,
     clearRestoreError,
   } = useClassificationRun(jobQuery);
@@ -50,6 +55,7 @@ export default function WorkbenchPage() {
   const followStageRef = useRef(true);
   const followClassificationRef = useRef(true);
   const viewModel = useClassificationViewModel(result);
+  const activeQuestions = ActiveUserQuestions(result);
   const defaultCandidate = viewModel.candidates.find((candidate) => candidate.llm_recommended)
     || viewModel.candidates[0]
     || null;
@@ -101,7 +107,7 @@ export default function WorkbenchPage() {
     let latest = "product_collection";
     STAGES.forEach(([key]) => {
       const state = GetPipelineStageState(result, viewModel, key);
-      if (["done", "running", "completed"].includes(state)) latest = key;
+      if (["done", "running", "completed", "awaiting-input"].includes(state)) latest = key;
     });
     if (latest === "document_recommendation" && !selectedCandidate) {
       latest = "classification";
@@ -162,7 +168,7 @@ export default function WorkbenchPage() {
   const hasRun = Boolean(
     clean(result?.job_id)
     || result?.error
-    || ["submitting", "queued", "running", "completed", "complete", "done"].includes(resultStatus)
+    || ["submitting", "queued", "running", "awaiting_input", "completed", "complete", "done"].includes(resultStatus)
     || result?.input_processing_view
     || viewModel.candidates.length,
   );
@@ -239,11 +245,23 @@ export default function WorkbenchPage() {
                   <TariffRoutingPanel result={result} />
                 ) : null}
                 {classificationStep === "hierarchy" ? (
-                  <ClassificationHierarchy
-                    candidates={viewModel.candidates}
-                    selectedPath={viewModel.candidateSet.selected_path}
-                    selectedCn8={selectedCandidate?.cn8 || defaultCandidate?.cn8}
-                  />
+                  <>
+                    {activeQuestions.length ? (
+                      <UserQuestionPanel
+                        questions={activeQuestions}
+                        onSubmit={answerQuestions}
+                        submitting={answering}
+                        error={answerError}
+                      />
+                    ) : null}
+                    {viewModel.candidates.length ? (
+                      <ClassificationHierarchy
+                        candidates={viewModel.candidates}
+                        selectedPath={viewModel.candidateSet.selected_path}
+                        selectedCn8={selectedCandidate?.cn8 || defaultCandidate?.cn8}
+                      />
+                    ) : null}
+                  </>
                 ) : null}
                 {classificationStep === "review" ? (
                   <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">

@@ -86,6 +86,7 @@ const CLASSIFICATION_EVENT_STEPS = {
 
 export function ClassificationStepForResult(result) {
   const status = String(result?.job_status || "").toLowerCase();
+  if (status === "awaiting_input") return "hierarchy";
   if (["completed", "complete", "done"].includes(status)) {
     return "review";
   }
@@ -155,6 +156,7 @@ export const EVENT_STAGE_LABELS = {
   Regulatory_Domain: "도메인 라우팅",
   Classification: "분류",
   Classification_Component: "분류",
+  Classification_Answer: "사용자 답변 반영",
   Document_Component: "문서 패키지",
   Document_Recommendation: "문서 패키지",
 };
