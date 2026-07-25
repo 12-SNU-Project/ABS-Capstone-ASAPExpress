@@ -2771,6 +2771,7 @@ class StagedClassificationTool:
         """Expose unresolved branch questions without turning them into votes."""
         from bussiness_logic.classification.rules.question_contract import (
             BuildClassificationQuestionKey,
+            QUESTION_CONTRACT_VERSION,
         )
 
         options: list[dict[str, Any]] = []
@@ -2810,6 +2811,7 @@ class StagedClassificationTool:
                         + list(row.get("predicate_results") or [])
                 )
                 if isinstance(item, dict)
+                   and str(item.get("op") or "") != "user_answer"
                    and str(item.get("verdict") or "").lower()
                    in ("", "unknown", "undecided", "silent")
             ]
@@ -2851,6 +2853,10 @@ class StagedClassificationTool:
                     )
                 context_scope = str(row.get("context_scope") or "")
                 parent_code = code[:-2] or str(parents[0] if len(parents) == 1 else "")
+                predicate_op = (
+                    str(detail.get("op") or "").strip().lower()
+                    or "affirmative"
+                )
                 question_key = BuildClassificationQuestionKey(
                     stage=level,
                     parentCode=parent_code,
@@ -2858,6 +2864,7 @@ class StagedClassificationTool:
                     axis=axis,
                     canonicalField=canonical_field,
                     conditionValue=detail.get("value"),
+                    predicateOp=predicate_op,
                     contextScope=context_scope,
                 )
                 if question_key in seen_keys:
@@ -2885,12 +2892,14 @@ class StagedClassificationTool:
                         f"분류 조건에 해당합니까: {description}?"
                     )
                 options.append({
+                    "contract_version": QUESTION_CONTRACT_VERSION,
                     "question_key": question_key,
                     "stage": level,
                     "parent_code": parent_code,
                     "candidate_code": code,
                     "code": code,
                     "axis": axis,
+                    "predicate_op": predicate_op,
                     "canonical_field": canonical_field,
                     "condition_value": str(detail.get("value") or ""),
                     "description": description,
@@ -2938,11 +2947,13 @@ class StagedClassificationTool:
         resolved_prefix = str(parents[0] if len(parents) == 1 else "")
         pending_questions = [
             {
+                "contract_version": int(option.get("contract_version") or 0),
                 "question_key": str(option.get("question_key") or ""),
                 "stage": str(option.get("stage") or level),
                 "parent_code": str(option.get("parent_code") or resolved_prefix),
                 "candidate_code": str(option.get("candidate_code") or option.get("code") or ""),
                 "axis": str(option.get("axis") or ""),
+                "predicate_op": str(option.get("predicate_op") or ""),
                 "canonical_field": str(option.get("canonical_field") or ""),
                 "condition_value": str(option.get("condition_value") or ""),
                 "context_scope": str(option.get("context_scope") or ""),

@@ -8,6 +8,7 @@ from typing import Any
 
 
 VALID_ANSWERS = frozenset({"yes", "no", "unknown"})
+QUESTION_CONTRACT_VERSION = 2
 
 
 def _normalized_value(value: Any) -> str:
@@ -38,6 +39,7 @@ def BuildClassificationQuestionKey(
     axis: str,
     canonicalField: str,
     conditionValue: Any,
+    predicateOp: str,
     contextScope: str = "",
 ) -> str:
     """Return a stable identifier for one legal branch question."""
@@ -48,6 +50,7 @@ def BuildClassificationQuestionKey(
         "axis": str(axis or "").strip().lower(),
         "field": str(canonicalField or "").strip(),
         "value": _normalized_value(conditionValue),
+        "op": str(predicateOp or "").strip().lower(),
         "context": " ".join(str(contextScope or "").split()).casefold(),
     }
     digest = hashlib.sha256(
@@ -92,7 +95,7 @@ def _detail_contract(
     parentCode: str,
     candidateCode: str,
     contextScope: str,
-) -> tuple[str, str, Any, str]:
+) -> tuple[str, str, Any, str, str]:
     axis = str(
         detail.get("binding_axis")
         or detail.get("axis")
@@ -103,6 +106,7 @@ def _detail_contract(
     if not canonicalField:
         canonicalField = str(detail.get("binding_paths") or "").split(";", 1)[0].strip()
     conditionValue = detail.get("value")
+    predicateOp = str(detail.get("op") or "").strip().lower() or "affirmative"
     questionKey = BuildClassificationQuestionKey(
         stage=stage,
         parentCode=parentCode,
@@ -110,9 +114,10 @@ def _detail_contract(
         axis=axis,
         canonicalField=canonicalField,
         conditionValue=conditionValue,
+        predicateOp=predicateOp,
         contextScope=contextScope,
     )
-    return axis, canonicalField, conditionValue, questionKey
+    return axis, canonicalField, conditionValue, predicateOp, questionKey
 
 
 def ApplyClassificationAnswers(
@@ -137,7 +142,7 @@ def ApplyClassificationAnswers(
         if verdict not in ("", "unknown", "undecided", "silent"):
             updated.append(detail)
             continue
-        axis, canonicalField, conditionValue, questionKey = _detail_contract(
+        axis, canonicalField, conditionValue, predicateOp, questionKey = _detail_contract(
             detail,
             stage=stage,
             parentCode=parentCode,
@@ -149,16 +154,20 @@ def ApplyClassificationAnswers(
             updated.append(detail)
             continue
         answer = NormalizeClassificationAnswer(record.get("answer"))
-        answerVerdict = {
-            "yes": "true",
-            "no": "false",
-            "unknown": "silent",
-        }[answer]
+        if answer == "unknown":
+            answerVerdict = "silent"
+        elif predicateOp == "not_contains":
+            answerVerdict = "false" if answer == "yes" else "true"
+        else:
+            answerVerdict = "true" if answer == "yes" else "false"
         detail["overridden_by"] = questionKey
+        detail["verdict"] = answerVerdict
         updated.append(detail)
         updated.append({
             "cond": axis,
             "op": "user_answer",
+            "predicate_op": predicateOp,
+            "contract_version": QUESTION_CONTRACT_VERSION,
             "verdict": answerVerdict,
             "field": canonicalField,
             "why": "explicit_user_answer",

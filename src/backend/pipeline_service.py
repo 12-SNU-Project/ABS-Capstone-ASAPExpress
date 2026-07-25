@@ -19,6 +19,7 @@ from backend.api_contract import (
     PipelineEventPayload,
     RunCompleteSsePayload,
     RunNotFoundSsePayload,
+    RunPausedSsePayload,
 )
 from backend.pipeline_projection import PipelineResultProjector
 from bussiness_logic.document.document_package_builder import BuildDocumentPackage
@@ -26,6 +27,30 @@ from bussiness_logic.utils.json_types import JsonMapping, JsonObject, JsonValue
 
 
 PipelineCallable = Callable[..., dict[str, object]]
+
+
+def _ClassificationNeedsMoreFacts(result: JsonMapping) -> bool:
+    candidateCodeSet = result.get("candidate_code_set")
+    return (
+        isinstance(candidateCodeSet, Mapping)
+        and candidateCodeSet.get("classification_status") == "needs_more_facts"
+    )
+
+
+def _RequiresUserInput(result: JsonMapping) -> bool:
+    blackboard = result.get("blackboard")
+    questions = result.get("user_questions") or (
+        blackboard.get("user_questions")
+        if isinstance(blackboard, Mapping)
+        else []
+    ) or []
+    return (
+        _ClassificationNeedsMoreFacts(result)
+        and any(
+            isinstance(question, Mapping) and bool(question.get("active"))
+            for question in questions
+        )
+    )
 
 
 class PipelineRunRequest(BaseModel):
@@ -123,17 +148,33 @@ class RunRegistry:
             return {}
         return self._projector.BuildUiResult(snapshot, runId)
 
-    def RestoreCompletedRun(self, runId: str, snapshot: JsonMapping) -> None:
-        """Restore a completed run from its durable UI snapshot after a server restart."""
+    def RestoreRun(self, runId: str, snapshot: JsonMapping) -> None:
+        """Restore a durable run snapshot after a server restart."""
         result = snapshot.get("result")
         if not isinstance(result, Mapping):
             return
+        status = str(snapshot.get("status") or "")
+        if status not in {"awaiting_input", "completed", "failed"}:
+            status = (
+                "awaiting_input"
+                if _RequiresUserInput(result)
+                else "failed"
+                if _ClassificationNeedsMoreFacts(result)
+                else "completed"
+            )
         with self._condition:
             self._runs[runId] = {
-                "status": "completed",
+                "status": status,
                 "query": str(snapshot.get("query") or ""),
                 "facts": self._projector.CompactInputFacts(
                     snapshot.get("facts") if isinstance(snapshot.get("facts"), Mapping) else {},
+                ),
+                "request_signature": self._BuildRequestSignature(
+                    str(snapshot.get("query") or ""),
+                    snapshot.get("facts") if isinstance(snapshot.get("facts"), Mapping) else {},
+                ),
+                "include_celex_excerpt": bool(
+                    snapshot.get("include_celex_excerpt")
                 ),
                 "events": list(snapshot.get("events") or []),
                 "result": dict(result),
@@ -142,7 +183,7 @@ class RunRegistry:
             }
             self._condition.notify_all()
 
-    def PersistCompletedRun(self, runId: str) -> None:
+    def PersistRun(self, runId: str) -> None:
         snapshot = self.ReadSnapshot(runId)
         if snapshot is None:
             return
@@ -155,8 +196,12 @@ class RunRegistry:
         target = runDir / "api_snapshot.json"
         temporary = target.with_suffix(".tmp")
         payload = {
+            "status": snapshot.get("status") or "completed",
             "query": snapshot.get("query") or "",
             "facts": snapshot.get("facts") or {},
+            "include_celex_excerpt": bool(
+                snapshot.get("include_celex_excerpt")
+            ),
             "events": snapshot.get("events") or [],
             "result": dict(result),
         }
@@ -338,6 +383,15 @@ class RunRegistry:
                     ).ToDict(),
                 )
                 return
+            if status == "awaiting_input" and eventIndex >= len(events):
+                yield self._FormatSse(
+                    "run_paused",
+                    RunPausedSsePayload(
+                        run_id=runId,
+                        status="awaiting_input",
+                    ).ToDict(),
+                )
+                return
 
             yield ": heartbeat\n\n"
 
@@ -379,7 +433,10 @@ class RunRegistry:
 
     def _IsTerminal(self, runId: str) -> bool:
         run = self._runs.get(runId)
-        return bool(run is not None and run.get("status") in {"completed", "failed"})
+        return bool(
+            run is not None
+            and run.get("status") in {"awaiting_input", "completed", "failed"}
+        )
 
     def _BuildRequestSignature(self, query: str, facts: JsonMapping) -> str:
         payload = {
@@ -397,7 +454,7 @@ class RunRegistry:
 
     def _FindActiveRunBySignatureLocked(self, requestSignature: str) -> str | None:
         for runId, run in self._runs.items():
-            if run.get("status") not in {"queued", "running"}:
+            if run.get("status") not in {"queued", "running", "awaiting_input"}:
                 continue
             if run.get("request_signature") == requestSignature:
                 return runId
@@ -444,6 +501,7 @@ class PipelineRunService:
             started_at=time.time(),
             query=request.query,
             facts=dict(request.facts),
+            include_celex_excerpt=request.includeCelexExcerpt,
         )
         try:
             pipelineOutput = self._pipelineCallable(
@@ -464,25 +522,46 @@ class PipelineRunService:
                 else []
             )
             result = self._registry.BuildPipelineResultProjection(pipelineOutput)
+            candidateCodeSet = pipelineOutput.get("candidate_code_set")
+            needsMoreFacts = _ClassificationNeedsMoreFacts(pipelineOutput)
+            status = (
+                "awaiting_input"
+                if _RequiresUserInput(pipelineOutput)
+                else "failed"
+                if needsMoreFacts
+                else "completed"
+            )
+            failureReason = (
+                str(candidateCodeSet.get("failure_reason") or "classification unresolved")
+                if needsMoreFacts and isinstance(candidateCodeSet, Mapping)
+                else ""
+            )
             self._registry.UpdateRun(
                 runId,
-                status="completed",
+                status=status,
                 finished_at=time.time(),
                 result=result,
                 partial_result=result,
                 document_packages=documentPackages,
+                error=failureReason or None,
             )
-            self._registry.PersistCompletedRun(runId)
             self._registry.AppendEvent(
                 runId,
                 {
-                    "stage": "Pipeline",
-                    "status": "completed",
-                    "message": "전체 파이프라인 완료",
+                    "stage": "Classification" if needsMoreFacts else "Pipeline",
+                    "status": status,
+                    "message": (
+                        "분류를 계속하려면 사용자 응답이 필요합니다."
+                        if status == "awaiting_input"
+                        else failureReason
+                        if status == "failed"
+                        else "전체 파이프라인 완료"
+                    ),
                     "run_id": result.get("run_id"),
                     "partial_result": result,
                 },
             )
+            self._registry.PersistRun(runId)
         except Exception as exc:  # noqa: BLE001
             self._registry.UpdateRun(
                 runId,
@@ -506,11 +585,18 @@ class PipelineRunService:
         runDirectory: Path,
         answers: list[JsonObject],
     ) -> JsonObject:
-        """Persist explicit answers and replay only the classification component."""
+        """Persist explicit answers and resume classification and document steps."""
         from bussiness_logic.classification.components.classification import (
             ClassificationComponent,
         )
+        from bussiness_logic.classification.rules.question_contract import (
+            QUESTION_CONTRACT_VERSION,
+        )
+        from bussiness_logic.document.pipeline.document_recommendation_pipeline import (
+            DocumentRecommendationPipeline,
+        )
         from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
+        from bussiness_logic.pipeline.pipeline_context import PipelineContext
 
         with self._answerLock:
             blackboardPath = runDirectory / "blackboard.json"
@@ -535,6 +621,13 @@ class PipelineRunService:
             answerFacts = blackboard.setdefault("classification_answer_facts", [])
             if not isinstance(answerFacts, list):
                 raise ValueError("classification_answer_facts must be a list")
+            questionIds = [
+                str(payload.get("user_question_id") or "")
+                for payload in answers
+            ]
+            if len(questionIds) != len(set(questionIds)):
+                raise ValueError("duplicate user_question_id in answer payload")
+            snapshot = self._registry.ReadSnapshot(runId) or {}
 
             answeredAt = now_iso()
             acceptedIds: list[str] = []
@@ -547,9 +640,37 @@ class PipelineRunService:
                 if question is None:
                     raise KeyError(f"unknown user_question_id: {questionId}")
                 questionKey = str(question.get("question_key") or "")
-                if not questionKey:
+                predicateOp = str(question.get("predicate_op") or "")
+                if (
+                    int(question.get("contract_version") or 0)
+                    != QUESTION_CONTRACT_VERSION
+                    or not questionKey
+                    or not predicateOp
+                ):
                     raise ValueError(
-                        f"question {questionId} predates the stable question contract"
+                        f"question {questionId} predates contract V2; rerun classification"
+                    )
+                previousFact = next((
+                    item
+                    for item in reversed(answerFacts)
+                    if isinstance(item, Mapping)
+                    and str(item.get("user_question_id") or "") == questionId
+                ), None)
+                previousAnswer = str(
+                    question.get("answer")
+                    or (previousFact or {}).get("answer")
+                    or ""
+                )
+                if previousAnswer == answer:
+                    if previousFact:
+                        question["answer_id"] = previousFact.get("answer_id")
+                        question["answered_at"] = previousFact.get("answered_at")
+                    continue
+                if not bool(question.get("active")):
+                    raise ValueError(f"question {questionId} is no longer active")
+                if previousAnswer not in {"", "unknown"}:
+                    raise ValueError(
+                        f"question {questionId} already has a different answer"
                     )
                 answerId = store.next_id("qa")
                 answerFact = {
@@ -559,6 +680,7 @@ class PipelineRunService:
                     "answer_id": answerId,
                     "user_question_id": questionId,
                     "question_key": questionKey,
+                    "contract_version": QUESTION_CONTRACT_VERSION,
                     "answer": answer,
                     "answered_at": answeredAt,
                     "source": "user",
@@ -566,6 +688,7 @@ class PipelineRunService:
                     "parent_code": str(question.get("parent_code") or ""),
                     "candidate_code": str(question.get("candidate_code") or ""),
                     "axis": str(question.get("axis") or ""),
+                    "predicate_op": predicateOp,
                     "canonical_field": str(question.get("canonical_field") or ""),
                     "condition_value": str(question.get("condition_value") or ""),
                     "context_scope": str(question.get("context_scope") or ""),
@@ -577,66 +700,125 @@ class PipelineRunService:
                 acceptedIds.append(answerId)
 
             store.save(blackboard)
-            componentResult = ClassificationComponent().Execute(store)
+            if (
+                not acceptedIds
+                and snapshot.get("status") != "awaiting_input"
+            ):
+                return self._registry.BuildUiResult(runId)
+            context = PipelineContext(
+                query=str(snapshot.get("query") or ""),
+                facts=dict(snapshot.get("facts") or {}),
+                store=store,
+                includeCelexExcerpt=bool(
+                    snapshot.get("include_celex_excerpt")
+                ),
+                progressCallback=lambda event: self._registry.AppendEvent(
+                    runId,
+                    event,
+                ),
+            )
+            self._registry.UpdateRun(runId, status="running")
+            componentResult = context.ExecuteComponent(ClassificationComponent())
             if not componentResult.success:
+                self._registry.UpdateRun(runId, status="awaiting_input")
                 raise RuntimeError(
                     componentResult.error or "classification replay failed"
                 )
 
             replayedBlackboard = store.load()
             candidateSets = replayedBlackboard.get("candidate_code_sets") or []
-            documentPackages = replayedBlackboard.get("document_packages") or []
             latestCandidateSet = candidateSets[-1] if candidateSets else {}
-            resolverDebug = (
-                latestCandidateSet.get("resolver_debug") or {}
+            needsMoreFacts = (
+                isinstance(latestCandidateSet, dict)
+                and latestCandidateSet.get("classification_status")
+                == "needs_more_facts"
+            )
+            pendingQuestions = (
+                latestCandidateSet.get("resolver_debug", {}).get(
+                    "pending_user_questions",
+                    [],
+                )
                 if isinstance(latestCandidateSet, dict)
-                else {}
+                else []
             )
-            unresolved = (
-                resolverDebug.get("unresolved") or {}
-                if isinstance(resolverDebug, dict)
-                else {}
-            )
+            if not pendingQuestions and isinstance(latestCandidateSet, dict):
+                pendingQuestions = (
+                    latestCandidateSet.get("resolver_debug", {})
+                    .get("unresolved", {})
+                    .get("question_options", [])
+                )
             activeQuestionKeys = {
                 str(item.get("question_key") or "")
-                for item in (unresolved.get("question_options") or [])
+                for item in pendingQuestions
                 if isinstance(item, dict) and str(item.get("question_key") or "")
             }
+            isAwaitingInput = needsMoreFacts and bool(activeQuestionKeys)
+            processingError = ""
             for question in replayedBlackboard.get("user_questions") or []:
-                if not isinstance(question, dict) or question.get("answer"):
+                if not isinstance(question, dict):
                     continue
                 isActive = str(question.get("question_key") or "") in activeQuestionKeys
                 question["active"] = isActive
                 question["resolved_at"] = None if isActive else answeredAt
             store.save(replayedBlackboard)
-            result = self._registry.BuildPipelineResultProjection({
-                "blackboard": replayedBlackboard,
-                "candidate_code_set": latestCandidateSet or None,
-                "document_package": documentPackages[-1] if documentPackages else None,
-                "component_runs": replayedBlackboard.get("component_runs") or [],
-                "run_id": internalRunId,
-                "run_dir": str(runDirectory),
-                "user_questions": replayedBlackboard.get("user_questions") or [],
-            })
+            if needsMoreFacts and not isAwaitingInput:
+                processingError = str(
+                    latestCandidateSet.get("failure_reason")
+                    or "classification unresolved without an actionable question"
+                )
+            elif not isAwaitingInput:
+                DocumentRecommendationPipeline().Run(context)
+                if context.shouldStop:
+                    processingError = str(
+                        context.componentResults[-1].error
+                        if context.componentResults
+                        else "document recommendation replay failed"
+                    )
+                replayedBlackboard = store.load()
+            pipelineOutput = self._StripRuntimeObjects(context.BuildFinalResult())
+            result = self._registry.BuildPipelineResultProjection(pipelineOutput)
+            documentPackages = replayedBlackboard.get("document_packages") or []
+            status = (
+                "awaiting_input"
+                if isAwaitingInput
+                else "failed"
+                if processingError
+                else "completed"
+            )
             self._registry.UpdateRun(
                 runId,
-                status="completed",
+                status=status,
                 finished_at=time.time(),
                 result=result,
                 partial_result=result,
                 document_packages=documentPackages,
+                error=processingError or None,
             )
             self._registry.AppendEvent(
                 runId,
                 {
-                    "stage": "Classification_Answer",
-                    "status": "completed",
-                    "message": "사용자 답변을 반영해 분류 단계만 재실행했습니다.",
+                    "stage": (
+                        "Classification_Answer"
+                        if isAwaitingInput
+                        else "Classification"
+                        if needsMoreFacts
+                        else "Document_Component"
+                        if processingError
+                        else "Pipeline"
+                    ),
+                    "status": status,
+                    "message": (
+                        "추가 사용자 응답이 필요합니다."
+                        if isAwaitingInput
+                        else processingError
+                        if processingError
+                        else "사용자 답변을 반영해 분류와 문서 단계를 완료했습니다."
+                    ),
                     "answer_ids": acceptedIds,
                     "partial_result": result,
                 },
             )
-            self._registry.PersistCompletedRun(runId)
+            self._registry.PersistRun(runId)
             return self._registry.BuildUiResult(runId)
 
     def _StripRuntimeObjects(self, pipelineOutput: Mapping[str, object]) -> JsonObject:

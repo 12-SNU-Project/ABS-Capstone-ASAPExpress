@@ -65,6 +65,13 @@ class ExportPipelineManager:
             step.Run(context)
             if context.shouldStop:
                 break
+            partialResult = context.BuildPartialResult()
+            candidateCodeSet = partialResult.get("candidate_code_set")
+            if (
+                isinstance(candidateCodeSet, dict)
+                and candidateCodeSet.get("classification_status") == "needs_more_facts"
+            ):
+                break
         return context.BuildFinalResult()
 
     def _CreateStore(

@@ -112,6 +112,7 @@ class PipelineApi:
                         str(part) for part in (firstError.get("loc") or ("answers",))
                     ),
                 ).ToDict()), 400
+            self._RestorePersistedRun(job_id)
             runDirectory = self._ResolveRunDirectory(job_id)
             if runDirectory is None:
                 return jsonify(ApiErrorResponse(
@@ -294,7 +295,7 @@ class PipelineApi:
                         snapshot["document_packages"] = list(
                             persistedBlackboard.get("document_packages") or [],
                         )
-                self._registry.RestoreCompletedRun(jobId, snapshot)
+                self._registry.RestoreRun(jobId, snapshot)
                 if self._registry.BuildUiResult(jobId):
                     return
 
@@ -339,7 +340,7 @@ class PipelineApi:
         ingredients = observedFacts.get("ingredients") or []
         if isinstance(ingredients, list) and ingredients:
             facts["user_input_facts"] = {"ingredients": ingredients[:20]}
-        self._registry.RestoreCompletedRun(jobId, {
+        self._registry.RestoreRun(jobId, {
             "query": facts.get("product_name") or "",
             "facts": facts,
             "events": [],

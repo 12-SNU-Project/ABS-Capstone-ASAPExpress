@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from bussiness_logic.utils.json_types import JsonObject
 
 
-RunStatus = Literal["queued", "running", "completed", "failed"]
+RunStatus = Literal["queued", "running", "awaiting_input", "completed", "failed"]
 IngredientRole = Literal["primary", "secondary"]
 IntendedUse = Literal[
     "human consumption",
@@ -511,6 +511,11 @@ class RunSnapshotResponse(ApiContractModel):
 class RunCompleteSsePayload(ApiContractModel):
     runId: str = Field(alias="run_id")
     status: Literal["completed", "failed"]
+
+
+class RunPausedSsePayload(ApiContractModel):
+    runId: str = Field(alias="run_id")
+    status: Literal["awaiting_input"]
 
 
 class RunNotFoundSsePayload(ApiContractModel):
