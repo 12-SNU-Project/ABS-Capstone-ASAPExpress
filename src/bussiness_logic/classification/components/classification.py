@@ -1,6 +1,8 @@
 """Classification_Component — staged HS4 -> HS6 -> CN8 classifier."""
 from __future__ import annotations
 
+from copy import deepcopy
+
 from bussiness_logic.pipeline.component_base import BasePipelineComponent
 from bussiness_logic.classification.services.taric_branch_resolver import TaricBranchResolverTool
 from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
@@ -66,10 +68,17 @@ class ClassificationComponent(BasePipelineComponent):
             self.reason("Staged classifier disabled by env; no legacy Stage1 fallback.")
             return False
         try:
-            product_facts = bb.get("product_understanding") or {}
+            product_facts = deepcopy(bb.get("product_understanding") or {})
             if not product_facts:
                 self.reason("Staged classifier: no product_understanding.")
                 return False
+            answerFacts = bb.get("classification_answer_facts") or []
+            if isinstance(answerFacts, list) and answerFacts:
+                product_facts["_classification_answer_facts"] = [
+                    dict(item)
+                    for item in answerFacts
+                    if isinstance(item, dict)
+                ]
             routing = routingContext if isinstance(routingContext, dict) else (
                 bb.get("routing_context") or {}
             )
@@ -104,6 +113,26 @@ class ClassificationComponent(BasePipelineComponent):
             )
             stages = staged.get("stages") or []
             candidates = staged.get("candidates") or []
+            if staged.get("classification_status") == "needs_more_facts":
+                self._emit_unresolved(
+                    store,
+                    pes,
+                    why=str(staged.get("error") or "needs_more_facts"),
+                    userQuestions=list(staged.get("pending_user_questions") or []),
+                    debug={
+                        "resolved_level": staged.get("resolved_level") or "",
+                        "resolved_prefix": staged.get("resolved_prefix") or "",
+                        "unresolved_stage": staged.get("unresolved_stage") or "",
+                        "unresolved": staged.get("unresolved") or {},
+                        "suggestions": staged.get("suggestions") or [],
+                        "classification_trace": {
+                            "mode": "staged_narrowing",
+                            "stages": stages,
+                            "bti_summons": staged.get("bti_summons") or [],
+                        },
+                    },
+                )
+                return True
             if not staged.get("ok") or not candidates:
                 self.reason(
                     "Staged classifier produced no candidates "
@@ -200,11 +229,19 @@ class ClassificationComponent(BasePipelineComponent):
                 for path in classificationPaths
                 if str(path.get("cn8") or "")[:8]
             }
-            for candidate in candidates[:5]:
-                cn8 = str(candidate.get("cn8") or "")[:8]
-                if not cn8.isdigit() or len(cn8) != 8:
-                    continue
-                taric_branches = self._resolve_taric_branches(cn8)
+            finalCandidates = [
+                (candidate, cn8)
+                for candidate in candidates[:5]
+                if (
+                    cn8 := str(candidate.get("cn8") or "")[:8]
+                ).isdigit()
+                and len(cn8) == 8
+            ]
+            finalCn8s = [cn8 for _candidate, cn8 in finalCandidates]
+            taricBranchesByCn8 = self._resolve_taric_branches_many(finalCn8s)
+            ebtiRowsByCn8 = self._load_ebti_case_pools(finalCn8s)
+            for candidate, cn8 in finalCandidates:
+                taric_branches = taricBranchesByCn8.get(cn8, [])
                 selected_branch = self._select_taric_branch(taric_branches)
                 taric10 = selected_branch.get("taric10") or ""
                 rank = len(ccs_candidates) + 1
@@ -236,7 +273,11 @@ class ClassificationComponent(BasePipelineComponent):
                     "classification_evidence_refs": [],
                     # EBTI 판례는 표시 전용(원용도) — 선택·점수·검증 어디에도
                     # 관여하지 않는다 (판례의 코드 편향을 선택에 수입 금지).
-                    "similar_ebti_cases": self._ebti_cases(cn8, product_facts),
+                    "similar_ebti_cases": self._ebti_cases(
+                        cn8,
+                        product_facts,
+                        preloadedRows=ebtiRowsByCn8.get(cn8, ()),
+                    ),
                     "classification_citations": list(getattr(self, "_ontology_reads", []) or []),
                     "required_facts": [],
                     "unknowns": [],
@@ -352,7 +393,12 @@ class ClassificationComponent(BasePipelineComponent):
             return fallback
 
     @staticmethod
-    def _ebti_cases(cn8: str, product_facts: dict) -> list[dict]:
+    def _ebti_cases(
+        cn8: str,
+        product_facts: dict,
+        *,
+        preloadedRows=None,
+    ) -> list[dict]:
         """유사 EBTI 판례 (표시 전용) — 실패는 빈 목록, 파이프라인 무영향."""
         try:
             from bussiness_logic.classification.services.ebti_precedent_local import FindSimilarCases
@@ -366,9 +412,27 @@ class ClassificationComponent(BasePipelineComponent):
                     ih.get("ingredient_class") or "",
                 ) if part
             )
-            return FindSimilarCases(cn8, identity_text, limit=2)
+            return FindSimilarCases(
+                cn8,
+                identity_text,
+                limit=2,
+                preloaded_rows=preloadedRows,
+            )
         except Exception:  # noqa: BLE001 — 근거 표시 실패가 분류를 깨면 안 된다
             return []
+
+    @staticmethod
+    def _load_ebti_case_pools(cn8s: list[str]) -> dict[str, tuple[dict, ...]]:
+        if not cn8s:
+            return {}
+        try:
+            from bussiness_logic.core.runtime_asset_repository import (
+                LoadBtiCasesForCodes,
+            )
+
+            return LoadBtiCasesForCodes(cn8s)
+        except Exception:  # noqa: BLE001 — 표시 근거 실패는 분류 결과와 무관
+            return {cn8: () for cn8 in cn8s}
 
     def _staged_basis(self, candidate: dict) -> str:
         desc = str(candidate.get("description") or "")[:160]
@@ -400,6 +464,35 @@ class ClassificationComponent(BasePipelineComponent):
                 snippet=f"{len(out)} TARIC10 branch candidate(s)",
                 reason="TaricBranchResolverTool branch retrieval.",
             )
+        return out
+
+    def _resolve_taric_branches_many(
+        self,
+        cn8s: list[str],
+    ) -> dict[str, list[JsonObject]]:
+        if not cn8s:
+            return {}
+        try:
+            resolved = self._taric_resolver.resolve_many(
+                cn8s,
+                only_declarable_leaf=False,
+                only_kr_applicable=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.reason(f"TaricBranchResolverTool batch error: {exc}")
+            return {cn8: self._resolve_taric_branches(cn8) for cn8 in cn8s}
+
+        out: dict[str, list[JsonObject]] = {}
+        for cn8 in cn8s:
+            branches = [branch.to_dict() for branch in resolved.get(cn8, [])]
+            out[cn8] = branches
+            if branches:
+                self.CreateCiteSource(
+                    "taric_master_table",
+                    f"cn8={cn8}",
+                    snippet=f"{len(branches)} TARIC10 branch candidate(s)",
+                    reason="TaricBranchResolverTool batched branch retrieval.",
+                )
         return out
 
     # ------------------------------------------------------------------ helpers
@@ -439,6 +532,7 @@ class ClassificationComponent(BasePipelineComponent):
         *,
         why: str,
         debug: JsonObject | None = None,
+        userQuestions: list[dict] | None = None,
     ) -> None:
         ccs_id = store.next_id("ccs")
         candidateCodeSet = {
@@ -456,6 +550,74 @@ class ClassificationComponent(BasePipelineComponent):
             candidateCodeSet["resolver_debug"] = debug
         store.append("candidate_code_sets", candidateCodeSet)
         self.WriteBlackBoard(ccs_id)
+        existingQuestions = [
+            item
+            for item in (store.load().get("user_questions") or [])
+            if isinstance(item, dict)
+        ]
+        existingStableKeys = {
+            str(item.get("question_key") or "")
+            for item in existingQuestions
+            if str(item.get("question_key") or "")
+        }
+        seenQuestions: set[tuple[str, tuple[str, ...]]] = {
+            (
+                str(item.get("question_text") or "").strip(),
+                tuple(str(value) for value in (item.get("required_for") or [])),
+            )
+            for item in existingQuestions
+        }
+        for pendingQuestion in userQuestions or []:
+            questionText = str(pendingQuestion.get("question_text") or "").strip()
+            stableKey = str(pendingQuestion.get("question_key") or "").strip()
+            requiredFor = tuple(
+                str(item)
+                for item in (pendingQuestion.get("required_for") or [])
+                if str(item)
+            )
+            questionKey = (questionText, requiredFor)
+            if (
+                not questionText
+                or (stableKey and stableKey in existingStableKeys)
+                or questionKey in seenQuestions
+            ):
+                continue
+            seenQuestions.add(questionKey)
+            if stableKey:
+                existingStableKeys.add(stableKey)
+            questionId = store.next_id("uq")
+            store.append("user_questions", {
+                "object_type": "UserQuestion",
+                "created_by": self.component_name,
+                "created_at": now_iso(),
+                "user_question_id": questionId,
+                "question_key": stableKey,
+                "question_text": questionText,
+                "asked_by": self.component_name,
+                "stage": str(pendingQuestion.get("stage") or ""),
+                "parent_code": str(pendingQuestion.get("parent_code") or ""),
+                "candidate_code": str(pendingQuestion.get("candidate_code") or ""),
+                "axis": str(pendingQuestion.get("axis") or ""),
+                "canonical_field": str(pendingQuestion.get("canonical_field") or ""),
+                "condition_value": pendingQuestion.get("condition_value"),
+                "context_scope": str(pendingQuestion.get("context_scope") or ""),
+                "bti_evidence": [
+                    dict(item)
+                    for item in (pendingQuestion.get("bti_evidence") or [])
+                    if isinstance(item, dict)
+                ],
+                "active": True,
+                "resolved_at": None,
+                "required_for": list(requiredFor),
+                "options": [
+                    str(option)
+                    for option in (pendingQuestion.get("options") or [])
+                    if str(option)
+                ],
+                "answer": None,
+                "answered_at": None,
+            })
+            self.WriteBlackBoard(questionId)
         self.reason(
             f"Classification unresolved ({why}); wrote empty ClassificationCandidateSet "
             "instead of a synthetic 99999999 candidate."

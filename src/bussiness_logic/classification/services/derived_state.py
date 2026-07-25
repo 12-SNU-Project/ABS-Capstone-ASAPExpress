@@ -23,9 +23,9 @@ steaming`)에 DTO가 답하지 못하는 원인은 라벨이 '생것'을 명시�
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
+
+from bussiness_logic.core.runtime_asset_repository import LoadSingletonAsset
 
 # 데모 _axes_from_name 검증분(영문) — 조리 상태·조리 형태 어휘.
 _COOK_EN = (
@@ -35,7 +35,6 @@ _COOK_EN = (
 )
 _RAW_CHAPTERS = {f"{n:02d}" for n in range(1, 15)}   # 관세율표 1~2부 경계
 
-_TAX_PATH = Path("/Users/snu/Asap_Lab/data/taxonomy/commodity_taxonomy.json")
 _state_lex_cache: list[tuple[str, tuple[str, ...]]] = []
 
 
@@ -44,10 +43,7 @@ def _cook_lexicon_ko() -> list[tuple[str, tuple[str, ...]]]:
     어휘가 들어 있는 항목(기계 도출·수기 목록 0)."""
     if _state_lex_cache:
         return _state_lex_cache
-    try:
-        tax = json.loads(_TAX_PATH.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        tax = {}
+    tax = LoadSingletonAsset("commodity_taxonomy")
     for ko, ens in (tax.get("state_lexicon") or {}).items():
         ens_t = tuple(str(e).lower() for e in (ens or []))
         # 정확 일치 비교 — 부분문자열이면 'uncooked'가 'cooked'에 걸려

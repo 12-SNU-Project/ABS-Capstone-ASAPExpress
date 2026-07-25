@@ -47,15 +47,14 @@ class DbSessionConfig:
 
     @staticmethod
     def FromEnvironment() -> "DbSessionConfig":
-        _load_project_dotenv()
         database_url = (
             # [07-20 설계자 확정] 분류 DB = PG* 블록(Supabase pooler).
             # 서류 작업이 ASAP_DATABASE_URL을 메인 서버 DB로 옮기면서
             # (그쪽엔 branch_decision_index·술어 테이블 없음) staged가
             # 빈손이 되는 충돌 실측 → 분류층은 PGHOST가 설정돼 있으면
             # PG* 조립 주소를 ASAP_DATABASE_URL보다 우선한다. 명시
-            # 오버라이드는 ASAP_CLASSIFICATION_DATABASE_URL(값은 .env
-            # 에서 설계자 관리).
+            # 오버라이드는 ASAP_CLASSIFICATION_DATABASE_URL이다. 이 모듈은
+            # .env 파일을 읽지 않으며 호출자가 셸 환경을 주입해야 한다.
             _env("ASAP_CLASSIFICATION_DATABASE_URL")
             or (_build_url_from_pg_env() if _env("PGHOST") else "")
             or _env("ASAP_DATABASE_URL")

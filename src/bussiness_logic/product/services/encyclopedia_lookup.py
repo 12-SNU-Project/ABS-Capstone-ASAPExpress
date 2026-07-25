@@ -52,6 +52,19 @@ def LookupEncyclopediaEvidence(
     legalVocab: frozenset[str] = frozenset(),
     dictTitles: frozenset[str] = frozenset(),
 ) -> EncyclopediaEvidenceSet:
+    # [step1 실측 스위치 · 2026-07-22 설계자] 백과 기여도 A/B용 킬스위치 —
+    # ASAP_ENCYCLOPEDIA=0이면 검색 자체를 건너뛴다(빈 증거·no-op). 기본 1
+    # = 현행 유지. 백과 경로 존폐(타요 오염 vs 실기여)는 이 실측 후 결정.
+    import os as _os
+    if (_os.environ.get("ASAP_ENCYCLOPEDIA", "1") or "1").strip() == "0":
+        return EncyclopediaEvidenceSet(
+            encyclopediaEvidenceId=encyclopediaEvidenceId,
+            productId=productId,
+            query=query.strip(),
+            configured=False,
+            qualityStatus="disabled",
+            qualityReasons=("asap_encyclopedia_off",),
+        )
     normalizedQuery = CleanEncyclopediaQuery(query)
     if not normalizedQuery:
         return EncyclopediaEvidenceSet(

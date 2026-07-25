@@ -27,6 +27,10 @@ class PipelineRunResult(BaseModel):
         default=None,
         alias="candidate_code_set",
     )
+    userQuestions: list[JsonObject] = Field(
+        default_factory=list,
+        alias="user_questions",
+    )
     documentPackage: Optional[DocumentPackageSummaryView] = Field(
         default=None,
         alias="document_package",
@@ -46,6 +50,10 @@ class PipelineRunResult(BaseModel):
         runDir = str(pipelineOutput.get("run_dir") or "")
         decision = pipelineOutput.get("decision")
         documentPackage = pipelineOutput.get("document_package")
+        blackboard = pipelineOutput.get("blackboard")
+        userQuestions = pipelineOutput.get("user_questions")
+        if not isinstance(userQuestions, list) and isinstance(blackboard, Mapping):
+            userQuestions = blackboard.get("user_questions")
         return cls(
             run_id=runId,
             run_dir=runDir,
@@ -56,6 +64,11 @@ class PipelineRunResult(BaseModel):
                 "component_run_count": len(pipelineOutput.get("component_runs") or []),
             },
             candidate_code_set=pipelineOutput.get("candidate_code_set"),
+            user_questions=(
+                list(userQuestions)
+                if isinstance(userQuestions, list)
+                else []
+            ),
             document_package=(
                 DocumentPackageProjector.PublicDocumentPackageSummary(documentPackage)
                 if isinstance(documentPackage, Mapping)
@@ -743,6 +756,9 @@ class PipelineOutputProjector:
             routingView = self._understandingProjector.BuildRoutingView(blackboard)
             if routingView:
                 compact["routing_view"] = routingView
+            userQuestions = blackboard.get("user_questions")
+            if isinstance(userQuestions, list):
+                compact["user_questions"] = list(userQuestions)
         documentPackage = compact.get("document_package")
         if isinstance(documentPackage, Mapping):
             compact["document_package"] = (
@@ -807,6 +823,7 @@ class PipelineSnapshotProjector:
             "run_dir",
             "audit_ref",
             "candidate_code_set",
+            "user_questions",
             "document_package",
             "document_packages",
             "decision",

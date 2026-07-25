@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Mapping, Sequence
 
 from bussiness_logic.utils.json_types import JsonValue
@@ -22,6 +21,11 @@ _PREPARED_STATE_WORDS = frozenset({
     "prepared", "cooked", "seasoned", "smoked", "roasted", "boiled", "fried",
     "steamed", "preserved", "processed", "instant",
 })
+# [챕터 게이트 재적용 · 07-23 설계자 "Domain_Router 읽게 한다며"] 식품
+# 권위 라벨(식약처 표시 실물) 존재 검사 — 발동 신호. 앞선 원복(07-22)은
+# hs4 하락 오귀속이었음이 실측 확정(그 런 blocked=[] — 게이트 미발동,
+# 하락 원인=지터). search라 접두("옵션 1 ") 무관.
+_FOOD_LABEL_PATTERN = re.compile(r"식품\s*의?\s*유형|원재료명")
 
 
 def _stem_token(token: str) -> str:
@@ -84,6 +88,11 @@ class PreClassificationRouteHint:
     # the backup Route_dto ``candidate_chapters`` contract so the downstream
     # classifier can respect the router's ranking instead of flattening it.
     candidateChapterDetails: tuple[dict[str, JsonValue], ...] = ()
+    # Score-free semantic routing contract. Legacy keyword routing leaves these
+    # empty; the staged classifier then follows the existing score contract.
+    selectedHs2: str = ""
+    alternativeHs2: tuple[str, ...] = ()
+    semanticDecision: dict[str, JsonValue] = field(default_factory=dict)
 
     def ToTrace(self) -> dict[str, JsonValue]:
         return {
@@ -94,6 +103,9 @@ class PreClassificationRouteHint:
             "routing_basis": self.routingBasis.ToTrace(),
             "missing_facts": list(self.missingFacts),
             "candidate_chapter_details": list(self.candidateChapterDetails),
+            "selected_hs2": self.selectedHs2,
+            "alternative_hs2": list(self.alternativeHs2),
+            "semantic_decision": dict(self.semanticDecision),
         }
 
 
@@ -222,23 +234,15 @@ _DERIVED_KW_CACHE: dict | None = None
 
 
 def _derived_chapter_keywords() -> dict[str, list[str]]:
-    """[9회차 P1] 법정 서술 기계 도출 챕터 어휘 아티팩트 —
-    DB/artifacts/chapter_keywords_derived.jsonl (빌드: DB/
-    build_chapter_keywords.py, 창작 0 게이트 --verify). cn_chapter_index
-    원본 무접촉 — 부재 시 빈 dict(기존 동작). ASAP_ROUTER_DERIVED_KW=0 OFF."""
+    """Retired lexical-router compatibility hook.
+
+    SemanticChapterRouter is the runtime authority. The removed workstation
+    artifact must not silently add lexical terms when this legacy class is used
+    by an old diagnostic caller.
+    """
     global _DERIVED_KW_CACHE
     if _DERIVED_KW_CACHE is None:
         _DERIVED_KW_CACHE = {}
-        try:
-            if (os.environ.get("ASAP_ROUTER_DERIVED_KW", "1") or "1").strip() != "0":
-                from pathlib import Path as _P
-                _path = _P(__file__).resolve().parents[4] / "DB" / "artifacts" /                     "chapter_keywords_derived.jsonl"
-                for _line in _path.read_text(encoding="utf-8").splitlines():
-                    _row = json.loads(_line)
-                    _DERIVED_KW_CACHE[str(_row.get("chapter"))] = list(
-                        _row.get("keywords") or [])
-        except Exception:  # noqa: BLE001 — 아티팩트 부재 = 기능 OFF
-            _DERIVED_KW_CACHE = {}
     return _DERIVED_KW_CACHE
 
 
@@ -810,6 +814,27 @@ class PreClassificationDomainRouter:
                     matchedByChapter.setdefault(_ch_r2, []),
                     "redirect_tie:"
                     + ("prepared_first" if processed else "raw_first"))
+        # [챕터 게이트 · 07-23 재적용 — cn_chapter_index 정본 소비] 식품
+        # 라벨 존재 시 후보 챕터를 domain_scope_candidates의 food 스코프
+        # (02~24 실측)로 제한. 두 실물(라벨×테이블 컬럼) 교차·창작 0·점수
+        # 무관(in/out). 실측 근거: 쪽갈비 'ribs'→ch72(철강) 8점·비빔밥
+        # 84=12점 — 스코프 필터 부재로 비식품 챕터가 점수 진입. 잘린
+        # 챕터는 blockedHs2 + 사유 기록(빈 blocked 기전 정상화). 게이트
+        # 전멸 시 무적용(보수). ASAP_CHAPTER_GATE=0 복귀.
+        if (os.environ.get("ASAP_CHAPTER_GATE", "1") or "1").strip() != "0" \
+                and _FOOD_LABEL_PATTERN.search(searchText):
+            foodSet = {
+                self._ReadChapter(row) for row in chapterRows
+                if "food" in self._ReadDomainScopes(
+                    row, self._ReadChapter(row))
+            }
+            gatedIn = [c for c in rankedChapters if c in foodSet]
+            if gatedIn:
+                for c in rankedChapters[:5]:
+                    if c not in foodSet and scores.get(c, 0.0) > 0:
+                        self._AppendUnique(blockedHs2, c)
+                        blockedReasons.append(f"domain_gate:food_label:{c}")
+                rankedChapters = gatedIn
         candidateHs2 = tuple(rankedChapters[:5])
         matchedTerms: list[str] = []
         for chapter in candidateHs2:

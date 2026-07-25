@@ -32,12 +32,12 @@ OUT_DIR = PROJECT_ROOT / "data" / "coi_normalized"
 # role 판정 — 구획명(component)의 법조문 대응. 폼 정규화 규칙이며
 # 코드/상품 지목이 아니라 서류 양식 어휘의 표준화다.
 _ROLE_RULES: tuple[tuple[str, str], ...] = (
-    (r"(만두피|피$|도우|반죽|크러스트)", "wrapper"),
-    (r"(만두소|소$|속$|필링)", "filling"),
-    (r"(소스|양념|시즈닝|드레싱|장$|비빔장)", "sauce"),
-    (r"(육수|국물|스프|다시)", "broth"),
-    (r"(면$|면류|생면|숙면|건면)", "noodle"),
-    (r"(고명|토핑|후레이크|건더기)", "topping"),
+    (r"(만두피|피$|도우|반죽|크러스트|wrapper|dough|crust)", "wrapper"),
+    (r"(만두소|소$|속$|필링|filling)", "filling"),
+    (r"(소스|양념|시즈닝|드레싱|장$|비빔장|sauce|seasoning|dressing)", "sauce"),
+    (r"(육수|국물|스프|다시|broth|stock|soup\s*base)", "broth"),
+    (r"(면$|면류|생면|숙면|건면|noodle)", "noodle"),
+    (r"(고명|토핑|후레이크|건더기|topping|flake)", "topping"),
 )
 _SOLVENT_RE = re.compile(r"^(정제수|물|정수|음용수|water)$", re.IGNORECASE)
 _PAREN_RE = re.compile(r"^(.{2,40}?)\s*[\(（]([^)）]{2,120})[\)）]\s*$")
@@ -52,10 +52,19 @@ def _role_for(component: str, ingredient: str) -> str:
     # 검사하면 '찰당면'(만두소 재료)이 noodle 구획으로 오인돼 주성분·라우팅
     # 을 오염시킨다(실측: 군만두→1904). 성분명 검사는 sauce 계열만.
     for pattern, role in _ROLE_RULES:
-        if re.search(pattern, component.strip()):
+        if re.search(pattern, component.strip(), re.I):
             return role
-    if re.search(r"(소스|양념|드레싱|시즈닝)", ingredient.strip()):
-        return "sauce"
+    liquid = re.search(
+        r"(소스|양념|드레싱|시즈닝|육수|국물|sauce|dressing|seasoning|broth|stock)",
+        ingredient.strip(),
+        re.I,
+    )
+    if liquid:
+        return (
+            "broth"
+            if liquid.group(0).lower() in {"육수", "국물", "broth", "stock"}
+            else "sauce"
+        )
     return "other"
 
 
@@ -77,10 +86,10 @@ def _slug(text: str) -> str:
     return re.sub(r"[^0-9A-Za-z가-힣]+", "_", text)[:48].strip("_")
 
 
-def NormalizeCoiFile(path: Path) -> dict:
+def NormalizeCoiFile(path: Path, sheet_name: str | None = None) -> dict:
     from bussiness_logic.product.services.coi_loader import ParseCoiComposition
 
-    raw = ParseCoiComposition(path)
+    raw = ParseCoiComposition(path, sheetName=sheet_name)
     entries = []
     sections: list[str] = []
     for e in raw:

@@ -24,7 +24,6 @@ from bussiness_logic.bridge.schema import (
 )
 from bussiness_logic.artifact_paths import ExtractProductIdFromUrl
 from bussiness_logic.input_process.dictionary import (
-    DEFAULT_PRODUCT_INPUT_DICTIONARY_PATH,
     ProductDictionaryMatch,
     ProductDictionaryRepository,
     ProductDictionaryRetriever,
@@ -2572,21 +2571,13 @@ class ProductInputReconstructionService:
 
     def __init__(
         self,
-        dictionaryPath: Optional[str] = None,
         runtimeAdapter: Optional[RuntimeAdapter[object]] = None,
         fuzzyMinRatio: float = 0.86,
         llmMaxTokens: int = DEFAULT_LLM_INPUT_RECONSTRUCTION_MAX_TOKENS,
         llmArtifactRootPath: Optional[Path] = None,
     ) -> None:
         self._evidenceBuilder = ProductInputEvidenceBuilder()
-        resolvedDictionaryPath = (
-            DEFAULT_PRODUCT_INPUT_DICTIONARY_PATH
-            if dictionaryPath is None
-            else Path(dictionaryPath)
-        )
-        dictionaryEntries = ProductDictionaryRepository(
-            resolvedDictionaryPath,
-        ).LoadEntries()
+        dictionaryEntries = ProductDictionaryRepository().LoadEntries()
         dictionaryRetriever = ProductDictionaryRetriever(
             dictionaryEntries,
             fuzzyMinRatio=fuzzyMinRatio,

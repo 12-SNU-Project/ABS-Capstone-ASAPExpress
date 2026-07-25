@@ -5,16 +5,19 @@ compiled CONDITIONS against the bound ProductUnderstandingFacts fields.
 
   confirmed   every condition of the code answered true  -> that code wins
   violated    any condition answered false               -> code is out
-  undecided   conditions unanswerable (missing data)     -> lexical fallback
+  undecided   conditions unanswerable (missing data)     -> question/BTI
 
 Confirmation requires the BOUND FIELD to answer (alias-expanded for
 species/contains) — a broad-pool match is not enough to confirm (precision:
-a stray OCR token must not certify a code). Violation uses the broad pool
-(recall: an exclusion must be caught wherever the token lives) with
-whole-phrase semantics ("common wheat flour" needs every content word).
+a stray OCR token must not certify a code). Canonical HS4/HS6 violations use
+the same bound field; legacy callers may still use their broad recall pool.
+Whole-phrase semantics require every content word in a condition such as
+"common wheat flour".
 
-Degrades to {} on any DB failure; the sidecar's absence turns the whole
-layer off.
+Legacy callers may still rank an undecided row lexically. HS4/HS6 call with
+``canonical_closed_world=True`` and never grant lexical selection authority.
+Degrades to {} on any DB failure; the sidecar's absence turns the whole layer
+off.
 """
 from __future__ import annotations
 
@@ -23,7 +26,16 @@ import os
 import re
 from typing import Any, Mapping
 
-from bussiness_logic.classification.rules.branch_predicate_evaluator import _aliases, _dig, _field_tokens, _stem
+from bussiness_logic.classification.rules.axis_field_binding import (
+    ResolveAxisFieldBinding,
+)
+from bussiness_logic.classification.rules.branch_predicate_evaluator import (
+    MatchPositivePhraseEvidence,
+    _aliases,
+    _dig,
+    _field_tokens,
+    _stem,
+)
 
 _TOKEN = re.compile(r"[a-z]+")
 
@@ -37,7 +49,7 @@ _BOOLEAN_REGISTER = {
 _UN_PREFIX = ("un", "non")
 
 # binding-v1: (cond_type|leaf) 확정 자격을 손 규칙이 아니라 실측 정밀도로.
-# artifacts/binding_v1.json (캘리브레이터 산출물). 파일 부재/게이트 OFF면
+# axis_field_binding table (캘리브레이터 산출물). 게이트 OFF면
 # 손 규칙(_TYPED_LEAVES 계열) 폴백. 임계는 env로 노출:
 #   ASAP_BINDING_MIN_N (기본 10) / ASAP_BINDING_MIN_PRECISION (기본 0.25
 #   — 형제 ~10개 기준 무작위 10%의 2.5배 lift)
@@ -46,19 +58,20 @@ _binding_cache: list[dict] = []
 
 def _binding_table() -> dict:
     if not _binding_cache:
-        import pathlib
+        from bussiness_logic.core.runtime_asset_repository import (
+            LoadSingletonAsset,
+        )
+
         loaded = {}
-        try:
-            path = os.environ.get("ASAP_BINDING_V1_PATH") or str(
-                pathlib.Path(__file__).resolve().parents[4] / "artifacts" / "binding_v1.json")
-            data = json.loads(open(path, encoding="utf-8").read())
-            min_n = int(os.environ.get("ASAP_BINDING_MIN_N", "10"))
-            min_p = float(os.environ.get("ASAP_BINDING_MIN_PRECISION", "0.25"))
-            for key, v in (data.get("pairs") or {}).items():
-                if int(v.get("n", 0)) >= min_n and float(v.get("precision", 0)) >= min_p:
-                    loaded[key] = True
-        except Exception:  # noqa: BLE001 — 산출물 부재 = 손 규칙 폴백
-            loaded = {}
+        data = LoadSingletonAsset("axis_field_binding")
+        min_n = int(os.environ.get("ASAP_BINDING_MIN_N", "10"))
+        min_p = float(os.environ.get("ASAP_BINDING_MIN_PRECISION", "0.25"))
+        for key, value in (data.get("pairs") or {}).items():
+            if (
+                int(value.get("n", 0)) >= min_n
+                and float(value.get("precision", 0)) >= min_p
+            ):
+                loaded[key] = True
         _binding_cache.append(loaded)
     return _binding_cache[0]
 
@@ -94,6 +107,16 @@ _TYPED_LEAVES = frozenset({
 _ALIAS_AXES = frozenset({
     "species", "contains",  # 구세대 명칭 호환
     "species_source", "material_composition", "product_identity",
+})
+
+# Product identity answers "what is the product?", not "which words occur in
+# its description or ingredients?".  A broad NTD/ingredient binding made
+# ``fish cake`` certify bakery heading 1905 and ``rice meal`` certify
+# ``rice paper``.  Keep only canonical identity fields for confirmation.
+_PRODUCT_IDENTITY_LEAVES = frozenset({
+    "commercial_identity",
+    "food_form",
+    "identity_terms",
 })
 
 
@@ -158,6 +181,8 @@ def EvaluateCodeDecision(
     fact_tokens: frozenset[str] | set[str],
     percentages: list[Any],
     quant_verdict_fn,
+    *,
+    canonical_closed_world: bool = False,
 ) -> tuple[str, list[dict[str, str]]]:
     """('confirmed'|'violated'|'undecided', detail) for ONE code's conditions."""
     pool = set(fact_tokens)
@@ -193,9 +218,25 @@ def EvaluateCodeDecision(
                             if len(w) >= 3}
             enc_exclusive = frozenset(enc_toks - primary)
     for cond in conditions:
+        why_suffix_sa = ""
         cond_type = str(cond.get("cond_type") or "")
         op = str(cond.get("op") or "")
         dto_field = str(cond.get("dto_field") or "")
+        binding_trace: dict[str, str] = {}
+        if canonical_closed_world and op in {
+            "has_token", "not_contains", "quant_gate"
+        }:
+            question_phrases = _phrase_sets(str(cond.get("value")))
+            question_tokens = frozenset(
+                token for phrase in question_phrases for token in phrase
+            )
+            resolved_binding = ResolveAxisFieldBinding(
+                cond_type,
+                product_facts,
+                questionTokens=question_tokens,
+            )
+            dto_field = resolved_binding.dtoField
+            binding_trace = resolved_binding.ToTrace()
         # [P1-D1] qualifier(그룹 공통 자격층)는 순위 합산 불참 — true 지지도
         # violated 감점도 없다. 판별이 아니라 소속이기 때문(조상 헤더 텍스트
         # 를 형제 개별 조건으로 실었던 R5 청양고추 사고의 구조적 처방).
@@ -204,7 +245,8 @@ def EvaluateCodeDecision(
             detail.append({"cond": cond_type, "op": op, "verdict": "skipped",
                            "field": dto_field.split(";")[0][:40],
                            "why": "qualifier_rank_excluded",
-                           "value": str(cond.get("value") or "")[:80]})
+                           "value": str(cond.get("value") or "")[:80],
+                           **binding_trace})
             continue
         verdict = "undecided"
         why = ""
@@ -223,8 +265,15 @@ def EvaluateCodeDecision(
         elif op == "not_contains":
             phrases = _phrase_sets(str(cond.get("value")))
             judge_pool = pool
+            evidence_field = (
+                dto_field or "__canonical_field_unbound__"
+                if canonical_closed_world
+                else dto_field or "*tokens*"
+            )
             why_suffix = ""
-            if str(cond.get("role") or "").strip() == "eliminator":
+            if canonical_closed_world and dto_field:
+                judge_pool = set(_field_tokens(product_facts, dto_field))
+            elif str(cond.get("role") or "").strip() == "eliminator":
                 # [P2-1] 거울 배제 이중 가드 — 잔반의 eliminator가 광역 풀
                 # 잡음에 위반당하면 승격 경로가 원천 봉쇄된다 (프로덕션
                 # 실측: 백과 유래 'sweet'가 청양고추 59의 not_contains
@@ -238,18 +287,129 @@ def EvaluateCodeDecision(
                 if dto_field and dto_field != "*tokens*":
                     judge_pool = set(_field_tokens(product_facts, dto_field))
                 judge_pool = judge_pool - enc_exclusive
-            if any(p <= judge_pool for p in phrases):
+            matches = [
+                MatchPositivePhraseEvidence(
+                    phrase, product_facts, evidence_field, judge_pool,
+                )
+                for phrase in phrases
+            ]
+            if any(matched for matched, _ in matches):
                 verdict = "false"
                 why = "exclusion_present_in_pool"
+            elif (
+                evidence_field != "*tokens*"
+                and _field_tokens(product_facts, evidence_field)
+            ):
+                verdict = "true"
+                why = "canonical_field_absence"
             else:
                 why = "exclusion_absent"
+                guarded = [reason for matched, reason in matches
+                           if not matched and reason not in {"phrase_absent"}]
+                if guarded:
+                    why += f";{guarded[0]}"
                 if judge_pool is not pool and any(p <= pool for p in phrases):
                     # 가드가 광역 풀 위반을 실제로 막았음을 노출 (실증용)
                     why_suffix = ";broad_pool_hit_guarded"
             why += why_suffix
         elif op == "has_token":
             phrases = _phrase_sets(str(cond.get("value")))
-            bound = _field_tokens(product_facts, str(cond.get("dto_field") or ""))
+            # [13회차 L §7] 소스별 축 관할 — verdict의 원천(bound)부터
+            # 게이트 통과 경로만으로 구성한다(why 산출만 걸러서는 광역
+            # bound가 verdict true를 세워 게이트가 무력 — C25 실측).
+            _sa_on0 = (os.environ.get(
+                "ASAP_SOURCE_AXIS", "1") or "1").strip() != "0"
+            _COMP_EXCL0 = ("material_composition",
+                           "quantitative_threshold", "species_source")
+            _COMP_FIRST0 = ("preservation_state", "processing_method",
+                            "physical_form", "condition_quality")
+            _paths_all0 = [p0.strip() for p0 in
+                           dto_field.split(";")
+                           if p0.strip()]
+            _comp_toks0: set = set()
+            if _sa_on0 and cond_type in _COMP_FIRST0:
+                for p0 in _paths_all0:
+                    if p0.startswith("composition_facts."):
+                        _comp_toks0 |= _field_tokens(product_facts, p0)
+            _paths_ok0 = []
+            _sconf0 = False
+            # [13회차 M 결함3] 전속 발동 요건 정밀화 — '충전 여부'가
+            # 아니라 '해당 축 표적의 실물 존재': sauce_only 서류(압구정
+            # 주꾸미 — 본품 어휘 0회·ingredient_classes 空·principal
+            # 空)가 entries 충전만으로 종 전속을 발동시켜 lane(webfoot
+            # octopus)을 차단하던 함정. classes·principal이 모두 空이면
+            # 그 서류는 본품 성분을 다루지 않는다(coverage=sauce_only의
+            # 이산 프록시 — 메인 산출측이 coverage를 cf에 실으면 태그
+            # 정본으로 교체·2단). 해제 시 identity 폴백 허용(C25 ②
+            # 부재 판정의 정밀화).
+            _comp_has_target0 = True
+            if _sa_on0 and cond_type in _COMP_EXCL0:
+                _cf0 = product_facts.get("composition_facts") or {}
+                if (not (_cf0.get("ingredient_classes") or [])
+                        and not str(_cf0.get("principal_ingredient")
+                                    or "").strip()):
+                    _comp_has_target0 = False
+            for p0 in _paths_all0:
+                if (_sa_on0 and cond_type in _COMP_EXCL0
+                        and _comp_has_target0
+                        and p0.startswith("identity_hints.")):
+                    continue          # ① composition 전속
+                if (
+                    _sa_on0
+                    and cond_type == "product_identity"
+                    and p0.rsplit(".", 1)[-1]
+                    not in _PRODUCT_IDENTITY_LEAVES
+                ):
+                    continue          # 정체 질문에 NTD/성분 광역 토큰 사용 금지
+                if (_sa_on0 and cond_type in _COMP_FIRST0
+                        and p0.startswith("identity_hints.")
+                        and _comp_toks0):
+                    _pt0 = _field_tokens(product_facts, p0)
+                    if _pt0 and not (_pt0 & _comp_toks0):
+                        _sconf0 = True   # ④ 문서 값과 무교차 지각 값 기각
+                        continue
+                _paths_ok0.append(p0)
+            _dto_eff = ";".join(_paths_ok0)
+            bound = _field_tokens(product_facts, _dto_eff)
+            if _sconf0:
+                why_suffix_sa = ";source_conflict"
+            if cond_type == "species_source":
+                from bussiness_logic.classification.rules.species_taxonomy import (
+                    EvaluateSpeciesQuestion,
+                )
+
+                try:
+                    taxonomy_values = json.loads(str(cond.get("value") or "null"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    taxonomy_values = [str(cond.get("value") or "")]
+                if not isinstance(taxonomy_values, list):
+                    taxonomy_values = [taxonomy_values]
+                taxonomy_result = EvaluateSpeciesQuestion(
+                    taxonomy_values,
+                    product_facts,
+                    _paths_ok0,
+                )
+                verdict = {
+                    "O": "true",
+                    "X": "false",
+                    "SILENCE": "undecided",
+                }[taxonomy_result.verdict]
+                answers.append(verdict)
+                detail.append({
+                    "cond": cond_type,
+                    "op": op,
+                    "verdict": verdict,
+                    "field": dto_field.split(";")[0][:40],
+                    "why": (
+                        f"field_hit:exact_taxonomy:{taxonomy_result.reason}"
+                        if verdict == "true"
+                        else f"exact_taxonomy:{taxonomy_result.reason}"
+                    ),
+                    "value": str(cond.get("value") or "")[:80],
+                    **binding_trace,
+                    **taxonomy_result.ToTrace(),
+                })
+                continue
             # ── 극성 평가 (ASAP_DECISION_POLARITY, 기본 ON) ──
             polarity_on = (os.environ.get(
                 "ASAP_DECISION_POLARITY", "1") or "1").strip() != "0"
@@ -324,9 +484,10 @@ def EvaluateCodeDecision(
                     answers.append(verdict)
                     detail.append({"cond": cond_type, "op": op, "verdict": verdict,
                                    "field": dto_field.split(";")[0][:40], "why": why,
-                                   "value": str(cond.get("value") or "")[:80]})
+                                   "value": str(cond.get("value") or "")[:80],
+                                   **binding_trace})
                     continue
-            if cond_type in _ALIAS_AXES:
+            if cond_type in _ALIAS_AXES and cond_type != "species_source":
                 alias = _aliases()
                 bound = bound | {c for t in bound for c in alias.get(t, ())}
             if any(p <= bound for p in phrases):
@@ -343,11 +504,21 @@ def EvaluateCodeDecision(
                     "ASAP_ALIAS_CONFIRM_GUARD", "1") or "1").strip() != "0"
                 hit_paths = []
                 alias_paths = []
-                for path in dto_field.split(";"):
-                    path = path.strip()
+                # [13회차 L §7-①②④] 입력 소스별 축 관할 게이트 —
+                # composition_facts=coi_form 기원·identity_hints=지각
+                # (page/LLM) 기원의 필드-프록시(1단·태그 스키마 前).
+                #  ① 성분·함량·종 축은 composition 전속 — identity 폴백
+                #     소비 금지(새우살 coi가 identity 'fish' 계열로
+                #     03045910 어류행이 되던 실측의 처방).
+                #  ② 보존·조리·형태 축은 composition 우선 — composition
+                #     경로에 값이 실재하고 identity 값이 다르면 identity
+                #     기각(④ 충돌 게이트) + source_conflict 서명.
+                #  정체 축은 전 소스 허용(서열은 기존 typed/enc 등급
+                #  구조가 담당 — ③은 대장 명문화). ASAP_SOURCE_AXIS=0 복귀.
+                for path in _paths_ok0:
                     ptoks = _field_tokens(product_facts, path)
                     expanded = ptoks
-                    if cond_type in _ALIAS_AXES:
+                    if cond_type in _ALIAS_AXES and cond_type != "species_source":
                         expanded = ptoks | {c for t in ptoks for c in _aliases().get(t, ())}
                     if any(p <= ptoks for p in phrases):
                         hit_paths.append(path.rsplit(".", 1)[-1])
@@ -388,13 +559,16 @@ def EvaluateCodeDecision(
             elif not bound:
                 why = "field_empty"       # 답안지 부재 — DTO가 이 질문에 침묵
             else:
-                why = "field_no_match"    # 필드는 찼는데 값 불일치 (어휘 갭/오답)
+                verdict = "false"
+                why = "canonical_field_mismatch"
         # [12회차 3-수리] 그룹 조건은 answers에 직접 넣지 않고 버킷으로
         # 모은다. 종전엔 루프 뒤에서 conditions 인덱스로 answers를
         # 필터했는데, **answers는 skipped 조건을 담지 않아 인덱스가
         # 어긋났다** — 그래서 그룹 OR이 서명만 남기고 실판정에는
         # 반영되지 않았다(0710 undecided의 진짜 원인).
         _alt_g = str(cond.get("alt_group") or "")
+        if why_suffix_sa and why:
+            why = why + why_suffix_sa
         if _alt_g and _alt_on:
             _grp_answers.setdefault(_alt_g, []).append(verdict)
         else:
@@ -402,7 +576,8 @@ def EvaluateCodeDecision(
         det_entry = {"cond": cond_type, "op": op, "verdict": verdict,
                      "field": dto_field.split(";")[0][:40], "why": why,
                      "value": str(cond.get("value") or "")[:80],
-                     "alt_group": str(cond.get("alt_group") or "")}
+                     "alt_group": str(cond.get("alt_group") or ""),
+                     **binding_trace}
         # [기록 의무화] 근거 등급은 항상 서명 — 판례(precedent)는 원천 사건
         # 결정번호(source_text의 BTI: 접두)까지 병기한다 (UI 노출·감사 실물).
         _grade = str(cond.get("grade") or "").strip()
@@ -445,8 +620,12 @@ def EvaluateCodeDecision(
         # 확정을 가른다. ASAP_DECISION_STATE_ALONE=1 복귀.
         state_types = {"processing_method", "preservation_state",
                        "physical_form", "condition_quality"}
-        if gate_on and (os.environ.get(
-                "ASAP_DECISION_STATE_ALONE", "0") or "0").strip() != "1":
+        if (
+            not canonical_closed_world
+            and gate_on
+            and (os.environ.get(
+                "ASAP_DECISION_STATE_ALONE", "0") or "0").strip() != "1"
+        ):
             true_types = {d["cond"] for d in detail if d["verdict"] == "true"}
             if true_types and true_types <= state_types:
                 for d in detail:
@@ -516,9 +695,30 @@ def EvaluateCodeDecision(
             ranks = [rank_by_tok[tk] for tk in vt if tk in rank_by_tok]
             return (1.0 / min(ranks)) if ranks else 0.0
 
-        binding = _binding_table() if (os.environ.get(
-            "ASAP_BINDING_V1", "1") or "1").strip() != "0" else {}
-        if binding:
+        binding = (
+            {}
+            if canonical_closed_world
+            else (
+                _binding_table()
+                if (os.environ.get(
+                    "ASAP_BINDING_V1", "1") or "1").strip() != "0"
+                else {}
+            )
+        )
+        if canonical_closed_world:
+            # The compiled decision row already binds the legal question to a
+            # canonical DTO field. A direct field match (or an answered
+            # quantitative gate) is therefore sufficient authority; the
+            # legacy empirical binding-v1 table must not veto it.
+            typed_ok = any(
+                (d["op"] == "quant_gate" and d["verdict"] == "true")
+                or (
+                    d["verdict"] == "true"
+                    and str(d.get("why") or "").startswith("field_hit:")
+                )
+                for d in detail
+            )
+        elif binding:
             # 측정 산출물 모드: (cond|leaf) 쌍의 실측 정밀도가 자격을 준다.
             # [12회차 §C] provenance 편입 — 자격 키를 (cond|field)에서
             # **(cond|field|provenance)** 로 확장한다. 같은 'mollusc'라도

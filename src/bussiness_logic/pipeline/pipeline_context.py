@@ -117,6 +117,7 @@ class PipelineContext:
             "candidate_code_set": (
                 blackboardSnapshot.get("candidate_code_sets") or [None]
             )[-1],
+            "user_questions": list(blackboardSnapshot.get("user_questions") or []),
             "document_package": (
                 blackboardSnapshot.get("document_packages") or [None]
             )[-1],
@@ -142,6 +143,7 @@ class PipelineContext:
             "raw_document_package": rawDocumentPackage,
             "document_package": documentPackage,
             "candidate_code_set": candidateCodeSet,
+            "user_questions": list(blackboard.get("user_questions") or []),
             "step_results": list(self.stepResults),
             "component_results": list(self.componentResults),
             "component_runs": _ReadComponentRuns(self.store),

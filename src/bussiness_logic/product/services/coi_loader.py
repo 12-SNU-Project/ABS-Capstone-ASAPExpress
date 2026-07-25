@@ -1,9 +1,9 @@
 """COI 로더 — 정규화 COI 폼(asap-coi-v1)의 로딩·주입이 주 기능.
 
 [신형 — 주 경로] 서비스 전제는 "COI를 입력 서류로 받는다":
-  업로드 COI → DB/sources/coi_normalize.py(정규화·번역) → 폼 JSON
-  → 본 모듈이 product_map으로 찾아 composition_lane에 가산 주입.
-  게이트: ASAP_COI_FORM_DIR. 주입 규칙(교차 합의제·기존값 보존·
+  업로드 COI → 정규화·번역 → coi_form/coi_product_map
+  → 본 모듈이 PostgreSQL에서 찾아 composition_lane에 가산 주입.
+  게이트: ASAP_COI_FORM_DIR=0. 주입 규칙(교차 합의제·기존값 보존·
   sauce_only 주성분 금지)은 coi50 스모크에서 실측 검증.
 
 [파싱 유틸] ParseCoiComposition/_FindTableSheet 등은 정규화기의 원료.
@@ -24,6 +24,10 @@ from typing import Iterable
 
 
 import os
+from bussiness_logic.core.runtime_asset_repository import (
+    LoadCoiForms,
+    LoadCoiProductMap,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 # ASAP_COI_ROOT로 오버라이드 가능 — 실물 46파일은 현재 ~/ASAP_A/test에 있다
@@ -167,7 +171,7 @@ _HEADER_KEYS = ("품명", "성분", "함량")
 _PERCENT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*%?")
 
 
-def _FindTableSheet(workbook):
+def _FindTableSheet(workbook, sheetName: str | None = None):
     """유효 헤더(품명·성분·함량)를 가진 시트 중 데이터 행이 가장 많은 것.
 
     실물 COI는 다중 시트에 예시 시트가 섞여 있다(1~2번째가 작성 예시인
@@ -178,7 +182,12 @@ def _FindTableSheet(workbook):
     for sheet in workbook.worksheets:
         if "예시" in str(sheet.title):
             continue
+        # [07-20] 제품별 시트 분리 — 한 파일에 상품별 시트(설기·콩찰떡)가
+        # 공존하는 실물. 시트 지정 시 그 시트만 파싱(정규화기 분리 산출용).
+        if sheetName and str(sheet.title) != sheetName:
+            continue
         header_idx, colmap = None, {}
+        fb_idx, fb_map = None, {}
         for i, row in enumerate(sheet.iter_rows(values_only=True)):
             cells = {j: NormalizeText(v).lower() for j, v in enumerate(row) if v is not None}
             hits: dict[str, int] = {}
@@ -200,8 +209,20 @@ def _FindTableSheet(workbook):
                     if "원산지" in v or "origin" in v:
                         colmap.setdefault("원산지", j)
                 break
+            # [07-20] 폴백 헤더 — 품명 열 없는 2단 작성표 실물(전복미역국:
+            # r7 '성분/영문/함량/1차 원료명', 품명은 별도 행). 성분∧함량만
+            # 있는 첫 행을 예비 헤더로 기억, 정헤더 부재 시에만 사용.
+            if (fb_idx is None and "성분" in hits and "함량" in hits):
+                fb_idx, fb_map = i, dict(hits)
+                for j, v in cells.items():
+                    if "재료명" in v or "breakdown" in v:
+                        fb_map.setdefault("재료명", j)
+                    if "원산지" in v or "origin" in v:
+                        fb_map.setdefault("원산지", j)
             if i > 120:
                 break
+        if header_idx is None and fb_idx is not None:
+            header_idx, colmap = fb_idx, fb_map
         if header_idx is None:
             continue
         data_rows = 0
@@ -217,7 +238,8 @@ def _FindTableSheet(workbook):
     return best
 
 
-def ParseCoiComposition(path: Path, *, maxEntries: int = 60) -> list[dict]:
+def ParseCoiComposition(path: Path, *, maxEntries: int = 60,
+                        sheetName: str | None = None) -> list[dict]:
     """COI 원료풀이 표 → 구조화 성분 엔트리 (표기순 = 함량 내림차순 규칙).
 
     반환: [{ingredient_name, component, percent, order_index, origin,
@@ -233,7 +255,7 @@ def ParseCoiComposition(path: Path, *, maxEntries: int = 60) -> list[dict]:
     except Exception:  # noqa: BLE001 — 손상 파일 = 증거 없음
         return []
     try:
-        found = _FindTableSheet(workbook)
+        found = _FindTableSheet(workbook, sheetName=sheetName)
         if not found:
             return []
         _n, sheet, header_idx, colmap = found
@@ -272,6 +294,15 @@ def ParseCoiComposition(path: Path, *, maxEntries: int = 60) -> list[dict]:
                 "origin": cell(c_org),
                 "source": "coi",
             })
+        # [07-20] 분율 함량 정규화 — 작성표가 %를 소수 분율로 담는 실물
+        # (전복미역국 자숙전복 0.04 = 4%). 전량이 1 이하일 때만 ×100 —
+        # 기존 백분율 폼(33.3 등)은 무접촉(이산 판정).
+        pcts = [e["percent"] for e in entries
+                if isinstance(e.get("percent"), (int, float))]
+        if pcts and max(pcts) <= 1.0:
+            for e in entries:
+                if isinstance(e.get("percent"), (int, float)):
+                    e["percent"] = round(e["percent"] * 100, 2)
         return entries
     finally:
         workbook.close()
@@ -302,61 +333,16 @@ def SummarizeCoiMatches(
 # ══════════════════════════════
 # 신형: 정규화 COI 폼 로딩·주입 (주 경로)
 # ══════════════════════════════
-import csv
-import json
 from typing import Any
 
-_MAP_CACHE: dict[str, list[str]] | None = None
-_FORM_CACHE: dict[str, dict] = {}
-
-
-def _form_dir() -> Path | None:
-    """COI 폼 디렉토리 — 기본 ON (설계자 지시 07-16: 재구성 파서+COI 병용).
-
-    data/coi_normalized가 있으면 그게 기본이고, ASAP_COI_FORM_DIR로
-    경로 교체(값이 0/off면 명시 차단)한다 — 이전의 '설정 시에만' 기본은
-    스모크가 COI 없이 도는 사고를 만들었다(22건 캐시 런 실측).
-    """
-    raw = (os.environ.get("ASAP_COI_FORM_DIR") or "").strip()
-    if raw.lower() in ("0", "off", "false"):
-        return None
-    if raw:
-        path = Path(raw).expanduser()
-        return path if path.exists() else None
-    default = Path(__file__).resolve().parents[4] / "data" / "coi_normalized"
-    return default if default.exists() else None
+def _forms_enabled() -> bool:
+    """Normalized COI is default-on and database-backed."""
+    raw = (os.environ.get("ASAP_COI_FORM_DIR") or "").strip().lower()
+    return raw not in ("0", "off", "false")
 
 
 def _nfc(t: object) -> str:
     return unicodedata.normalize("NFC", str(t or "")).replace("\xa0", " ").strip()
-
-
-def _load_map(root: Path) -> dict[str, list[str]]:
-    global _MAP_CACHE
-    if _MAP_CACHE is not None:
-        return _MAP_CACHE
-    out: dict[str, list[str]] = {}
-    try:
-        for r in csv.DictReader(open(root / "product_map.csv", encoding="utf-8-sig")):
-            name, fnames = _nfc(r.get("제품명")), str(r.get("coi_file") or "").strip()
-            if name and fnames:
-                out[name] = [f.strip() for f in fnames.split(";") if f.strip()]
-    except Exception:  # noqa: BLE001 — 매핑 부재 = 전부 no-op
-        out = {}
-    _MAP_CACHE = out
-    return out
-
-
-def _load_form(root: Path, fname: str) -> dict | None:
-    if fname in _FORM_CACHE:
-        return _FORM_CACHE[fname]
-    try:
-        form = json.loads((root / fname).read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        form = None
-    if form is not None:
-        _FORM_CACHE[fname] = form
-    return form
 
 
 def _merge_forms(forms: list[dict]) -> dict:
@@ -365,6 +351,12 @@ def _merge_forms(forms: list[dict]) -> dict:
         "principal_candidates": [], "principal_candidates_en": [],
         "accessory_ingredients": [],
         "coverage": "full" if any(f.get("coverage") == "full" for f in forms) else "sauce_only",
+        # [07-20 Task A] 구성품 병합 표식 — 밀키트(어묵+김치+면 등 별
+        # 제조사 서류 결합)의 % 는 **구성품 내부 비율**(어묵 90%는 어묵
+        # 봉지 안에서 90%지 제품의 90% 아님)이라 제품 레벨 quant로 쓰면
+        # 오독한다. 구성품 상호 비율 데이터가 없으므로 quant 미주입(미결
+        # > 오판 — 원리 8). 단일 폼(len==1)은 표식 없음(정상 % 주입).
+        "_constituent_merge": len(forms) > 1,
     }
     order = 0
     for f in forms:
@@ -406,10 +398,16 @@ def _pipeline_entries(form: dict) -> list[dict]:
             pct = float(pct) if pct not in (None, "") else None
         except (TypeError, ValueError):
             pct = None
+        component = str(e.get("section") or "")
+        role = _CanonicalComponentRole(
+            str(e.get("role") or "other"),
+            component=component,
+            ingredient=display,
+        )
         rows.append({
             "ingredient_name": display,
-            "component": e.get("section") or "",
-            "role": e.get("role") or "other",
+            "component": component,
+            "role": role,
             "percent": pct,
             "order_index": e.get("order_index"),
             "origin": e.get("origin") or "",
@@ -418,11 +416,105 @@ def _pipeline_entries(form: dict) -> list[dict]:
     return rows
 
 
+_COMPONENT_ROLE_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(만두피|피$|도우|반죽|크러스트|wrapper|dough|crust)", re.I), "wrapper"),
+    (re.compile(r"(만두소|소$|속$|필링|filling)", re.I), "filling"),
+    (re.compile(r"(소스|양념|시즈닝|드레싱|비빔장|sauce|seasoning|dressing)", re.I), "sauce"),
+    (re.compile(r"(육수|국물|스프|다시|broth|stock|soup\s*base)", re.I), "broth"),
+    (re.compile(r"(면$|면류|생면|숙면|건면|noodle)", re.I), "noodle"),
+    (re.compile(r"(고명|토핑|후레이크|건더기|topping|flake)", re.I), "topping"),
+)
+_INGREDIENT_LIQUID_ROLE_RE = re.compile(
+    r"(소스|양념|드레싱|시즈닝|육수|국물|sauce|dressing|seasoning|broth|stock)",
+    re.I,
+)
+
+
+def _CanonicalComponentRole(
+    role: str,
+    *,
+    component: str,
+    ingredient: str,
+) -> str:
+    """Backfill structural roles in legacy normalized COI forms.
+
+    New normalized forms carry ``role`` already. Older forms frequently have
+    English component labels such as ``Jjambbong Sauce`` but ``role=other``.
+    Resolve only generic document vocabulary; never inspect a product name or
+    assign an HS/CN code.
+    """
+    current = str(role or "").strip().lower()
+    if current and current != "other":
+        return current
+    componentText = NormalizeText(component)
+    for pattern, resolved in _COMPONENT_ROLE_RULES:
+        if pattern.search(componentText):
+            return resolved
+    liquidMatch = _INGREDIENT_LIQUID_ROLE_RE.search(NormalizeText(ingredient))
+    if liquidMatch:
+        token = liquidMatch.group(0).lower()
+        return "broth" if token in {"육수", "국물", "broth", "stock"} else "sauce"
+    return "other"
+
+
+def _IngredientKey(value: object) -> str:
+    """Canonical key used only to apply COI-over-reconstruction precedence."""
+    text = NormalizeText(value).split("/", 1)[0]
+    text = re.sub(r"\([^)]*\)", "", text).lower()
+    return re.sub(r"[^0-9a-z가-힣]+", "", text)
+
+
+_REV_STAMP = re.compile(r"_2\d{5}(?=_|\.|$)")
+
+
+def _dedupe_versions(fnames: list[str]) -> list[str]:
+    """개정판 규약(설계자 07-20): 같은 서류 계보는 최신본 단일 선택.
+
+    계보 = 파일명에서 날짜 스탬프(_2yymdd) 이후를 제거한 몸통. 같은
+    계보의 복수 파일(원본+개정판)은 '추가 구성품'이 아니라 대체 관계다
+    — 병합하면 성분 이중 주입(오징어무국 구판+첨가당 확인 개정판 실측).
+    구성품 서류(계보 상이 — 면·소스·본품)만 병합 대상으로 남긴다.
+    """
+    groups: dict[str, list[str]] = {}
+    for fn in fnames:
+        stem = fn.rsplit(".", 1)[0]
+        m = _REV_STAMP.search(stem)
+        key = stem[: m.start()] if m else stem
+        groups.setdefault(key, []).append(fn)
+
+    def _rev(fn: str) -> tuple[int, str]:
+        m2 = _REV_STAMP.search(fn)
+        return (int(m2.group(0)[1:]) if m2 else 0, fn)
+
+    return sorted(max(fs, key=_rev) for fs in groups.values())
+
+
+def _dedupe_content(forms: list[dict]) -> list[dict]:
+    """같은 서류의 재정규화 중복(스캔 변형) 제거 — 결정론.
+
+    성분명 집합이 다른 폼의 부분집합이면 낙방(초집합 보존·동일 집합은
+    선착 보존). 실측: 우동전골 '전체 구성품' 목록 2스캔 병합 → 이중.
+    """
+    def _names(f: dict) -> set:
+        return {str(e.get("name_en") or e.get("name_ko") or "").strip().lower()
+                for e in (f.get("entries") or [])} - {""}
+
+    sets_ = [_names(f) for f in forms]
+    keep = []
+    for i, f in enumerate(forms):
+        dominated = any(
+            j != i and sets_[i] <= sets_[j]
+            and (sets_[i] < sets_[j] or j < i)
+            for j in range(len(forms)))
+        if not dominated:
+            keep.append(f)
+    return keep or forms
+
+
 def FindFormForProduct(product_name: str) -> dict | None:
-    root = _form_dir()
-    if root is None:
+    if not _forms_enabled():
         return None
-    mapping = _load_map(root)
+    mapping = LoadCoiProductMap()
     fnames = mapping.get(_nfc(product_name))
     if not fnames:
         # 퍼지 폴백: 표기 차('다진 새우살' vs '다짐살 9종')로 exact 실패 시
@@ -438,9 +530,12 @@ def FindFormForProduct(product_name: str) -> dict | None:
         fnames = best
     if not fnames:
         return None
-    forms = [f for f in (_load_form(root, fn) for fn in fnames) if f]
+    fnames = _dedupe_versions(fnames)
+    available = LoadCoiForms()
+    forms = [available[fn] for fn in fnames if fn in available]
     if not forms:
         return None
+    forms = _dedupe_content(forms)
     return forms[0] if len(forms) == 1 else _merge_forms(forms)
 
 
@@ -455,9 +550,47 @@ def InjectIntoProductUnderstanding(pu: dict[str, Any]) -> dict[str, Any] | None:
     cf = dict(pu.get("composition_facts") or {})
     ih = pu.get("identity_hints") or {}
     existing = [e for e in (cf.get("ingredient_entries") or []) if isinstance(e, dict)]
-    seen = {str(e.get("ingredient_name") or "").strip() for e in existing}
-    added = [e for e in entries if str(e.get("ingredient_name") or "").strip() not in seen]
-    cf["ingredient_entries"] = existing + added
+    # Composition authority: normalized COI first, reconstruction fills only
+    # names absent from COI. Keep repeated COI ingredients across distinct
+    # components because their structural role is legally meaningful.
+    added: list[dict[str, Any]] = []
+    coiSeen: set[tuple[str, str]] = set()
+    for e in entries:
+        nm = _IngredientKey(e.get("ingredient_name"))
+        component = NormalizeText(e.get("component")).lower()
+        key = (component, nm)
+        if not nm or key in coiSeen:
+            continue
+        coiSeen.add(key)
+        added.append(e)
+    coiNames = {_IngredientKey(e.get("ingredient_name")) for e in added}
+    reconstructionFillers = [
+        e for e in existing
+        if _IngredientKey(e.get("ingredient_name")) not in coiNames
+    ]
+    cf["ingredient_entries"] = added + reconstructionFillers
+
+    # [07-20 배선] 함량 주입 — entries의 percent가 quant 소비 필드
+    # (composition_facts.ingredient_percentages)로 안 옮겨지던 결손.
+    # 실측: 전복미역국 재정규화로 전복 4%가 폼에 실렸는데 pct=[]라
+    # 주해 2(어육 20%) 중재가 영구 불능이었다. 기존값 보존(가산).
+    # [Task A] 구성품 병합 폼은 % 가 제품 레벨이 아니라 quant 미주입.
+    if form.get("_constituent_merge"):
+        _pct_add = []
+    else:
+        _pct_existing = {str(x.get("ingredient") or "").strip()
+                         for x in (cf.get("ingredient_percentages") or [])
+                         if isinstance(x, dict)}
+        _pct_add = []
+        for e in added:
+            nm = str(e.get("ingredient_name") or "").strip()
+            pv = e.get("percent")
+            if nm and isinstance(pv, (int, float)) and nm not in _pct_existing:
+                _pct_add.append({"ingredient": nm, "percent": float(pv)})
+                _pct_existing.add(nm)
+    if _pct_add:
+        cf["ingredient_percentages"] = (
+            list(cf.get("ingredient_percentages") or []) + _pct_add)
 
     cands = [str(c) for c in (form.get("principal_candidates") or []) if c]
     cands_en = [str(c) for c in (form.get("principal_candidates_en") or [])]
@@ -506,10 +639,29 @@ def InjectIntoProductUnderstanding(pu: dict[str, Any]) -> dict[str, Any] | None:
             if len(by_pct) >= 2:
                 principal = max(by_pct)[1]
         cf["coi_principal_candidates"] = cands
-    # 기존 값 보존: 구식 로더·재구성이 이미 채운 주성분은 덮지 않는다 —
-    # 교차 확정값은 빈자리만 채우고, 불일치는 후보 병기로만 남는다.
-    if principal and not str(cf.get("principal_ingredient") or "").strip():
+    # Field-level authority: a cross-confirmed COI principal supersedes the
+    # reconstruction guess. Preserve the displaced value in the audit trace.
+    if principal:
+        previousPrincipal = str(cf.get("principal_ingredient") or "").strip()
         cf["principal_ingredient"] = principal
+        if previousPrincipal and _IngredientKey(previousPrincipal) != _IngredientKey(principal):
+            traces = list(cf.get("extraction_traces") or [])
+            traces.append({
+                "source_field_name": "coi_normalized",
+                "source_text": principal,
+                "selected_span": principal,
+                "output_field": "principal_ingredient",
+                "normalized_value": principal,
+                "extraction_method": "coi_authority_override",
+                "decision_reason": (
+                    "COI principal supersedes reconstruction principal "
+                    f"({previousPrincipal})"
+                ),
+                "confidence": 1.0,
+                "unresolved_reason": "",
+                "source_refs": [],
+            })
+            cf["extraction_traces"] = traces
     if form.get("accessory_ingredients"):
         cf["accessory_ingredients"] = form["accessory_ingredients"]
     roles = {e.get("role") for e in entries}
@@ -525,9 +677,13 @@ def InjectIntoProductUnderstanding(pu: dict[str, Any]) -> dict[str, Any] | None:
         from bussiness_logic.product.components.product_understanding import (
             ProductUnderstandingComponent as _PU,
         )
-        cf["ingredient_percentages"] = _PU._IngredientPercentagesFromEntries(
-            cf["ingredient_entries"],
-        )
+        # [Task A] 구성품 병합 폼은 % 재계산도 건너뛴다 — entries의
+        # percent가 구성품 내부 비율이라 제품 레벨 quant로 굳으면 오독
+        # (우동전골 어묵 90% → 16류 오견인). 미결 > 오판.
+        if not form.get("_constituent_merge"):
+            cf["ingredient_percentages"] = _PU._IngredientPercentagesFromEntries(
+                cf["ingredient_entries"],
+            )
         # ingredient_classes도 lane 내부 시점 계산이라 신폼 entries 미반영
         # (실측: 꼬마바 4→1, 산채 2→0 — hs2/hs4 지지 실탄 소실). 재계산.
         merged_classes = _PU._BuildIngredientClasses(

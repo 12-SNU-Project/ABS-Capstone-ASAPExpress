@@ -118,8 +118,6 @@ _MATERIAL_ARM_LEXICON = frozenset({
 # 목록 등재만으로 통과된다(조립부 수정 불필요).
 SIGNATURE_CONTRACT: tuple[str, ...] = (
     "residual_phase",            # 잔반 3상 (qualified_named/residual_promoted/unqualified_question)
-    "identity_axis_lead",        # 정체 축 서열 교대
-    "window_ticket_lead",        # 창밖 티켓 동점·우위 교대
     "router_trust_gate",         # G2 교대 서명
     "router_trust_entry",        # G1 입장권 엔트리
     "merge_evidence_gated",      # 병합 게이트 ON 강등
@@ -127,6 +125,7 @@ SIGNATURE_CONTRACT: tuple[str, ...] = (
     "summoned_by",               # BTI 소환 입장권 서명
     "axis_tiebreak_transitional",  # §5-(c) 과도기 동점 구제(소멸 예정 §13)
     "gri3",                       # GRI 3 계단 서명 (gri3a/3b/3c)
+    "gri_bti",                    # 다중 O에서 동일 scope EBTI 코드 확정 근거
     "gri3_family_demoted",       # [I §1] GRI 기판력 — 패자 가족 하위 전파
     "precedent_lead",            # [I §2] 판례 우세(BTI refs)
     "overrides_confirmed",       # [I §2] 상충 병기(UI 재료)
@@ -160,27 +159,73 @@ def _summon_query(product_facts: dict) -> set:
 
 def _ApplyGri3(ranked: list, product_facts: dict,
                barred_families: set | None = None) -> list:
-    """[12회차 §2-B + F-HOTFIX] GRI 3 계단 — 다중 확정(confirmed ≥2)
-    서열. 이산·점수 무관·순서 고정 3(a)→3(b)→3(c), 자리 보존 재배열.
+    """GRI3 fixed runtime authority.
 
-    F-HOTFIX 보강 2건(면류 전멸 부검 — 칼국수 2104 conf 55 vs 1902
-    conf 52에서 3(b) 침묵 → 3(c)가 2104를 골랐던 실측):
-    - 3(b) 주성분 신호 사다리: principal_ingredient 토큰이 무의미
-      (한글 폴백 '베테랑 칼국수')여도 composition_terms('flour')·
-      principal_candidates가 실물로 남는다 — 전부 소비(창작 0).
-    - 3(b) 매칭 lane 사다리: 후보 '조건 값' 교차가 전무하면(1902 값에
-      flour 없음 실측) **챕터 파생 소유 어휘**(derived chapter_keywords
-      — 기계 도출 실물)와 교차: flour는 ch19 소유·ch21 비소유라
-      1902가 유일 후보로 성립한다. 유일성 요구는 불변(양쪽 교차 시
-      기권 → 다음 단).
-    킬스위치 ASAP_GRI3. 서명 gri3a/3b/3c(+trace 노출은 조립부).
+    법정 cascade(_ApplyGri3Law)가 유일 경로. 구 손휴리스틱(prep-cut·head
+    추출·챕터어휘 lane·칼국수/전복미역국/매운탕 per-제품 핫픽스)은 물리
+    삭제 — 답맞춤 하드코딩 청산."""
+    return _ApplyGri3Law(
+        ranked,
+        product_facts,
+        barred_families,
+        rule_family="gri3",
+    )
+
+
+def _ApplyGri6(ranked: list, product_facts: dict,
+               barred_families: set | None = None, *,
+               prefix_len: int = 6) -> list:
+    """[GRI 6 · 2026-07-24 설계자 "다중O 해소 방법 1"] 소호 준용 래퍼.
+
+    원문(WCO GIR 6): "classification of goods in the subheadings **of a
+    heading** … only subheadings at the **same level** are comparable" —
+    같은 부모(상위 prefix) 그룹 **안에서만** 법정 캐스케이드(3a→3b→3c)를
+    재실행한다(mutatis mutandis — 엔진 재사용·스코프만 신설). 교차부모
+    경쟁은 GRI6 관할이 아님(부모 호는 상위 레벨 기판정) — 그룹 밖 서열
+    불변. 그룹 크기 1 = 무발동. 반환 = 그룹별 패자 합집합(3c 무기판력
+    규율은 _ApplyGri3Law 내부 동일).
     """
-    if (os.environ.get("ASAP_GRI3", "1") or "1").strip() == "0":
-        return []
-    # [I §1] GRI 기판력(GRI 6 성문화 집행) — 상위 판결에서 패한 가족의
-    # 자식은 **하위 GRI 재판 참전 금지**. stuffed가 아니라고 파스타가
-    # 수프가 되는 경로는 법에 없다(§3). 전파는 단방향(상위→하위) —
-    # 하위 증거의 상향 유입 없음(barred는 읽기 전용 입력).
+    parent_len = prefix_len - 2
+    groups: dict[str, list[int]] = {}
+    for i_g6, e_g6 in enumerate(ranked):
+        code6 = _digits(e_g6.get("code"), limit=8)
+        groups.setdefault(code6[:parent_len], []).append(i_g6)
+    losers: list = []
+    for _parent, idxs in groups.items():
+        if len(idxs) < 2:
+            continue
+        sub = [ranked[i2] for i2 in idxs]
+        sub_losers = _ApplyGri3Law(
+            sub,
+            product_facts,
+            barred_families,
+            rule_family="gri6",
+        )
+        for slot6, e_s6 in zip(idxs, sub):
+            ranked[slot6] = e_s6
+        losers.extend(sub_losers)
+    return losers
+
+
+def _ApplyGri3Law(ranked: list, product_facts: dict,
+                  barred_families: set | None = None, *,
+                  rule_family: str = "gri3") -> list:
+    """[GRI3 유일 경로 · 07-23 손휴리스틱 삭제로 승격] 점수 0 · 이산.
+
+    법조문 cascade 3(a)→3(b)→3(c). 계약은 _ApplyGri3와 동일: confirmed≥2
+    감지 → winner 선정(winner["gri3"] stamp) → gri_idx 자리보존 재배열 →
+    패자코드 반환(3c는 [] · 기판력 없음). 현 손휴리스틱(_PREP_CUT·head추출·
+    챕터어휘 lane·per-제품 핫픽스)을 전부 버린다.
+      3(a) 최특수 : NES/잔반(residual) 형제는 specific-named에 패. 유일
+                   specific = winner (Rule 3(a) '이름>부류'·잔반 배제).
+      3(b) 본질특성 : 성질·용적·수량·중량·가치·용도상 역할을 후보 호에
+                   구조적으로 바인딩한 근거만 허용한다. 현재 그 바인딩은
+                   아직 없으므로 판단하지 않는다.
+      EBTI 확인    : 3(a)/(b)가 유일 답을 못 낸 다중 O에서만, 이미 확정된
+                   동일 scope 후보 중 판례 k>=2 합의·반례 0인 코드 하나를
+                   확정한다. SILENCE에서는 이 권위를 사용하지 않는다.
+      3(c) 최종호 : 후보 호번호 max (Rule 3(c) 'last in numerical order').
+    """
     _barred = barred_families or set()
     gri_idx = [i_g for i_g, r_g in enumerate(ranked)
                if r_g.get("decision") == "confirmed"
@@ -190,154 +235,74 @@ def _ApplyGri3(ranked: list, product_facts: dict,
         return []
     entries = [ranked[i_g] for i_g in gri_idx]
 
-    def true_sig(e_g: dict) -> frozenset:
-        return frozenset(
-            (str(d_g.get("cond")), str(d_g.get("value"))[:60])
-            for d_g in (e_g.get("decision_detail") or [])
-            if d_g.get("verdict") == "true")
+    def _code(e_g: dict) -> str:
+        return str(e_g.get("code") or "")
+
+    def _is_residual(e_g: dict) -> bool:
+        if bool(e_g.get("residual")):
+            return True
+        d_g = str(e_g.get("descr") or "").strip().lower()
+        return (d_g.startswith("other")
+                or "not elsewhere" in d_g or "n.e.s" in d_g)
 
     winner = None
-    # 3(a) 최특수 — 진부분집합 유일 최대
-    for e_g in entries:
-        s_g = true_sig(e_g)
-        if all(e2 is e_g or true_sig(e2) < s_g for e2 in entries):
-            winner = e_g
-            e_g["gri3"] = "gri3a_more_specific"
-            break
-    # 3(b) 본질특성 — [G HOTFIX2] 신호 사다리 재정의 (설계자 확정:
-    # 신규 LLM 추론·프롬프트·콜 추가 일절 금지 — 수리는 오직 '있는
-    # 전사를 읽어라'). 실측: guess('noodles'·'buckwheat')는 이미 생산
-    # 중(15/22·39/48)인데 종전 사다리가 안 읽고 classes[:1](류값+CO
-    # 분류학 확장 혼입 — **중량 서열이 아님**)을 오소비해 짬뽕이
-    # mollusc를 먹고 1605행·메밀이 cereal을 먹고 원곡물 1008행.
-    # classes 폴백 전면 금지.
-    if winner is None:
-        cf_g = product_facts.get("composition_facts") or {}
-        ih_g = product_facts.get("identity_hints") or {}
-        sig_toks: set = set()
-        pct_src: list = list(cf_g.get("ingredient_percentages") or [])
-        # ① 문서 교차 확정분만 — principal이 성분 실물(entries/%)과
-        #    토큰 교차할 때만 자격. 한글 상품명 폴백('베테랑 칼국수')은
-        #    교차 불성립으로 자동 박탈([F] 자가 지적 결함의 처방).
-        pi_g = str(cf_g.get("principal_ingredient") or "").strip().lower()
-        if pi_g:
-            _pi_toks_g = {w_g for w_g in _tokens(pi_g) if len(w_g) >= 3}
-            _doc_toks_g: set = set()
-            for _e_dg in (list(pct_src)
-                          + list(cf_g.get("ingredient_entries") or [])):
-                if isinstance(_e_dg, dict):
-                    _doc_toks_g |= set(_tokens(" ".join(
-                        str(_e_dg.get(k_dg) or "")
-                        for k_dg in ("ingredient", "ingredient_name",
-                                     "term", "name_en"))))
-            if _pi_toks_g & _doc_toks_g:
-                sig_toks |= _pi_toks_g
-        # ② 기존 전사 필드 guess 소비 — 3(b) 서열 신호 전용(확정 인장
-        #    자격 없음·등급 규율 불변)
-        if not sig_toks:
-            sig_toks |= {w_g for w_g in _tokens(str(
-                ih_g.get("principal_ingredient_guess") or ""))
-                if len(w_g) >= 3}
-        pct_g = ""
-        for e_pct in (cf_g.get("ingredient_percentages") or []):
-            if isinstance(e_pct, dict) and sig_toks & set(
-                    _tokens(str(e_pct.get("ingredient")
-                                or e_pct.get("ingredient_name")
-                                or e_pct.get("term") or ""))):
-                pct_g = str(e_pct.get("percent") or "")
-                break
-        sig_toks |= {w_g.rstrip("s") for w_g in set(sig_toks)}
-        # [G HOTFIX2] 3(b) 후보 자격 — 조리 상품(cooked/prepared 계열)
-        # 에서 원물 챕터(01~14) 후보는 본질특성 승자 자격 배제(상태
-        # 모순 계보 — 메밀 원곡물 1008·주꾸미 0306 차단, 데모 실측).
-        _proc_g = str(ih_g.get("processing_state") or "").strip().lower()
-        _is_cooked_g = _proc_g in (
-            "cooked", "prepared", "processed", "fried", "grilled",
-            "steamed", "roasted", "baked", "boiled", "stir-fried",
-            "smoked", "instant")
-        if _is_cooked_g:
-            _eligible = [e_g for e_g in entries
-                         if str(e_g.get("code") or "")[:2]
-                         not in _RAW_CH_GRI]
-            if _eligible:
-                entries_b = _eligible
-            else:
-                entries_b = entries
-        else:
-            entries_b = entries
-        if sig_toks:
-            def cond_hit(e_g: dict) -> bool:
-                vals: set = set()
-                for d_g in (e_g.get("decision_detail") or []):
-                    vals |= set(_tokens(str(d_g.get("value") or "")))
-                vals |= set(_tokens(" ".join(
-                    str(m_g) for m_g in (e_g.get("matched") or []))))
-                return bool(sig_toks & vals)
+    rule = ""
 
-            hits = [e_g for e_g in entries_b if cond_hit(e_g)]
-            if not hits:
-                # lane 사다리 — 챕터 파생 소유 어휘(기계 도출 실물)
-                try:
-                    from bussiness_logic.classification.services.pre_classification_router import (
-                        _derived_chapter_keywords,
-                    )
-                    derived = _derived_chapter_keywords() or {}
-                except Exception:  # noqa: BLE001
-                    derived = {}
-                if derived:
-                    # 단일어 소유 **정확 일치**만 — 다중그램('mustard
-                    # flour' — 겨자분)을 토큰 분해하면 ch21이 flour
-                    # 소유가 되어 유일성이 깨진다(실측). 단일어 소유
-                    # 구문은 그 챕터의 전유 판별어다(cereal: ch19 ✓
-                    # ch21 ✗ 실측 — 칼국수 갈림의 실물).
-                    def owner_hit(e_g: dict) -> bool:
-                        ch_g = str(e_g.get("code") or "")[:2]
-                        own_single = {
-                            str(w_o).strip().lower()
-                            for w_o in (derived.get(ch_g) or ())
-                            if len(str(w_o).split()) == 1}
-                        own_single |= {w_o.rstrip("s")
-                                       for w_o in own_single}
-                        return bool(sig_toks & own_single)
-                    hits = [e_g for e_g in entries_b if owner_hit(e_g)]
-            if len(hits) == 1:
-                winner = hits[0]
-                winner["gri3"] = ("gri3b_essential_character:"
-                                  + (pi_g or ",".join(sorted(sig_toks)[:3]))
-                                  + (f" {pct_g}%" if pct_g else ""))
-    # [G HOTFIX2] ③ 신호 기권 시 — 정체축 확정 우선(product_identity
-    # 확정 > material 계열 확정 — 원리 2의 GRI판). 정체축 hs4 소속
-    # 확정이 유일하면 그것이 승자(_hs4_axis 없는 이 스코프에서는
-    # true 조건의 cond_type로 판정 — identity true 보유 유일 후보).
+    # ── 3(a) 최특수 : NES/잔반은 specific-named에 패 ──
+    specific = [e_g for e_g in entries if not _is_residual(e_g)]
+    if len(specific) == 1:
+        winner, rule = specific[0], f"{rule_family}a_most_specific"
+
+    # ── 3(b) 본질특성 ──
+    # 아직 후보 호 ↔ 법정 인자(중량·가치·역할 등)의 구조화 바인딩이 없다.
+    # 제품/판례 문장의 토큰 겹침으로 이 자리를 대신하면 GRI가 lexical
+    # 분류기로 변질되므로 의도적으로 판단하지 않는다.
+    # 다만 다중 O가 이미 성립한 뒤에는 scoped EBTI를 코드 확정 근거로
+    # 사용할 수 있다. BM25 점수는 추림 전용이고 발동은 _bti_summon의
+    # 합의(k>=2)·반례 0·현행 트리 실존 조건으로만 결정된다.
+    precedent = None
     if winner is None:
-        def _id_conf(e_g: dict) -> bool:
-            return any(
-                str(d_g.get("cond")) == "product_identity"
-                and d_g.get("verdict") == "true"
-                for d_g in (e_g.get("decision_detail") or []))
-        _id_hits = [e_g for e_g in entries_b if _id_conf(e_g)]
-        if len(_id_hits) == 1:
-            winner = _id_hits[0]
-            winner["gri3"] = "gri3b_identity_axis_first"
-    # 3(c) 번호 후순 — 법정 최종 규칙 (후보 자격 통과분 안에서)
+        q_primary = _summon_query(product_facts)
+        existing = {_code(entry) for entry in entries}
+        cut = len(next(iter(existing))) if existing else 0
+        if q_primary and cut:
+            precedent = _bti_summon(
+                sorted(existing),
+                q_primary,
+                q_primary,
+                cut,
+                existing,
+            )
+        precedent_code = str((precedent or {}).get("code") or "")
+        precedent_matches = [
+            entry for entry in entries if _code(entry) == precedent_code
+        ]
+        if len(precedent_matches) == 1:
+            winner = precedent_matches[0]
+            rule = f"{rule_family}_precedent"
+            winner["gri_bti"] = {
+                **dict(precedent or {}),
+                "authority": "code_confirmation",
+                "scope": sorted(existing),
+            }
+            winner["summoned_by"] = (
+                "BTI:" + ",".join((precedent or {}).get("refs") or [])
+            )
+
+    # ── 3(c) 최종호 : max 호번호 ──
     if winner is None:
-        winner = max(entries_b if entries_b else entries,
-                     key=lambda e_g: str(e_g.get("code") or ""))
-        winner["gri3"] = "gri3c_last_numeric"
+        winner = max(entries, key=_code)
+        rule = f"{rule_family}c_last_numeric"
+
+    winner["gri3"] = rule
     order = [winner] + [e_g for e_g in entries if e_g is not winner]
     for slot_g, e_slot in zip(gri_idx, order):
         ranked[slot_g] = e_slot
-    # [I §1] 3(c) 판결은 기판력 없음 — Developer 판단·근거: 3(c)는
-    # '어느 쪽도 못 가른' 정보 부재의 잔여 봉합이지 실질 판정이
-    # 아니다. GRI 6의 기판력은 상위 '판단'의 세분 원칙인데, 봉합을
-    # 고착하면 하위의 더 구체적 조문 정보로 정당하게 갈리는 지형까지
-    # 얼려버린다(과착 위험 > 재탈환 위험 — 3c 승자는 어차피 번호
-    # 후순이라 하위 재론이 뒤집어도 '실질 판정'을 뒤집는 게 아니다).
-    # 3(a)·3(b) 실질 판결만 패자 가족을 전파한다.
-    if str(winner.get("gri3") or "").startswith("gri3c"):
+    if rule.endswith("3c_last_numeric"):
         return []
-    return [str(e_g.get("code") or "") for e_g in entries
-            if e_g is not winner]
+    return [_code(e_g) for e_g in entries if e_g is not winner]
+
+
 _TOKEN = re.compile(r"[a-z0-9]+")
 
 
@@ -555,19 +520,16 @@ _BTI_RECALL_CACHE: dict | None = None
 
 
 def _bti_recall_index() -> dict:
-    """컴파일 시점 빌드된 BM25 인덱스(DB/artifacts/bti_recall_index.json).
+    """컴파일 시점 빌드된 BM25 인덱스(bti_recall_index table).
 
-    부재 = 소환층 전체 no-op. 코퍼스 고정 — 런타임은 사칙연산만(결정론).
+    코퍼스 고정 — 런타임은 사칙연산만(결정론).
     """
     global _BTI_RECALL_CACHE
     if _BTI_RECALL_CACHE is None:
-        import pathlib
-        try:
-            path = (pathlib.Path(__file__).resolve().parents[3]
-                    ).parent / "DB" / "artifacts" / "bti_recall_index.json"
-            _BTI_RECALL_CACHE = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            _BTI_RECALL_CACHE = {}
+        from bussiness_logic.core.runtime_asset_repository import (
+            LoadSingletonAsset,
+        )
+        _BTI_RECALL_CACHE = LoadSingletonAsset("bti_recall_index")
     return _BTI_RECALL_CACHE
 
 
@@ -715,6 +677,45 @@ class StagedClassificationTool:
         if start_parents:
             parents = [_digits(c, limit=8) for c in start_parents if _digits(c)]
         else:
+            # [HS2 앵커 · 2026-07-22 설계자] 후보 공간을 라우터 서열 1위
+            # 챕터에 고정한다 — 종전 5-챕터 합류는 HS2가 틀리지 않아도 타
+            # 도메인 자식(식품→8438 기계)이 하위 정렬에서 살아남는 발산의
+            # 원천이었다. reopen은 **명시적으로만**: 앵커 챕터 항행이 후보
+            # 0으로 소진됐을 때 라우터 서열 다음 챕터로 재시작하고, 결과에
+            # hs2_reopen 서명을 남긴다(감사·재현 실물). 협착 자체는 기존
+            # start_parents 경로(validator 2nd-pass와 동일 기제) 재사용 —
+            # 새 항행 기제 0. ASAP_HS2_ANCHOR=0 = 구 5-챕터 합류 복귀.
+            _semantic_hs2 = bool(str(
+                routing_context.get("selected_hs2") or "").strip())
+            if (_semantic_hs2 or
+                    (os.environ.get("ASAP_HS2_ANCHOR", "0") or "1").strip() != "0"):
+                _chs_a = self._start_chapters(routing_context)
+                if len(_chs_a) > 1:
+                    _last_a: dict[str, Any] = {}
+                    for _i_ch, _ch_a in enumerate(_chs_a):
+                        _res_a = self.classify(
+                            product_facts=product_facts,
+                            routing_context=routing_context,
+                            top_k=top_k,
+                            start_parents=[_ch_a],
+                        )
+                        if _res_a.get("ok") and _res_a.get("candidates"):
+                            if _i_ch:
+                                _res_a["hs2_reopen"] = {
+                                    "anchor": _chs_a[0],
+                                    "reopened_to": _ch_a,
+                                    "exhausted": _chs_a[:_i_ch],
+                                }
+                            return _res_a
+                        if _res_a.get("classification_status") == "needs_more_facts":
+                            # An unresolved legal question under the selected
+                            # chapter is not an exhausted route. Reopening into
+                            # another chapter would let a lower level rewrite HS2.
+                            return _res_a
+                        _last_a = _res_a
+                    return _last_a or {
+                        "ok": False, "error": "no_route_chapters",
+                        "candidates": [], "stages": []}
             parents = self._start_chapters(routing_context)
         if not parents:
             return {"ok": False, "error": "no_route_chapters", "candidates": [], "stages": []}
@@ -745,8 +746,6 @@ class StagedClassificationTool:
         route_disagreements: list[dict[str, Any]] = []
         merge_gate_observations: list[dict[str, Any]] = []
         bti_summons: list[dict[str, Any]] = []
-        # [10회차-1A] hs4 판별 축 지도 — 최종 병합의 정체 직격 서열 판정용
-        _hs4_axis: dict[str, str] = {}
         # [7회차-2 G1] 라우터 신뢰 게이트 — 창밖 회수 (조건부 승인 반영).
         # 부검 실측: 병합 유실 16건 중 11건이 시작 창 [:5] 컷으로 정답
         # 챕터 미스캔(볼펜 지각·vocab 양존인데 0회). 기본 observe(관측만),
@@ -805,15 +804,6 @@ class StagedClassificationTool:
                         decisions_by_parent = LoadBranchDecisions(level, tuple(parents))
                     except Exception:  # noqa: BLE001 — 사이드카 부재 = 계층 off
                         decisions_by_parent = {}
-                    if level == "hs4":
-                        for _p_ax, _codes_ax in (decisions_by_parent or {}).items():
-                            for _c_ax, _rows_ax in (_codes_ax or {}).items():
-                                for _r_ax in _rows_ax:
-                                    if str(_r_ax.get("role")) == "discriminator":
-                                        _hs4_axis.setdefault(
-                                            str(_c_ax),
-                                            str(_r_ax.get("cond_type") or ""))
-                                        break
                 predicates_by_code = {}
                 if (os.environ.get("ASAP_STAGED_PREDICATES", "1") or "").strip().lower() not in (
                     "0", "false", "no", "off",
@@ -833,7 +823,21 @@ class StagedClassificationTool:
                     parent_scores=parent_scores,
                     predicates_by_code=predicates_by_code,
                     decisions_by_parent=decisions_by_parent,
+                    level=level,
                 )
+                # HS4 and HS6 use separate legal-question maps and entrypoints.
+                if level in ("hs4", "hs6"):
+                    try:
+                        from bussiness_logic.classification.services.axis_verdict import (
+                            StampHs4AxisVerdicts,
+                            StampHs6AxisVerdicts,
+                        )
+                        if level == "hs4":
+                            StampHs4AxisVerdicts(ranked, product_facts)
+                        else:
+                            StampHs6AxisVerdicts(ranked, product_facts)
+                    except Exception:  # noqa: BLE001 — 축맵/모듈 부재 = off
+                        pass
                 # [관측] 병합 게이트 observe 기록 수거 (순위 무영향 —
                 # 정렬로 부착 엔트리 위치가 바뀔 수 있어 전 엔트리 스캔)
                 for _e_obs in ranked:
@@ -849,8 +853,6 @@ class StagedClassificationTool:
                 if ((os.environ.get("ASAP_BTI_RECALL", "1") or "1").strip()
                         != "0" and ranked):
                     def _no_evidence(e2: dict[str, Any]) -> bool:
-                        if float(e2.get("score") or 0.0) > 0:
-                            return False
                         if e2.get("decision") == "confirmed":
                             return False
                         if any(d2.get("verdict") == "true"
@@ -1150,7 +1152,11 @@ class StagedClassificationTool:
                         "evidence_top_code": level_recoveries[0]["code"],
                         "evidence_top_score": level_recoveries[0]["score"],
                     })
-            ranked = ranked[: self.rank_top_k]
+            # HS4/HS6 legal decisions must see every sibling. Lexical rank may
+            # limit CN8 retrieval temporarily, but cannot remove an upper-level
+            # branch before axis/verdict/GRI evaluation.
+            if level == "cn8":
+                ranked = ranked[: self.rank_top_k]
             # [12회차 §2-B] GRI 3 계단 — **다중 확정(같은 레벨 confirmed
             # ≥2)일 때만** 그 확정들 사이 서열을 법정 규칙으로 정한다
             # (점수 무관·이산·순서 고정 3(a)→3(b)→3(c)). 확정 0~1이면
@@ -1167,8 +1173,15 @@ class StagedClassificationTool:
             # 번호 후순이 '법대로' 2104를 골라 면류 전멸 ②gri3 서명
             # trace 미노출(관측 사각)이었다 — 둘 다 본 수리로 처방.
             self._gri3_barred = set(_gri3_losers)
-            _new_losers = _ApplyGri3(ranked, product_facts,
-                                     barred_families=_gri3_losers)
+            # [GRI 서열] hs4 = GRI3(교차챕터 합법 — Rule 3 무제한) /
+            # hs6·cn8 = GRI6 준용(같은 부모 그룹 한정 — Rule 6 스코프)
+            if level == "hs4":
+                _new_losers = _ApplyGri3(ranked, product_facts,
+                                         barred_families=_gri3_losers)
+            else:
+                _new_losers = _ApplyGri6(ranked, product_facts,
+                                         _gri3_losers,
+                                         prefix_len=prefix_len)
             if _new_losers:
                 _gri3_losers.update(_new_losers)
                 # trace 마커는 이 레벨 trace가 아직 append 전이므로
@@ -1176,214 +1189,80 @@ class StagedClassificationTool:
                 _demote_mark = sorted(_new_losers)
             else:
                 _demote_mark = None
-            selected = self._llm_select(ranked, level_facts, level)
-            if not selected:  # deterministic fallback = top lexical
+            if level in ("hs4", "hs6"):
+                winner, authority = self._authoritative_selection(ranked)
+                if not winner:
+                    question_options = self._question_options(
+                        ranked,
+                        level=level,
+                        parents=parents,
+                        bti_summons=bti_summons,
+                    )
+                    stage_trace = self._trace(
+                        level,
+                        ranked,
+                        [],
+                        level_facts,
+                        "question_required",
+                        engine="branch_index" if branch_rows else "cn_table",
+                    )
+                    stage_trace["selection_authority"] = "none"
+                    stage_trace["question_options"] = question_options
+                    stages.append(stage_trace)
+                    return self._unresolved_result(
+                        level=level,
+                        parents=parents,
+                        stages=stages,
+                        question_options=question_options,
+                        bti_summons=bti_summons,
+                        recovery_candidates=recovery_candidates,
+                        route_disagreements=route_disagreements,
+                        merge_gate_observations=merge_gate_observations,
+                        router_trust_obs=router_trust_obs,
+                        suggestions=self._retrieval_suggestions(ranked, top_k),
+                    )
+                selected = [winner]
+                stage_trace = self._trace(
+                    level,
+                    ranked,
+                    selected,
+                    level_facts,
+                    "resolved",
+                    engine="branch_index" if branch_rows else "cn_table",
+                )
+                stage_trace["selection_authority"] = authority
+                if _demote_mark:
+                    stage_trace["gri3_family_demoted"] = _demote_mark
+                stages.append(stage_trace)
+                parent_scores = {winner: 1.0}
+                parents = selected
+                continue
+
+            # CN8 axis/verdict is not ready yet. Lexical ranking remains only
+            # inside the single, already-authoritative HS6 parent.
+            selected = self._select_keep(ranked)
+            if not selected:
                 selected = [ranked[0]["code"]]
-            # Residual guarantee: real answers are majority "Other" nodes
-            # (P4 autopsy ~11/20). A shallow one-word match on a specific
-            # sibling must not evict every residual — reserve the last slot.
-            if branch_rows and len(selected) >= 2:
-                score_by_code = {r["code"]: r["score"] for r in full_ranked}
-                residual_codes = {r["code"] for r in full_ranked if r.get("residual")}
-                viable_residuals = [
-                    r for r in full_ranked
-                    if r.get("residual") and r["score"] > -QUANT_PENALTY / 2
-                ]
-                # The guarantee is per BRANCHING POINT: when a specific sibling
-                # wins its group on wording alone, the elimination alternative
-                # is that group's own "Other" — a residual selected under a
-                # DIFFERENT parent must not satisfy the guarantee for it
-                # (measured: 07102900 "Other" masked 07108059 while sweet
-                # peppers 07108051 won the 071080 group by one token).
-                top_code = max(selected, key=lambda c: score_by_code.get(c, 0.0))
-                best_residual = None
-                if score_by_code.get(top_code, 0.0) > 0:
-                    group = top_code[:-2]
-                    if not any(c in residual_codes and c[:-2] == group for c in selected):
-                        best_residual = next(
-                            (r for r in viable_residuals if r["code"][:-2] == group),
-                            None,
-                        )
-                if best_residual is None and not any(c in residual_codes for c in selected):
-                    best_residual = next(iter(viable_residuals), None)
-                # Only evict a ZERO-evidence slot: the guarantee exists for the
-                # "no sibling scored" case and must never push out a candidate
-                # that earned positive evidence (measured: it evicted the
-                # correct 1605 at 2.0 in favour of a 0.0 residual).
-                if (
-                    best_residual
-                    and best_residual["code"] not in selected
-                    and score_by_code.get(selected[-1], 0.0) <= 0.0
-                ):
-                    selected = [*selected[:-1], best_residual["code"]]
-            # [9회차 [1]] window_ticket 자식 입장권 — 라우터가 정체
-            # 유일-직격으로 창 입장시킨 챕터(서명 window_ticket:)의 최고
-            # 자식을 selected 말미에 보존. 부모 라운드로빈 서열(재첩국
-            # ch21 5위)이 정체 직격 가족을 keep 밖으로 밀어 2104가 풀
-            # 실재에도 소멸하던 실측의 처방 — 입장권 계보(점수·서열
-            # 불변, 생존만). ASAP_WINDOW_TICKET_CHILD=0 복귀.
-            if (os.environ.get("ASAP_WINDOW_TICKET_CHILD", "1")
-                    or "1").strip() != "0":
-                _wt_chs: set = set()
-                for _d_wt in (routing_context.get(
-                        "candidate_chapter_details") or []):
-                    if any(str(m_wt).startswith(
-                            ("window_ticket:", "window_ticket_prep:"))
-                           for m_wt in (_d_wt.get("matched_terms") or [])):
-                        _wt_chs.add(str(_d_wt.get("chapter")))
-                for _ch_wt in sorted(_wt_chs):
-                    if any(str(c_wt).startswith(_ch_wt)
-                           for c_wt in selected):
-                        continue
-                    _best_wt = max(
-                        (r_wt for r_wt in full_ranked
-                         if r_wt["code"].startswith(_ch_wt)
-                         and r_wt.get("decision") != "violated"),
-                        key=lambda r_wt: float(r_wt.get("score") or 0.0),
-                        default=None)
-                    if _best_wt is not None:
-                        selected = [*selected, _best_wt["code"]]
-            # [10회차-1A] 정체 축 보존 — hs4 선두 가족이 성분 축(material_
-            # composition)일 때 정체 축(product_identity) 최고 자식을
-            # selected 말미 보존(입장권 계보 — 재첩국 신지각: 21 창안
-            # 3위인데 2104가 keep 밖 소멸 → 최종 축 교대 자체가 불가하던
-            # 실측). 면류 보호: 선두가 정체 축이면 무발동. ASAP_AXIS_RANK.
-            if (selected
-                    and (os.environ.get("ASAP_AXIS_RANK", "1")
-                         or "1").strip() != "0"
-                    and _hs4_axis.get(str(selected[0])[:4])
-                    == "material_composition"):
-                _best_ax = max(
-                    (r_ax2 for r_ax2 in full_ranked
-                     if _hs4_axis.get(str(r_ax2["code"])[:4])
-                     == "product_identity"
-                     and r_ax2.get("decision") != "violated"),
-                    key=lambda r_ax2: float(r_ax2.get("score") or 0.0),
-                    default=None)
-                if (_best_ax is not None
-                        and _best_ax["code"] not in selected):
-                    selected = [*selected, _best_ax["code"]]
-            # [7회차-3] 소환 입장권 — 이 레벨 stall 소환이 성립했으면
-            # 다음 레벨 부모 풀에 합류(신뢰 0 — 서열은 기존 기제가 결정)
-            for _sm in bti_summons:
-                if (_sm.get("level") == level and _sm.get("code")
-                        and _sm["code"] not in selected):
-                    selected = [*selected, _sm["code"]]
-            # [7회차-2 G1] 창밖 회수 입장권 (ON시에만) — BTI와 동일 계보:
-            # selected 말미 추가만(신뢰 0), rank_top_k 절단의 영향 밖.
-            if _rt_gate == "1":
-                for _o_rt in router_trust_obs:
-                    if _o_rt.get("level") != level:
-                        continue
-                    for _cand_rt in _o_rt.get("candidates") or []:
-                        if _cand_rt["code"] not in selected:
-                            selected = [*selected, _cand_rt["code"]]
-                            # [8회차-0] ON 발동 서명 — 실제 개입(입장권
-                            # 부여)을 관측 레코드에 실물로 남긴다. 무서명
-                            # 개입 사고(6런 A/B)의 재발 방지.
-                            _o_rt.setdefault("applied", []).append(
-                                _cand_rt["code"])
-            stages.append(self._trace(
-                level, ranked, selected, level_facts, "ok",
+            stage_trace = self._trace(
+                level,
+                ranked,
+                selected,
+                level_facts,
+                "temporary_lexical",
                 engine="branch_index" if branch_rows else "cn_table",
-            ))
-            if _demote_mark:
-                stages[-1]["gri3_family_demoted"] = _demote_mark
-            ranked_scores = {r["code"]: float(r["score"]) for r in ranked}
-            parent_scores = {code: ranked_scores.get(code, 0.0) for code in selected}
-            # Elimination promotion must PROPAGATE: a residual selected as
-            # this level's top would otherwise re-lose the next-level merge
-            # to a sibling with a higher raw score (measured: jjokgalbi won
-            # hs4 with 1602 but hs6 followed 1601's children again). The
-            # level's chosen top carries top parent authority downward.
-            # [8회차-3] 병합 증거화 — 부모 서열 세습에 자식 증거 조건.
-            # 세습(선두 최상 부여) 자격 = 선두 가족이 ①1급 확정(confirmed)
-            # ②원문·제목 직격 ③'마커 무보유' 직접 true(강등 계보 마커
-            # encyclopedia/alias/precedent_hit·qualifier_state_conflict·
-            # broad_pool_hit_guarded·typed_gate_blocked·state_alone·
-            # qualifier_rank_excluded 보유 true는 불인정 — 승인 조건 1)
-            # 중 하나 보유. 미달 시 세습 생략(부모 순서만 유지) — 무증거
-            # 상위 오선택의 하위 고착(볼펜 좌표) 차단. G1/G2는 이 구조
-            # 완성 시 소멸 예정 과도 장치. ASAP_PARENT_TRUST_EVIDENCE=0 복귀.
-            _pte_on = (os.environ.get(
-                "ASAP_PARENT_TRUST_EVIDENCE", "1") or "1").strip() != "0"
-            _MARKERS = ("encyclopedia_hit", "alias_hit", "precedent_hit",
-                        "qualifier_state_conflict", "broad_pool_hit_guarded",
-                        "typed_gate_blocked", "state_alone",
-                        "qualifier_rank_excluded")
-
-            def _direct_true(e6: dict) -> bool:
-                for d6 in (list(e6.get("decision_detail") or [])
-                           + list(e6.get("predicate_results") or [])):
-                    if d6.get("verdict") != "true":
-                        continue
-                    why6 = str(d6.get("why") or "")
-                    if not any(mk in why6 for mk in _MARKERS):
-                        return True
-                return False
-
-            if selected:
-                _top_e = next((r6 for r6 in full_ranked
-                               if r6["code"] == selected[0]), None)
-                try:
-                    _top_hit = (_rt_title_toks
-                                & _rt_row_toks.get(selected[0], set()))
-                except NameError:  # 게이트 OFF 경로 — 직격 lane 미구축
-                    _top_hit = set()
-                # [12회차 §4-b] ④ 소거 완결성 — 낙지볶음 1602 잎 회귀의
-                # 갈림 기준(부검 실물): 소거 승격 잔반(1602 0.0)이 무조건
-                # 세습을 받아 parent_score 최대가 되면, 병합 정렬이
-                # parent_score 우선이라 **양수 증거 가족(1605 3.0)의
-                # 자식 전원이 keep 창 밖으로 전멸**한다(hs6 considered
-                # 8자리에 1605 자식 0 실측). 소거는 '그룹의 아무도 입증
-                # 못함'일 때만 완결이다 — selected 안에 양수 점수의
-                # specific(비잔반) 생존자가 있으면 소거 미완결이므로
-                # 세습을 생략한다(승격 자체는 유지 — 그룹 내 서열은
-                # 불변, 가족 간 지배만 차단). 주꾸미(동형·1603 3.0
-                # 동률이라 생존)와 낙지(1603 4.0 우세라 전멸)를 모두
-                # 설명하는 유일한 이산 경계가 이 완결성이다.
-                _elim_complete = True
-                _ec_on = (os.environ.get(
-                    "ASAP_ELIM_COMPLETENESS", "1") or "1").strip() != "0"
-                if _ec_on and _top_e is not None and bool(_top_e.get("residual")):
-                    _score_by = {r_sb["code"]: float(r_sb.get("score") or 0.0)
-                                 for r_sb in full_ranked}
-                    _res_set = {r_sb["code"] for r_sb in full_ranked
-                                if r_sb.get("residual")}
-                    # 완결성의 범위 = **같은 분기점(같은 부모) 형제만**.
-                    # 소거는 그룹 내 사건이므로 완결성 판정도 그룹 내로
-                    # 한정한다 — 콩찰떡 실측: hs6 선두 190590(1905 그룹
-                    # 소거 승격·그룹 형제 전원 0 = 완결)인데 다른 부모의
-                    # 210230(2102, 4.0)을 이유로 세습을 꺾으면 2102가
-                    # cn8을 탈취한다(hs2 정답 방향 상실). 타 가족 경쟁은
-                    # 세습 자격이 아니라 병합 서열의 몫이다.
-                    _top_parent = str(selected[0])[:-2]
-                    _elim_complete = not any(
-                        _score_by.get(c_sb, 0.0) > 0.0
-                        and c_sb not in _res_set
-                        and str(c_sb)[:-2] == _top_parent
-                        for c_sb in selected[1:])
-                if (_top_e is not None and bool(_top_e.get("residual"))
-                        and not _elim_complete):
-                    # 발동 서명 — stage trace는 이 블록보다 먼저 조립되고
-                    # considered는 entry 사본이라, 방금 append된 레벨
-                    # trace(stages[-1])에 소급 기록한다(blackboard 관측).
-                    _top_e["inherit_skipped"] = "elim_incomplete"
-                    if stages:
-                        stages[-1]["inherit_skipped"] = (
-                            f"elim_incomplete:{selected[0]}")
-                _inherit = (not _pte_on) or (_top_e is not None and (
-                    _top_e.get("decision") == "confirmed"
-                    or bool(_top_hit)
-                    or _direct_true(_top_e)
-                    # ④ 소거 승격 잔반 — 소거(형제 위반·미입증)로 선두에
-                    # 선 잔반의 세습은 이 승계 장치의 원 처방(쪽갈비
-                    # 1602→1601 재이탈 방지). 소거도 증거의 한 형태 —
-                    # 단, 위 소거 완결성이 성립할 때만(§4-b).
-                    or (bool(_top_e.get("residual")) and _elim_complete)))
-                if _inherit:
-                    parent_scores[selected[0]] = max(parent_scores.values())
+            )
+            stage_trace["selection_authority"] = "lexical_cn8_temporary"
+            stage_trace["upper_prefix_locked"] = parents[0] if len(parents) == 1 else ""
+            stages.append(stage_trace)
+            ranked_scores = {
+                row["code"]: float(row.get("score") or 0.0) for row in ranked
+            }
+            level_score_maps[level] = ranked_scores
+            parent_scores = {
+                code: ranked_scores.get(code, 0.0) for code in selected
+            }
             parents = selected
+            continue
 
         candidates = self._final_candidates(parents, top_k=top_k)
         # [I §2] ★판례 우세 조항 (설계자 확정 07-20 — 등급제의 유일한
@@ -1394,19 +1273,22 @@ class StagedClassificationTool:
         # k≥2 ∧ 반례 0 — _bti_summon 내장) ∧ 현행 트리 실존. 충족 시
         # 합의 코드를 1급 증거로 승격해 top1(**우리 확정과 상충해도
         # 우세** — 상충 사실 overrides_confirmed 병기·UI 재료).
-        # 자릿수: 본 조항 발동 시에 한해 cn8까지 소비(stall 레벨 제한
-        # 해제 — 구속 결정의 코드 전체가 근거). 요건 미달 시 현행 침묵
-        # 규율 불변. ASAP_PRECEDENT_LEAD=0 복귀.
+        # 자릿수: 본 조항 발동 시에 한해 cn8까지 소비하되, 위에서 확정한
+        # HS6 prefix 안에서만 허용한다. BTI도 상위 법적 결정을 되쓸 수 없다.
         if (os.environ.get("ASAP_PRECEDENT_LEAD", "1") or "1").strip() != "0":
             _q_pl = _summon_query(product_facts)
             if _q_pl:
-                _scope_pl = sorted({str(c_pl.get("cn8") or "")[:2]
+                _scope_pl = sorted({str(c_pl.get("cn8") or "")[:6]
                                     for c_pl in candidates
                                     if str(c_pl.get("cn8") or "")})
                 _sm_pl = _bti_summon(_scope_pl,
                                      _q_pl, _q_pl, 8, set())                     if _scope_pl else None
                 _code_pl = str((_sm_pl or {}).get("code") or "")
-                if _code_pl and len(_code_pl) == 8:
+                if (
+                    _code_pl
+                    and len(_code_pl) == 8
+                    and any(_code_pl.startswith(prefix) for prefix in _scope_pl)
+                ):
                     _rows_pl = self._load_branch_rows(
                         "cn8", [_code_pl[:6]])
                     _in_tree = any(
@@ -1432,28 +1314,6 @@ class StagedClassificationTool:
                         candidates = ([_entry_pl]
                                       + [c_pl for c_pl in candidates
                                          if c_pl is not _entry_pl])
-        # [F-HOTFIX] 최종 병합 직전 1회 — cn8 최종 후보열의 교차 확정
-        # (스테이지 합본과 동일 계단·메인 요구 문언 그대로)
-        _ApplyGri3(candidates, product_facts)
-        # [F-HOTFIX] GRI3 서열의 하위 전파 — GRI 3는 heading 간 법정
-        # 서열이므로 패자 heading의 '자식'이 하위 레벨에서 confirmed
-        # 우선으로 재탈환하면 서열이 무효가 된다(칼국수: hs4에서 1902
-        # 승 → hs6 210410 confirmed 55가 [D] 우선으로 top 재탈환 실측).
-        # 패자 가족 자식을 최종 후보열 후순으로(demote-not-penalize —
-        # 제거 아님·서열만). 킬스위치 ASAP_GRI3 동일.
-        if _gri3_losers and (os.environ.get(
-                "ASAP_GRI3", "1") or "1").strip() != "0":
-            def _is_loser_fam(c_gl: dict) -> bool:
-                code_gl = str(c_gl.get("cn8") or c_gl.get("code") or "")
-                return any(code_gl.startswith(l_gl)
-                           for l_gl in _gri3_losers)
-            _keep_gl = [c_gl for c_gl in candidates
-                        if not _is_loser_fam(c_gl)]
-            _lose_gl = [c_gl for c_gl in candidates if _is_loser_fam(c_gl)]
-            if _keep_gl and _lose_gl:
-                for c_gl in _lose_gl:
-                    c_gl["gri3_family_demoted"] = True
-                candidates = [*_keep_gl, *_lose_gl]
         # 최종 DTO의 score는 cn8 스테이지 점수를 그대로 싣는다 — 키가 없으면
         # 소비측(ClassificationCandidate 조립)이 기본 0.0으로 표시해 버린다.
         cn8_scores = level_score_maps.get("cn8", {})
@@ -1465,166 +1325,6 @@ class StagedClassificationTool:
             _ph_c = _phase_by_code.get(str(cand.get("cn8") or ""))
             if _ph_c:
                 cand["residual_phase"] = _ph_c  # [10회차-2] trace 전파(내부)
-        # [9회차 [1] 결승] 입장권 자식의 점수 우위 교대 — 정체 유일-직격
-        # 챕터(window_ticket)의 자식이 최종 점수에서 현 선두를 이기면
-        # 선두 교대(순서만 — demote-not-penalize). 부모 라운드로빈이
-        # 점수 우위·동점 후보를 하위로 미는 재첩국 실측(cn8 3.0=3.0
-        # 동점 — §2 '동점은 정체 직격 우선'의 최종병합판)의 처방.
-        # 열세면 불변. 서명 window_ticket_lead.
-        if (os.environ.get("ASAP_WINDOW_TICKET_CHILD", "1")
-                or "1").strip() != "0" and len(candidates) >= 2:
-            _wt_prep = set()
-            _wt_chs2 = set()
-            for _d_w2 in (routing_context.get(
-                    "candidate_chapter_details") or []):
-                _ms_w2 = [str(m_w2) for m_w2 in
-                          (_d_w2.get("matched_terms") or [])]
-                if any(m_w2.startswith("window_ticket_prep:")
-                       for m_w2 in _ms_w2):
-                    _wt_prep.add(str(_d_w2.get("chapter")))
-                    _wt_chs2.add(str(_d_w2.get("chapter")))
-                elif any(m_w2.startswith("window_ticket:")
-                         for m_w2 in _ms_w2):
-                    _wt_chs2.add(str(_d_w2.get("chapter")))
-            if _wt_chs2:
-                # 동점(>=) 교대는 §2 지대(조제 측 티켓 — redirect 원천
-                # 서명 window_ticket_prep)에서만. 그 외 티켓은 순수
-                # 우위(>)만 — 잡음 티켓의 동점 선두 탈취 실측(주꾸미
-                # ch48·멘보샤 ch85) 차단.
-                _lead_sc = float(candidates[0].get("score") or 0.0)
-
-                def _wt_beats(i_w: int) -> bool:
-                    _c2 = str(candidates[i_w].get("cn8") or "")[:2]
-                    _s2 = float(candidates[i_w].get("score") or 0.0)
-                    if _c2 not in _wt_chs2:
-                        return False
-                    return _s2 >= _lead_sc if _c2 in _wt_prep \
-                        else _s2 > _lead_sc
-                _best_i = max(
-                    (i_w for i_w in range(1, len(candidates))
-                     if _wt_beats(i_w)),
-                    key=lambda i_w: float(
-                        candidates[i_w].get("score") or 0.0),
-                    default=None)
-                if _best_i is not None:
-                    _wt_cand = candidates.pop(_best_i)
-                    _wt_cand["window_ticket_lead"] = True
-                    candidates.insert(0, _wt_cand)
-        # [10회차-1A] 정체 직격 서열 — 최종 동점에서 '정체 축(product_
-        # identity) 판별 가족' 후보가 '성분 축(material_composition)
-        # 판별 가족' 선두를 이긴다 (이산·수기 0 — 축은 taxonomy 원천.
-        # 재첩국 신지각: 1605(성분 clam) 3.0 = 2104(정체 soup) 3.0 동점
-        # 코드순 패배의 처방. 면류 보호: 1902도 정체 축이라 불변).
-        # ASAP_AXIS_RANK=0 복귀. 서명 identity_axis_lead.
-        # [12회차 §B] 축 서열 발동 자격 — 이산 3조건 (설계자 긴급 발주).
-        # 폐지가 드러낸 은폐 버그: validator가 새우살·대구살을 구제해
-        # 10회차 내내 보이지 않았다. 원인 실측 3겹:
-        #  ① 현행 `score` 비교는 **cn8 단계 점수**만 본다 — 그 층은 잔반
-        #     지대라 대부분 0.0 동점이어서 `>=`가 사실상 무조건 통과했다
-        #     (미작동 원인 확정). 상위 층(hs4·hs6)의 증거 우위가 통째로
-        #     무시됐다 → 비교 대상을 **전 레벨 누적 증거**로 교체.
-        #  ② 라우터 챕터 서열 역전 금지 — 라우터가 2~4배로 지지하는
-        #     챕터를 열세 챕터가 뒤집던 지형(새우살 ch03 24.0 vs ch84
-        #     12.0, 대구살 ch03 16.0) 차단.
-        #  ③ residual_phase == unqualified_question 후보는 선두 자격
-        #     없음 — '질문 자체가 없어 아무도 입증 못한' 후보가 입증된
-        #     잔반(residual_promoted)을 이기는 것은 자격 역전이다.
-        # 전부 이산·서명(identity_axis_lead) 유지. ASAP_AXIS_RANK=0 복귀.
-        if (os.environ.get("ASAP_AXIS_RANK", "1") or "1").strip() != "0" \
-                and len(candidates) >= 2:
-            _ch_scores: dict[str, float] = {}
-            for _d_ax in (routing_context.get("candidate_chapter_details")
-                          or []):
-                if isinstance(_d_ax, dict):
-                    try:
-                        _ch_scores[str(_d_ax.get("chapter"))] = float(
-                            _d_ax.get("score") or 0.0)
-                    except (TypeError, ValueError):
-                        pass
-
-            def _evidence(code_ax: str) -> float:
-                """전 레벨 누적 증거 — cn8 단독 점수의 0.0 동점 착시 처방."""
-                total = 0.0
-                for _lvl_ax, _cut_ax in (("hs4", 4), ("hs6", 6), ("cn8", 8)):
-                    total += float((level_score_maps.get(_lvl_ax) or {}).get(
-                        code_ax[:_cut_ax], 0.0) or 0.0)
-                return total
-
-            _lead_c = candidates[0]
-            _lead_code = str(_lead_c.get("cn8") or "")
-            _lead_ax = _hs4_axis.get(_lead_code[:4], "")
-            if _lead_ax == "material_composition":
-                _ax_i = None
-                for i_a in range(1, len(candidates)):
-                    _cand_code = str(candidates[i_a].get("cn8") or "")
-                    if _hs4_axis.get(_cand_code[:4]) != "product_identity":
-                        continue
-                    # ③ 자격 조건 — 교대 후보는 **named 자격(3상 출력의
-                    #    qualified_named)** 을 스스로 입증했어야 한다.
-                    #    실측이 세 지형을 정확히 가르는 유일한 이산 경계:
-                    #      전복미역국 2104 qualified_named  → 허용(정답)
-                    #      주꾸미     1902 residual_promoted → 차단(오답)
-                    #      새우살     8476 (자격 없음/None)  → 차단(오답)
-                    #    원 요구는 'unqualified_question 배제'였으나 그
-                    #    문언만으로는 주꾸미·새우살이 통과한다(전자는
-                    #    residual_promoted, 후자는 phase 자체가 없음).
-                    #    소거로 올라온 후보가 named 선두를 뺏을 자격은
-                    #    없다 — 요구의 정신을 실측 경계로 정확화한 것.
-                    if (candidates[i_a].get("residual_phase")
-                            != "qualified_named"):
-                        continue
-                    # ① 누적 증거 실재 — cn8 단독 점수는 잔반 지대라
-                    #    0.0 동점이 흔해 `>=` 비교가 무조건 통과했다(현행
-                    #    미작동 원인). 전 레벨 누적으로 교체하고, 증거가
-                    #    아예 없는 후보(새우살 8476 = 0.0)를 차단한다.
-                    #    선두 대비 우위까지 요구하면 전복미역국(3.0 vs
-                    #    18.0)의 정당한 교대가 죽어 -4레벨 회귀 실측 —
-                    #    따라서 경계는 '실재'이고 우열은 ③이 가른다.
-                    if _evidence(_cand_code) <= 0.0:
-                        continue
-                    # ② 라우터 창 실재 — 라우터가 점수 0으로 둔(창 밖)
-                    #    챕터로는 교대하지 않는다. 원 문언(선두 챕터 점수
-                    #    > 후보 챕터면 무발동)은 전복미역국(ch21 8.0 <
-                    #    ch16 18.0)의 정답 교대를 막아 기각 — 라우터가
-                    #    후보를 인정은 했는지까지만 본다.
-                    # 원 요구 문언 적용: 선두 챕터 점수 > 후보 챕터 점수면
-                    # 무발동. 완화판('창 실재')은 설기·콩찰떡을 1101(밀가루)
-                    # ·2102(효모)가 탈취하는 회귀 -2/-2 실측(12핀 신 캐시)
-                    # → 스펙 문언으로 복귀. 대가는 전복미역국 1건(ch21 8.0
-                    # < ch16 18.0) — 정직 기록, §D 백로그.
-                    # [12회차 E §5-(c)] 과도기 동점 구제 — ** 원리 8(서열의
-                    # 탈점수화) 완성 시 '등급 동점 규칙'으로 승계·소멸하는
-                    # 과도기 장치**(대청소 소멸 예정 목록 §13 탄생 등재 —
-                    # G1/G2 사후 재판 전철 방지). 조건: cn8 완전 동점 ∧
-                    # 양측 qualified_named일 때만 ②(라우터 서열) 면제.
-                    # '정체 직격'은 축 전제(_hs4_axis==product_identity —
-                    # taxonomy 1급 원천)가 담보한다: 오구제 후보 row14의
-                    # 8438은 축 전제에서 이미 탈락(exclusion_boundary)이고
-                    # cn8 잔반 지대는 matched가 공집합이라 토큰 직격은
-                    # 신호가 없다(실측). 설기(비동점)·주꾸미(promoted ③)
-                    # ·콩찰떡(비동점) 전부 기존 문에서 차단 유지.
-                    # ASAP_AXIS_TIEBREAK_C=0 복귀. 서명 axis_tiebreak_
-                    # transitional.
-                    _tie_c = (
-                        (os.environ.get("ASAP_AXIS_TIEBREAK_C", "1")
-                         or "1").strip() != "0"
-                        and float(candidates[i_a].get("score") or 0.0)
-                        == float(_lead_c.get("score") or 0.0)
-                        and _lead_c.get("residual_phase")
-                        == "qualified_named")
-                    if _tie_c:
-                        candidates[i_a]["axis_tiebreak_transitional"] = (
-                            "gri_pending:principle8")
-                    elif (_ch_scores
-                            and _ch_scores.get(_cand_code[:2], 0.0)
-                              < _ch_scores.get(_lead_code[:2], 0.0)):
-                        continue
-                    _ax_i = i_a
-                    break
-                if _ax_i is not None:
-                    _ax_cand = candidates.pop(_ax_i)
-                    _ax_cand["identity_axis_lead"] = True
-                    candidates.insert(0, _ax_cand)
         paths: list[dict[str, Any]] = []
         for cand in candidates:
             cn8 = _digits(cand.get("cn8"), limit=8)
@@ -1704,6 +1404,10 @@ class StagedClassificationTool:
     @staticmethod
     def _chapter_scores(routing_context: dict[str, Any]) -> dict[str, float]:
         """Router chapter scores from candidate_chapter_details ({} if absent)."""
+        # Semantic closed-choice routing is ordinal and must never be converted
+        # back into a chapter score or inherited by HS4 children.
+        if str(routing_context.get("selected_hs2") or "").strip():
+            return {}
         details = routing_context.get("candidate_chapter_details")
         if not isinstance(details, list):
             return {}
@@ -1722,6 +1426,13 @@ class StagedClassificationTool:
 
     def _start_chapters(self, routing_context: dict[str, Any]) -> list[str]:
         chapters: list[str] = []
+        # Score-free semantic contract: the selected chapter is the sole active
+        # parent for HS4. ``alternative_hs2`` is reopen/audit material only; if
+        # it is admitted here, a lower-level GRI decision can silently replace
+        # the already selected HS2 parent.
+        selected_hs2 = _digits(routing_context.get("selected_hs2"), limit=2)
+        if len(selected_hs2) == 2:
+            return [selected_hs2]
         # Router-EVIDENCED chapters only (score > 0), ranked order. The
         # bucket-scope allowed list is the recall boundary for the fallback
         # classifiers, but feeding the whole bucket into staged puts
@@ -1850,6 +1561,7 @@ class StagedClassificationTool:
         parent_scores: dict[str, float] | None = None,
         predicates_by_code: dict[str, list[dict[str, Any]]] | None = None,
         decisions_by_parent: dict[str, dict[str, list[dict[str, Any]]]] | None = None,
+        level: str = "",
     ) -> list[dict[str, Any]]:
         """Hierarchical branch ranking: children compete ONLY with their own
         siblings; families are merged by PARENT CONFIDENCE first.
@@ -1878,13 +1590,24 @@ class StagedClassificationTool:
 
         parent_rank = {p: i for i, p in enumerate(parent_order)}
         scores_by_parent = parent_scores or {}
+        discrete_only = level in ("hs4", "hs6")
         merged: list[dict[str, Any]] = []
         fam_entries: dict[str, list[dict[str, Any]]] = {}
         for parent, items in groups.items():
+            if level == "hs6" and len(items) > 1:
+                # CN/TARIC trees can expose the heading umbrella as ``HHHH00``
+                # beside its real HS6 children. Once real subheadings exist,
+                # that umbrella is a structural node, not an answer candidate.
+                items = [
+                    item for item in items
+                    if item["code"] != f"{parent}00"
+                ]
             ranked_group = self._rank_sibling_group(
                 items, product_facts, fallback_tokens, percentages,
                 predicates_by_code=predicates_by_code or {},
                 group_decisions=(decisions_by_parent or {}).get(parent) or {},
+                discrete_only=discrete_only,
+                level=level,
             )
             fam_entries[parent] = ranked_group
             for round_index, entry in enumerate(ranked_group):
@@ -1893,6 +1616,22 @@ class StagedClassificationTool:
                 entry["_parent_rank"] = parent_rank.get(parent, len(parent_rank))
                 entry["_fam"] = parent
                 merged.append(entry)
+
+        if discrete_only:
+            # HS4/HS6 are closed sibling decisions. Parent order and source
+            # branch order are retained only for deterministic presentation;
+            # neither lexical overlap nor inherited parent score can select a
+            # child. `_authoritative_selection` consumes only O/X/SILENCE,
+            # residual elimination, and the level-specific GRI signature.
+            merged.sort(key=lambda row: (
+                row["_parent_rank"], row["_round"], row["code"],
+            ))
+            for entry in merged:
+                entry.pop("_parent_score", None)
+                entry.pop("_round", None)
+                entry.pop("_parent_rank", None)
+                entry.pop("_fam", None)
+            return merged
 
         # [5회차-1] 가족 단위 증거 게이트 (설계자 조건부 승인 2026-07-17):
         # '증거 0 가족은 부모 신뢰를 순위 근거로 승계할 수 없다'(원리 1의
@@ -1985,9 +1724,17 @@ class StagedClassificationTool:
                 r_m["gri3_family_demoted"] = True
         merged.sort(key=lambda r: (
             1 if _demoted_m(r) else 0,
+            # [M 결함1] 생존 삽입 후보(window/axis/BTI/G1 입장권)는
+            # '소멸 방지'가 목적 — **동점에서 기존 후보를 이길 자격이
+            # 없다**(데모 주꾸미: 전원 0.0 동점에서 회수 유입 48173000
+            # 종이봉투가 rank1·llm_recommended는 rank1의 결과 표기였음
+            # — 원리 8 위반의 실체는 삽입 후보의 동점 참전). 잔반 서열
+            # 최후순 비트(demote-not-penalize·킬스위치 공유 GRI 무관).
+            1 if r.get("_survival_entry") else 0,
             0 if (_mcf_on and r.get("decision") == "confirmed"
                   and not _demoted_m(r)) else 1,
-            -r["_parent_score"], r["_round"], -r["score"], r["_parent_rank"], r["code"],
+            -r["_parent_score"], r["_round"], -r["score"],
+            r["_parent_rank"], r["code"],
         ))
         for entry in merged:
             entry.pop("_parent_score", None)
@@ -2029,6 +1776,8 @@ class StagedClassificationTool:
         percentages: list[Any],
         predicates_by_code: dict[str, list[dict[str, Any]]] | None = None,
         group_decisions: dict[str, list[dict[str, Any]]] | None = None,
+        discrete_only: bool = False,
+        level: str = "",
     ) -> list[dict[str, Any]]:
         """Rank ONE family of siblings by their own decision criteria.
 
@@ -2038,6 +1787,78 @@ class StagedClassificationTool:
         H1: sibling-IDF within the family (skipped for a single child — there
         is nothing to discriminate). Residuals never win by wording.
         """
+        context_conditions_by_scope: dict[str, list[dict[str, Any]]] = {}
+        context_scope_by_code: dict[str, str] = {}
+        if discrete_only and level == "hs6":
+            contexts: list[str] = []
+            for item in items:
+                row = item["row"]
+                code = _digits(row.get("code"), limit=6)
+                context = re.sub(
+                    r"\s+",
+                    " ",
+                    str(row.get("branch_context") or ""),
+                ).strip()
+                if context.lower() in ("", "other", "n/a", "none"):
+                    continue
+                context_scope_by_code[code] = context
+                if context not in contexts:
+                    contexts.append(context)
+            if contexts:
+                from bussiness_logic.classification.offline.branch_decision_compiler import (
+                    CompileGroupDecisions,
+                )
+
+                parent = _digits(
+                    items[0]["row"].get("parent_code"),
+                    limit=4,
+                )
+                synthetic_by_context = {
+                    context: f"ctx{index:04d}"
+                    for index, context in enumerate(contexts, start=1)
+                }
+                context_by_synthetic = {
+                    synthetic: context
+                    for context, synthetic in synthetic_by_context.items()
+                }
+                compiled_context_rows = CompileGroupDecisions(
+                    "hs6_context",
+                    parent,
+                    {
+                        synthetic: context
+                        for context, synthetic in synthetic_by_context.items()
+                    },
+                )
+                context_exclusion_fields = ";".join((
+                    "identity_hints.commercial_identity",
+                    "identity_hints.food_form",
+                    "identity_hints.processing_state",
+                    "identity_hints.physical_form",
+                    "identity_hints.product_form_terms",
+                    "composition_facts.processing_state",
+                    "composition_facts.physical_form",
+                    "composition_facts.contains_wrapper_or_dough",
+                ))
+                for compiled_row in compiled_context_rows:
+                    if str(compiled_row.get("role") or "") == "qualifier":
+                        continue
+                    context = context_by_synthetic.get(
+                        str(compiled_row.get("then_code") or "")
+                    )
+                    if not context:
+                        continue
+                    normalized_row = dict(compiled_row)
+                    if (
+                        str(normalized_row.get("cond_type") or "")
+                        == "exclusion_boundary"
+                        and str(normalized_row.get("dto_field") or "")
+                        == "*tokens*"
+                    ):
+                        normalized_row["dto_field"] = context_exclusion_fields
+                    context_conditions_by_scope.setdefault(context, []).append(
+                        normalized_row
+                    )
+
         prepared: list[dict[str, Any]] = []
         for item in items:
             row = item["row"]
@@ -2175,7 +1996,12 @@ class StagedClassificationTool:
                     tok for tok in entry["positive"]
                     if doc_freq.get(tok, 0) * 2 <= sibling_count
                 }
-                score = float(len(positive & fact_tokens)) - float(len(negative & fact_tokens))
+                score = (
+                    0.0
+                    if discrete_only
+                    else float(len(positive & fact_tokens))
+                    - float(len(negative & fact_tokens))
+                )
             else:
                 # A single child is NOT a decision: it inherits its parent's
                 # whole wording with no sibling-IDF discipline, so re-scoring
@@ -2206,9 +2032,9 @@ class StagedClassificationTool:
             verdict = _quantitative_verdict(quant_text, percentages) if quant_conditions else {
                 "verdict": "neutral", "reason": "no_threshold_in_node",
             }
-            if verdict["verdict"] == "satisfies":
+            if not discrete_only and verdict["verdict"] == "satisfies":
                 score += QUANT_BOOST
-            elif verdict["verdict"] == "violates":
+            elif not discrete_only and verdict["verdict"] == "violates":
                 score -= QUANT_PENALTY  # legal condition contradicted -> effectively out
             # Recovery observation compares RAW evidence (lexical + quant)
             # — a predicate/decision boost on a rival sibling must not
@@ -2224,18 +2050,75 @@ class StagedClassificationTool:
 
                 pred_delta, predicate_results = EvaluatePredicates(
                     group_predicates, fact_tokens, product_facts,
+                    closed_world=discrete_only,
+                    allow_pool=not discrete_only,
                 )
-                score += pred_delta
+                if not discrete_only:
+                    score += pred_delta
             decision_status = ""
             decision_detail: list[dict[str, str]] = []
-            code_conditions = (group_decisions or {}).get(code)
-            if code_conditions:
+            raw_code_conditions = (group_decisions or {}).get(code)
+            code_conditions = raw_code_conditions
+            context_scope = context_scope_by_code.get(code, "")
+            context_decision = ""
+            context_detail: list[dict[str, str]] = []
+            context_conditions = list(
+                context_conditions_by_scope.get(context_scope, [])
+            )
+            primary_axis = ""
+            if discrete_only and raw_code_conditions:
+                from bussiness_logic.classification.services.axis_verdict import (
+                    ProjectDecisionRowsForAxis,
+                )
+
+                primary_axis, code_conditions = ProjectDecisionRowsForAxis(
+                    level,
+                    code,
+                    list(raw_code_conditions),
+                )
+            if code_conditions or context_conditions:
                 from bussiness_logic.classification.rules.branch_decision_evaluator import EvaluateCodeDecision
 
-                decision_status, decision_detail = EvaluateCodeDecision(
-                    code_conditions, product_facts, fact_tokens, percentages,
+            if context_conditions:
+                context_decision, context_detail = EvaluateCodeDecision(
+                    context_conditions,
+                    product_facts,
+                    frozenset(),
+                    percentages,
                     _quantitative_verdict,
+                    canonical_closed_world=True,
                 )
+            elif context_scope:
+                context_decision = "undecided"
+                context_detail = [{
+                    "cond": "branch_context",
+                    "op": "context_question",
+                    "verdict": "silent",
+                    "field": "",
+                    "why": "context_question_not_compiled",
+                    "value": json.dumps([context_scope]),
+                }]
+            if code_conditions:
+                decision_status, decision_detail = EvaluateCodeDecision(
+                    code_conditions,
+                    product_facts,
+                    frozenset() if discrete_only else fact_tokens,
+                    percentages,
+                    _quantitative_verdict,
+                    canonical_closed_world=discrete_only,
+                )
+                if discrete_only:
+                    decision_detail.append({
+                        "cond": primary_axis,
+                        "op": "axis_projection",
+                        "verdict": "applied",
+                        "field": "",
+                        "why": (
+                            f"{level}_primary_axis:"
+                            f"{len(code_conditions)}/{len(raw_code_conditions or [])}"
+                        ),
+                        "value": primary_axis,
+                    })
                 # [10회차-0 위생] 치환 스프린트 섀도 블록 뿌리 제거 —
                 # 표 해석 섀도 모듈은 원장 §4.3 폐기 계보(메인 삭제).
                 # 6차 재출현의 원본이 이 지점이었다 — 재도입 금지 (감사
@@ -2268,13 +2151,17 @@ class StagedClassificationTool:
                             if d.get("verdict") == "true":
                                 d["why"] = (str(d.get("why") or "")
                                             + ";qualifier_state_conflict")
-                if decision_status == "confirmed":
+                if not discrete_only and decision_status == "confirmed":
                     score += DECISION_CONFIRM
-                elif decision_status == "violated":
+                elif not discrete_only and decision_status == "violated":
                     score -= QUANT_PENALTY
-                elif decision_status == "undecided" and (
+                elif (
+                    not discrete_only
+                    and decision_status == "undecided"
+                    and (
                     os.environ.get("ASAP_DECISION_TRUE_SUPPORT", "1") or "1"
-                ).strip() != "0":
+                    ).strip() != "0"
+                ):
                     # 부분 충족 가산: true 조건당 +3, 상한 2개(과대 라벨 방지)
                     # [P1-D3] 백과 유래 매치(encyclopedia_hit)는 합산에서
                     # 집합적으로 1개(+3 상한)로만 친다 — 백과 잡음 여러 건이
@@ -2285,8 +2172,70 @@ class StagedClassificationTool:
                         if not str(d.get("why") or "").startswith("encyclopedia_hit"))
                     n_true = n_direct + (1 if len(trues) > n_direct else 0)
                     score += DECISION_TRUE_SUPPORT * min(n_true, 2)
+            elif (
+                discrete_only
+                and not raw_code_conditions
+                and predicate_results
+            ):
+                # The decision table is the primary compiled question source.
+                # Predicates fill only codes for which no decision-table row
+                # exists. Canonical-field mismatch is X; an empty field or an
+                # incomplete answer is SILENCE.
+                pred_answers = [
+                    str(item.get("verdict") or "")
+                    for item in predicate_results
+                    if str(item.get("verdict") or "") not in ("", "skipped")
+                ]
+                if "false" in pred_answers:
+                    decision_status = "violated"
+                elif pred_answers and all(answer == "true" for answer in pred_answers):
+                    decision_status = "confirmed"
+                else:
+                    decision_status = "undecided"
+            if discrete_only:
+                from bussiness_logic.classification.rules.question_contract import (
+                    ApplyClassificationAnswers,
+                )
+
+                parent_code = code[:-2]
+                if decision_detail:
+                    decision_status, decision_detail, _answer_keys = (
+                        ApplyClassificationAnswers(
+                            decisionStatus=decision_status,
+                            decisionDetail=decision_detail,
+                            productFacts=product_facts,
+                            stage=level,
+                            parentCode=parent_code,
+                            candidateCode=code,
+                            contextScope=context_scope,
+                        )
+                    )
+                elif predicate_results:
+                    decision_status, predicate_results, _answer_keys = (
+                        ApplyClassificationAnswers(
+                            decisionStatus=decision_status,
+                            decisionDetail=predicate_results,
+                            productFacts=product_facts,
+                            stage=level,
+                            parentCode=parent_code,
+                            candidateCode=code,
+                            contextScope=context_scope,
+                        )
+                    )
+                if context_detail:
+                    context_decision, context_detail, _context_answer_keys = (
+                        ApplyClassificationAnswers(
+                            decisionStatus=context_decision,
+                            decisionDetail=context_detail,
+                            productFacts=product_facts,
+                            stage=level,
+                            parentCode=parent_code,
+                            candidateCode=code,
+                            contextScope=context_scope,
+                        )
+                    )
             if residual:
-                score = min(score, 0.0)  # residuals never win on wording
+                score = 0.0 if discrete_only else min(score, 0.0)
                 # score_raw는 캡하지 않는다 — 잔반 간 동률의 tie-break·관측
                 # 정보(캡은 named와의 경쟁 규율일 뿐). [D3] 071080('capsicum'
                 # raw 1.0)이 무증거 콩류 잔반에 코드순으로 밀리던 실측 처방.
@@ -2307,8 +2256,17 @@ class StagedClassificationTool:
                 "predicate_results": predicate_results,
                 "decision": decision_status,
                 "decision_detail": decision_detail,
+                "context_scope": context_scope,
+                "context_decision": context_decision,
+                "context_detail": context_detail,
                 "quantitative_verdict": verdict,
             })
+
+        if discrete_only:
+            # No score sorting, lexical proof, precedent tiebreak, or score-
+            # driven residual promotion at HS4/HS6. The caller applies the
+            # level axis fallback, then GRI3/GRI6, then authoritative selection.
+            return scored
 
         # Elimination order: positive-scoring specific nodes first; residual
         # ("Other") nodes surface only when no specific sibling scored > 0.
@@ -2573,21 +2531,18 @@ class StagedClassificationTool:
     # ---- weighted lexical rank + quantitative gate ------------------------
     @staticmethod
     def _heading_vocab() -> dict:
-        """DB/artifacts/heading_vocab.json — pair_rows including/excluding
-        수확분(HS 해설서 유래, 원문 보존). 부재/오류 = 빈 dict no-op.
+        """heading_vocab table — pair_rows including/excluding
+        수확분(HS 해설서 유래, 원문 보존).
         ASAP_HEADING_VOCAB=0 비활성."""
         global _HEADING_VOCAB_CACHE
         try:
             return _HEADING_VOCAB_CACHE
         except NameError:
             pass
-        vocab: dict = {}
-        try:
-            path = Path(__file__).resolve().parents[4] / "DB" / "artifacts" / "heading_vocab.json"
-            with open(path, encoding="utf-8") as f:
-                vocab = json.load(f)
-        except Exception:  # noqa: BLE001 — 아티팩트 부재는 기능 OFF와 동일
-            vocab = {}
+        from bussiness_logic.core.runtime_asset_repository import (
+            LoadSingletonAsset,
+        )
+        vocab = LoadSingletonAsset("heading_vocab")
         globals()["_HEADING_VOCAB_CACHE"] = vocab
         return vocab
 
@@ -2707,6 +2662,335 @@ class StagedClassificationTool:
         valid = {r["code"] for r in ranked}
         picked = [str(c) for c in (parsed.get("selected") or []) if str(c) in valid]
         return picked[: self.keep_per_level]
+
+    def _select_keep(self, ranked: list[dict[str, Any]]) -> list[str]:
+        """현행 이산 top-k. (구 _llm_select — LLM re-selector는 2026-07-22
+        설계자 지시로 폐기: 임시 실험 잔재였고 런타임 LLM 0 mandate 위반.)"""
+        if not ranked:
+            return []
+        return [r["code"] for r in ranked[: self.keep_per_level]]
+
+    @staticmethod
+    def _authoritative_selection(
+            ranked: list[dict[str, Any]],
+    ) -> tuple[str, str]:
+        """Return one legally supported branch, never a lexical head."""
+        eligible = [
+            row for row in ranked
+            if str(row.get("decision") or "") != "violated"
+        ]
+        confirmed = [
+            row for row in eligible
+            if str(row.get("decision") or "") == "confirmed"
+        ]
+        if len(confirmed) == 1:
+            return str(confirmed[0].get("code") or ""), "confirmed"
+        if len(confirmed) > 1:
+            gri_winners = [
+                row for row in confirmed if str(row.get("gri3") or "")
+            ]
+            if len(gri_winners) == 1:
+                return str(gri_winners[0].get("code") or ""), "gri"
+            return "", "multiple_confirmed_without_gri"
+
+        # A suffix context is an intermediate branch, not another HS6 answer.
+        # Resolve its local "Other" only after the context is proven and every
+        # named sibling inside that same context is explicitly X. A missing
+        # named-leaf fact remains SILENCE and is exposed as a question below.
+        context_groups: dict[str, list[dict[str, Any]]] = {}
+        for row in ranked:
+            scope = str(row.get("context_scope") or "").strip()
+            if scope and str(row.get("context_decision") or "") == "confirmed":
+                context_groups.setdefault(scope, []).append(row)
+        context_residuals: list[dict[str, Any]] = []
+        for scoped_rows in context_groups.values():
+            scoped_specific = [
+                row for row in scoped_rows if not bool(row.get("residual"))
+            ]
+            scoped_residual = [
+                row for row in scoped_rows
+                if bool(row.get("residual"))
+                   and str(row.get("decision") or "") != "violated"
+            ]
+            if (
+                    scoped_specific
+                    and len(scoped_residual) == 1
+                    and all(
+                str(row.get("decision") or "") == "violated"
+                for row in scoped_specific
+            )
+            ):
+                context_residuals.append(scoped_residual[0])
+        if len(context_residuals) == 1:
+            return (
+                str(context_residuals[0].get("code") or ""),
+                "context_residual_elimination",
+            )
+        if len(context_residuals) > 1:
+            return "", "multiple_context_residuals_without_gri"
+
+        # "Other" can be authoritative only when elimination was actually
+        # completed, or when the axis evaluator directly answered its question.
+        residual_rows = [row for row in ranked if bool(row.get("residual"))]
+        specific_rows = [row for row in ranked if not bool(row.get("residual"))]
+        explicit_elimination = bool(specific_rows) and all(
+            str(row.get("decision") or "") == "violated"
+            for row in specific_rows
+        )
+        residual = []
+        for row in residual_rows:
+            if str(row.get("decision") or "") == "violated":
+                continue
+            if not bool(row.get("residual")):
+                continue
+            axis_true = any(
+                str(detail.get("op") or "") == "axis_verdict"
+                and str(detail.get("verdict") or "") == "true"
+                for detail in (row.get("decision_detail") or [])
+            )
+            if explicit_elimination or axis_true:
+                residual.append(row)
+        if len(residual) == 1:
+            row = residual[0]
+            reason = (
+                "residual_elimination"
+                if explicit_elimination
+                else "axis_residual"
+            )
+            return str(row.get("code") or ""), reason
+        return "", "none"
+
+    @staticmethod
+    def _question_options(
+            ranked: list[dict[str, Any]],
+            *,
+            level: str,
+            parents: list[str],
+            bti_summons: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Expose unresolved branch questions without turning them into votes."""
+        from bussiness_logic.classification.rules.question_contract import (
+            BuildClassificationQuestionKey,
+        )
+
+        options: list[dict[str, Any]] = []
+        seen_keys: set[str] = set()
+        bti_fields = (
+            "level",
+            "code",
+            "refs",
+            "matched",
+            "phrases",
+            "silence",
+            "not_in_tree",
+            "summoned_by",
+            "k",
+            "counter",
+            "shortlist_n",
+        )
+        stage_bti = [
+            {
+                **{
+                    field: item.get(field)
+                    for field in bti_fields
+                    if item.get(field) not in (None, "", [])
+                },
+                "authority": "reference_only",
+            }
+            for item in bti_summons
+            if str(item.get("level") or "") == level
+        ]
+        for row in ranked:
+            if str(row.get("decision") or "") == "violated":
+                continue
+            details = [
+                dict(item)
+                for item in (
+                        list(row.get("decision_detail") or [])
+                        + list(row.get("predicate_results") or [])
+                )
+                if isinstance(item, dict)
+                   and str(item.get("verdict") or "").lower()
+                   in ("", "unknown", "undecided", "silent")
+            ]
+            if str(row.get("context_decision") or "") == "undecided":
+                details.extend(
+                    dict(item)
+                    for item in (row.get("context_detail") or [])
+                    if isinstance(item, dict)
+                    and str(item.get("verdict") or "").lower()
+                    in ("", "unknown", "undecided", "silent")
+                )
+            if not details:
+                continue
+            code = str(row.get("code") or "")
+            description = str(row.get("descr") or "")
+            for detail in details:
+                values: list[str] = []
+                try:
+                    parsed = json.loads(str(detail.get("value") or "null"))
+                except Exception:  # noqa: BLE001 - question text is best-effort
+                    parsed = None
+                if isinstance(parsed, list):
+                    values.extend(str(value) for value in parsed if str(value))
+                elif parsed not in (None, ""):
+                    values.append(str(parsed))
+                values = list(dict.fromkeys(values))[:4]
+                condition = str(detail.get("cond") or "")
+                axis = str(
+                    detail.get("binding_axis")
+                    or detail.get("axis")
+                    or condition
+                )
+                canonical_field = str(detail.get("field") or "").strip()
+                if not canonical_field:
+                    canonical_field = (
+                        str(detail.get("binding_paths") or "")
+                        .split(";", 1)[0]
+                        .strip()
+                    )
+                context_scope = str(row.get("context_scope") or "")
+                parent_code = code[:-2] or str(parents[0] if len(parents) == 1 else "")
+                question_key = BuildClassificationQuestionKey(
+                    stage=level,
+                    parentCode=parent_code,
+                    candidateCode=code,
+                    axis=axis,
+                    canonicalField=canonical_field,
+                    conditionValue=detail.get("value"),
+                    contextScope=context_scope,
+                )
+                if question_key in seen_keys:
+                    continue
+                seen_keys.add(question_key)
+                if condition in ("material_composition", "contains", "species_source"):
+                    subject = ", ".join(values) or description
+                    question_text = f"제품에 다음 성분 또는 종이 포함되어 있습니까: {subject}?"
+                elif condition in (
+                        "preservation_state",
+                        "processing_method",
+                        "physical_form",
+                        "condition_quality",
+                ):
+                    subject = ", ".join(values) or description
+                    question_text = f"제품 상태 또는 형태가 다음 조건에 해당합니까: {subject}?"
+                else:
+                    level_name = {
+                        4: "HS4",
+                        6: "HS6",
+                        8: "CN8",
+                    }.get(len(code), "품목")
+                    question_text = (
+                        f"제품이 해당 {level_name} "
+                        f"분류 조건에 해당합니까: {description}?"
+                    )
+                options.append({
+                    "question_key": question_key,
+                    "stage": level,
+                    "parent_code": parent_code,
+                    "candidate_code": code,
+                    "code": code,
+                    "axis": axis,
+                    "canonical_field": canonical_field,
+                    "condition_value": str(detail.get("value") or ""),
+                    "description": description,
+                    "decision": str(row.get("decision") or "undecided"),
+                    "residual": bool(row.get("residual")),
+                    "required_facts": [detail],
+                    "context_scope": context_scope,
+                    "question_text": question_text,
+                    "answer_options": ["yes", "no", "unknown"],
+                    "bti_evidence": stage_bti,
+                })
+        return options[:8]
+
+    @staticmethod
+    def _retrieval_suggestions(
+            ranked: list[dict[str, Any]],
+            limit: int,
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "code": str(row.get("code") or ""),
+                "description": str(row.get("descr") or ""),
+                "decision": str(row.get("decision") or ""),
+                "residual": bool(row.get("residual")),
+                "bti": row.get("precedent_tiebreak"),
+            }
+            for row in ranked[:limit]
+        ]
+
+    @staticmethod
+    def _unresolved_result(
+            *,
+            level: str,
+            parents: list[str],
+            stages: list[dict[str, Any]],
+            question_options: list[dict[str, Any]],
+            bti_summons: list[dict[str, Any]],
+            recovery_candidates: list[dict[str, Any]],
+            route_disagreements: list[dict[str, Any]],
+            merge_gate_observations: list[dict[str, Any]],
+            router_trust_obs: list[dict[str, Any]],
+            suggestions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        previous = {"hs4": "hs2", "hs6": "hs4", "cn8": "hs6"}[level]
+        resolved_prefix = str(parents[0] if len(parents) == 1 else "")
+        pending_questions = [
+            {
+                "question_key": str(option.get("question_key") or ""),
+                "stage": str(option.get("stage") or level),
+                "parent_code": str(option.get("parent_code") or resolved_prefix),
+                "candidate_code": str(option.get("candidate_code") or option.get("code") or ""),
+                "axis": str(option.get("axis") or ""),
+                "canonical_field": str(option.get("canonical_field") or ""),
+                "condition_value": str(option.get("condition_value") or ""),
+                "context_scope": str(option.get("context_scope") or ""),
+                "bti_evidence": list(option.get("bti_evidence") or []),
+                "question_text": str(option.get("question_text") or ""),
+                "options": list(option.get("answer_options") or []),
+                "required_for": [
+                    f"stage:{level}",
+                    f"parent:{resolved_prefix}",
+                    f"candidate:{option.get('code') or ''}",
+                    *[
+                        f"field:{detail.get('field')}"
+                        for detail in (option.get("required_facts") or [])
+                        if isinstance(detail, dict) and detail.get("field")
+                    ][:2],
+                ],
+            }
+            for option in question_options
+            if str(option.get("question_text") or "")
+        ]
+        return {
+            "ok": False,
+            "error": f"question_required_at_{level}",
+            "classification_status": "needs_more_facts",
+            "unresolved_stage": level,
+            "resolved_level": previous if resolved_prefix else "",
+            "resolved_prefix": resolved_prefix,
+            "unresolved": {
+                "stage": level,
+                "parent_codes": list(parents),
+                "question_options": question_options,
+                "bti_summons": [
+                    item for item in bti_summons
+                    if str(item.get("level") or "") == level
+                ],
+            },
+            "suggestions": suggestions[:8],
+            "pending_user_questions": pending_questions,
+            "candidates": [],
+            "paths": [],
+            "stages": stages,
+            "recovery_candidates": recovery_candidates,
+            "route_disagreements": route_disagreements,
+            "merge_gate_observations": merge_gate_observations,
+            "router_trust_gate": router_trust_obs,
+            "bti_summons": bti_summons,
+        }
+
 
     def validate_selection(
         self,
@@ -2864,6 +3148,9 @@ class StagedClassificationTool:
                     "predicate_results": r.get("predicate_results", []),
                     "decision": r.get("decision", ""),
                     "decision_detail": r.get("decision_detail", []),
+                    "context_scope": r.get("context_scope", ""),
+                    "context_decision": r.get("context_decision", ""),
+                    "context_detail": r.get("context_detail", []),
                     "precedent_tiebreak": r.get("precedent_tiebreak"),
                     "quantitative_verdict": (r.get("quantitative_verdict") or {}).get("verdict", "neutral"),
                     # [기록 의무화 07-18 — 메인 그래프트 재이식] 잔반·형태

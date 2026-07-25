@@ -1,8 +1,8 @@
 """용어 브리지 — 자유어(한글 성분명) → 법정 영문 어휘 결정론 사상.
 
 층위 원칙: 발산(상류 LLM)은 건드리지 않고, DTO 완성 직후 '허리'에서
-수렴만 한다. LLM 0회 — 관세청 표준품명 사전(data/std_name_dictionary
-.jsonl, 2,966쌍)의 2-gram 조회 + 매칭행 HS챕터 제목 토큰(법정 텍스트)을
+수렴만 한다. LLM 0회 — 관세청 표준품명 사전(std_name_dictionary
+table, 2,966쌍)의 조회 + 매칭행 HS챕터 제목 토큰(법정 텍스트)을
 계열 alias로 동반 ('돼지등갈비'→ch02→'meat/offal' — quant의
 "meat of any kind" 조건이 요구하는 바로 그 다리).
 
@@ -14,12 +14,16 @@
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import unicodedata
-from pathlib import Path
 from typing import Any
+
+from bussiness_logic.core.runtime_asset_repository import (
+    EnqueueTermReview,
+    LoadCuratedTermBridge,
+    LoadStandardNameDictionary,
+)
 
 _DICT_CACHE: list[dict] | None = None
 _CHAPTER_TOKENS: dict[str, list[str]] | None = None
@@ -33,13 +37,7 @@ def _load_dict() -> list[dict]:
     global _DICT_CACHE
     if _DICT_CACHE is not None:
         return _DICT_CACHE
-    rows: list[dict] = []
-    try:
-        path = Path(__file__).resolve().parents[4] / "data" / "std_name_dictionary.jsonl"
-        for line in path.read_text(encoding="utf-8").splitlines():
-            rows.append(json.loads(line))
-    except Exception:  # noqa: BLE001 — 사전 부재 = 브리지 전체 no-op
-        rows = []
+    rows = [dict(row) for row in LoadStandardNameDictionary()]
     _DICT_CACHE = rows
     return rows
 
@@ -104,7 +102,7 @@ def _exact_index() -> dict[str, list[int]]:
 
 # ── curated 파생층 (Track 2) ────────────────────────────────────────
 # 원천(관세청) 사전은 불변 잠금 — 원천 부재 어휘의 다리는 별도 파생층
-# (data/curated_term_bridge.jsonl)에서만 온다. 행 자격: source='curated'
+# (curated_term_bridge table)에서만 온다. 행 자격: source='curated'
 # ∧ approved_by 비어있지 않음(설계자 승인분만 유효). 조회는 원천 우선,
 # 파생은 폴백이며 산출에 grade='derived'가 표기된다 — 소비부는 파생
 # 매치에 ingredient_name 영문 병기를 하지 않아(원천 전용 특권) typed
@@ -118,22 +116,14 @@ def _curated_index() -> dict[str, list[dict]]:
     global _CURATED_INDEX
     if _CURATED_INDEX is None:
         idx: dict[str, list[dict]] = {}
-        try:
-            path = (Path(__file__).resolve().parents[4]
-                    / "data" / "curated_term_bridge.jsonl")
-            for line in path.read_text(encoding="utf-8").splitlines():
-                try:
-                    r = json.loads(line)
-                except Exception:  # noqa: BLE001
-                    continue
-                if (str(r.get("source") or "") != "curated"
-                        or not str(r.get("approved_by") or "").strip()):
-                    continue  # 승인된 curated 행만 유효
-                k = _norm_key(r.get("ko") or "")
-                if len(k) >= 2 and str(r.get("en") or "").strip():
-                    idx.setdefault(k, []).append(r)
-        except Exception:  # noqa: BLE001 — 파생층 부재 = 폴백 없음(무해)
-            idx = {}
+        for sourceRow in LoadCuratedTermBridge():
+            r = dict(sourceRow)
+            if (str(r.get("source") or "") != "curated"
+                    or not str(r.get("approved_by") or "").strip()):
+                continue
+            k = _norm_key(r.get("ko") or "")
+            if len(k) >= 2 and str(r.get("en") or "").strip():
+                idx.setdefault(k, []).append(r)
         _CURATED_INDEX = idx
     return _CURATED_INDEX
 
@@ -215,12 +205,7 @@ def _enqueue_review(name_ko: str) -> None:
     if not key or key in _REVIEW_SEEN:
         return
     _REVIEW_SEEN.add(key)
-    try:
-        path = Path(__file__).resolve().parents[4] / "data" / "std_name_review_queue.txt"
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(_nfc(name_ko) + "\n")
-    except Exception:  # noqa: BLE001
-        pass
+    EnqueueTermReview(key, _nfc(name_ko))
 
 
 def ApplyTermBridge(pu: dict[str, Any]) -> dict[str, Any] | None:

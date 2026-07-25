@@ -109,6 +109,21 @@ def _dig(obj: Any, path: str) -> Any:
 # 센티널은 '채워짐'이 아니라 '모름'이다 — 토큰으로 흘리면 field_empty가
 # field_no_match로 위장된다 (comp.processing_state='unknown' 22/22 실측).
 _FIELD_SENTINELS = frozenset({"unknown", "other", "none", "n/a", "na"})
+_NEGATION_WORDS = frozenset({"no", "not", "without", "non", "un"})
+_NEGATION_PREFIXES = ("non", "un")
+_MILLING_MEAL_CONTEXT = frozenset({
+    "bone", "cereal", "feed", "fish", "flour", "grain", "groat",
+    "ground", "milled", "milling", "oilcake", "powder", "seed",
+})
+_PREPARED_MEAL_CONTEXT = frozenset({
+    "cooked", "dish", "kit", "mixed", "noodle", "prepared", "ready",
+    "serving",
+})
+_FORM_POLARITY_EQUIVALENTS = {
+    "stuffed": frozenset({"stuffed", "filled"}),
+    "filled": frozenset({"stuffed", "filled"}),
+}
+_WRAPPER_FIELD = "composition_facts.contains_wrapper_or_dough"
 
 
 def _field_tokens(product_facts: Mapping[str, Any] | None, dto_field: str) -> set[str]:
@@ -161,6 +176,191 @@ def _field_tokens(product_facts: Mapping[str, Any] | None, dto_field: str) -> se
     return out
 
 
+def _text_values(value: Any) -> list[str]:
+    """Flatten DTO values to source strings without including mapping keys."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, Mapping):
+        out: list[str] = []
+        for nested in value.values():
+            out.extend(_text_values(nested))
+        return out
+    if isinstance(value, (list, tuple, set)):
+        out = []
+        for nested in value:
+            out.extend(_text_values(nested))
+        return out
+    return []
+
+
+def _field_texts(
+    product_facts: Mapping[str, Any] | None,
+    dto_field: str,
+) -> list[str]:
+    if not product_facts:
+        return []
+    if not dto_field or dto_field == "*tokens*":
+        return _text_values(product_facts)
+    out: list[str] = []
+    for path in dto_field.split(";"):
+        path = path.strip()
+        if path:
+            out.extend(_text_values(_dig(product_facts, path)))
+    return out
+
+
+def _has_unnegated_token(words: list[str], target: str) -> tuple[bool, bool]:
+    """Return (positive occurrence, explicitly negated occurrence)."""
+    positive = False
+    negated = False
+    for idx, raw_word in enumerate(words):
+        word = _stem(raw_word)
+        if word != target:
+            for prefix in _NEGATION_PREFIXES:
+                if raw_word.startswith(prefix) \
+                        and _stem(raw_word[len(prefix):]) == target:
+                    negated = True
+                    break
+            continue
+        qualifier = {
+            _stem(v) for v in words[max(0, idx - 5):idx]
+        }
+        if {"whether", "not", "or"} <= qualifier:
+            # "whether or not cooked or stuffed" does not assert either
+            # polarity about the product. It is a legal scope qualifier.
+            continue
+        lookback = {_stem(v) for v in words[max(0, idx - 3):idx]}
+        if lookback & _NEGATION_WORDS:
+            negated = True
+        else:
+            positive = True
+    return positive, negated
+
+
+def MatchHasTokenPolarity(
+    values: set[str] | frozenset[str],
+    product_facts: Mapping[str, Any] | None,
+    dto_field: str,
+) -> tuple[str | None, str]:
+    """Resolve signed evidence for polarity-sensitive form predicates.
+
+    ``None`` means this predicate is outside the supported polarity concept
+    or has no polarity-relevant evidence, so the legacy evaluator may run.
+    ``unknown`` is an explicit SILENCE result: a neutral legal qualifier,
+    contradictory lanes, or an uncorroborated wrapper boolean must not fall
+    through to unsigned token matching.
+    """
+    query_tokens = {
+        _stem(token)
+        for value in values
+        for token in _TOKEN.findall(str(value).lower())
+    }
+    concept_terms: set[str] = set()
+    for token in query_tokens:
+        concept_terms.update(_FORM_POLARITY_EQUIVALENTS.get(token, ()))
+    if not concept_terms:
+        return None, ""
+
+    positive = False
+    negated = False
+    mentioned = False
+    for text in _field_texts(product_facts, dto_field):
+        words = [word.lower() for word in _TOKEN.findall(text.lower())]
+        stems = {_stem(word) for word in words}
+        for target in concept_terms:
+            target_positive, target_negated = _has_unnegated_token(
+                words, target
+            )
+            positive = positive or target_positive
+            negated = negated or target_negated
+            mentioned = mentioned or target in stems or any(
+                word.startswith(_NEGATION_PREFIXES)
+                and _stem(word[3:] if word.startswith("non") else word[2:])
+                == target
+                for word in words
+            )
+
+    wrapper = _dig(product_facts, _WRAPPER_FIELD)
+    wrapper_is_bound = (
+        _WRAPPER_FIELD in {
+            path.strip() for path in dto_field.split(";")
+        }
+        and isinstance(wrapper, bool)
+    )
+
+    if positive and negated:
+        return "unknown", "polarity_conflict"
+    if positive:
+        if wrapper_is_bound and wrapper is False:
+            return "unknown", "polarity_conflict:wrapper_false"
+        return "true", "affirmative_source_text"
+    if negated:
+        if wrapper_is_bound and wrapper is True:
+            return "unknown", "polarity_conflict:wrapper_true"
+        return "false", "explicit_negation"
+    if mentioned:
+        return "unknown", "neutral_scope_qualifier"
+    if wrapper_is_bound:
+        return "unknown", "wrapper_requires_text_corroboration"
+    return None, ""
+
+
+def MatchPositivePhraseEvidence(
+    phrase: set[str] | frozenset[str],
+    product_facts: Mapping[str, Any] | None,
+    dto_field: str,
+    fallback_pool: set[str] | frozenset[str],
+) -> tuple[bool, str]:
+    """Verify that a token hit is affirmative and has the intended sense.
+
+    This is used only for exclusion evidence. Explicitly negated mentions
+    (``not stuffed``, ``without sauce``) and prepared-dish ``meal`` mentions
+    are not treated as proof that an excluded property is present. Failure to
+    prove presence remains unknown; it never becomes affirmative absence.
+    """
+    targets = {_stem(str(token).lower()) for token in phrase if str(token)}
+    pool = {_stem(str(token).lower()) for token in fallback_pool if str(token)}
+    if not targets or not targets <= pool:
+        return False, "phrase_absent"
+
+    texts = _field_texts(product_facts, dto_field)
+    if not texts:
+        return True, "token_pool_fallback"
+
+    saw_negated = False
+    saw_sense_guard = False
+    positive_targets: set[str] = set()
+    for text in texts:
+        words = [word.lower() for word in _TOKEN.findall(text.lower())]
+        for target in targets:
+            positive, negated = _has_unnegated_token(words, target)
+            saw_negated = saw_negated or negated
+            if not positive:
+                continue
+            # CN uses "meal" both for a milling/feed product and ordinary
+            # prepared meals. Only the former can satisfy a tariff exclusion.
+            if target != "meal":
+                positive_targets.add(target)
+                continue
+            stems = {_stem(word) for word in words}
+            if stems & _PREPARED_MEAL_CONTEXT:
+                saw_sense_guard = True
+                continue
+            if not stems & _MILLING_MEAL_CONTEXT:
+                saw_sense_guard = True
+                continue
+            positive_targets.add(target)
+
+    if targets <= positive_targets:
+        return True, "affirmative_source_text"
+
+    if saw_negated:
+        return False, "explicit_negation_guarded"
+    if saw_sense_guard:
+        return False, "meal_sense_guarded"
+    return False, "source_text_not_affirmative"
+
+
 def LoadBranchPredicates(level: str, codes: tuple[str, ...]) -> dict[str, list[dict[str, Any]]]:
     """{code -> [predicate rows]} from the sidecar; () -> {} on any failure."""
     if not codes:
@@ -204,6 +404,9 @@ def EvaluatePredicates(
     predicates: list[Mapping[str, Any]],
     fact_tokens: frozenset[str] | set[str],
     product_facts: Mapping[str, Any] | None = None,
+    *,
+    closed_world: bool = False,
+    allow_pool: bool = True,
 ) -> tuple[float, list[dict[str, str]]]:
     """(score delta, per-predicate verdicts) — three-valued, GRADED.
 
@@ -217,7 +420,11 @@ def EvaluatePredicates(
     pool = set(fact_tokens)
     # 잔존하는 유일한 broad-pool 지원 경로(true_pool +1)의 A/B 스위치.
     # 기본 ON(73% 실측 구성). OFF면 has_token은 바인딩 필드로만 답한다.
-    pool_boost_on = (os.environ.get("ASAP_PREDICATE_POOL_BOOST", "1") or "1").strip() != "0"
+    pool_boost_on = (
+        allow_pool
+        and (os.environ.get("ASAP_PREDICATE_POOL_BOOST", "1") or "1").strip()
+        != "0"
+    )
     for pred in predicates:
         axis = str(pred.get("axis") or "")
         if axis in _SKIP_AXES:
@@ -244,35 +451,104 @@ def EvaluatePredicates(
                              "why": "crossref_exclusion_skipped"})
             continue
         if op == "not_contains":
-            hit = bool(tokens & pool)
-            verdict = "false" if hit else "unknown"
+            dto_field = str(pred.get("dto_field") or "*tokens*")
+            phrases = [
+                {_stem(t) for t in _TOKEN.findall(str(value).lower()) if len(t) >= 3}
+                for value in (values or [])
+            ]
+            matches = [
+                MatchPositivePhraseEvidence(
+                    phrase, product_facts,
+                    dto_field, pool,
+                )
+                for phrase in phrases if phrase
+            ]
+            hit = any(matched for matched, _ in matches)
+            bound = (
+                _field_tokens(product_facts, dto_field)
+                if dto_field != "*tokens*"
+                else set()
+            )
             if hit:
-                delta -= _PREDICATE_BLOCK
-        elif op == "has_token":
-            bound = _field_tokens(product_facts, str(pred.get("dto_field") or ""))
-            if axis in _ALIAS_AXES:
-                bound = _expand(bound)
-            if tokens & bound:
+                verdict = "false"
+            elif closed_world and bound:
                 verdict = "true"
-                delta += _FIELD_BOOST
-            elif pool_boost_on and axis not in _STRICT_FIELD_AXES and tokens & (
-                _expand(pool) if axis in _ALIAS_AXES else pool
-            ):
-                verdict = "true_pool"
-                delta += _POOL_BOOST
             else:
                 verdict = "unknown"
+            if hit:
+                delta -= _PREDICATE_BLOCK
+            elif verdict == "true":
+                delta += _FIELD_BOOST
+        elif op == "has_token":
+            dto_field = str(pred.get("dto_field") or "")
+            polarity_verdict, polarity_why = MatchHasTokenPolarity(
+                tokens,
+                product_facts,
+                dto_field,
+            )
+            if polarity_verdict is not None:
+                verdict = polarity_verdict
+                if verdict == "true":
+                    delta += _FIELD_BOOST
+                elif verdict == "false":
+                    delta -= _PREDICATE_BLOCK
+            else:
+                bound = _field_tokens(product_facts, dto_field)
+                if axis in _ALIAS_AXES:
+                    bound = _expand(bound)
+                if tokens & bound:
+                    verdict = "true"
+                    delta += _FIELD_BOOST
+                elif pool_boost_on and axis not in _STRICT_FIELD_AXES and tokens & (
+                    _expand(pool) if axis in _ALIAS_AXES else pool
+                ):
+                    verdict = "true_pool"
+                    delta += _POOL_BOOST
+                elif closed_world and bound:
+                    verdict = "false"
+                    delta -= _PREDICATE_BLOCK
+                else:
+                    verdict = "unknown"
         else:
             verdict = "unknown"
         why = ""
-        if op == "has_token" and verdict == "unknown":
-            bound_probe = _field_tokens(product_facts, str(pred.get("dto_field") or ""))
-            why = "field_empty" if not bound_probe else "field_no_match"
-        verdicts.append({
+        if op == "not_contains" and not hit:
+            if verdict == "true":
+                why = "canonical_field_absence"
+            else:
+                guarded = [reason for matched, reason in matches
+                           if not matched and reason not in {"phrase_absent"}]
+                why = guarded[0] if guarded else "exclusion_absent"
+        if op == "has_token":
+            if polarity_verdict is not None:
+                why = polarity_why
+            elif verdict in {"unknown", "false"}:
+                bound_probe = _field_tokens(
+                    product_facts, str(pred.get("dto_field") or "")
+                )
+                why = (
+                    "field_empty"
+                    if not bound_probe
+                    else (
+                        "canonical_field_mismatch"
+                        if verdict == "false"
+                        else "field_no_match"
+                    )
+                )
+        result = {
             "axis": axis,
             "op": op,
             "value": ",".join(sorted(tokens))[:60],
             "verdict": verdict,
             "why": why,
-        })
+        }
+        if op == "has_token" and polarity_verdict is not None:
+            # A signed fact answers a narrower legal question than a broad
+            # axis token match. The later HS4/HS6 axis stamp must therefore
+            # consume this result before considering a processing/form axis.
+            # This contract is concept-generic; MatchHasTokenPolarity owns the
+            # supported signed vocabulary.
+            result["authority"] = "signed_polarity"
+            result["decisive"] = "true"
+        verdicts.append(result)
     return delta, verdicts

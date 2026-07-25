@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import logging
 import os
@@ -18,38 +17,22 @@ from time import perf_counter
 from urllib.parse import urlsplit, urlunsplit
 
 PROJECT_ROOT_PATH = Path(__file__).resolve().parent
-SRC_ROOT_PATH = PROJECT_ROOT_PATH / "src"
-APP_CONFIG_PATH = PROJECT_ROOT_PATH / ".appconfig.kurly_market_smoke.toml"
-ENV_FILE_PATH = PROJECT_ROOT_PATH / ".env.kurly_market_smoke"
-os.environ["ASAP_APP_CONFIG_PATH"] = str(APP_CONFIG_PATH)
-os.environ["ASAP_ENV_FILE"] = str(ENV_FILE_PATH)
-if str(SRC_ROOT_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT_PATH))
 
-from bussiness_logic.app_config import LlmProfileName, LoadAppConfig  # noqa: E402
+from bussiness_logic.app_config import LoadAppConfig  # noqa: E402
 from bussiness_logic.artifact_paths import ExtractProductIdFromUrl  # noqa: E402
 from bussiness_logic.utils.json_types import JsonMapping, JsonObject  # noqa: E402
 from bussiness_logic.bridge.factory import (  # noqa: E402
     BuildRuntimeAdapter,
     RuntimeAdapterBuildError,
 )
-from bussiness_logic.bridge.selector import (  # noqa: E402
-    BuildLlmRuntimeConfigFromEnv,
-    UnsupportedLlmRuntimeError,
-)
-from bussiness_logic.bridge.runtime_adapter import (  # noqa: E402
-    BuildOptionalPipelineRuntimeAdapter,
-)
+from bussiness_logic.bridge.selector import BuildLlmRuntimeConfigFromEnv  # noqa: E402
 from bussiness_logic.bridge.schema import LlmGenerationOptions, LlmRequest  # noqa: E402
 from bussiness_logic.input_process.reconstruction import (  # noqa: E402
     ProductInputReconstructionService,
 )
 from bussiness_logic.product.ocr.paddle_ocr import (  # noqa: E402
     PaddleOcrEngine,
-    ProductStructuredOcrEngine,
-)
-from bussiness_logic.product.ocr.vlm_adapter import (  # noqa: E402
-    BuildProductVlmAdapter,
+    PaddleOcrVlEngine,
 )
 from bussiness_logic.product.ocr.ocr_fallback import (  # noqa: E402
     ProductOcrImageDownloader,
@@ -95,23 +78,6 @@ NUTRITION_MARKERS = (
 )
 INGREDIENT_MARKERS = ("원재료", "원료", "원제", "함량", "함유", "ingredients")
 LOGGER = logging.getLogger("kurly_market_smoke")
-ANSWER_URL_COLUMNS = (
-    "링크",
-    "상품 상세",
-    "url",
-    "URL",
-    "product_url",
-    "product_page_url",
-)
-ANSWER_TARIC10_COLUMNS = (
-    "EU HS CODE",
-    "실제 taric10 코드",
-    "실제 TARIC10 코드",
-    "actual_taric10",
-    "taric10",
-    "TARIC10",
-    "미국 HS Code",
-)
 RECALL_LEVELS = (("hs2", 2), ("hs4", 4), ("hs6", 6), ("cn8", 8))
 SMOKE_LOG_CONTEXT_PATTERN = re.compile(
     r"\s*(?:pipeline|pipeline_step|step_index|step_total|component|input_dto|output_dto)=([^\s]+)"
@@ -441,14 +407,14 @@ def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
         action="append",
         dest="product_urls",
         help=(
-            "검사할 상품 URL입니다. 지정하면 Kurly smoke config 목록 대신 "
+            "검사할 상품 URL입니다. 지정하면 .appconfig 목록 대신 이 URL만 "
             "사용하며 여러 번 지정할 수 있습니다."
         ),
     )
     parser.add_argument(
         "--compare-ocr",
         action="store_true",
-        help="동일 이미지의 raw OCR, PP-StructureV3, structured VLM 결과를 비교합니다.",
+        help="동일 이미지의 raw OCR, PP-StructureV3, PaddleOCR-VL 결과를 비교합니다.",
     )
     parser.add_argument(
         "--compare-max-images",
@@ -489,12 +455,6 @@ def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--answer-csv",
-        type=Path,
-        default=None,
-        help="계층별 recall 정답 TARIC10 CSV 경로입니다.",
-    )
-    parser.add_argument(
         "--write-summary-artifact",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -507,6 +467,14 @@ def ParseArguments(arguments: List[str] | None = None) -> argparse.Namespace:
         help=(
             "Classification LLM 검증 모드입니다. 기본 compact, "
             "full은 후보별 evidence/EBTI 검토 JSON을 직접 요청합니다."
+        ),
+    )
+    parser.add_argument(
+        "--load-dotenv",
+        action="store_true",
+        help=(
+            "프로젝트 .env 값을 명시적으로 로드합니다. 기본값은 로드하지 않고 "
+            "현재 셸에 export된 환경변수만 사용합니다."
         ),
     )
     parsedArguments = parser.parse_args(arguments)
@@ -912,13 +880,14 @@ class KurlyMarketSmokeRunner:
         checkUiBinding: bool = False,
         classifyReconstruction: bool = False,
         stage1ReviewMode: str = "compact",
-        answerCsvPath: Path | None = None,
         writeSummaryArtifact: bool | None = None,
         reuseOcrImageArtifacts: bool = True,
         useCachedProductInput: bool = False,
+        loadDotEnv: bool = False,
         productUrls: Sequence[str] | None = None,
     ) -> None:
-        _LoadDotEnvDefaults(ENV_FILE_PATH)
+        if loadDotEnv:
+            _LoadDotEnvDefaults(PROJECT_ROOT_PATH / ".env")
         appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
         pathConfig = appConfig.paths
         smokeConfig = appConfig.kurly_smoke
@@ -934,7 +903,6 @@ class KurlyMarketSmokeRunner:
         self._stage1ReviewMode = stage1ReviewMode
         self._runOcrFallback = smokeConfig.run_ocr_fallback
         self._useStructuredOcr = smokeConfig.use_structured_ocr
-        self._structuredOcrProvider = smokeConfig.structured_ocr_provider
         self._maxOcrImageCount = smokeConfig.max_ocr_image_count
         self._structuredOcrMaxTileHeightPixels = (
             smokeConfig.structured_ocr_max_tile_height_pixels
@@ -959,11 +927,6 @@ class KurlyMarketSmokeRunner:
         self._llmInputReconstructionMaxTokens = (
             smokeConfig.llm_input_reconstruction_max_tokens
         )
-        self._inputDictionaryPath = (
-            pathConfig.ResolvePath(PROJECT_ROOT_PATH, smokeConfig.input_dictionary_path)
-            if smokeConfig.input_dictionary_path is not None
-            else None
-        )
         self._inputDictionaryFuzzyMinRatio = (
             smokeConfig.input_dictionary_fuzzy_min_ratio
         )
@@ -981,13 +944,7 @@ class KurlyMarketSmokeRunner:
             PROJECT_ROOT_PATH,
             pathConfig.kurly_smoke_summary_artifact,
         )
-        self._answerCsvPath = pathConfig.ResolvePath(
-            PROJECT_ROOT_PATH,
-            answerCsvPath or appConfig.ontology_smoke.answer_csv_path,
-        )
-        self._answerByUrl, self._answerByProductId = self._LoadAnswerRecords(
-            self._answerCsvPath,
-        )
+        self._answerByUrl, self._answerByProductId = self._LoadAnswerRecords()
         self._maxLoggedNoticeOptions = smokeConfig.max_logged_notice_options
         self._maxLoggedFieldsPerOption = smokeConfig.max_logged_fields_per_option
         self._maxLoggedOcrCandidateUrls = smokeConfig.max_logged_ocr_candidate_urls
@@ -1001,39 +958,42 @@ class KurlyMarketSmokeRunner:
 
     @staticmethod
     def _LoadAnswerRecords(
-        answerCsvPath: Path,
     ) -> tuple[dict[str, AnswerRecord], dict[str, AnswerRecord]]:
-        if not answerCsvPath.exists():
-            return {}, {}
+        from db.db_session_manager import DbSessionManager
+
+        manager = DbSessionManager.GetInstance()
+        if not manager.TableExists("classification_smoke_case"):
+            raise RuntimeError(
+                "Required smoke table is missing: classification_smoke_case"
+            )
         byUrl: dict[str, AnswerRecord] = {}
         byProductId: dict[str, AnswerRecord] = {}
-        with answerCsvPath.open(newline="", encoding="utf-8-sig") as file:
-            for row in csv.DictReader(file):
-                url = KurlyMarketSmokeRunner._FirstCsvValue(row, ANSWER_URL_COLUMNS)
-                taric10 = KurlyMarketSmokeRunner._NormalizeTaric10(
-                    KurlyMarketSmokeRunner._FirstCsvValue(
-                        row,
-                        ANSWER_TARIC10_COLUMNS,
-                    )
-                )
-                if not url or not taric10:
-                    continue
-                productId = ExtractProductIdFromUrl(url)
-                record = AnswerRecord(url=url, productId=productId, taric10=taric10)
-                normalizedUrl = KurlyMarketSmokeRunner._NormalizeAnswerUrl(url)
-                if normalizedUrl:
-                    byUrl[normalizedUrl] = record
-                if productId:
-                    byProductId[productId] = record
+        rows = manager.FetchRows(
+            """
+            SELECT product_url, expected_code
+            FROM classification_smoke_case
+            ORDER BY case_id
+            """
+        )
+        if not rows:
+            raise RuntimeError(
+                "Required smoke table is empty: classification_smoke_case"
+            )
+        for row in rows:
+            url = str(row.get("product_url") or "").strip()
+            taric10 = KurlyMarketSmokeRunner._NormalizeTaric10(
+                row.get("expected_code")
+            )
+            if not url or not taric10:
+                continue
+            productId = ExtractProductIdFromUrl(url)
+            record = AnswerRecord(url=url, productId=productId, taric10=taric10)
+            normalizedUrl = KurlyMarketSmokeRunner._NormalizeAnswerUrl(url)
+            if normalizedUrl:
+                byUrl[normalizedUrl] = record
+            if productId:
+                byProductId[productId] = record
         return byUrl, byProductId
-
-    @staticmethod
-    def _FirstCsvValue(row: Mapping[str, str], columns: Sequence[str]) -> str:
-        for column in columns:
-            value = str(row.get(column) or "").strip()
-            if value:
-                return value
-        return ""
 
     @staticmethod
     def _NormalizeTaric10(value: object) -> str:
@@ -1085,7 +1045,7 @@ class KurlyMarketSmokeRunner:
         if not self._productUrls:
             runLogger.warning(
                 (
-                    "실행할 상품 URL이 없습니다. Kurly smoke config의 "
+                    "실행할 상품 URL이 없습니다. .appconfig의 "
                     "[kurly_smoke].product_urls에 국내/해외 Kurly 상품 링크를 "
                     "넣어주세요."
                 )
@@ -1215,7 +1175,11 @@ class KurlyMarketSmokeRunner:
                 user_prompt="Reply with exactly: ok",
                 generation_options=LlmGenerationOptions(
                     temperature=0.0,
-                    max_tokens=8,
+                    # reasoning 모델은 max_tokens(→max_completion_tokens)를
+                    # 추론에 먼저 소비한다 — 8이면 본문이 항상 비어 헬스체크가
+                    # 구조적으로 실패(실측: empty response로 preflight 전멸).
+                    # 여유분 확보; 비-reasoning 모델에도 무해(짧게 답하고 끝).
+                    max_tokens=256,
                 ),
             ),
         )
@@ -1244,11 +1208,8 @@ class KurlyMarketSmokeRunner:
             if self._useStructuredOcr:
                 screeningOcrEngine = PaddleOcrEngine()
             ocrEngine = (
-                ProductStructuredOcrEngine(
+                PaddleOcrVlEngine(
                     vlExtraOptions=self._structuredOcrVlExtraOptions,
-                    vlPipeline=BuildProductVlmAdapter(
-                        self._structuredOcrProvider,
-                    ),
                     useProjectionTiling=self._structuredOcrUseProjectionTiling,
                     maxTileHeightPixels=self._structuredOcrMaxTileHeightPixels,
                     maxTileSidePixels=self._structuredOcrMaxTileSidePixels,
@@ -1276,27 +1237,19 @@ class KurlyMarketSmokeRunner:
             reconstructionLogger = self._Logger("_BuildInputReconstructionService")
             try:
                 runtimeAdapter = BuildRuntimeAdapter(
-                    BuildLlmRuntimeConfigFromEnv(
-                        projectRootPath=PROJECT_ROOT_PATH,
-                        profileName=LlmProfileName.INPUT_RECONSTRUCTION,
-                    ),
+                    BuildLlmRuntimeConfigFromEnv(projectRootPath=PROJECT_ROOT_PATH),
                     requireAvailable=True,
                 )
                 reconstructionLogger.info(
                     "pipeline_step=llm_reconstruction component=ProductInputReconstructionService agent=ProductFactReconstructionAgent output_dto=RuntimeAdapter llm_status=adapter_ready"
                 )
-            except (RuntimeAdapterBuildError, UnsupportedLlmRuntimeError) as error:
+            except RuntimeAdapterBuildError as error:
                 reconstructionLogger.warning(
                     "pipeline_step=llm_reconstruction component=ProductInputReconstructionService agent=ProductFactReconstructionAgent output_dto=RuntimeAdapter llm_status=unavailable error={}",
                     error,
                 )
 
         return ProductInputReconstructionService(
-            dictionaryPath=(
-                str(self._inputDictionaryPath)
-                if self._inputDictionaryPath is not None
-                else None
-            ),
             runtimeAdapter=runtimeAdapter,
             fuzzyMinRatio=self._inputDictionaryFuzzyMinRatio,
             llmMaxTokens=self._llmInputReconstructionMaxTokens,
@@ -1378,11 +1331,12 @@ class KurlyMarketSmokeRunner:
         수집·OCR·LLM 재구성 0회 — 지각을 직전 풀런에 고정한 채 술어·매칭
         층의 변화만 측정한다 (재구성 모델 비결정성 잡음 차단).
         """
-        from bussiness_logic.product.pipeline.kurly_url_facts import (
-            LoadCachedProductInputFacts,
-        )
-
         try:
+            from bussiness_logic.product.pipeline.kurly_url_facts import (
+                LoadCachedProductInputFacts,
+            )
+
+            productId = ExtractProductIdFromUrl(productUrl)
             uiFacts = LoadCachedProductInputFacts(productUrl)
         except Exception as error:  # noqa: BLE001 — 캐시 부재 = 해당 상품 실패
             return {
@@ -1485,17 +1439,7 @@ class KurlyMarketSmokeRunner:
                 facts=rawInput,
                 store=store,
             )
-            HsCodeClassificationPipeline(
-                identityHintRuntimeAdapter=BuildOptionalPipelineRuntimeAdapter(
-                    LlmProfileName.IDENTITY_HINT,
-                ),
-                selectionRuntimeAdapter=BuildOptionalPipelineRuntimeAdapter(
-                    LlmProfileName.CLASSIFICATION_SELECTOR,
-                ),
-                validationRuntimeAdapter=BuildOptionalPipelineRuntimeAdapter(
-                    LlmProfileName.CLASSIFICATION_VALIDATOR,
-                ),
-            ).Run(context)
+            HsCodeClassificationPipeline().Run(context)
             stepResults = list(context.stepResults)
             componentResults = list(context.componentResults)
             rawInput = context.rawInput
@@ -1518,6 +1462,10 @@ class KurlyMarketSmokeRunner:
         if not isinstance(candidateCodeSet, Mapping):
             candidateCodeSet = {}
         trace = candidateCodeSet.get("classification_trace") or {}
+        if not trace:
+            resolverDebug = candidateCodeSet.get("resolver_debug") or {}
+            if isinstance(resolverDebug, Mapping):
+                trace = resolverDebug.get("classification_trace") or {}
         if not isinstance(trace, Mapping):
             trace = {}
         candidates = self._BuildClassificationCandidateSmokeRows(candidateCodeSet)
@@ -1530,17 +1478,22 @@ class KurlyMarketSmokeRunner:
             componentResults,
             "Classification_Component",
         )
-        answerRecord = self._FindAnswerRecord(productUrl, productId)
-        answerRecall = self._BuildAnswerRecallSmoke(answerRecord, candidates)
-        llmValidationRecommendation = self._BuildLlmValidationRecommendationSmoke(
-            candidates,
-        )
         classificationPaths = candidateCodeSet.get("classification_paths") or []
         if not isinstance(classificationPaths, list):
             classificationPaths = []
         stageTrace = trace.get("stages") or []
         if not isinstance(stageTrace, list):
             stageTrace = []
+        answerRecord = self._FindAnswerRecord(productUrl, productId)
+        answerRecall = self._BuildAnswerRecallSmoke(
+            answerRecord,
+            candidates,
+            routingContext=routingContext,
+            stageTrace=stageTrace,
+        )
+        llmValidationRecommendation = self._BuildLlmValidationRecommendationSmoke(
+            candidates,
+        )
         return {
             "source": productUrl,
             "dash_equivalence": {
@@ -1664,6 +1617,9 @@ class KurlyMarketSmokeRunner:
     def _BuildAnswerRecallSmoke(
         answerRecord: AnswerRecord | None,
         candidates: Sequence[JsonMapping],
+        *,
+        routingContext: JsonMapping | None = None,
+        stageTrace: Sequence[JsonMapping] | None = None,
     ) -> Dict[str]:
         if answerRecord is None:
             return {
@@ -1679,7 +1635,7 @@ class KurlyMarketSmokeRunner:
             (candidate for candidate in candidates if candidate.get("llm_recommended")),
             None,
         )
-        candidateCodesByLevel = {
+        finalCandidateCodesByLevel = {
             level: [
                 code
                 for candidate in candidates[:5]
@@ -1693,11 +1649,90 @@ class KurlyMarketSmokeRunner:
             ]
             for level, codeLength in RECALL_LEVELS
         }
+        authoritativeCodesByLevel: dict[str, JsonObject] = {}
+        route = routingContext if isinstance(routingContext, Mapping) else {}
+        selectedHs2 = KurlyMarketSmokeRunner._NormalizeHierarchyCode(
+            route.get("selected_hs2"),
+            2,
+        )
+        allowedHs2 = route.get("allowed_hs2") or []
+        alternativeHs2 = route.get("alternative_hs2") or []
+        hs2Pool = KurlyMarketSmokeRunner._UniqueHierarchyCodes(
+            [
+                selectedHs2,
+                *(
+                    alternativeHs2
+                    if isinstance(alternativeHs2, list)
+                    else []
+                ),
+                *(allowedHs2 if isinstance(allowedHs2, list) else []),
+            ],
+            2,
+        )
+        authoritativeCodesByLevel["hs2"] = {
+            "top1_code": selectedHs2 or (hs2Pool[0] if hs2Pool else ""),
+            "top5_codes": hs2Pool[:5],
+            "selection_source": "semantic_router" if hs2Pool else "none",
+            "stage_status": "resolved" if selectedHs2 else "unresolved",
+        }
+
+        stages = stageTrace if isinstance(stageTrace, Sequence) else []
+        for level, codeLength in RECALL_LEVELS[1:]:
+            stage = next(
+                (
+                    item
+                    for item in stages
+                    if isinstance(item, Mapping)
+                    and str(item.get("stage") or item.get("level") or "") == level
+                ),
+                None,
+            )
+            if stage is None:
+                authoritativeCodesByLevel[level] = {
+                    "top1_code": "",
+                    "top5_codes": [],
+                    "selection_source": "none",
+                    "stage_status": "not_reached",
+                }
+                continue
+            selectedCodes = KurlyMarketSmokeRunner._UniqueHierarchyCodes(
+                stage.get("selected_codes") or [],
+                codeLength,
+            )
+            considered = stage.get("candidates_considered") or []
+            consideredCodes = KurlyMarketSmokeRunner._UniqueHierarchyCodes(
+                [
+                    item.get("code")
+                    for item in considered
+                    if isinstance(item, Mapping)
+                    and str(item.get("decision") or "") != "violated"
+                ],
+                codeLength,
+            )
+            top5Codes = KurlyMarketSmokeRunner._UniqueHierarchyCodes(
+                [*selectedCodes, *consideredCodes],
+                codeLength,
+            )[:5]
+            authoritativeCodesByLevel[level] = {
+                "top1_code": selectedCodes[0] if selectedCodes else "",
+                "top5_codes": top5Codes,
+                "selection_source": "staged_trace",
+                "stage_status": str(stage.get("status") or ""),
+            }
+
         levels: dict[str, JsonObject] = {}
         for level, codeLength in RECALL_LEVELS:
             expectedCode = expectedByLevel[level]
-            top5Codes = candidateCodesByLevel[level]
-            top1Code = top5Codes[0] if top5Codes else ""
+            authority = authoritativeCodesByLevel.get(level) or {}
+            top5Codes = list(authority.get("top5_codes") or [])
+            top1Code = str(authority.get("top1_code") or "")
+            if not top1Code and not top5Codes and candidates:
+                top5Codes = finalCandidateCodesByLevel[level]
+                top1Code = top5Codes[0] if top5Codes else ""
+                authority = {
+                    "selection_source": "final_candidate_fallback",
+                    "stage_status": "legacy_trace_missing",
+                }
             llmRecommendedCode = (
                 KurlyMarketSmokeRunner._CandidateCodeAtLevel(
                     llmRecommendedCandidate,
@@ -1712,6 +1747,8 @@ class KurlyMarketSmokeRunner:
                 "top5_codes": top5Codes,
                 "top1_match": bool(expectedCode and top1Code == expectedCode),
                 "top5_match": bool(expectedCode and expectedCode in top5Codes),
+                "selection_source": authority.get("selection_source") or "none",
+                "stage_status": authority.get("stage_status") or "",
                 "llm_recommended_code": llmRecommendedCode,
                 "llm_recommended_match": bool(
                     expectedCode and llmRecommendedCode == expectedCode,
@@ -1727,6 +1764,26 @@ class KurlyMarketSmokeRunner:
             },
             "levels": levels,
         }
+
+    @staticmethod
+    def _NormalizeHierarchyCode(value: object, codeLength: int) -> str:
+        code = re.sub(r"\D", "", str(value or ""))
+        return code[:codeLength] if len(code) >= codeLength else ""
+
+    @staticmethod
+    def _UniqueHierarchyCodes(
+        values: Sequence[object],
+        codeLength: int,
+    ) -> list[str]:
+        out: list[str] = []
+        for value in values:
+            code = KurlyMarketSmokeRunner._NormalizeHierarchyCode(
+                value,
+                codeLength,
+            )
+            if code and code not in out:
+                out.append(code)
+        return out
 
     @staticmethod
     def _CandidateCodeAtLevel(
@@ -1868,6 +1925,11 @@ class KurlyMarketSmokeRunner:
                     "normalized_tariff_description",
                 ),
                 "product_form_terms": identity.get("product_form_terms") or [],
+                # [관측창 수정 07-22] 결정론 전사 실물(식품유형→fish cake 등)이
+                # identity_terms에 병기되는데 뷰가 안 실어 "전사 미작동"으로
+                # 오판됐던 것의 처방 — DTO 검증은 이 두 필드가 실물.
+                "identity_terms": identity.get("identity_terms") or [],
+                "preservation_state": identity.get("preservation_state"),
                 "domain_hints": identity.get("domain_hints") or [],
                 "chapter_hint_terms": identity.get("chapter_hint_terms") or [],
                 "chapter_hint_source_terms": identity.get(
@@ -1967,6 +2029,8 @@ class KurlyMarketSmokeRunner:
     ) -> Dict[str]:
         return {
             "routing_decision_id": routingContext.get("routing_decision_id"),
+            "selected_hs2": routingContext.get("selected_hs2") or "",
+            "alternative_hs2": routingContext.get("alternative_hs2") or [],
             "allowed_hs2": routingContext.get("allowed_hs2") or [],
             "blocked_hs2": routingContext.get("blocked_hs2") or [],
             "enforce_hs2_boundary": routingContext.get("enforce_hs2_boundary"),
@@ -2265,15 +2329,9 @@ class KurlyMarketSmokeRunner:
                 ),
                 "only_vlm": (
                     self._pipelineOcrEngine
-                    if isinstance(
-                        self._pipelineOcrEngine,
-                        ProductStructuredOcrEngine,
-                    )
-                    else ProductStructuredOcrEngine(
+                    if isinstance(self._pipelineOcrEngine, PaddleOcrVlEngine)
+                    else PaddleOcrVlEngine(
                         vlExtraOptions=self._structuredOcrVlExtraOptions,
-                        vlPipeline=BuildProductVlmAdapter(
-                            self._structuredOcrProvider,
-                        ),
                         useProjectionTiling=(
                             self._structuredOcrUseProjectionTiling
                         ),
@@ -2378,7 +2436,6 @@ class KurlyMarketSmokeRunner:
                 "only_vlm",
                 "production_hybrid",
             ],
-            "structured_ocr_provider": self._structuredOcrProvider,
             "vl_backend": self._structuredOcrVlExtraOptions.get("vl_rec_backend"),
             "candidate_image_count": len(imageUrls),
             "image_count": len(imageResults),
@@ -3044,8 +3101,8 @@ class KurlyMarketSmokeRunner:
             (
                 "pipeline=HsCodeClassificationPipeline step_index=5 step_total={} "
                 "component=ClassificationComponent input_dto=Hs2RoutingDecision "
-                "output_dto=CandidateCodeSet error={} candidates={} zero_score={} "
-                "stage_count={} selected_path={} level_scores={} decision={} backtracking={} "
+                "output_dto=CandidateCodeSet error={} candidates={} no_evidence_codes={} "
+                "stage_count={} selected_path={} decision_trace={} decision={} backtracking={} "
                 "traversal={} raw_input_match={} answer_found={}"
             ),
             stepTotal,
@@ -3054,7 +3111,7 @@ class KurlyMarketSmokeRunner:
             status.get("zero_score_candidate_codes"),
             (candidateCodeSet.get("staged_trace") or {}).get("stage_count"),
             self._CompactSelectedPath(candidateCodeSet.get("selected_path")),
-            self._SelectedPathScores(candidateCodeSet.get("selected_path")),
+            self._DecisionTrace(candidateCodeSet),
             decision.get("decision_status"),
             decision.get("backtracking_recommended"),
             traversal.get("traversal_status"),
@@ -3092,15 +3149,14 @@ class KurlyMarketSmokeRunner:
                     "pipeline=HsCodeClassificationPipeline step_index=5 step_total={} "
                     "component=ClassificationComponent input_dto=CandidateCodeSet "
                     "output_dto=ClassificationCandidate rank={} cn8={} hs6={} "
-                    "score={} stage_scores={} recommended={} taric_branches={} "
+                    "decided_by={} recommended={} taric_branches={} "
                     "evidence_refs={} ebti_cases={}"
                 ),
                 stepTotal,
                 candidate.get("rank"),
                 candidate.get("cn8"),
                 candidate.get("hs6"),
-                candidate.get("score"),
-                candidate.get("stage_scores"),
+                self._CandidateDecidedBy(candidate),
                 candidate.get("llm_recommended"),
                 candidate.get("taric10_branch_count"),
                 len(candidate.get("classification_evidence_refs") or []),
@@ -3202,6 +3258,85 @@ class KurlyMarketSmokeRunner:
         levelScores = value.get("level_scores") or {}
         return dict(levelScores) if isinstance(levelScores, Mapping) else {}
 
+    @staticmethod
+    def _DecisionTrace(candidateCodeSet: object) -> Dict[str, object]:
+        """레벨별 '어떤 분기·어떤 이항검사 code를 통과했는지' — 스코어 미출력.
+        각 레벨: 선택코드 + by(결정 근거) + O(통과조건 cond)·X(위반조건)·
+        SILENT(값 없는 축). by 라벨 의미:
+          confirmed = 전 조건 true(이산 O 확정) · residual = 형제 부정(Other)
+          pass_through = 단일자식 · gri3:* = 다중확정 이산서열
+          partial = 일부 조건 true인데 미확정 · lexical(미해결) = **점수 폴백**
+        즉 by=lexical 인 레벨이 아직 스코어가 결정하는 자리(질문/다중O 대상)."""
+        if not isinstance(candidateCodeSet, Mapping):
+            return {}
+        trace = candidateCodeSet.get("staged_trace") or {}
+        stages = trace.get("stages") if isinstance(trace, Mapping) else None
+        if not isinstance(stages, list):
+            return {}
+        out: Dict[str, object] = {}
+        for stage in stages:
+            if not isinstance(stage, Mapping):
+                continue
+            level = str(stage.get("stage") or "")
+            if level not in ("hs4", "hs6", "cn8"):
+                continue
+            selectedCodes = stage.get("selected_codes") or []
+            selected = str(selectedCodes[0]) if selectedCodes else ""
+            status = str(stage.get("status") or "")
+            cand: Mapping = {}
+            for c in stage.get("candidates_considered") or []:
+                if isinstance(c, Mapping) and str(c.get("code")) == selected:
+                    cand = c
+                    break
+            detail = cand.get("decision_detail") or []
+            preds = cand.get("predicate_results") or []
+            passedO = sorted({
+                str(d.get("cond") or "") for d in detail
+                if isinstance(d, Mapping) and str(d.get("verdict")) == "true"
+            } - {""})
+            violatedX = sorted({
+                str(d.get("cond") or "") for d in detail
+                if isinstance(d, Mapping) and str(d.get("verdict")) == "false"
+            } - {""})
+            predTrue = sum(
+                1 for p in preds
+                if isinstance(p, Mapping) and str(p.get("verdict")) == "true"
+            )
+            silent = [str(a) for a in (stage.get("missing_facts") or [])]
+            decision = str(cand.get("decision") or "")
+            gri3 = cand.get("gri3")
+            if status == "pass_through":
+                by = "pass_through"
+            elif decision == "confirmed":
+                by = "confirmed"
+            elif cand.get("residual"):
+                by = "residual"
+            elif gri3:
+                by = f"gri3:{gri3}"
+            elif passedO or predTrue:
+                by = "partial"
+            else:
+                by = "lexical(미해결)"
+            out[level] = {
+                "code": selected,
+                "by": by,
+                "O": passedO[:6],
+                "X": violatedX[:4],
+                "SILENT": silent[:4],
+                "predicate_true": predTrue,
+            }
+        return out
+
+    @staticmethod
+    def _CandidateDecidedBy(candidate: object) -> str:
+        """후보 단위 결정 근거 요약 — 스코어 미출력, classification_basis 압축."""
+        if not isinstance(candidate, Mapping):
+            return ""
+        basis = candidate.get("classification_basis") or []
+        if isinstance(basis, list) and basis:
+            return "; ".join(str(b)[:48] for b in basis[:3])
+        return str(candidate.get("hard_condition_status") or "")
+
     def _LogAnswerRecall(
         self,
         logger: _BoundLogger,
@@ -3266,7 +3401,7 @@ class KurlyMarketSmokeRunner:
                     (
                         "classification_recall level={} evaluated={} "
                         "top1={}/{} ({}) top5={}/{} ({}) "
-                        "llm_recommended={}/{} ({})"
+                        "final_recommended={}/{} ({})"
                     ),
                     levelName,
                     levelSummary["evaluated_count"],
@@ -3277,13 +3412,13 @@ class KurlyMarketSmokeRunner:
                     levelSummary["evaluated_count"],
                     levelSummary["top5_recall"],
                     levelSummary["llm_recommended_match_count"],
-                    levelSummary["evaluated_count"],
+                    levelSummary["llm_recommended_evaluated_count"],
                     levelSummary["llm_recommended_recall"],
                 )
         elif any("classification_smoke" in result for result in results):
             summaryLogger.info(
                 "classification_recall skipped answer_source={} matched_rows=0",
-                self._answerCsvPath,
+                "classification_smoke_case",
             )
         if self._logFullResult:
             summaryLogger.info(
@@ -3300,6 +3435,7 @@ class KurlyMarketSmokeRunner:
                 "evaluated_count": 0,
                 "top1_match_count": 0,
                 "top5_match_count": 0,
+                "llm_recommended_evaluated_count": 0,
                 "llm_recommended_match_count": 0,
             }
             for levelName, _ in RECALL_LEVELS
@@ -3325,6 +3461,10 @@ class KurlyMarketSmokeRunner:
                     levelTotals[levelName]["top1_match_count"] += 1
                 if levelData.get("top5_match"):
                     levelTotals[levelName]["top5_match_count"] += 1
+                if levelData.get("llm_recommended_code"):
+                    levelTotals[levelName][
+                        "llm_recommended_evaluated_count"
+                    ] += 1
                 if levelData.get("llm_recommended_match"):
                     levelTotals[levelName]["llm_recommended_match_count"] += 1
 
@@ -3335,6 +3475,9 @@ class KurlyMarketSmokeRunner:
             evaluatedCounts.append(evaluatedCount)
             top1Count = totals["top1_match_count"]
             top5Count = totals["top5_match_count"]
+            llmRecommendedEvaluatedCount = totals[
+                "llm_recommended_evaluated_count"
+            ]
             llmRecommendedCount = totals["llm_recommended_match_count"]
             levelsOut[levelName] = {
                 **totals,
@@ -3349,8 +3492,11 @@ class KurlyMarketSmokeRunner:
                     else 0.0
                 ),
                 "llm_recommended_recall": (
-                    round(llmRecommendedCount / evaluatedCount, 4)
-                    if evaluatedCount
+                    round(
+                        llmRecommendedCount / llmRecommendedEvaluatedCount,
+                        4,
+                    )
+                    if llmRecommendedEvaluatedCount
                     else 0.0
                 ),
             }
@@ -3520,9 +3666,9 @@ if __name__ == "__main__":
         checkUiBinding=cliArguments.check_ui_binding,
         classifyReconstruction=cliArguments.classify_reconstruction,
         stage1ReviewMode=cliArguments.stage1_review_mode,
-        answerCsvPath=cliArguments.answer_csv,
         writeSummaryArtifact=cliArguments.write_summary_artifact,
         reuseOcrImageArtifacts=cliArguments.reuse_ocr_image_artifacts,
         useCachedProductInput=cliArguments.use_cached_product_input,
+        loadDotEnv=cliArguments.load_dotenv,
         productUrls=cliArguments.product_urls,
     ).Run()

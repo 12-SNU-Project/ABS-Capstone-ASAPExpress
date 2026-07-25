@@ -25,9 +25,17 @@ class Hs2RoutingDecision:
     routingBasis: dict[str, JsonValue] = field(metadata=_desc("라우팅 판단 근거"))
     candidateChapterDetails: tuple[dict[str, JsonValue], ...] = field(
         default=(),
-        metadata=_desc("HS2 후보별 점수와 매칭 근거"),
+        metadata=_desc("HS2 후보별 순위와 판단 근거"),
     )
     missingFacts: tuple[str, ...] = field(default=(), metadata=_desc("라우팅에 부족한 fact"))
+    selectedHs2: str = field(default="", metadata=_desc("점수 없이 선택된 HS2"))
+    alternativeHs2: tuple[str, ...] = field(
+        default=(), metadata=_desc("명시적 reopen 전용 HS2 대안"),
+    )
+    semanticDecision: dict[str, JsonValue] = field(
+        default_factory=dict,
+        metadata=_desc("닫힌 후보 semantic 라우팅 감사 레코드"),
+    )
 
     def ToBlackboard(self, *, createdBy: str, createdAt: str) -> dict[str, JsonValue]:
         return {
@@ -46,4 +54,7 @@ class Hs2RoutingDecision:
             "routing_basis": dict(self.routingBasis),
             "candidate_chapter_details": list(self.candidateChapterDetails),
             "missing_facts": list(self.missingFacts),
+            "selected_hs2": self.selectedHs2,
+            "alternative_hs2": list(self.alternativeHs2),
+            "semantic_decision": dict(self.semanticDecision),
         }

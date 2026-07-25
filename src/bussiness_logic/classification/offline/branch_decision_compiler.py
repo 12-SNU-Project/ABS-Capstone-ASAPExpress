@@ -35,6 +35,9 @@ from typing import Any
 import csv
 
 from bussiness_logic.classification.offline.cn_predicate_llm_compiler import _TOKEN, _build_groups, _stem, _toks
+from bussiness_logic.classification.rules.axis_field_binding import (
+    CompilerFieldBindings,
+)
 
 # ── 기준 유형 taxonomy (7/2 설계 사양서) ─────────────────────────────
 # data/classification_criterion_taxonomy_20260702.csv 가 유일한 축 정의다:
@@ -42,63 +45,9 @@ from bussiness_logic.classification.offline.cn_predicate_llm_compiler import _TO
 # (species/form/... )은 이 16유형의 부분집합이라 폐기.
 _TAXONOMY_CSV = Path(__file__).resolve().parents[4] / "data" / "classification_criterion_taxonomy_20260702.csv"
 
-# criterion_type -> 질문에 답할 DTO 필드 (없는 유형은 미결로 남는 게 정직)
-CRITERION_FIELD_BINDING = {
-    "product_identity": (
-        # food_form 추가: 'noodle/rice cake' 같은 판별형 typed 값이 identity
-        # 질문의 정답 필드인데 빠져 있었다 — 칼국수 1902 확정 불가 실측.
-        "identity_hints.normalized_tariff_description;identity_hints.identity_terms;"
-        "identity_hints.food_form;identity_hints.ingredient_class;"
-        "composition_facts.principal_ingredient"
-    ),
-    # 폴백 축 — named 정체와 같은 필드를 보되 binding-v1 자격쌍 밖이라
-    # 확정 불가(+3 증거만). 폴백 잡음의 확정 독식(청양고추 0703류) 차단.
-    "identity_fallback": (
-        "identity_hints.normalized_tariff_description;identity_hints.identity_terms;"
-        "identity_hints.food_form;identity_hints.ingredient_class;"
-        "composition_facts.principal_ingredient"
-    ),
-    "species_source": (
-        # principal_ingredient_guess 선두: 주성분(성분 서열 1위)이 종 질문의
-        # 1차 답안. typed 확정 자격은 없음(LLM 추론 단독 확정 금지) — 증거 가산만.
-        "identity_hints.principal_ingredient_guess;"
-        "identity_hints.normalized_tariff_description;identity_hints.identity_terms;"
-        "identity_hints.ingredient_class;composition_facts.ingredient_classes;"
-        "composition_facts.principal_ingredient;composition_facts.ingredient_entries"
-    ),
-    "material_composition": (
-        "identity_hints.normalized_tariff_description;identity_hints.identity_terms;"
-        "composition_facts.ingredient_classes;composition_facts.principal_ingredient;"
-        "composition_facts.ingredient_entries;composition_facts.composition_terms"
-    ),
-    # [배선 일관성 07-18] preservation_state가 composition_facts를 안 읽어
-    # 문서(COI/CO)가 '냉동'을 알아도 답 못 하던 누락 — 옆 축 processing_
-    # method는 읽는데 이 축만 빠져 있었다(답변가능성 감사 212건 실측).
-    "preservation_state": (
-        "identity_hints.processing_state;composition_facts.processing_state;"
-        "composition_facts.preservation_state;identity_hints.product_form_terms"
-    ),
-    "processing_method": "identity_hints.processing_state;composition_facts.processing_state;identity_hints.product_form_terms",
-    "physical_form": (
-        "identity_hints.food_form;identity_hints.product_form_terms;"
-        "composition_facts.physical_form;"
-        "composition_facts.contains_wrapper_or_dough;composition_facts.contains_sauce_or_broth"
-    ),
-    "quantitative_threshold": "composition_facts.ingredient_percentages",
-    "exclusion_boundary": "*tokens*",
-    # 아래 유형들은 현 DTO에 답 필드가 없다 — 조건은 컴파일하되 런타임에서
-    # 미결(undecided)로 남는 것이 정직한 동작 (답안지 백로그의 유형별 목록)
-    "packaging_presentation": "identity_hints.product_form_terms",
-    "dimension_capacity": "composition_facts.ingredient_percentages",
-    "intended_use_function": (
-        "identity_hints.intended_use;identity_hints.normalized_tariff_description;"
-        "identity_hints.identity_terms"
-    ),
-    "technical_specification": "identity_hints.normalized_tariff_description",
-    "parts_accessories": "identity_hints.normalized_tariff_description;identity_hints.identity_terms",
-    "condition_quality": "identity_hints.processing_state;identity_hints.normalized_tariff_description",
-    "demographic_target": "identity_hints.normalized_tariff_description;identity_hints.identity_terms",
-}
+# criterion_type -> 질문에 답할 DTO 필드. Runtime과 offline compiler가
+# 같은 registry를 읽어 split-brain binding을 만들지 않는다.
+CRITERION_FIELD_BINDING = CompilerFieldBindings()
 
 _COND_CLAUSE = re.compile(r"whether\s+or\s+not[^,;.)]*", re.I)
 
@@ -428,6 +377,17 @@ def CompileGroupDecisions(
         # (달래꼬막장 'prepared' 실측). 상태 판별은 uncooked/frozen 등
         # 구체 상태어와 preservation_state 축이 담당.
         "prepared", "preserved",
+        # [무의미 disc 스크럽 07-20] disc has_token 12,487행 전수 감사에서
+        # '값 전체가 무의미 토큰'인 227행(의류 91·식품 24…)의 잔재 토큰.
+        # 조문 만능어라 판별력 0(620349 'material'·1903 'form'·3707
+        # 'preparation'·human consumption 보일러플레이트). 구체 판별어
+        # (textile·photographic 등)는 phrase에 병존하면 살아남는다 —
+        # 이 토큰만 단독일 때 그 행이 비어 미방출(정직한 미결).
+        "material", "materials", "preparation", "preparations",
+        "product", "products", "food", "foods", "weight",
+        "consumption", "human", "purpose", "form", "forms",
+        "type", "types", "content", "contents", "goods", "article",
+        "articles",
     })
     residual_members: list[tuple[int, str]] = []  # [P1-C] 거울 배제 대상
     ancestor_by_code: dict[str, str] = {}         # [P3] arm(조상) 경계 지도
@@ -1457,6 +1417,60 @@ def _bti_index() -> dict[str, list[dict]]:
                     "country": str(r.get("issuing_country") or ""),
                     "phrases": phrases,
                 })
+        # [코퍼스 회수 07-20] 미번역 사건 EN 폴백 — case_summary가 없어
+        # 전량 탈락하던 영어 원문 판례의 회수(gyoza 36건 실측: IE 발급
+        # goods_description_raw만 존재·인덱스 0건 → 190220 판례 어휘
+        # 공백). 요약 'Keywords:'가 이미 잡은 ref는 건드리지 않고,
+        # **ascii 영어 원문**의 goods_description_raw에서만 _cnen_units
+        # 보수 캡 문법으로 구문 수확(비영어 원문은 번역 전사 계보 별도).
+        # 무공백 연결('GyozasFrozen') 실물 → 카멜 경계 분할 후 수확.
+        # ref→사건 역색인: 요약이 이미 잡은 사건에도 상품 서술 구문을
+        # **증강 병합**한다 — 요약 Keywords가 상품명 어휘를 유실하는 실측
+        # (gyoza 3건: 요약 실존·keywords에 gyoza 소실 → 소환 매칭 불가).
+        by_ref = {c["ref"]: c for cs in idx.values() for c in cs}
+        have_refs = set(by_ref)
+        with open(_BTI_PATH, encoding="utf-8", newline="") as f:
+            for r in _csv.DictReader(f):
+                if str(r.get("chunk_type") or "") != "goods_description_raw":
+                    continue
+                ref = str(r.get("bti_reference") or "")
+                if not ref:
+                    continue
+                cn8 = re.sub(r"\D", "", str(r.get("cn8") or ""))[:8]
+                if len(cn8) != 8:
+                    continue
+                txt = str(r.get("chunk_text") or "")
+                if not txt:
+                    continue
+                # EN 판정은 글자 단위 — '°C' 같은 기호가 전체 isascii를
+                # 죽여 IE gyoza 사건이 통째 탈락하던 실측. 단어의 글자가
+                # 전부 ascii(라틴 무액센트)면 영어 원문으로 본다.
+                _letters = re.findall(r"[^\W\d_]+", txt)
+                if not _letters or not all(w.isascii() for w in _letters):
+                    continue
+                txt = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", txt)
+                phrases = _cnen_units(txt, 6)
+                if not phrases:
+                    continue
+                if ref in have_refs:
+                    # 기존 사건 증강 — 서술 구문 중 신규만 병합(캡 12)
+                    case = by_ref[ref]
+                    for ph in phrases:
+                        if ph not in case["phrases"] and len(case["phrases"]) < 12:
+                            case["phrases"].append(ph)
+                    continue
+                sig = (cn8, str(r.get("issuing_country") or ""),
+                       frozenset(phrases))
+                if sig in seen:
+                    continue
+                seen.add(sig)
+                have_refs.add(ref)
+                by_ref[ref] = {
+                    "ref": ref,
+                    "country": str(r.get("issuing_country") or ""),
+                    "phrases": phrases,
+                }
+                idx.setdefault(cn8, []).append(by_ref[ref])
     except OSError:
         idx = {}
     _BTI_CACHE = idx
@@ -1649,15 +1663,9 @@ def _main() -> int:  # pragma: no cover — designer-run CLI
                         " WHERE version = :v LIMIT 2000)"), {"v": "parser-v1"})
                     if (deleted.rowcount or 0) == 0:
                         break
-            # 9,296행 개별 INSERT는 원거리 DB에서 순단에 취약(실측 1회 실패)
-            # — executemany 일괄 전송으로 왕복을 청크당 1회로 줄인다.
-            insert_sql = text(
-                'INSERT INTO "branch_decision_index" ('
-                "level, branch_id, seq, then_code, cond_type,"
-                " dto_field, op, value, source_text, version, role, grade, alt_group, alt_kind) VALUES ("
-                ":level, :branch_id, :seq, :then_code, :cond_type,"
-                " :dto_field, :op, :value, :source_text, :version, :role, :grade,"
-                " :alt_group, :alt_kind)")
+            # 9,296행 개별 INSERT는 원거리 DB에서 순단에 취약(실측 1회
+            # 실패) — 아래 execute_values 일괄 전송이 정본(구 insert_sql
+            # executemany는 [12회차] 인프라 이행으로 소멸).
             # [12회차 3-수리·재발 방지] INSERT 파라미터 정규화 — add()를
             # 거치지 않고 rows/out에 직접 append하는 경로(법정 주·BTI·
             # 거울 배제·qualifier·quant·CNEN 등)는 신설 컬럼 키를 갖지

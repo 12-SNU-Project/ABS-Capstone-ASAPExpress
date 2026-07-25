@@ -21,76 +21,37 @@ origin 필드와 별도 origin_facts에 기록(관세 조치 결정 변수 — �
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import unicodedata
-from pathlib import Path
 from typing import Any
+
+from bussiness_logic.core.runtime_asset_repository import (
+    LoadCoForms,
+    LoadCoProductMap,
+    LoadSingletonAsset,
+)
 
 
 def _nfc(text: object) -> str:
     return unicodedata.normalize("NFC", str(text or "")).strip()
 
 
-def _form_dir() -> Path | None:
-    """CO 폼 디렉토리. ASAP_CO_FORM_DIR로 오버라이드. =0 이면 OFF.
-
-    기본값은 없다(COI와 달리 상시 ON 아님) — 명시적 지정 시에만 로드.
-    """
-    raw = (os.environ.get("ASAP_CO_FORM_DIR") or "").strip()
-    if raw in ("0", "off", "false"):
-        return None
-    if not raw:
-        return None
-    path = Path(raw)
-    return path if path.is_dir() else None
-
-
-def LoadCoForm(path: Path | str) -> dict | None:
-    """asap-co-v1 폼 파일 로드. 스키마 위반·파싱 실패는 None."""
-    try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        return None
-    if str(data.get("co_form_version") or "").startswith("asap-co-v"):
-        return data
-    return None
-
-
-def _load_map(root: Path) -> dict[str, list[str]]:
-    """product_map.csv(제품명→co_file) 또는 디렉토리 스캔."""
-    mapping: dict[str, list[str]] = {}
-    map_path = root / "product_map.csv"
-    if map_path.exists():
-        import csv
-        with map_path.open(encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                name = _nfc(row.get("제품명") or row.get("product_name"))
-                files = str(row.get("co_file") or "").strip()
-                if name and files:
-                    mapping[name] = [x.strip() for x in files.split(";") if x.strip()]
-    if not mapping:
-        for p in sorted(root.glob("co_*.json")):
-            form = LoadCoForm(p)
-            if form:
-                mapping.setdefault(_nfc(form.get("product_name")), []).append(p.name)
-    return mapping
+def _forms_enabled() -> bool:
+    """CO is optional but, when enabled, is read only from PostgreSQL."""
+    raw = (os.environ.get("ASAP_CO_FORM_DIR") or "").strip().lower()
+    return bool(raw) and raw not in ("0", "off", "false")
 
 
 def FindFormForProduct(product_name: str) -> dict | None:
-    root = _form_dir()
-    if root is None:
+    if not _forms_enabled():
         return None
-    mapping = _load_map(root)
+    mapping = LoadCoProductMap()
     fnames = mapping.get(_nfc(product_name))
     if not fnames:
         return None
-    forms = []
-    for fname in fnames:
-        form = LoadCoForm(root / fname)
-        if form:
-            forms.append(form)
+    available = LoadCoForms()
+    forms = [available[fname] for fname in fnames if fname in available]
     if not forms:
         return None
     if len(forms) == 1:
@@ -117,13 +78,7 @@ def _taxonomy() -> dict:
     """
     if _TAXONOMY_CACHE:
         return _TAXONOMY_CACHE[0]
-    data: dict = {}
-    try:
-        path = (Path(__file__).resolve().parents[4] / "data" / "taxonomy"
-                / "commodity_taxonomy.json")
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001 — 자원 부재 = 확장 없음(기존 동작)
-        data = {}
+    data = LoadSingletonAsset("commodity_taxonomy")
     _TAXONOMY_CACHE.append(data)
     return data
 
@@ -131,18 +86,15 @@ def _taxonomy() -> dict:
 def ExpandTaxonomy(terms: list[str]) -> list[str]:
     """통칭·학명 목록 → 상위 분류 랭크 + 관세 등록어(중복 제거).
 
-    결정론: 문자열 포함 매칭만(임계·점수 없음). 매칭 실패는 무확장.
+    Exact taxonomy v2 uses token-boundary matching and upward-only expansion.
+    The legacy flat entries remain data-compatible but no longer decide the
+    runtime species hierarchy.
     """
-    entries = (_taxonomy().get("entries") or [])
-    low = " ".join(_nfc(t).lower() for t in terms if t)
-    out: list[str] = []
-    for entry in entries:
-        for key in entry.get("match") or []:
-            if str(key).lower() in low:
-                out.extend(str(x) for x in (entry.get("ranks") or []))
-                out.extend(str(x) for x in (entry.get("tariff_terms") or []))
-                break
-    return list(dict.fromkeys(out))
+    from bussiness_logic.classification.rules.species_taxonomy import (
+        ExpandExactTaxonomy,
+    )
+
+    return ExpandExactTaxonomy(terms)
 
 
 def _species_tokens(item: dict) -> list[str]:
@@ -166,7 +118,7 @@ def ApplyCoForm(pu: dict[str, Any], form: dict | None = None) -> int:
     반환: 주입 항목 수(0=no-op). 기존값 보존(가산) — COI가 채운 entries·
     ingredient_classes를 덮지 않고 종 어휘만 보강한다.
     """
-    if _form_dir() is None and form is None:
+    if not _forms_enabled() and form is None:
         return 0
     if form is None:
         form = FindFormForProduct(str(pu.get("product_name") or ""))
