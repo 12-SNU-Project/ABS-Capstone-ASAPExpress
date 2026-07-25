@@ -1,6 +1,6 @@
 import { CheckCircle2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { candidateKey, clean } from "@/lib/format.js";
+import { candidateKey, clean, optionalFiniteNumber } from "@/lib/format.js";
 
 function CandidateRationale(candidate) {
   const text = clean(candidate?.classification_basis?.[0]);
@@ -10,8 +10,7 @@ function CandidateRationale(candidate) {
 }
 
 function RelativeScore(candidate) {
-  const score = Number(candidate?.candidate_static_tree?.total_score);
-  return Number.isFinite(score) ? score : null;
+  return optionalFiniteNumber(candidate?.candidate_static_tree?.total_score);
 }
 
 function UnresolvedCount(candidate) {
@@ -44,7 +43,7 @@ export default function TariffCandidateList({ candidates, selectedKey, onSelect 
         {candidates.map((candidate, index) => {
           const key = candidateKey(candidate, index);
           const active = key === activeKey;
-          const score = RelativeScore(candidate);
+          const score = candidates.length > 1 ? RelativeScore(candidate) : null;
           const unresolved = UnresolvedCount(candidate);
           return (
             <button

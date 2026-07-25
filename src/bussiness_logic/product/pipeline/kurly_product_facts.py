@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from bussiness_logic.input_process.product_facts import NormalizeProductFacts
 from bussiness_logic.utils.json_types import JsonObject
 
@@ -9,6 +11,7 @@ from bussiness_logic.utils.json_types import JsonObject
 def CollectKurlyProductFactsIfNeeded(
     *,
     facts: JsonObject,
+    imageStatusCallback: Callable[[list[JsonObject]], None] | None = None,
 ) -> JsonObject:
     """Collect Kurly product facts when the normalized input only has a URL."""
     normalizedFacts = NormalizeProductFacts(facts or {})
@@ -28,7 +31,10 @@ def CollectKurlyProductFactsIfNeeded(
                 CollectKurlyUrlFacts,
             )
 
-            collected = CollectKurlyUrlFacts(url)
+            collected = CollectKurlyUrlFacts(
+                url,
+                imageStatusCallback=imageStatusCallback,
+            )
             merged = dict(normalizedFacts)
             for key, value in collected.items():
                 if value not in ("", [], None):

@@ -50,6 +50,7 @@ class EvidenceIntakeComponent(BasePipelineComponent):
             "input_reconstruction": self.raw_input.get("input_reconstruction", {}),
             "ocr_text": self.raw_input.get("ocr_text", []),
             "source_urls": self.raw_input.get("source_urls", []),
+            "url_intake": self.raw_input.get("url_intake", {}),
             "origin_country": self.raw_input.get("origin_country") or "unknown",
             "intended_use": self.raw_input.get("intended_use") or "unknown",
             "warnings": self.raw_input.get("warnings", []),

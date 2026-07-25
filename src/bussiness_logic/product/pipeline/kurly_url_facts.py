@@ -1,6 +1,7 @@
 """Kurly URL product facts collection."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import lru_cache
 import json
 from threading import Lock
@@ -92,6 +93,7 @@ def BuildKurlyUrlFactsFromPipelineResult(
     source_product_page = public_result.get("source_product_page") or {}
     collection_summary = public_result.get("collection") or {}
     ocr_summary = public_result.get("ocr") or {}
+    image_evidence_items = public_result.get("image_evidence_items") or []
     pipeline_steps = public_result.get("pipeline_steps") or []
     input_reconstruction = public_result.get("input_reconstruction") or {}
     productId = ExtractProductIdFromUrl(url)
@@ -102,6 +104,8 @@ def BuildKurlyUrlFactsFromPipelineResult(
         collection_summary = {}
     if not isinstance(ocr_summary, dict):
         ocr_summary = {}
+    if not isinstance(image_evidence_items, list):
+        image_evidence_items = []
     if not isinstance(pipeline_steps, list):
         pipeline_steps = []
     if not isinstance(input_reconstruction, dict):
@@ -147,6 +151,7 @@ def BuildKurlyUrlFactsFromPipelineResult(
             "pipeline_steps": pipeline_steps,
             "collection": collection_summary,
             "ocr": ocr_summary,
+            "image_evidence_items": image_evidence_items,
             "ocr_image_count": ocr_summary.get("image_result_count", 0),
             "combined_ocr_text_length": ocr_summary.get("combined_text_length", 0),
             "parse_warning_count": collection_summary.get("warning_count", 0),
@@ -174,6 +179,7 @@ def CollectKurlyUrlFacts(
     timeout_seconds: int | None = None,
     scroll_count: int | None = None,
     max_ocr_images: int | None = None,
+    imageStatusCallback: Callable[[list[JsonObject]], None] | None = None,
 ) -> JsonObject:
     """Collect product facts from a Kurly product URL.
 
@@ -226,18 +232,21 @@ def CollectKurlyUrlFacts(
                 ocrEngine=ocr_engine,
                 screeningOcrEngine=screening_ocr_engine,
                 inputReconstructionService=input_reconstruction_service,
+                imageStatusCallback=imageStatusCallback,
             )
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"ocr_engine_unavailable: {exc}")
             pipeline = KurlyUrlIntakePipeline(
                 collector=collector,
                 inputReconstructionService=input_reconstruction_service,
+                imageStatusCallback=imageStatusCallback,
             )
             run_ocr = False
     else:
         pipeline = KurlyUrlIntakePipeline(
             collector=collector,
             inputReconstructionService=input_reconstruction_service,
+            imageStatusCallback=imageStatusCallback,
         )
 
     artifact_root = PRODUCT_INPUT_ARTIFACT_ROOT

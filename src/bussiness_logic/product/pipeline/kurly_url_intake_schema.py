@@ -153,6 +153,7 @@ class KurlyUrlIntakeResult(BaseModel):
             ),
             "collection": collectionData,
             "ocr": self._BuildOcrSummary(includeDebugArtifacts=False),
+            "image_evidence_items": self._BuildImageEvidenceItems(),
             "input_reconstruction": {
                 "mode": (
                     "llm_reconstruction"
@@ -200,6 +201,47 @@ class KurlyUrlIntakeResult(BaseModel):
             "errors": list(self.errors),
             "warnings": warnings,
         }
+
+    def _BuildImageEvidenceItems(self) -> List[Dict[str, object]]:
+        resultsByUrl = {
+            imageResult.imageUrl: imageResult
+            for imageResult in self.ocrImageResults
+            if imageResult.imageUrl
+        }
+        imageUrls = list(dict.fromkeys([
+            *self.collectionResult.productDetailImageUrls,
+            *self.collectionResult.ocrCandidateImageUrls,
+            *resultsByUrl,
+        ]))
+        items: List[Dict[str, object]] = []
+        for imageIndex, imageUrl in enumerate(imageUrls, start=1):
+            imageResult = resultsByUrl.get(imageUrl)
+            status = "discovered"
+            if imageResult is not None:
+                status = (
+                    "failed"
+                    if imageResult.error
+                    else "rejected"
+                    if imageResult.skippedReason
+                    else "extracted"
+                )
+            items.append({
+                "image_id": f"collected-image-{imageIndex}",
+                "preview_url": imageUrl,
+                "source_page_url": self.collectionResult.productPageUrl,
+                "status": status,
+                "rejection_reason": (
+                    imageResult.skippedReason
+                    if imageResult is not None and imageResult.skippedReason
+                    else ""
+                ),
+                "failure_reason": (
+                    imageResult.error
+                    if imageResult is not None and imageResult.error
+                    else ""
+                ),
+            })
+        return items
 
     def _BuildOcrSummary(self, includeDebugArtifacts: bool) -> Dict[str, object]:
         successfulImageResults = [

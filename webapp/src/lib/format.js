@@ -36,6 +36,14 @@ export function asObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+export function optionalFiniteNumber(value) {
+  if (value === null || value === undefined || value === "" || typeof value === "boolean") {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 export function isFilled(value) {
   if (value === null || value === undefined) {
     return false;

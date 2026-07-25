@@ -1,5 +1,6 @@
 import DataTable from "@/components/DataTable";
 import { Database, ImageOff, ScanSearch, TriangleAlert } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +10,24 @@ import { BuildImageEvidenceItems } from "@/features/classification/model/imageEv
 import { GetIntendedUseLabel } from "@/features/classification/model/classificationInput.js";
 import { NormalizeWarning } from "@/features/classification/model/warningViewModel.js";
 import { EvidenceTerms, FactLabel } from "./EvidenceElements";
+
+const IMAGE_STATUS_LABELS = {
+  discovered: "수집됨",
+  queued: "처리 대기",
+  "vlm-processing": "VLM 분석 중",
+  extracted: "근거 추출 완료",
+  rejected: "근거 제외",
+  failed: "처리 실패",
+};
+
+const IMAGE_STATUS_STYLES = {
+  discovered: "border-border bg-surface-muted text-muted-foreground",
+  queued: "border-warning/30 bg-warning/10 text-warning-foreground",
+  "vlm-processing": "border-primary/30 bg-primary/10 text-primary",
+  extracted: "border-success/30 bg-success/10 text-success",
+  rejected: "border-needs-review/30 bg-needs-review/10 text-needs-review",
+  failed: "border-destructive/30 bg-destructive/10 text-destructive",
+};
 
 function ParseCompositionTerms(terms) {
   return asList(terms)
@@ -173,6 +192,19 @@ function CollectionActivityPanel({ collectedFactCount, reconstructedFactCount, u
 }
 
 function EvidenceAcquisitionPanel({ items }) {
+  const reduceMotion = useReducedMotion();
+  const processingItem = [...items]
+    .reverse()
+    .find((item) => item.status === "vlm-processing");
+  const orderedItems = processingItem
+    ? [...items.filter((item) => item.id !== processingItem.id), processingItem]
+    : items;
+  const visibleItems = orderedItems.slice(-4).reverse();
+  const statusCounts = items.reduce((counts, item) => ({
+    ...counts,
+    [item.status]: (counts[item.status] || 0) + 1,
+  }), {});
+
   return (
     <Card className="gap-0 shadow-[var(--shadow-surface)]">
       <CardHeader className="border-b">
@@ -184,7 +216,91 @@ function EvidenceAcquisitionPanel({ items }) {
       </CardHeader>
       <CardContent className="py-5">
         {items.length ? (
-          <div className="text-sm text-muted-foreground">이미지 상태 계약이 연결되었습니다.</div>
+          <div className="grid items-center gap-6 lg:grid-cols-[minmax(320px,0.9fr)_minmax(240px,1.1fr)]">
+            <div
+              className="relative mx-auto min-h-[260px] w-full max-w-[460px]"
+              role="group"
+              aria-label={`웹 페이지에서 수집한 상품 이미지 ${items.length}건의 처리 상태`}
+            >
+              {visibleItems.map((item, depth) => {
+                const statusLabel = IMAGE_STATUS_LABELS[item.status] || item.status;
+                const isProcessing = item.status === "vlm-processing";
+                const imageNumber = items.findIndex((source) => source.id === item.id) + 1;
+                return (
+                  <motion.figure
+                    className="absolute top-0 left-0 m-0 w-[calc(100%-3rem)] overflow-hidden rounded-xl border bg-card shadow-md"
+                    initial={reduceMotion ? false : { x: 72, y: depth * 12, opacity: 0 }}
+                    animate={{
+                      x: depth * 16,
+                      y: depth * 14,
+                      scale: 1 - depth * 0.035,
+                      rotate: depth % 2 ? 0.7 : -0.35,
+                      opacity: 1 - depth * 0.17,
+                    }}
+                    transition={{
+                      duration: reduceMotion ? 0 : 0.26,
+                      delay: reduceMotion ? 0 : depth * 0.04,
+                      ease: [0.22, 1, 0.36, 1],
+                    }}
+                    style={{ zIndex: visibleItems.length - depth }}
+                    key={item.id}
+                  >
+                    <div className="relative aspect-[16/9] overflow-hidden bg-surface-muted">
+                      <img
+                        className="size-full object-cover"
+                        src={item.previewUrl}
+                        alt={`수집 이미지 ${imageNumber} · ${statusLabel}`}
+                        loading="lazy"
+                      />
+                      {isProcessing && !reduceMotion ? (
+                        <motion.div
+                          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-primary/70"
+                          animate={{ top: ["0%", "100%"] }}
+                          transition={{ duration: 1.8, ease: "easeInOut", repeat: Infinity }}
+                          aria-hidden="true"
+                        />
+                      ) : null}
+                    </div>
+                    <figcaption className="flex items-center justify-between gap-3 border-t px-3 py-2">
+                      <span className="truncate text-xs font-medium">수집 이미지 {imageNumber}</span>
+                      <span className={`shrink-0 rounded-md border px-2 py-0.5 text-[11px] font-medium ${IMAGE_STATUS_STYLES[item.status] || IMAGE_STATUS_STYLES.discovered}`}>
+                        {statusLabel}
+                      </span>
+                    </figcaption>
+                  </motion.figure>
+                );
+              })}
+            </div>
+            <div>
+              <h3 className="m-0 text-base font-semibold">수집 이미지 처리 현황</h3>
+              <p className="mt-1 mb-4 text-sm leading-6 text-muted-foreground">
+                상품 페이지에서 실제 수집한 이미지만 표시합니다. 최신 이미지가 앞으로 이동하며 최대 4장을 겹쳐 보여줍니다.
+              </p>
+              <dl className="m-0 grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border">
+                {[
+                  ["전체 수집", items.length],
+                  ["근거 추출", statusCounts.extracted || 0],
+                  [
+                    "처리 전·중",
+                    (statusCounts.discovered || 0)
+                      + (statusCounts.queued || 0)
+                      + (statusCounts["vlm-processing"] || 0),
+                  ],
+                  ["제외·실패", (statusCounts.rejected || 0) + (statusCounts.failed || 0)],
+                ].map(([label, count]) => (
+                  <div className="bg-card px-3 py-3" key={label}>
+                    <dt className="text-xs text-muted-foreground">{label}</dt>
+                    <dd className="mt-1 text-lg font-semibold tabular-nums">{count}</dd>
+                  </div>
+                ))}
+              </dl>
+              {items.some((item) => item.rejectionReason || item.failureReason) ? (
+                <p className="mt-3 mb-0 text-xs leading-5 text-muted-foreground">
+                  제외 또는 실패 사유는 처리 결과에 보존되며 분류 근거로 사용되지 않습니다.
+                </p>
+              ) : null}
+            </div>
+          </div>
         ) : (
           <div className="flex items-start gap-3 rounded-lg border border-dashed bg-surface-muted/50 p-4">
             <ImageOff className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden="true" />

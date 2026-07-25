@@ -15,7 +15,7 @@ import {
   verdictLabel,
 } from "@/lib/traceContract.js";
 import { BuildCandidateHierarchy, UnderstandingValueLabel } from "@/lib/labels.js";
-import { asList, asObject, clean } from "@/lib/format.js";
+import { asList, asObject, clean, optionalFiniteNumber } from "@/lib/format.js";
 import { PrecedentSummary } from "./EvidenceElements";
 
 function EvidenceGradeBadge({ detail }) {
@@ -178,7 +178,7 @@ function ClassificationBasisLabel(value) {
   return basis.replaceAll("_", " ");
 }
 
-function ClassificationHierarchyNode({ node, selectedCn8 }) {
+function ClassificationHierarchyNode({ node, selectedCn8, showScores }) {
   const children = asList(node.children);
   const description = ClassificationBasisLabel(node.description);
   const selected = node.level === "CN8" && clean(node.code) === clean(selectedCn8);
@@ -192,14 +192,19 @@ function ClassificationHierarchyNode({ node, selectedCn8 }) {
             {description || `${node.level} ${node.code}의 공식 품목 설명이 결과에 포함되지 않았습니다.`}
           </small>
           <div className="cjs-hierarchy-meta">
-            {Number.isFinite(Number(node.score)) ? <small>단계 비교값 {node.score}</small> : null}
+            {showScores && optionalFiniteNumber(node.score) !== null ? <small>단계 비교값 {node.score}</small> : null}
           </div>
         </div>
       </div>
       {children.length ? (
         <ul>
           {children.map((child) => (
-            <ClassificationHierarchyNode node={child} selectedCn8={selectedCn8} key={`${child.level}-${child.code}`} />
+            <ClassificationHierarchyNode
+              node={child}
+              selectedCn8={selectedCn8}
+              showScores={showScores}
+              key={`${child.level}-${child.code}`}
+            />
           ))}
         </ul>
       ) : null}
@@ -221,7 +226,11 @@ export function ClassificationHierarchy({ candidates, selectedPath, selectedCn8 
       </div>
       {hasCandidates ? (
         <ul className="cjs-hierarchy-tree" aria-label="HS 코드 후보 계층 트리">
-          <ClassificationHierarchyNode node={tree} selectedCn8={selectedCn8} />
+          <ClassificationHierarchyNode
+            node={tree}
+            selectedCn8={selectedCn8}
+            showScores={candidates.length > 1}
+          />
         </ul>
       ) : (
         <div className="cjs-muted">계층 분류 후보가 기록되지 않았습니다.</div>

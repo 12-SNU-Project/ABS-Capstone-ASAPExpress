@@ -39,9 +39,10 @@ test("CN8 후보들의 공통 코드를 병합해 계층 트리를 만든다", (
     Candidate(2, "1605", "160530", "16053010"),
     Candidate(3, "1605", "160530", "16053090"),
     Candidate(4, "1603", "160300", "16030080"),
-  ], { hs2: "16" });
+  ], { hs2: "16", hs2_description: "육류·어류 등의 조제품" });
 
   assert.equal(tree.code, "16");
+  assert.equal(tree.description, "육류·어류 등의 조제품");
   assert.deepEqual(tree.children.map((node) => node.code), ["1605", "1603"]);
   assert.deepEqual(tree.children[0].children.map((node) => node.code), ["160555", "160530"]);
   assert.deepEqual(tree.children[0].children[1].children.map((node) => node.code), ["16053010", "16053090"]);

@@ -436,44 +436,60 @@ class ClassificationComponent(BasePipelineComponent):
             else {}
         )
         levelScores = levelScoresValue if isinstance(levelScoresValue, dict) else {}
-        candidateScore = self._read_float(candidate.get("score"), fallback=0.0)
+        candidateScore = self._read_optional_float(candidate.get("score"))
+        cn8Score = self._read_optional_float(levelScores.get("cn8"))
+        totalScore = candidateScore if candidateScore is not None else cn8Score
         nodes: list[dict] = []
         for level, label in (("hs4", "HS4"), ("hs6", "HS6"), ("cn8", "CN8")):
             code = str(candidate.get(level) or "").strip()
             if not code:
                 continue
-            nodes.append({
+            description = (
+                classificationPath.get(f"{level}_description")
+                if isinstance(classificationPath, dict)
+                else ""
+            )
+            node = {
                 "level": level,
                 "label": label,
                 "code": code,
-                "description": str(candidate.get("description") or "") if level == "cn8" else "",
-                "score": self._read_float(
-                    levelScores.get(level),
-                    fallback=candidateScore if level == "cn8" else 0.0,
+                "description": str(
+                    description
+                    or (candidate.get("description") if level == "cn8" else "")
+                    or ""
                 ),
                 "matched_keywords": [],
-            })
-        return {
-            "total_score": candidateScore,
+            }
+            levelScore = self._read_optional_float(levelScores.get(level))
+            if levelScore is None and level == "cn8":
+                levelScore = candidateScore
+            if levelScore is not None:
+                node["score"] = levelScore
+            nodes.append(node)
+        staticTree = {
             "level_scores": {
-                level: self._read_float(levelScores.get(level), fallback=0.0)
+                level: score
                 for level in ("hs4", "hs6", "cn8")
-                if level in levelScores
+                if (score := self._read_optional_float(levelScores.get(level)))
+                is not None
             },
             "retrieval_sources": ["staged_narrowing"],
             "nodes": nodes,
         }
+        if totalScore is not None:
+            staticTree["total_score"] = totalScore
+        return staticTree
 
     @staticmethod
-    def _read_float(value: object, *, fallback: float) -> float:
+    def _read_optional_float(value: object) -> float | None:
         if isinstance(value, bool):
-            return fallback
+            return None
         if isinstance(value, (int, float)):
             return float(value)
         try:
             return float(str(value))
         except (TypeError, ValueError):
-            return fallback
+            return None
 
     @staticmethod
     def _ebti_cases(

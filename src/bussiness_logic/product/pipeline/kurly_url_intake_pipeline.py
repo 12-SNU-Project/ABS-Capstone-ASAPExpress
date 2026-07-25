@@ -1,6 +1,7 @@
 """KurlyMarket URL intake pipeline."""
 
-from typing import List, Optional
+from collections.abc import Callable
+from typing import Dict, List, Optional
 
 from bussiness_logic.product.web_parser.kurly_market_collector import KurlyPageCollector
 from bussiness_logic.product.web_parser.kurly_market_schema import KurlyCollectionResult
@@ -34,12 +35,16 @@ class KurlyUrlIntakePipeline:
         screeningOcrEngine: Optional[ProductOcrEngine] = None,
         ocrFactNormalizer: Optional[ProductOcrFactNormalizer] = None,
         inputReconstructionService: Optional[ProductInputReconstructionService] = None,
+        imageStatusCallback: Optional[
+            Callable[[List[Dict[str, object]]], None]
+        ] = None,
     ) -> None:
         self._collector = collector
         self._ocrEngine = ocrEngine
         self._screeningOcrEngine = screeningOcrEngine
         self._ocrFactNormalizer = ocrFactNormalizer or ProductOcrFactNormalizer()
         self._inputReconstructionService = inputReconstructionService
+        self._imageStatusCallback = imageStatusCallback
 
     def Run(
         self,
@@ -95,6 +100,55 @@ class KurlyUrlIntakePipeline:
             )
         )
 
+        selectedImageUrls = set(
+            collectionResult.ocrCandidateImageUrls[
+                : max(0, pipelineInput.maxOcrImageCount)
+            ]
+            if pipelineInput.runOcrFallback
+            and collectionResult.parsedProductPage.requiresOcrFallback
+            else []
+        )
+        imageUrls = list(dict.fromkeys([
+            *collectionResult.productDetailImageUrls,
+            *collectionResult.ocrCandidateImageUrls,
+        ]))
+        imageEvidenceItems = [
+            {
+                "image_id": f"collected-image-{imageIndex}",
+                "preview_url": imageUrl,
+                "source_page_url": collectionResult.productPageUrl,
+                "status": "queued" if imageUrl in selectedImageUrls else "discovered",
+                "rejection_reason": "",
+                "failure_reason": "",
+            }
+            for imageIndex, imageUrl in enumerate(imageUrls, start=1)
+        ]
+        self._PublishImageEvidenceItems(imageEvidenceItems)
+
+        def ReportImageStatus(
+            _imageIndex: int,
+            imageUrl: str,
+            status: str,
+            rejectionReason: str,
+            failureReason: str,
+        ) -> None:
+            item = next(
+                (
+                    imageItem
+                    for imageItem in imageEvidenceItems
+                    if imageItem["preview_url"] == imageUrl
+                ),
+                None,
+            )
+            if item is None:
+                return
+            item.update({
+                "status": status,
+                "rejection_reason": rejectionReason,
+                "failure_reason": failureReason,
+            })
+            self._PublishImageEvidenceItems(imageEvidenceItems)
+
         ocrImageResults: List[ProductOcrImageResult] = []
         if pipelineInput.runOcrFallback:
             ocrImageResults = self._RunOcrFallback(
@@ -102,6 +156,7 @@ class KurlyUrlIntakePipeline:
                 pipelineInput=pipelineInput,
                 steps=steps,
                 errors=errors,
+                imageStatusCallback=ReportImageStatus,
             )
         else:
             steps.append(
@@ -193,6 +248,7 @@ class KurlyUrlIntakePipeline:
         pipelineInput: KurlyUrlIntakeInput,
         steps: List[KurlyUrlIntakeStep],
         errors: List[str],
+        imageStatusCallback: Callable[[int, str, str, str, str], None],
     ) -> List[ProductOcrImageResult]:
         if not collectionResult.parsedProductPage.requiresOcrFallback:
             steps.append(
@@ -226,6 +282,7 @@ class KurlyUrlIntakePipeline:
             maxImageCount=pipelineInput.maxOcrImageCount,
             downloadTimeoutSeconds=pipelineInput.downloadTimeoutSeconds,
             reuseArtifactImages=pipelineInput.reuseOcrImageArtifacts,
+            imageStatusCallback=imageStatusCallback,
         )
         errors.extend(
             imageResult.error
@@ -281,3 +338,18 @@ class KurlyUrlIntakePipeline:
             )
         )
         return imageResults
+
+    def _PublishImageEvidenceItems(
+        self,
+        imageEvidenceItems: List[Dict[str, object]],
+    ) -> None:
+        if self._imageStatusCallback is None or not imageEvidenceItems:
+            return
+        try:
+            self._imageStatusCallback([
+                dict(imageItem)
+                for imageItem in imageEvidenceItems
+            ])
+        except Exception:
+            # 진행 알림 실패가 수집 결과를 실패로 바꾸면 안 된다.
+            pass

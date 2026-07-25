@@ -159,6 +159,24 @@ class ReconstructionStatusView(ApiContractModel):
     )
 
 
+class ImageEvidenceItemView(ApiContractModel):
+    imageId: str = Field(alias="image_id")
+    previewUrl: str = Field(alias="preview_url")
+    sourcePageUrl: str = Field(default="", alias="source_page_url")
+    status: Literal[
+        "discovered",
+        "queued",
+        "vlm-processing",
+        "extracted",
+        "rejected",
+        "failed",
+    ] = "discovered"
+    discoveredAt: str = Field(default="", alias="discovered_at")
+    updatedAt: str = Field(default="", alias="updated_at")
+    rejectionReason: str = Field(default="", alias="rejection_reason")
+    failureReason: str = Field(default="", alias="failure_reason")
+
+
 class InputProcessingView(ApiContractModel):
     pageProductFacts: PageProductFactsView = Field(alias="page_product_facts")
     detailEvidenceRows: list[JsonObject] = Field(
@@ -197,6 +215,10 @@ class InputProcessingView(ApiContractModel):
     evidenceSourceLabels: dict[str, str] = Field(
         default_factory=dict,
         alias="evidence_source_labels",
+    )
+    imageEvidenceItems: list[ImageEvidenceItemView] = Field(
+        default_factory=list,
+        alias="image_evidence_items",
     )
     reconstructionStatus: ReconstructionStatusView = Field(
         alias="reconstruction_status",
@@ -271,14 +293,29 @@ class CandidateCodeView(ApiContractModel):
 
 class ClassificationPathView(ApiContractModel):
     hs2: str | None = None
+    hs2Description: str = Field(default="", alias="hs2_description")
     hs4: str | None = None
+    hs4Description: str = Field(default="", alias="hs4_description")
     hs6: str | None = None
+    hs6Description: str = Field(default="", alias="hs6_description")
     cn8: str | None = None
+    cn8Description: str = Field(default="", alias="cn8_description")
     levelScores: dict[str, float] = Field(
         default_factory=dict,
         alias="level_scores",
     )
     source: str | None = None
+
+    @field_validator("levelScores", mode="before")
+    @classmethod
+    def DropUncomputedLevelScores(cls, value: object) -> object:
+        if not isinstance(value, Mapping):
+            return value
+        return {
+            key: score
+            for key, score in value.items()
+            if score is not None
+        }
 
 
 class ClassificationTraceView(ApiContractModel):

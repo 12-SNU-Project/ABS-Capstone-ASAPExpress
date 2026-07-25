@@ -263,6 +263,9 @@ class InputProcessingViewProjector:
         inputReconstruction = facts.get("input_reconstruction") or {}
         if not isinstance(inputReconstruction, Mapping):
             inputReconstruction = {}
+        urlIntake = facts.get("url_intake") or {}
+        if not isinstance(urlIntake, Mapping):
+            urlIntake = {}
         hasBasicInfo = any(
             str(value).strip()
             for value in (
@@ -287,7 +290,13 @@ class InputProcessingViewProjector:
                 "reconstructed_fact_texts",
             )
         )
-        if not (hasBasicInfo or hasReconstruction or hasStructuredFacts):
+        hasImageEvidence = bool(urlIntake.get("image_evidence_items"))
+        if not (
+            hasBasicInfo
+            or hasReconstruction
+            or hasStructuredFacts
+            or hasImageEvidence
+        ):
             return {}
 
         reconstructionWarnings = inputReconstruction.get("warnings") or []
@@ -353,6 +362,7 @@ class InputProcessingViewProjector:
             ),
             "warnings": warnings,
             "evidence_source_labels": inputReconstruction.get("source_ref_labels") or {},
+            "image_evidence_items": urlIntake.get("image_evidence_items") or [],
             "reconstruction_status": {
                 "mode": inputReconstruction.get("mode") or "",
                 "used_llm_reconstruction": bool(
@@ -488,6 +498,11 @@ class InputProcessingViewProjector:
             "evidence_source_labels": self._CompactTextMapping(
                 inputProcessingView.get("evidence_source_labels"),
                 textLimit=200,
+            ),
+            "image_evidence_items": self._CompactMappingList(
+                inputProcessingView.get("image_evidence_items"),
+                limit=20,
+                textLimit=2000,
             ),
             "reconstruction_status": dict(reconstruction),
         }

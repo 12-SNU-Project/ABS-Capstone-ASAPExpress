@@ -372,6 +372,10 @@ class SemanticChapterRouter:
             )
 
         validChapters = {card["chapter"] for card in cards}
+        rowByChapter = {
+            re.sub(r"\D", "", str(row.get("chapter") or ""))[:2].zfill(2): row
+            for row in rows
+        }
         validated: list[dict[str, object]] = []
         for rawCandidate in list(parsed.get("candidates") or [])[:5]:
             if not isinstance(rawCandidate, Mapping):
@@ -395,8 +399,15 @@ class SemanticChapterRouter:
             ]
             if not factPaths or not authorityFields:
                 continue
+            authorityRow = rowByChapter.get(chapter, {})
             validated.append({
                 "chapter": chapter,
+                "chapter_description": _Clip(
+                    authorityRow.get("chapter_title")
+                    or authorityRow.get("title")
+                    or authorityRow.get("description"),
+                    320,
+                ),
                 "rank": len(validated) + 1,
                 "selected": len(validated) == 0,
                 "support_status": (
@@ -425,10 +436,6 @@ class SemanticChapterRouter:
 
         selected = str(validated[0]["chapter"])
         alternatives = tuple(str(item["chapter"]) for item in validated[1:])
-        rowByChapter = {
-            re.sub(r"\D", "", str(row.get("chapter") or ""))[:2].zfill(2): row
-            for row in rows
-        }
         selectedRow = rowByChapter.get(selected, {})
         domainScopes = self._SplitValues(selectedRow.get("domain_scope_candidates"))
         if not domainScopes:

@@ -16,7 +16,24 @@ class KurlyProductCollectionPipeline:
             message="Kurly 상품 정보 수집 확인",
         )
         previousFacts = dict(context.facts)
-        context.facts = CollectKurlyProductFactsIfNeeded(facts=context.facts)
+
+        def EmitImageStatus(imageEvidenceItems: list[dict[str, object]]) -> None:
+            context.Emit(
+                "Kurly_Product_Collection",
+                "running",
+                message="상품 이미지 근거 처리 중",
+                raw_input={
+                    **context.facts,
+                    "url_intake": {
+                        "image_evidence_items": imageEvidenceItems,
+                    },
+                },
+            )
+
+        context.facts = CollectKurlyProductFactsIfNeeded(
+            facts=context.facts,
+            imageStatusCallback=EmitImageStatus,
+        )
         changed = context.facts != previousFacts
         context.Emit(
             "Kurly_Product_Collection",

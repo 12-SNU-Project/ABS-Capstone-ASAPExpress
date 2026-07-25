@@ -2,6 +2,7 @@
 
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -63,6 +64,8 @@ OCR_SCREENING_QUANTITY_PATTERN = re.compile(
     r"\d+(?:[.,]\d+)?\s*(?:mg|g|kg|ml|l|%|kcal|㎎|㎏|㎖)",
     re.IGNORECASE,
 )
+
+OcrImageStatusCallback = Callable[[int, str, str, str, str], None]
 
 
 class ProductOcrImageResult(BaseModel):
@@ -404,6 +407,7 @@ class ProductOcrFallbackRunner:
         maxImageCount: int,
         downloadTimeoutSeconds: int,
         reuseArtifactImages: bool = False,
+        imageStatusCallback: OcrImageStatusCallback | None = None,
     ) -> List[ProductOcrImageResult]:
         artifactDirectory = self._artifactStore.PrepareArtifactDirectory(
             artifactRootPath=artifactRootPath,
@@ -420,8 +424,23 @@ class ProductOcrFallbackRunner:
                 artifactDirectory=artifactDirectory,
                 downloadTimeoutSeconds=downloadTimeoutSeconds,
                 reuseArtifactImages=reuseArtifactImages,
+                imageStatusCallback=imageStatusCallback,
             )
             imageResults.append(imageResult)
+            self._NotifyImageStatus(
+                imageStatusCallback,
+                imageIndex,
+                imageUrl,
+                (
+                    "failed"
+                    if imageResult.error
+                    else "rejected"
+                    if imageResult.skippedReason
+                    else "extracted"
+                ),
+                imageResult.skippedReason or "",
+                imageResult.error or "",
+            )
 
         self._artifactStore.PruneUnretainedArtifacts(
             artifactDirectory,
@@ -455,6 +474,7 @@ class ProductOcrFallbackRunner:
         artifactDirectory: Path,
         downloadTimeoutSeconds: int,
         reuseArtifactImages: bool,
+        imageStatusCallback: OcrImageStatusCallback | None,
     ) -> ProductOcrImageResult:
         artifactPath: Optional[Path] = None
         processingTimes: Dict[str, float] = {}
@@ -528,6 +548,14 @@ class ProductOcrFallbackRunner:
                     processingTimes["roi_build"] = perf_counter() - startedAt
                     if regionCrop is not None:
                         structuredInputBytes, roiBounds = regionCrop
+                self._NotifyImageStatus(
+                    imageStatusCallback,
+                    imageIndex,
+                    imageUrl,
+                    "vlm-processing",
+                    "",
+                    "",
+                )
                 startedAt = perf_counter()
                 structuredOcrResult = (
                     self._ocrEngine.ExtractStructuredTextFromImage(
@@ -647,6 +675,29 @@ class ProductOcrFallbackRunner:
                     error,
                 ),
             )
+
+    @staticmethod
+    def _NotifyImageStatus(
+        callback: OcrImageStatusCallback | None,
+        imageIndex: int,
+        imageUrl: str,
+        status: str,
+        rejectionReason: str,
+        failureReason: str,
+    ) -> None:
+        if callback is None:
+            return
+        try:
+            callback(
+                imageIndex,
+                imageUrl,
+                status,
+                rejectionReason,
+                failureReason,
+            )
+        except Exception:
+            # 진행 알림 실패가 OCR 결과를 실패로 바꾸면 안 된다.
+            pass
 
     def _MergeStructuredAndScreeningOcr(
         self,

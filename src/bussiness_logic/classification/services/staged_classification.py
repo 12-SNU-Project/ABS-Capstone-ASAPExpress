@@ -1302,7 +1302,15 @@ class StagedClassificationTool:
                              if str(c_pl.get("cn8") or "") == _code_pl),
                             None)
                         if _entry_pl is None:
-                            _entry_pl = {"cn8": _code_pl, "score": 0.0}
+                            fetched_entries = self._final_candidates(
+                                [_code_pl],
+                                top_k=1,
+                            )
+                            _entry_pl = (
+                                fetched_entries[0]
+                                if fetched_entries
+                                else {"cn8": _code_pl, "score": 0.0}
+                            )
                             candidates.append(_entry_pl)
                         _entry_pl["precedent_lead"] = (
                             "BTI:" + ",".join(_sm_pl.get("refs") or []))
@@ -1314,31 +1322,53 @@ class StagedClassificationTool:
                         candidates = ([_entry_pl]
                                       + [c_pl for c_pl in candidates
                                          if c_pl is not _entry_pl])
-        # 최종 DTO의 score는 cn8 스테이지 점수를 그대로 싣는다 — 키가 없으면
-        # 소비측(ClassificationCandidate 조립)이 기본 0.0으로 표시해 버린다.
+        # CN8 단일 분기(pass-through)는 비교 점수를 계산하지 않는다.
+        # 미계산과 실제 0점을 구분하기 위해 점수 필드를 만들지 않는다.
         cn8_scores = level_score_maps.get("cn8", {})
         _phase_by_code = {str(r_ph.get("code")): r_ph.get("residual_phase")
                           for r_ph in (full_ranked or [])
                           if r_ph.get("residual_phase")}
         for cand in candidates:
-            cand["score"] = cn8_scores.get(str(cand.get("cn8")), 0.0)
+            candidateCode = str(cand.get("cn8") or "")
+            if candidateCode in cn8_scores:
+                cand["score"] = cn8_scores[candidateCode]
+            else:
+                cand.pop("score", None)
             _ph_c = _phase_by_code.get(str(cand.get("cn8") or ""))
             if _ph_c:
                 cand["residual_phase"] = _ph_c  # [10회차-2] trace 전파(내부)
+        chapter_descriptions = {
+            _digits(detail.get("chapter"), limit=2): str(
+                detail.get("chapter_description") or ""
+            )
+            for detail in (routing_context.get("candidate_chapter_details") or [])
+            if isinstance(detail, dict)
+            and len(_digits(detail.get("chapter"), limit=2)) == 2
+        }
         paths: list[dict[str, Any]] = []
         for cand in candidates:
             cn8 = _digits(cand.get("cn8"), limit=8)
             if len(cn8) != 8:
                 continue
+            pathLevelScores: dict[str, float] = {}
+            for level, width in (("hs4", 4), ("hs6", 6), ("cn8", 8)):
+                levelScore = level_score_maps.get(level, {}).get(cn8[:width])
+                if levelScore is not None:
+                    pathLevelScores[level] = levelScore
             paths.append({
                 "hs2": cn8[:2],
+                "hs2_description": chapter_descriptions.get(cn8[:2], ""),
                 "hs4": cn8[:4],
+                "hs4_description": str(cand.get("hs4_description") or ""),
                 "hs6": cn8[:6],
+                "hs6_description": str(cand.get("hs6_description") or ""),
                 "cn8": cn8,
-                "level_scores": {
-                    lvl: level_score_maps.get(lvl, {}).get(cn8[:width])
-                    for lvl, width in (("hs4", 4), ("hs6", 6), ("cn8", 8))
-                },
+                "cn8_description": str(
+                    cand.get("cn8_description")
+                    or cand.get("description")
+                    or ""
+                ),
+                "level_scores": pathLevelScores,
                 "source": "normal",
             })
         return {
@@ -1519,7 +1549,10 @@ class StagedClassificationTool:
             for row in manager.FetchRows(
                 text(
                     """
-                    SELECT cn8, coalesce(cn8_description, combined_description, '') d
+                    SELECT cn8,
+                           coalesce(heading_description, '') hs4_description,
+                           coalesce(subheading_description, '') hs6_description,
+                           coalesce(cn8_description, combined_description, '') cn8_description
                     FROM cn_table WHERE cn8 IN :cn8Prefixes ORDER BY cn8 LIMIT :topK
                     """
                 ).bindparams(bindparam("cn8Prefixes", expanding=True)),
@@ -1530,7 +1563,15 @@ class StagedClassificationTool:
             ):
                 code = _digits(row.get("cn8"), limit=8)
                 if len(code) == 8:
-                    out.append({"cn8": code, "hs6": code[:6], "hs4": code[:4], "description": row.get("d")})
+                    out.append({
+                        "cn8": code,
+                        "hs6": code[:6],
+                        "hs4": code[:4],
+                        "description": row.get("cn8_description"),
+                        "hs4_description": row.get("hs4_description"),
+                        "hs6_description": row.get("hs6_description"),
+                        "cn8_description": row.get("cn8_description"),
+                    })
         except Exception as error:  # noqa: BLE001
             _LOGGER.warning("staged _final_candidates DB query failed: %s", error)
             return []
