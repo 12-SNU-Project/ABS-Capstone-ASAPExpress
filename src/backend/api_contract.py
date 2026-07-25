@@ -116,6 +116,15 @@ class RunCreateAcceptedResponse(ApiContractModel):
     resultUrl: str = Field(alias="result_url")
 
 
+class QuestionAnswerPayload(ApiContractModel):
+    userQuestionId: str = Field(alias="user_question_id", min_length=1)
+    answer: Literal["yes", "no", "unknown"]
+
+
+class QuestionAnswersRequestPayload(ApiContractModel):
+    answers: list[QuestionAnswerPayload] = Field(min_length=1, max_length=8)
+
+
 class RunRequestView(ApiContractModel):
     query: str = ""
     facts: JsonObject = Field(default_factory=dict)
@@ -478,6 +487,10 @@ class RunSnapshotResponse(ApiContractModel):
     candidateCodeSet: ClassificationCandidateSetView | None = Field(
         default=None,
         alias="candidate_code_set",
+    )
+    userQuestions: list[JsonObject] = Field(
+        default_factory=list,
+        alias="user_questions",
     )
     documentPackage: DocumentPackageSummaryView | None = Field(
         default=None,

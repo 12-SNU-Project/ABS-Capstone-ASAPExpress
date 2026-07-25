@@ -124,9 +124,6 @@ class AppPathsConfig(BaseModel):
     blackboard_schema: Path = Path(
         "docs/ASAP_Ontology_v1/linkml/generated/asap_runtime.schema.json",
     )
-    taric_master_table: Path = Path(
-        "data/processed/TARIC/taric_master_table.csv",
-    )
 
     def ResolvePath(self, projectRootPath: str | Path, configPath: Path) -> Path:
         expandedPath = configPath.expanduser()
@@ -160,7 +157,6 @@ class KurlySmokeAppConfig(BaseModel):
     use_input_reconstruction: StrictBool = True
     use_llm_input_reconstruction: StrictBool = True
     llm_input_reconstruction_max_tokens: StrictInt = 4096
-    input_dictionary_path: Optional[Path] = None
     input_dictionary_fuzzy_min_ratio: StrictFloat = 0.86
     write_summary_artifact: StrictBool = True
     log_full_result: StrictBool = False
@@ -220,7 +216,6 @@ class OntologySmokeAppConfig(BaseModel):
     max_result_count: StrictInt = 6
     cn_candidate_top_k: StrictInt = 5
     max_product_smoke_inputs: StrictInt = 2
-    answer_csv_path: Path = Path("data/EU_HS_test.csv")
     run_kurly_smoke_before_ontology: StrictBool = False
     write_summary_artifact: StrictBool = True
     run_llm_connection_smoke: StrictBool = False

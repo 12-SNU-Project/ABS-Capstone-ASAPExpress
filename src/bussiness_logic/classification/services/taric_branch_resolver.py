@@ -5,8 +5,7 @@ Owned by Classification_Component. Pure deterministic lookup — no LLM. The com
 calls this to enumerate the deterministic universe of TARIC10 lines under a
 CN8 before asking the LLM to rank/select one.
 
-Data source: ``data/processed/TARIC/taric_master_table.csv`` (140k rows).
-We read it once (lru_cache) and index by cn8 prefix.
+Data source: database ``taric_master_table``.
 
 Output (per branch):
   TaricBranch(
@@ -19,24 +18,8 @@ Output (per branch):
 """
 from __future__ import annotations
 
-import csv
 import functools
-import os
-import sys
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Optional
-
-from bussiness_logic.app_config import LoadAppConfig
-
-csv.field_size_limit(sys.maxsize)
-
-PROJECT_ROOT = Path(os.environ.get("ASAP_PROJECT_ROOT", Path(__file__).resolve().parents[4])).resolve()
-APP_CONFIG = LoadAppConfig(PROJECT_ROOT)
-DEFAULT_MASTER_CSV = APP_CONFIG.paths.ResolvePath(
-    PROJECT_ROOT,
-    APP_CONFIG.paths.taric_master_table,
-)
 
 
 def _truthy(value) -> bool:
@@ -75,46 +58,50 @@ class TaricBranch:
         }
 
 
-@functools.lru_cache(maxsize=1)
-def _load_by_cn8(csv_path: str) -> dict[str, list[dict]]:
-    """{cn8 -> list of master_table row dicts}. Cached for process lifetime.
-
-    Legacy CSV path — kept ONLY for an explicitly passed master_csv (tests).
-    The default runtime path is ``_load_rows_from_db`` (Supabase
-    taric_master_table) so classification and documents read the SAME table.
-    """
-    if not Path(csv_path).exists():
-        raise FileNotFoundError(f"taric_master_table.csv not found: {csv_path}")
-    out: dict[str, list[dict]] = {}
-    with Path(csv_path).open(encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            cn8 = (r.get("cn8") or "").strip()
-            if cn8:
-                out.setdefault(cn8, []).append(r)
-    return out
-
-
 @functools.lru_cache(maxsize=512)
 def _load_rows_from_db(cn8: str) -> tuple[dict, ...]:
-    """taric_master_table rows for one CN8 from the DB (runtime-env based).
+    """Load one CN8 branch universe from the runtime database."""
+    return tuple(
+        row
+        for row in _load_rows_for_cn8s((cn8,))
+        if str(row.get("cn8") or "") == cn8
+    )
 
-    Same table document_package already queries — removes the CSV/DB dual
-    source that could desync classification from document requirements.
-    Degrades to () on failure (resolver then returns no branches).
-    """
-    try:
-        from sqlalchemy import text
 
-        from db.db_session_manager import DbSessionManager
+@functools.lru_cache(maxsize=1)
+def _require_taric_master_table() -> None:
+    from db.db_session_manager import DbSessionManager
 
-        manager = DbSessionManager.GetInstance()
-        rows = manager.FetchRows(
-            text("SELECT * FROM taric_master_table WHERE cn8 = :cn8"),
-            {"cn8": cn8},
+    manager = DbSessionManager.GetInstance()
+    if not manager.TableExists("taric_master_table"):
+        raise RuntimeError(
+            "Required runtime table is missing: taric_master_table"
         )
-        return tuple(dict(r) for r in rows)
-    except Exception:  # noqa: BLE001 — resolver must not break the pipeline
+
+
+@functools.lru_cache(maxsize=128)
+def _load_rows_for_cn8s(cn8s: tuple[str, ...]) -> tuple[dict, ...]:
+    """Load branch universes for a final candidate set in one round trip."""
+    from sqlalchemy import text
+
+    from db.db_session_manager import DbSessionManager
+
+    normalized = tuple(
+        dict.fromkeys(
+            code
+            for rawCode in cn8s
+            if len(code := "".join(c for c in str(rawCode) if c.isdigit())[:8]) == 8
+        )
+    )
+    if not normalized:
         return ()
+    _require_taric_master_table()
+    manager = DbSessionManager.GetInstance()
+    rows = manager.FetchRows(
+        text("SELECT * FROM taric_master_table WHERE cn8 = ANY(:cn8_codes)"),
+        {"cn8_codes": list(normalized)},
+    )
+    return tuple(dict(row) for row in rows)
 
 
 class TaricBranchResolverTool:
@@ -125,14 +112,6 @@ class TaricBranchResolverTool:
         branches = tool.resolve(cn8="19023010")
         # → list[TaricBranch]
     """
-
-    def __init__(
-        self,
-        master_csv: Optional[Path] = None,
-    ) -> None:
-        # DB is the default source; an explicitly passed master_csv (tests /
-        # offline runs) keeps the legacy CSV path.
-        self._master_csv = Path(master_csv) if master_csv else None
 
     def resolve(
         self,
@@ -145,10 +124,56 @@ class TaricBranchResolverTool:
         cn8 = (cn8 or "").strip()
         if not cn8 or len(cn8) < 8:
             return []
-        if self._master_csv is not None:
-            rows = _load_by_cn8(str(self._master_csv)).get(cn8, [])
-        else:
-            rows = list(_load_rows_from_db(cn8))
+        rows = list(_load_rows_from_db(cn8))
+        return self._BuildBranches(
+            cn8,
+            rows,
+            only_declarable_leaf=only_declarable_leaf,
+            only_kr_applicable=only_kr_applicable,
+        )
+
+    def resolve_many(
+        self,
+        cn8s: list[str] | tuple[str, ...],
+        *,
+        only_declarable_leaf: bool = False,
+        only_kr_applicable: bool = False,
+    ) -> dict[str, list[TaricBranch]]:
+        """Resolve several final candidates with one database query."""
+        normalized = tuple(
+            dict.fromkeys(
+                code
+                for rawCode in cn8s
+                if len(code := "".join(c for c in str(rawCode) if c.isdigit())[:8]) == 8
+            )
+        )
+        rowsByCn8: dict[str, list[dict]] = {code: [] for code in normalized}
+        for row in _load_rows_for_cn8s(normalized):
+            rowCn8 = "".join(
+                character
+                for character in str(row.get("cn8") or "")
+                if character.isdigit()
+            )[:8]
+            if rowCn8 in rowsByCn8:
+                rowsByCn8[rowCn8].append(dict(row))
+        return {
+            cn8: self._BuildBranches(
+                cn8,
+                rowsByCn8[cn8],
+                only_declarable_leaf=only_declarable_leaf,
+                only_kr_applicable=only_kr_applicable,
+            )
+            for cn8 in normalized
+        }
+
+    @staticmethod
+    def _BuildBranches(
+        cn8: str,
+        rows: list[dict],
+        *,
+        only_declarable_leaf: bool,
+        only_kr_applicable: bool,
+    ) -> list[TaricBranch]:
         if not rows:
             return []
 

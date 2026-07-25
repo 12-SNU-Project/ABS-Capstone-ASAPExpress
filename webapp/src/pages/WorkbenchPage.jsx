@@ -402,6 +402,124 @@ function ClassificationFlow({ activeStep, onSelect }) {
   );
 }
 
+function UserQuestionPanel({ questions, onSubmit, busy }) {
+  const items = asList(questions).filter(
+    (question) =>
+      clean(question?.question_text)
+      && (question?.active !== false || clean(question?.answer)),
+  );
+  const [answers, setAnswers] = useState({});
+  const [submitError, setSubmitError] = useState("");
+  if (!items.length) {
+    return null;
+  }
+  const pendingItems = items.filter(
+    (question) => question?.active !== false && !clean(question?.answer),
+  );
+  const selectedAnswers = pendingItems
+    .map((question) => ({
+      user_question_id: clean(question?.user_question_id),
+      answer: clean(answers[clean(question?.user_question_id)]),
+    }))
+    .filter((item) => item.user_question_id && item.answer);
+  const submitAnswers = async (event) => {
+    event.preventDefault();
+    if (!selectedAnswers.length || typeof onSubmit !== "function") {
+      return;
+    }
+    setSubmitError("");
+    try {
+      await onSubmit(selectedAnswers);
+      setAnswers({});
+    } catch (error) {
+      setSubmitError(String(error?.message || error));
+    }
+  };
+  const contextLabels = (question) => {
+    const requiredFor = asList(question?.required_for).map(clean);
+    const stage = requiredFor.find((item) => item.startsWith("stage:"))?.slice(6).toUpperCase();
+    const candidate = requiredFor.find((item) => item.startsWith("candidate:"))?.slice(10);
+    return [
+      stage ? `${stage} 분기` : "",
+      candidate ? `후보 ${candidate}` : "",
+    ].filter(Boolean);
+  };
+  return (
+    <section className="cjs-question-panel" aria-live="polite">
+      <div className="cjs-question-panel-heading">
+        <div>
+          <div className="cjs-panel-title">추가 확인이 필요한 정보</div>
+          <small>현재 정보만으로 분류 기준을 확정할 수 없어 판정이 보류되었습니다.</small>
+        </div>
+        <strong>{items.length}건</strong>
+      </div>
+      <form className="cjs-question-list" onSubmit={submitAnswers}>
+        {items.map((question, index) => {
+          const questionId = clean(question.user_question_id) || `question-${index}`;
+          const currentAnswer = clean(question.answer);
+          const evidence = asList(question?.bti_evidence);
+          return (
+          <article
+            className="cjs-question-item"
+            key={questionId}
+          >
+            <div className="cjs-question-meta">
+              {contextLabels(question).map((label) => <span key={label}>{label}</span>)}
+              <b>{currentAnswer ? "응답 완료" : "응답 대기"}</b>
+            </div>
+            <p>{clean(question.question_text)}</p>
+            {evidence.length ? (
+              <div className="cjs-question-evidence">
+                EBTI 참고 근거 {evidence.flatMap((item) => asList(item?.refs)).length}건
+                <small>분류 확정이 아닌 확인 자료입니다.</small>
+              </div>
+            ) : null}
+            {currentAnswer ? (
+              <div className="cjs-question-answer-readonly">
+                선택: {currentAnswer === "yes" ? "예" : currentAnswer === "no" ? "아니오" : "모름"}
+              </div>
+            ) : (
+              <div className="cjs-question-choices" role="group" aria-label="답변 선택">
+                {[
+                  ["yes", "예"],
+                  ["no", "아니오"],
+                  ["unknown", "모름"],
+                ].map(([value, label]) => (
+                  <button
+                    type="button"
+                    className={answers[questionId] === value ? "active" : ""}
+                    aria-pressed={answers[questionId] === value}
+                    onClick={() => setAnswers((previous) => ({
+                      ...previous,
+                      [questionId]: value,
+                    }))}
+                    key={value}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </article>
+          );
+        })}
+        {pendingItems.length ? (
+          <button
+            type="submit"
+            className="cjs-question-submit"
+            disabled={busy || !selectedAnswers.length}
+          >
+            {busy ? "재분류 중" : `선택한 답변 반영 (${selectedAnswers.length})`}
+          </button>
+        ) : null}
+        {submitError ? (
+          <div className="cjs-question-submit-error">{submitError}</div>
+        ) : null}
+      </form>
+    </section>
+  );
+}
+
 function CandidateBoard({ derived, selectedKey, onSelect }) {
   const { candidates } = derived;
   if (!candidates.length) {
@@ -1324,7 +1442,13 @@ function ClassificationPager({ activeStep, onSelect }) {
 
 export default function WorkbenchPage() {
   const [searchParams] = useSearchParams();
-  const { result, busy, runPipeline, loadRun } = useClassificationRun(searchParams.get("job"));
+  const {
+    result,
+    busy,
+    runPipeline,
+    loadRun,
+    answerQuestions,
+  } = useClassificationRun(searchParams.get("job"));
   const [form, setForm] = useState({
     productName: "",
     url: "",
@@ -1657,6 +1781,11 @@ export default function WorkbenchPage() {
               <ClassificationFlow
                 activeStep={classificationStep}
                 onSelect={pickClassificationStep}
+              />
+              <UserQuestionPanel
+                questions={result?.user_questions}
+                onSubmit={answerQuestions}
+                busy={busy}
               />
               <div className="cjs-classification-step-content">
                 {classificationStep === "understanding" ? (

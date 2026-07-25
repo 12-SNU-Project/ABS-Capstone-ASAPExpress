@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from backend.api_contract import (
     ApiErrorResponse,
+    QuestionAnswersRequestPayload,
     RunCreateAcceptedResponse,
     RunCreateRequestPayload,
 )
@@ -90,6 +91,56 @@ class PipelineApi:
                     job_id=job_id,
                 ).ToDict()), 404
             return jsonify(snapshot)
+
+        @server.route("/api/runs/<job_id>/question-answers", methods=["POST"])
+        def answer_classification_questions(job_id: str) -> ResponseReturnValue:
+            payload = flask_request.get_json(silent=True) or {}
+            if not isinstance(payload, dict):
+                return jsonify(ApiErrorResponse(
+                    error="invalid_json_payload",
+                    message="Request body must be a JSON object.",
+                    hint="Send an answers array.",
+                ).ToDict()), 400
+            try:
+                requestPayload = QuestionAnswersRequestPayload.model_validate(payload)
+            except ValidationError as error:
+                firstError = error.errors()[0] if error.errors() else {}
+                return jsonify(ApiErrorResponse(
+                    error="invalid_question_answer_payload",
+                    message=str(firstError.get("msg") or "Invalid answer payload."),
+                    field=".".join(
+                        str(part) for part in (firstError.get("loc") or ("answers",))
+                    ),
+                ).ToDict()), 400
+            runDirectory = self._ResolveRunDirectory(job_id)
+            if runDirectory is None:
+                return jsonify(ApiErrorResponse(
+                    error="run_not_found",
+                    message="No run exists for the requested job_id.",
+                    field="job_id",
+                    job_id=job_id,
+                ).ToDict()), 404
+            try:
+                snapshot = self._service.ReclassifyWithQuestionAnswers(
+                    job_id,
+                    runDirectory,
+                    [answer.ToDict() for answer in requestPayload.answers],
+                )
+            except KeyError as error:
+                return jsonify(ApiErrorResponse(
+                    error="question_not_found",
+                    message=str(error),
+                    field="user_question_id",
+                    job_id=job_id,
+                ).ToDict()), 404
+            except (OSError, ValueError, RuntimeError) as error:
+                return jsonify(ApiErrorResponse(
+                    error="classification_replay_failed",
+                    message=str(error),
+                    field="answers",
+                    job_id=job_id,
+                ).ToDict()), 409
+            return jsonify(snapshot), 200
 
         @server.route("/api/runs/<job_id>/document-packages")
         def list_document_packages(job_id: str) -> ResponseReturnValue:

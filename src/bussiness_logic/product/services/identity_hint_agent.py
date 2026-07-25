@@ -19,64 +19,82 @@ from bussiness_logic.product.model.product_understanding import (
     EncyclopediaEvidenceSet,
 )
 
-
-DOMAIN_HINT_VOCAB = (
-    "food",
-    "cosmetics",
-    "pharmaceutical",
-    "hazardous",
-    "animal_origin",
-    "other",
+# [WCO 21부 · 07-23 설계자 지시] 도메인 힌트를 임의 6분류에서 **HS협약
+# 공식 21부(Section I~XXI)**로 재작성 — 문서 근거(WCO Nomenclature 부
+# 구조·챕터 대응은 협약 정본, 창작 0). 이해 LLM의 chapter_group 21택
+# 승인분(07-22)의 구현 자리. 향후 챕터 게이트 일반화(부→허용 챕터)의
+# 정본 맵으로도 소비 예정.
+WCO_SECTIONS: tuple[tuple[str, str, str], ...] = (
+    ("I", "01-05", "live animals; animal products"),
+    ("II", "06-14", "vegetable products"),
+    ("III", "15", "animal or vegetable fats and oils"),
+    ("IV", "16-24", "prepared foodstuffs; beverages; tobacco"),
+    ("V", "25-27", "mineral products"),
+    ("VI", "28-38", "chemical products"),
+    ("VII", "39-40", "plastics; rubber"),
+    ("VIII", "41-43", "hides; leather; furskins"),
+    ("IX", "44-46", "wood; cork; straw"),
+    ("X", "47-49", "pulp; paper"),
+    ("XI", "50-63", "textiles"),
+    ("XII", "64-67", "footwear; headgear"),
+    ("XIII", "68-70", "stone; ceramics; glass"),
+    ("XIV", "71", "pearls; precious metals"),
+    ("XV", "72-83", "base metals"),
+    ("XVI", "84-85", "machinery; electrical equipment"),
+    ("XVII", "86-89", "vehicles; aircraft; vessels"),
+    ("XVIII", "90-92", "optical and measuring; clocks; musical instruments"),
+    ("XIX", "93", "arms and ammunition"),
+    ("XX", "94-96", "miscellaneous manufactured articles"),
+    ("XXI", "97", "works of art; antiques"),
 )
+DOMAIN_HINT_VOCAB = tuple(s[0] for s in WCO_SECTIONS)
+
+# [축질문 재설계 · 07-23 설계자 승인] 닫힌 enum은 기존 닫힌집합에서 유도
+# (수기 목록 0): 형태=_FORM_VOCAB(축스탬프 정본), 가공=_PREPARED/_RAW
+# STATE(라우터 정본 — frozen/chilled 등 보존어는 보존 슬롯으로 분리).
+from bussiness_logic.classification.services.axis_verdict import (  # noqa: E402
+    _FORM_VOCAB as _AXIS_FORM_VOCAB,
+)
+from bussiness_logic.classification.services.pre_classification_router import (  # noqa: E402
+    _PREPARED_STATE_WORDS as _PROC_PREPARED,
+    _RAW_STATE_WORDS as _PROC_RAW,
+)
+_PROC_ENUM = sorted(_PROC_PREPARED | (_PROC_RAW - {"frozen", "chilled", "whole", "minced", "live"}))
+_FORM_ENUM = sorted(_AXIS_FORM_VOCAB)
 
 _IDENTITY_SYSTEM_PROMPT = f"""
 Return only one JSON object. No markdown, no code fence.
-You are IdentityHintAgent. Convert product name + Wikipedia-derived identity
-evidence into HS2 routing hint terms. Do NOT output HS/CN/TARIC codes,
-documents, ingredient percentages, or composition facts.
+You are IdentityHintAgent. Answer AXIS QUESTIONS about ONE product from the
+supplied evidence. Evidence priority (highest wins on conflict):
+  1) normalized_coi_product_facts — product-specific ingredients, species,
+     percentages and origin. This is composition authority.
+  2) product_label_facts — Korean regulatory label lines (식품유형/원재료명/보관).
+     The label's declared food-type IS the product identity. Trust it over
+     marketing words and over encyclopedia titles.
+  3) product_name.
+  4) encyclopedia_titles — entity-validated vocabulary bridge ONLY. Do NOT
+     treat an encyclopedia article as the product. Never summarize it.
 
-Rules:
-- Use only the supplied evidence. The product name itself IS evidence: when
-  encyclopedia evidence is empty, still translate the name and fill what the
-  name alone supports (never return an empty object).
-- Do not invent ingredients or forms.
-- Use Wikipedia processing/form signal terms only as identity-routing evidence.
-- Keep translated/common-English wording short and stable.
-- Translate the product into tariff-style English wording where possible.
-- domain_hints values MUST be subset of: {", ".join(DOMAIN_HINT_VOCAB)}.
-
-Use the provided cn_chapter_index descriptions/keywords to propose up to 8
-chapter_hint_terms. Each term should be a short English or Korean keyword phrase.
-product_form_terms may include physical form and preparation/processing signal
-terms when they are present in the Wikipedia evidence.
-
-Pipeline role (ontology summary):
-- ProductUnderstandingFacts feeds DomainRouter, not final classification.
-- DomainRouter matches chapter_hint_terms/product_form_terms/processing_state
-  against cn_chapter_index include/exclude/guardrail columns.
-- Prepared foods must not route only by raw ingredient/allergen mentions.
-- Never output HS/CN/TARIC codes; code selection happens downstream.
-
-ingredient_class / food_form / processing_state: short lowercase English
-word(s) naming the principal ingredient family, the physical/commercial form,
-and the processing state — ONLY when the supplied evidence supports them;
-otherwise an empty string. Use tariff-register wording found in the chapter
-context, not marketing language.
-
-principal_ingredient_guess / accessory_ingredients: FACTUAL report of the
-ingredient ORDER, not a legal judgement — principal = the single ingredient
-most likely listed FIRST on the label (highest content); accessories = minor
-components (sauces, broth, seasonings, garnish). Lowercase English. Empty
-when the evidence does not say. Do NOT decide what the product "essentially
-is" — report ingredient ranking only.
+Never invent. If the evidence does not answer a question, return "" (empty —
+downstream treats empty as SILENT and will ask, so empty is SAFE, guessing is
+NOT). Do NOT output HS/CN/TARIC codes.
 
 JSON keys (all required):
-translated_product_name, commercial_identity, normalized_tariff_description,
-identity_terms, product_form_terms, domain_hints,
-ingredient_class, food_form, processing_state,
-principal_ingredient_guess, accessory_ingredients,
-chapter_hint_terms, chapter_hint_source_terms, chapter_hint_basis,
-chapter_hint_status, confidence, needs_review.
+- name_en: short literal English translation of the product name.
+- identity_head: ONE short English noun phrase for WHAT THE PRODUCT IS SOLD AS
+  (e.g. "noodle dish", "fish cake", "soup", "rice cake", "seasoned pork ribs").
+  Label food-type first; tariff-register nouns; no marketing words.
+- principal_ingredient: the single FIRST-listed (highest content) ingredient,
+  short English (e.g. "wheat flour", "pork", "clam"). From 원재료명 line when
+  present; "" if unknown. Report ranking fact only — no legal judgement.
+- processing_state: one of [{", ".join(_PROC_ENUM)}] or "".
+- preservation_state: one of [frozen, chilled, ambient] or "".
+- physical_form: one of [{", ".join(_FORM_ENUM)}] or "".
+- intended_use: one of [human consumption, baby food, animal feed, industrial] or "".
+- domain_hints: the WCO SECTION(s) this product belongs to — usually exactly
+  ONE roman numeral, two only for a genuine border case. Choose from:
+  {"; ".join(f"{sid}=ch{rng} {label}" for sid, rng, label in WCO_SECTIONS)}.
+- confidence: 0..1. needs_review: true/false.
 """.strip()
 
 _adapter_cache: list[object] = []
@@ -94,23 +112,27 @@ def _scoped_chapter_vocab(max_owners: int = 3) -> frozenset[str]:
     if _scoped_vocab_cache:
         return _scoped_vocab_cache[0]
     owners: dict[str, set] = {}
-    try:
-        from bussiness_logic.classification.repositories.chapter_index_repository import (
-            LoadPreClassificationChapterRows,
+    from bussiness_logic.classification.repositories.chapter_index_repository import (
+        LoadPreClassificationChapterRows,
+    )
+
+    for row in LoadPreClassificationChapterRows():
+        ch = str(row.get("chapter") or "").strip()
+        if not ch:
+            continue
+        text = " ".join(
+            str(row.get(key) or "")
+            for key in (
+                "title",
+                "description",
+                "heading_scope",
+                "chapter_keywords",
+                "raw_scope_signals",
+                "prepared_scope_signals",
+            )
         )
-        for row in LoadPreClassificationChapterRows():
-            ch = str(row.get("chapter") or "").strip()
-            if not ch:
-                continue
-            text = " ".join(
-                str(row.get(k) or "") for k in (
-                    "title", "description", "heading_scope",
-                    "chapter_keywords", "raw_scope_signals",
-                    "prepared_scope_signals"))
-            for tok in set(re.findall(r"[a-z]{3,}", text.lower())):
-                owners.setdefault(tok, set()).add(ch)
-    except Exception:  # noqa: BLE001 — DB 부재 = 빈 어휘(전부 약 등급)
-        owners = {}
+        for token in set(re.findall(r"[a-z]{3,}", text.lower())):
+            owners.setdefault(token, set()).add(ch)
     _scoped_vocab_cache.append(frozenset(
         tok for tok, chs in owners.items() if len(chs) <= max_owners))
     return _scoped_vocab_cache[0]
@@ -143,6 +165,101 @@ def _grounded_typed_field(value: object) -> str:
     return ""
 
 
+_grounding_vocab_cache: list[frozenset[str]] = []
+
+
+def _grounding_vocab() -> frozenset[str]:
+    """[게이트 어휘 광역판 · 07-23 회귀 수리] 정체 게이트용 어휘 =
+    전 품목표 서술(cn_table heading/subheading/cn8 descriptions)
+    ∪ taxonomy(통칭 match·ranks·tariff_terms — pork→swine 다리 입구 보존)
+    ∪ 식품유형 사전 EN(udon 등 통칭 병기 보존). 전부 기계 유도·수기 0.
+    챕터 요약 어휘(_chapter_vocab)는 호/소호 층 정체 단어(octopus·rib)가
+    없어 정체 절단 회귀 실측(낙지 octopus 소멸·쪽갈비 대두→ch12 표류)
+    — 챕터 힌트 그라운딩 전용으로 원위치."""
+    if _grounding_vocab_cache:
+        return _grounding_vocab_cache[0]
+    toks: set = set()
+    # ① 전 품목표 서술 — DB authority only.
+    from sqlalchemy import text as _sql_text
+    from db.db_session_manager import DbSessionManager
+
+    manager = DbSessionManager.GetInstance()
+    if not manager.TableExists("cn_table"):
+        raise RuntimeError("Required runtime table is missing: cn_table")
+    for row in manager.FetchRows(
+        _sql_text(
+            "SELECT heading_description AS h, subheading_description AS s,"
+            " cn8_description AS c FROM cn_table"
+        )
+    ):
+        payload = dict(row)
+        for key in ("h", "s", "c"):
+            toks |= set(
+                re.findall(
+                    r"[a-z]{3,}",
+                    str(payload.get(key) or "").lower(),
+                )
+            )
+    # ② taxonomy 통칭·등록어
+    from bussiness_logic.product.services.co_loader import _taxonomy
+
+    for entry in (_taxonomy().get("entries") or []):
+        for key in ("match", "ranks", "tariff_terms"):
+            for value in (entry.get(key) or []):
+                toks |= set(re.findall(r"[a-z]{3,}", str(value).lower()))
+    # ③ 식품유형 사전 EN
+    from bussiness_logic.core.runtime_asset_repository import (
+        LoadFoodTypeDictionary,
+    )
+
+    for value in LoadFoodTypeDictionary().values():
+        toks |= set(re.findall(r"[a-z]{3,}", str(value).lower()))
+    _grounding_vocab_cache.append(frozenset(toks))
+    return _grounding_vocab_cache[0]
+
+
+def _vocab_grounded_text(value: object, *, limit_tokens: int = 12) -> str:
+    """[지터 게이트 · 2026-07-23 설계자 승인] 자유작문 문자열 → 관세
+    어휘집(_grounding_vocab, 전 품목표+taxonomy+사전 기계유도) 교차 토큰만
+    남긴 정준형(등장 순서 보존·중복 제거). 어휘 밖 작문 토큰(dish/item/
+    themed 류 — 매런 바뀌는 지터 통로)이 결정층으로 흐르는 것을 **코드로
+    차단**(프롬프트 지시 아님 — code-driven 원칙). 필수 DB 자산이 없으면
+    무게이트 통과하지 않고 런타임 오류로 중단한다."""
+    toks = re.findall(r"[a-z]{3,}", str(value or "").lower())
+    vocab = _grounding_vocab()
+    if not vocab:
+        return str(value or "").strip()
+    seen: set = set()
+    out: list[str] = []
+    for t in toks:
+        # 단복수 브리지: 'rib'↔'ribs' — 품목표가 복수형만 쓰는 경우 보존
+        if (t in vocab or t + "s" in vocab
+                or (t.endswith("s") and t[:-1] in vocab)) and t not in seen:
+            seen.add(t)
+            out.append(t)
+    return " ".join(out[:limit_tokens])
+
+
+def _vocab_grounded_terms(values: object, *, limit: int) -> tuple[str, ...]:
+    """항 목록 게이트 — ASCII 항은 어휘집 교차 토큰으로 재구성(빈 항 탈락),
+    한글 포함 항은 무게이트 통과(라벨/표제 병기 계보 — 어휘집이 영문이라
+    게이트 불가·전사 병기 보존)."""
+    out: list[str] = []
+    seen: set = set()
+    for v in (values or ()):
+        s = str(v).strip()
+        if not s:
+            continue
+        if re.search(r"[가-힣]", s):
+            g = s
+        else:
+            g = _vocab_grounded_text(s, limit_tokens=6)
+        if g and g not in seen:
+            seen.add(g)
+            out.append(g)
+    return tuple(out[:limit])
+
+
 def _get_adapter() -> object:
     if not _adapter_cache:
         from bussiness_logic.bridge.runtime_adapter import BuildPipelineRuntimeAdapter
@@ -172,24 +289,23 @@ def _chapter_context() -> str:
         return _chapter_context_cache[0]
 
     lines: list[str] = []
-    try:
-        from bussiness_logic.classification.repositories.chapter_index_repository import LoadPreClassificationChapterRows
+    from bussiness_logic.classification.repositories.chapter_index_repository import (
+        LoadPreClassificationChapterRows,
+    )
 
-        for row in LoadPreClassificationChapterRows():
-            chapter = str(row.get("chapter") or "").strip()
-            parts = [
-                str(row.get("title") or "").strip(),
-                str(row.get("description") or "").strip(),
-                str(row.get("heading_scope") or "").strip(),
-                str(row.get("chapter_keywords") or "").strip(),
-                str(row.get("raw_scope_signals") or "").strip(),
-                str(row.get("prepared_scope_signals") or "").strip(),
-            ]
-            if chapter and any(parts):
-                scope = " | ".join(part for part in parts if part)
-                lines.append(f"{chapter}: {scope}".rstrip())
-    except Exception:  # noqa: BLE001 — best-effort context build
-        lines = []
+    for row in LoadPreClassificationChapterRows():
+        chapter = str(row.get("chapter") or "").strip()
+        parts = [
+            str(row.get("title") or "").strip(),
+            str(row.get("description") or "").strip(),
+            str(row.get("heading_scope") or "").strip(),
+            str(row.get("chapter_keywords") or "").strip(),
+            str(row.get("raw_scope_signals") or "").strip(),
+            str(row.get("prepared_scope_signals") or "").strip(),
+        ]
+        if chapter and any(parts):
+            scope = " | ".join(part for part in parts if part)
+            lines.append(f"{chapter}: {scope}".rstrip())
 
     context = "cn_chapter_index (chapter: scope):\n" + "\n".join(lines[:97]) if lines else ""
     _chapter_context_cache.append(context)
@@ -203,8 +319,9 @@ def _compact_evidence(
     encyclopediaEvidence: EncyclopediaEvidenceSet,
     factTexts: tuple[str, ...] = (),
 ) -> str:
-    # [8회차-1] 등급 승선제 소비 ②: 약 등급은 프롬프트 불승선(근거 기록만),
-    # 중은 성립 대목 우선. 등급·근거를 표기해 LLM이 신뢰 층위를 본다.
+    # [축질문 재설계 · 07-23] 백과 = **표제만**(본문·요약·스니펫 폐지 —
+    # 타요/탐폰 계보의 본문 오염 원천 차단, "본문은 오염원·제목만" 실측
+    # 원칙의 공급 시점 적용). 약 등급 불승선은 유지.
     _has_strong = any(
         str(getattr(e, "grade", "") or "") == "strong"
         for e in encyclopediaEvidence.entries)
@@ -214,26 +331,24 @@ def _compact_evidence(
         and not (_has_strong
                  and str(getattr(e, "grade", "") or "") == "medium")
     ][:3]
-    encyc = "\n".join(
-        f"- [{getattr(e, 'grade', '') or 'ungraded'}] {e.title}: "
-        f"{e.description[:220]}"
-        for e in _boarded
-    )
-    # ASAP_IDENTITY_FACTS=1: 라벨 사실 텍스트(원재료명 등)를 identity 번역
-    # 문맥에 포함 — DTO를 채우는 LLM이 이름+위키만 보던 정보 절단의 처방.
-    # 기본 OFF(기존 기준선 보존). 크롤 노이즈 유입 방지로 상한 8줄/720자.
+    _titles = [
+        str(e.title).strip() for e in _boarded if str(e.title).strip()
+    ]
+    for _t in (distilledIdentity.sourceTitles or ()):
+        _t = str(_t).strip()
+        if _t and _t not in _titles:
+            _titles.append(_t)
+    encyc = "\n".join(f"- {t}" for t in _titles[:5])
+    # [축질문 재설계] 라벨 = 1급 증거 — 기본 ON으로 반전(종전 기본 OFF가
+    # "최고 권위 증거를 LLM에 숨기던" 정보 절단이었음, 설계자 확정).
+    # ASAP_IDENTITY_FACTS=0 으로만 구기준선 복귀. 상한 8줄/720자 유지.
     label_block = ""
-    if (os.environ.get("ASAP_IDENTITY_FACTS", "0") or "0").strip() == "1" and factTexts:
+    if (os.environ.get("ASAP_IDENTITY_FACTS", "1") or "1").strip() != "0" and factTexts:
         lines = [str(x).strip()[:180] for x in factTexts if str(x).strip()][:8]
         label_block = "\n\nproduct_label_facts:\n" + "\n".join(f"- {x}" for x in lines)[:720]
     return (
         f"product_name: {productName}\n"
-        f"distilled_commercial_identity: {distilledIdentity.commercialIdentity}\n"
-        f"distilled_description: {distilledIdentity.normalizedDescription}\n"
-        f"identity_terms: {', '.join(distilledIdentity.identityTerms)}\n"
-        f"product_form_signal_terms: {', '.join(distilledIdentity.productFormSignalTerms)}\n"
-        f"processing_signal_terms: {', '.join(distilledIdentity.processingSignalTerms)}\n\n"
-        f"encyclopedia_evidence:\n{encyc or '-'}"
+        f"encyclopedia_titles:\n{encyc or '-'}"
         f"{label_block}"
     )
 
@@ -346,89 +461,57 @@ def _BuildIdentityFacts(
             ),
         }
 
-    chapterHintTerms = _dedup_strings(
-        parsed.get("chapter_hint_terms"),
-        limit=8,
-    )
-    chapterHintSourceTerms = _dedup_strings(
-        parsed.get("chapter_hint_source_terms"),
-        limit=8,
-    )
-
+    # [축질문 매핑 · 07-23 설계자 승인] 6질문 답 → 기존 IdentityHintSet
+    # 필드(하류 계약 보존). 자유작문 필드는 전부 코드 조립으로 대체 —
+    # LLM 산출은 닫힌 슬롯뿐, enum 밖 값은 코드가 기각(빈칸=SILENT).
+    head = _vocab_grounded_text(parsed.get("identity_head"), limit_tokens=6)
+    name_en = str(parsed.get("name_en") or "").strip()[:80]
+    principal = str(parsed.get("principal_ingredient") or "").strip().lower()[:40]
+    proc = str(parsed.get("processing_state") or "").strip().lower()
+    if proc not in set(_PROC_ENUM):
+        proc = ""
+    pres = str(parsed.get("preservation_state") or "").strip().lower()
+    if pres not in ("frozen", "chilled", "ambient"):
+        pres = ""
+    form = str(parsed.get("physical_form") or "").strip().lower()
+    if form not in set(_FORM_ENUM):
+        form = ""
     try:
         confidence = float(parsed.get("confidence", 0.5))
     except (TypeError, ValueError):
         confidence = 0.5
-
-    # [P3 병기 원칙 — 구조판] LLM ci가 백과 표제(정규화 일치)면 정체 교체가
-    # 아니라 병기다: ci는 관세 서술로 되돌리고 표제는 identity_terms에
-    # 싣는다 (프롬프트 지침 폐기 → merge 코드 강제, CYCLE9 P3).
-    # [10회차-0 역이식] 원 구현이 assert 실패로 디스크 미저장 — 메인 실물
-    # (TRANSPLANT_NOTES §2)을 진실원으로 채택. 차이 없음 회신 완료.
-    _extra_terms: list[str] = []
-    _parsed_ci = str(parsed.get("commercial_identity") or "").strip()
-    _ency_title = str(distilledIdentity.commercialIdentity or "").strip()
-
-    def _norm_title(value: str) -> str:
-        return re.sub(r"[^0-9a-z가-힣]+", " ", value.lower()).strip()
-
-    if (_parsed_ci and _ency_title
-            and _norm_title(_parsed_ci) == _norm_title(_ency_title)):
-        _extra_terms.append(_ency_title)
-        _tariff_ci = str(
-            parsed.get("normalized_tariff_description")
-            or distilledIdentity.normalizedDescription or "").strip()
-        if _tariff_ci:
-            parsed["commercial_identity"] = _tariff_ci
-
+    # ntd = 코드 조립(LLM 문장 폐지) — 구문 통째 세미콜론 병기(합성어 보존).
+    # 라벨 전사 헤드(_AssembleNtdHead)가 컴포넌트에서 추가로 앞에 병기된다.
+    ntd = "; ".join(dict.fromkeys(
+        p for p in (head, principal, proc, pres, form) if p))
+    hint_terms = _vocab_grounded_terms([head, principal], limit=8)
     return {
-        "translated_product_name": str(parsed.get("translated_product_name") or "").strip(),
-        "commercial_identity": str(
-            parsed.get("commercial_identity")
-            or distilledIdentity.commercialIdentity
-            or productName
-        ).strip(),
-        "normalized_tariff_description": str(
-            parsed.get("normalized_tariff_description")
-            or distilledIdentity.normalizedDescription
-        ).strip(),
-        "identity_terms": _dedup_strings(
-            [*_extra_terms,
-             *(parsed.get("identity_terms")
-               or distilledIdentity.identityTerms or [])],
-            limit=16,
-        ),
+        "translated_product_name": name_en,
+        "commercial_identity": head or name_en or productName,
+        "normalized_tariff_description": ntd,
+        "identity_terms": _vocab_grounded_terms(
+            [name_en, head, principal], limit=16),
         "product_form_terms": _dedup_strings(
-            parsed.get("product_form_terms")
-            or (
-                *distilledIdentity.productFormSignalTerms,
-                *distilledIdentity.processingSignalTerms,
-            ),
-            limit=20,
-        ),
-        "ingredient_class": _grounded_typed_field(parsed.get("ingredient_class")),
-        # 주/부성분: 사실 보고(성분 서열)로 한정 — 소비층에서 결정론 근거와
-        # 합류(결정론 우선, LLM 단독 확정 불가). ASAP_IDENTITY_PRINCIPAL=0 비활성.
-        "principal_ingredient_guess": (
-            str(parsed.get("principal_ingredient_guess") or "").strip().lower()[:40]
-            if (os.environ.get("ASAP_IDENTITY_PRINCIPAL", "1") or "1").strip() != "0" else ""
-        ),
-        "accessory_ingredients": _dedup_strings(
-            parsed.get("accessory_ingredients"), limit=8,
-        ) if (os.environ.get("ASAP_IDENTITY_PRINCIPAL", "1") or "1").strip() != "0" else (),
-        "food_form": _grounded_typed_field(parsed.get("food_form")),
-        "processing_state": _grounded_typed_field(parsed.get("processing_state")),
+            [form, proc, pres], limit=20),
+        "ingredient_class": _grounded_typed_field(principal),
+        "principal_ingredient_guess": principal if (os.environ.get(
+            "ASAP_IDENTITY_PRINCIPAL", "1") or "1").strip() != "0" else "",
+        "accessory_ingredients": (),  # 성분 서열은 composition entries가 정본
+        "food_form": head,
+        "processing_state": proc,
+        "preservation_state": pres,
+        "physical_form": form,
         "domain_hints": tuple(
             term
             for term in _dedup_strings(parsed.get("domain_hints"), limit=6)
             if term in DOMAIN_HINT_VOCAB
         )[:6],
-        "chapter_hint_terms": chapterHintTerms,
-        "chapter_hint_source_terms": chapterHintSourceTerms,
-        "chapter_hint_basis": str(parsed.get("chapter_hint_basis") or "").strip()
-        or ("from_chapter_context" if chapterHintTerms else "chapter_context_unavailable"),
-        "chapter_hint_status": str(parsed.get("chapter_hint_status") or "").strip()
-        or ("enabled" if chapterHintTerms else "not_enabled"),
+        "chapter_hint_terms": hint_terms,
+        "chapter_hint_source_terms": _dedup_strings([head, principal], limit=8),
+        "chapter_hint_basis": (
+            "axis_questions" if hint_terms else "axis_questions_empty"
+        ),
+        "chapter_hint_status": "enabled" if hint_terms else "not_enabled",
         "confidence": confidence,
         "needs_review": bool(parsed.get("needs_review")),
         "understanding_mode": "llm_json",

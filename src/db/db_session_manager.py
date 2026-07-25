@@ -47,15 +47,14 @@ class DbSessionConfig:
 
     @staticmethod
     def FromEnvironment() -> "DbSessionConfig":
-        _load_project_dotenv()
         database_url = (
             # [07-20 설계자 확정] 분류 DB = PG* 블록(Supabase pooler).
             # 서류 작업이 ASAP_DATABASE_URL을 메인 서버 DB로 옮기면서
             # (그쪽엔 branch_decision_index·술어 테이블 없음) staged가
             # 빈손이 되는 충돌 실측 → 분류층은 PGHOST가 설정돼 있으면
             # PG* 조립 주소를 ASAP_DATABASE_URL보다 우선한다. 명시
-            # 오버라이드는 ASAP_CLASSIFICATION_DATABASE_URL(값은 .env
-            # 에서 설계자 관리).
+            # 오버라이드는 ASAP_CLASSIFICATION_DATABASE_URL이다. 이 모듈은
+            # .env 파일을 읽지 않으며 호출자가 셸 환경을 주입해야 한다.
             _env("ASAP_CLASSIFICATION_DATABASE_URL")
             or (_build_url_from_pg_env() if _env("PGHOST") else "")
             or _env("ASAP_DATABASE_URL")
@@ -75,39 +74,6 @@ class DbSessionConfig:
             poolTimeoutSeconds=float(_read_int_env("ASAP_DB_POOL_TIMEOUT_SECONDS", 30)),
             connectTimeoutSeconds=_read_int_env("ASAP_DB_CONNECT_TIMEOUT_SECONDS", 10),
         )
-
-
-def _load_project_dotenv() -> None:
-    """DB 자격증명 단일 소스 정책(2026-07-08): 어떤 엔트리포인트(backend/smoke/
-    compiler)에서 실행되든 프로젝트 루트 .env가 항상 우선한다.
-    외부 패키지 없이 stdlib만 사용 — 파이썬 환경에 따라 조용히 건너뛰는
-    실패 모드(python-dotenv 미설치)를 원천 제거한다.
-    임시로 다른 DB를 가리키려면 쉘 export가 아니라 .env를 수정할 것."""
-    import os
-    from pathlib import Path
-
-    env_path = Path(__file__).resolve().parents[2] / ".env"
-    try:
-        content = env_path.read_text(encoding="utf-8")
-    except OSError:
-        return
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        if line.startswith("export "):
-            line = line[len("export "):].lstrip()
-        key, _, value = line.partition("=")
-        key = key.strip()
-        if not key or not key.replace("_", "").isalnum():
-            continue
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
-            value = value[1:-1]
-        if value == "":
-            # 빈 값(placeholder)으로 기존 값을 지우지 않는다.
-            continue
-        os.environ[key] = value
 
 
 def _env(name: str) -> str:

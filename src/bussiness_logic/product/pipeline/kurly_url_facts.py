@@ -356,16 +356,6 @@ def _BuildInputReconstructionService(
         except RuntimeAdapterBuildError as exc:
             warnings.append(f"llm_input_reconstruction_unavailable: {exc}")
     return ProductInputReconstructionService(
-        dictionaryPath=(
-            str(
-                APP_CONFIG.paths.ResolvePath(
-                    PROJECT_ROOT,
-                    smoke_config.input_dictionary_path,
-                )
-            )
-            if smoke_config.input_dictionary_path is not None
-            else None
-        ),
         runtimeAdapter=runtime_adapter,
         fuzzyMinRatio=smoke_config.input_dictionary_fuzzy_min_ratio,
         llmMaxTokens=smoke_config.llm_input_reconstruction_max_tokens,

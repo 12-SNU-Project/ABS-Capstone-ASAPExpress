@@ -427,6 +427,7 @@ class PipelineRunService:
     ) -> None:
         self._registry = registry
         self._pipelineCallable = pipelineCallable
+        self._answerLock = threading.Lock()
 
     def StartBackgroundRun(self, runId: str, request: PipelineRunRequest) -> None:
         thread = threading.Thread(
@@ -498,6 +499,145 @@ class PipelineRunService:
                     "message": str(exc),
                 },
             )
+
+    def ReclassifyWithQuestionAnswers(
+        self,
+        runId: str,
+        runDirectory: Path,
+        answers: list[JsonObject],
+    ) -> JsonObject:
+        """Persist explicit answers and replay only the classification component."""
+        from bussiness_logic.classification.components.classification import (
+            ClassificationComponent,
+        )
+        from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
+
+        with self._answerLock:
+            blackboardPath = runDirectory / "blackboard.json"
+            if not blackboardPath.is_file():
+                raise FileNotFoundError(f"blackboard not found: {blackboardPath}")
+            blackboard = json.loads(blackboardPath.read_text(encoding="utf-8"))
+            if not isinstance(blackboard, dict):
+                raise ValueError("blackboard must be a JSON object")
+            runContext = blackboard.get("run_context") or {}
+            internalRunId = str(runContext.get("run_id") or runId)
+            store = BlackboardStore(internalRunId, run_dir=runDirectory)
+            questions = [
+                item
+                for item in (blackboard.get("user_questions") or [])
+                if isinstance(item, dict)
+            ]
+            questionsById = {
+                str(item.get("user_question_id") or ""): item
+                for item in questions
+                if str(item.get("user_question_id") or "")
+            }
+            answerFacts = blackboard.setdefault("classification_answer_facts", [])
+            if not isinstance(answerFacts, list):
+                raise ValueError("classification_answer_facts must be a list")
+
+            answeredAt = now_iso()
+            acceptedIds: list[str] = []
+            for payload in answers:
+                questionId = str(payload.get("user_question_id") or "")
+                answer = str(payload.get("answer") or "").strip().lower()
+                if answer not in {"yes", "no", "unknown"}:
+                    raise ValueError(f"invalid answer for {questionId}")
+                question = questionsById.get(questionId)
+                if question is None:
+                    raise KeyError(f"unknown user_question_id: {questionId}")
+                questionKey = str(question.get("question_key") or "")
+                if not questionKey:
+                    raise ValueError(
+                        f"question {questionId} predates the stable question contract"
+                    )
+                answerId = store.next_id("qa")
+                answerFact = {
+                    "object_type": "ClassificationAnswerFact",
+                    "created_by": "User_Interaction_Component",
+                    "created_at": answeredAt,
+                    "answer_id": answerId,
+                    "user_question_id": questionId,
+                    "question_key": questionKey,
+                    "answer": answer,
+                    "answered_at": answeredAt,
+                    "source": "user",
+                    "stage": str(question.get("stage") or ""),
+                    "parent_code": str(question.get("parent_code") or ""),
+                    "candidate_code": str(question.get("candidate_code") or ""),
+                    "axis": str(question.get("axis") or ""),
+                    "canonical_field": str(question.get("canonical_field") or ""),
+                    "condition_value": str(question.get("condition_value") or ""),
+                    "context_scope": str(question.get("context_scope") or ""),
+                }
+                answerFacts.append(answerFact)
+                question["answer"] = answer
+                question["answered_at"] = answeredAt
+                question["answer_id"] = answerId
+                acceptedIds.append(answerId)
+
+            store.save(blackboard)
+            componentResult = ClassificationComponent().Execute(store)
+            if not componentResult.success:
+                raise RuntimeError(
+                    componentResult.error or "classification replay failed"
+                )
+
+            replayedBlackboard = store.load()
+            candidateSets = replayedBlackboard.get("candidate_code_sets") or []
+            documentPackages = replayedBlackboard.get("document_packages") or []
+            latestCandidateSet = candidateSets[-1] if candidateSets else {}
+            resolverDebug = (
+                latestCandidateSet.get("resolver_debug") or {}
+                if isinstance(latestCandidateSet, dict)
+                else {}
+            )
+            unresolved = (
+                resolverDebug.get("unresolved") or {}
+                if isinstance(resolverDebug, dict)
+                else {}
+            )
+            activeQuestionKeys = {
+                str(item.get("question_key") or "")
+                for item in (unresolved.get("question_options") or [])
+                if isinstance(item, dict) and str(item.get("question_key") or "")
+            }
+            for question in replayedBlackboard.get("user_questions") or []:
+                if not isinstance(question, dict) or question.get("answer"):
+                    continue
+                isActive = str(question.get("question_key") or "") in activeQuestionKeys
+                question["active"] = isActive
+                question["resolved_at"] = None if isActive else answeredAt
+            store.save(replayedBlackboard)
+            result = self._registry.BuildPipelineResultProjection({
+                "blackboard": replayedBlackboard,
+                "candidate_code_set": latestCandidateSet or None,
+                "document_package": documentPackages[-1] if documentPackages else None,
+                "component_runs": replayedBlackboard.get("component_runs") or [],
+                "run_id": internalRunId,
+                "run_dir": str(runDirectory),
+                "user_questions": replayedBlackboard.get("user_questions") or [],
+            })
+            self._registry.UpdateRun(
+                runId,
+                status="completed",
+                finished_at=time.time(),
+                result=result,
+                partial_result=result,
+                document_packages=documentPackages,
+            )
+            self._registry.AppendEvent(
+                runId,
+                {
+                    "stage": "Classification_Answer",
+                    "status": "completed",
+                    "message": "사용자 답변을 반영해 분류 단계만 재실행했습니다.",
+                    "answer_ids": acceptedIds,
+                    "partial_result": result,
+                },
+            )
+            self._registry.PersistCompletedRun(runId)
+            return self._registry.BuildUiResult(runId)
 
     def _StripRuntimeObjects(self, pipelineOutput: Mapping[str, object]) -> JsonObject:
         return {

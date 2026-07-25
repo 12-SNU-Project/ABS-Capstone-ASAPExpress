@@ -1,0 +1,3081 @@
+{
+  "dataset": "oracle_vs_actual_pu_22",
+  "created_at": "2026-07-25T00:13:08+09:00",
+  "case_count": 22,
+  "fields": [
+    "commercial_identity",
+    "ingredient_class",
+    "food_form",
+    "physical_form",
+    "processing_state",
+    "preservation_state",
+    "tariff_description",
+    "principal_ingredient",
+    "ingredient_classes",
+    "percentages",
+    "wrapper_or_dough",
+    "sauce_or_broth"
+  ],
+  "cases": [
+    {
+      "case_index": 1,
+      "product_name": "[마더푸드] 쪽갈비 2종",
+      "expected_cn8": "16024900",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "seasoned pork ribs",
+          "actual": "seasoned pork back ribs"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "missing",
+          "oracle": "meat",
+          "actual": "other"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "conflict",
+          "oracle": "prepared meat dish",
+          "actual": "seasoned pork back ribs"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "conflict",
+          "oracle": "bone-in rib portions",
+          "actual": "piece"
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "cooked",
+          "actual": "seasoned"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "overlap",
+          "oracle": "frozen after cooking",
+          "actual": "frozen"
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Prepared seasoned pork ribs",
+          "actual": "seasoned prepared meat; frozen; seasoned pork back ribs; pork back ribs; seasoned; frozen; piece"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "conflict",
+          "oracle": "pork ribs",
+          "actual": "돼지등갈비"
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "pork",
+            "sauce"
+          ],
+          "actual": [
+            "seasoning_sauce"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "overlap",
+          "oracle": [
+            {
+              "term": "pork ribs",
+              "ingredient": "pork ribs",
+              "ingredient_name": "pork ribs",
+              "percent": 75,
+              "term_aliases": [
+                "pork ribs",
+                "pork"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_01:ingredient:1"
+              ]
+            },
+            {
+              "term": "seasoning sauce",
+              "ingredient": "seasoning sauce",
+              "ingredient_name": "seasoning sauce",
+              "percent": 25,
+              "term_aliases": [
+                "seasoning sauce",
+                "sauce"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_01:ingredient:2"
+              ]
+            }
+          ],
+          "actual": [
+            {
+              "term": "돼지등갈비",
+              "percent": 83.7,
+              "term_aliases": [
+                "pork",
+                "meat",
+                "edible",
+                "offal"
+              ]
+            }
+          ]
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "conflict",
+          "oracle": true,
+          "actual": false
+        }
+      ]
+    },
+    {
+      "case_index": 2,
+      "product_name": "[압구정낙지] 낙지 볶음 500g",
+      "expected_cn8": "16055500",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "stir-fried webfoot octopus",
+          "actual": "seasoned octopus"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "missing",
+          "oracle": "mollusc",
+          "actual": "other"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "conflict",
+          "oracle": "prepared seafood dish",
+          "actual": "seasoned octopus"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "conflict",
+          "oracle": "octopus pieces in sauce",
+          "actual": "piece"
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "cooked",
+          "actual": "seasoned"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "overlap",
+          "oracle": "frozen after cooking",
+          "actual": "frozen"
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Prepared or preserved molluscs, namely octopus, cooked and seasoned",
+          "actual": "frozen; seasoned octopus; seasoned; frozen; piece"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "missing",
+          "oracle": "webfoot octopus",
+          "actual": ""
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "mollusc",
+            "sauce",
+            "vegetable"
+          ],
+          "actual": [
+            "soy_legume",
+            "vegetable",
+            "seasoning_sauce"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "missing",
+          "oracle": [
+            {
+              "term": "webfoot octopus",
+              "ingredient": "webfoot octopus",
+              "ingredient_name": "webfoot octopus",
+              "percent": 70,
+              "term_aliases": [
+                "webfoot octopus",
+                "mollusc"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_04:ingredient:1"
+              ]
+            },
+            {
+              "term": "seasoning sauce",
+              "ingredient": "seasoning sauce",
+              "ingredient_name": "seasoning sauce",
+              "percent": 25,
+              "term_aliases": [
+                "seasoning sauce",
+                "sauce"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_04:ingredient:2"
+              ]
+            },
+            {
+              "term": "vegetables",
+              "ingredient": "vegetables",
+              "ingredient_name": "vegetables",
+              "percent": 5,
+              "term_aliases": [
+                "vegetables",
+                "vegetable"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_04:ingredient:3"
+              ]
+            }
+          ],
+          "actual": []
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": true,
+          "actual": true
+        }
+      ]
+    },
+    {
+      "case_index": 3,
+      "product_name": "[애플하우스] 무침 군만두",
+      "expected_cn8": "19022099",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "conflict",
+          "oracle": "fried stuffed dumplings",
+          "actual": "dumpling with sauce"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "missing",
+          "oracle": "cereal",
+          "actual": "other"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "overlap",
+          "oracle": "stuffed dumpling",
+          "actual": "dumpling with sauce"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "conflict",
+          "oracle": "filled dough parcel",
+          "actual": "piece"
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "exact",
+          "oracle": "fried",
+          "actual": "fried"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "exact",
+          "oracle": "frozen",
+          "actual": "frozen"
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Stuffed wheat-flour dumplings containing meat and vegetables",
+          "actual": "dumplings; frozen; dumpling with sauce; fried; frozen; piece"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "missing",
+          "oracle": "wheat dough",
+          "actual": ""
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "cereal",
+            "meat"
+          ],
+          "actual": [
+            "cereal",
+            "soy_legume",
+            "vegetable",
+            "seasoning_sauce"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "overlap",
+          "oracle": [
+            {
+              "term": "wheat dough",
+              "ingredient": "wheat dough",
+              "ingredient_name": "wheat dough",
+              "percent": 45,
+              "term_aliases": [
+                "wheat dough",
+                "cereal"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_09:ingredient:1"
+              ]
+            },
+            {
+              "term": "meat and vegetable filling",
+              "ingredient": "meat and vegetable filling",
+              "ingredient_name": "meat and vegetable filling",
+              "percent": 55,
+              "term_aliases": [
+                "meat and vegetable filling",
+                "meat"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_09:ingredient:2"
+              ]
+            }
+          ],
+          "actual": [
+            {
+              "term": "복합조미식품 / Seasoning Mix",
+              "percent": 0.005
+            }
+          ]
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "conflict",
+          "oracle": true,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "conflict",
+          "oracle": false,
+          "actual": true
+        }
+      ]
+    },
+    {
+      "case_index": 4,
+      "product_name": "유기농 간편 청양고추 120g (냉동)",
+      "expected_cn8": "07108059",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "frozen Cheongyang chili pepper",
+          "actual": "chili peppers"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "conflict",
+          "oracle": "vegetable",
+          "actual": "organic cheongyang chili pepper"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "conflict",
+          "oracle": "frozen vegetable",
+          "actual": "chili peppers"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "overlap",
+          "oracle": "whole and cut peppers",
+          "actual": "whole"
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "frozen raw",
+          "actual": "preserved"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "exact",
+          "oracle": "frozen",
+          "actual": "frozen"
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Frozen uncooked fruits of the genus Capsicum used as vegetables",
+          "actual": "frozen; chili peppers; organic cheongyang chili pepper; preserved; frozen; whole"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "exact",
+          "oracle": "Cheongyang chili pepper",
+          "actual": "Cheongyang Chili Pepper"
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "exact",
+          "oracle": [
+            "vegetable"
+          ],
+          "actual": [
+            "vegetable"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "missing",
+          "oracle": [
+            {
+              "term": "Cheongyang chili pepper",
+              "ingredient": "Cheongyang chili pepper",
+              "ingredient_name": "Cheongyang chili pepper",
+              "percent": 100,
+              "term_aliases": [
+                "Cheongyang chili pepper",
+                "vegetable"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_11:ingredient:1"
+              ]
+            }
+          ],
+          "actual": []
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        }
+      ]
+    },
+    {
+      "case_index": 5,
+      "product_name": "[섬진강] 재첩국",
+      "expected_cn8": "21041000",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "marsh-clam soup",
+          "actual": "soup"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "missing",
+          "oracle": "mollusc",
+          "actual": "other"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "exact",
+          "oracle": "soup",
+          "actual": "soup"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "missing",
+          "oracle": "liquid soup with clam meat",
+          "actual": ""
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "cooked",
+          "actual": "prepared"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "conflict",
+          "oracle": "chilled",
+          "actual": "frozen"
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Prepared soup containing marsh-clam meat and broth",
+          "actual": "instant prepared food; frozen; soup; clam broth; prepared; frozen"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "overlap",
+          "oracle": "clam broth",
+          "actual": "Marsh Clam Broth"
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "soup",
+            "mollusc",
+            "seasoning"
+          ],
+          "actual": [
+            "mollusc",
+            "meat",
+            "seasoning_sauce"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "overlap",
+          "oracle": [
+            {
+              "term": "clam broth",
+              "ingredient": "clam broth",
+              "ingredient_name": "clam broth",
+              "percent": 60,
+              "term_aliases": [
+                "clam broth",
+                "soup"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_12:ingredient:1"
+              ]
+            },
+            {
+              "term": "marsh clam meat",
+              "ingredient": "marsh clam meat",
+              "ingredient_name": "marsh clam meat",
+              "percent": 30,
+              "term_aliases": [
+                "marsh clam meat",
+                "mollusc"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_12:ingredient:2"
+              ]
+            },
+            {
+              "term": "salt",
+              "ingredient": "salt",
+              "ingredient_name": "salt",
+              "percent": 10,
+              "term_aliases": [
+                "salt",
+                "seasoning"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_12:ingredient:3"
+              ]
+            }
+          ],
+          "actual": [
+            {
+              "term": "재첩국물",
+              "percent": 86.0,
+              "term_aliases": [
+                "clam",
+                "corbicula",
+                "mollusc"
+              ]
+            },
+            {
+              "term": "재첩살",
+              "percent": 12.0,
+              "term_aliases": [
+                "clam",
+                "corbicula",
+                "mollusc"
+              ]
+            },
+            {
+              "term": "천일염",
+              "percent": 2.0,
+              "term_aliases": [
+                "sea salt",
+                "salt",
+                "sulphur",
+                "earths",
+                "stone",
+                "plastering"
+              ]
+            }
+          ]
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": true,
+          "actual": true
+        }
+      ]
+    },
+    {
+      "case_index": 6,
+      "product_name": "[연안식당] 달래 꼬막장",
+      "expected_cn8": "21069098",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "seasoned cockles with wild chives",
+          "actual": "seasoned cockle product"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "missing",
+          "oracle": "mollusc",
+          "actual": "other"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "overlap",
+          "oracle": "seasoned side dish",
+          "actual": "seasoned cockle product"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "conflict",
+          "oracle": "cockle meat in thick seasoning",
+          "actual": "piece"
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "prepared",
+          "actual": "seasoned"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "conflict",
+          "oracle": "chilled",
+          "actual": "frozen"
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "conflict",
+          "oracle": "Composite prepared food of cockles, soy seasoning and wild chives",
+          "actual": "processed fishery product; frozen; seasoned cockle product; cockle; seasoned; frozen; piece"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "conflict",
+          "oracle": "cockle meat",
+          "actual": "새꼬막"
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "mollusc",
+            "sauce",
+            "vegetable"
+          ],
+          "actual": [
+            "mollusc",
+            "fish",
+            "soy_legume",
+            "vegetable",
+            "seasoning_sauce"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "missing",
+          "oracle": [
+            {
+              "term": "cockle meat",
+              "ingredient": "cockle meat",
+              "ingredient_name": "cockle meat",
+              "percent": 60,
+              "term_aliases": [
+                "cockle meat",
+                "mollusc"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_13:ingredient:1"
+              ]
+            },
+            {
+              "term": "soy seasoning sauce",
+              "ingredient": "soy seasoning sauce",
+              "ingredient_name": "soy seasoning sauce",
+              "percent": 25,
+              "term_aliases": [
+                "soy seasoning sauce",
+                "sauce"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_13:ingredient:2"
+              ]
+            },
+            {
+              "term": "wild chives",
+              "ingredient": "wild chives",
+              "ingredient_name": "wild chives",
+              "percent": 15,
+              "term_aliases": [
+                "wild chives",
+                "vegetable"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_13:ingredient:3"
+              ]
+            }
+          ],
+          "actual": []
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": true,
+          "actual": true
+        }
+      ]
+    },
+    {
+      "case_index": 7,
+      "product_name": "[베베피쉬] 이유식용 국산 다진 대구살 90g (냉동)",
+      "expected_cn8": "03047110",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "frozen minced cod meat",
+          "actual": "minced cod"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "missing",
+          "oracle": "fish",
+          "actual": "other"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "overlap",
+          "oracle": "minced fish meat",
+          "actual": "minced cod"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "overlap",
+          "oracle": "minced fish meat",
+          "actual": "minced"
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "frozen raw",
+          "actual": "processed"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "exact",
+          "oracle": "frozen",
+          "actual": "frozen"
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Frozen uncooked cod fish meat, minced, without other ingredients",
+          "actual": "processed fishery product; frozen; minced cod; cod fillet; processed; frozen; minced"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "overlap",
+          "oracle": "cod meat",
+          "actual": "Pacific cod"
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "exact",
+          "oracle": [
+            "fish"
+          ],
+          "actual": [
+            "fish"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "overlap",
+          "oracle": [
+            {
+              "term": "cod meat",
+              "ingredient": "cod meat",
+              "ingredient_name": "cod meat",
+              "percent": 100,
+              "term_aliases": [
+                "cod meat",
+                "fish"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_15:ingredient:1"
+              ]
+            }
+          ],
+          "actual": [
+            {
+              "term": "대구살",
+              "percent": 100.0,
+              "term_aliases": [
+                "cod",
+                "fish"
+              ]
+            }
+          ]
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        }
+      ]
+    },
+    {
+      "case_index": 8,
+      "product_name": "[베베피쉬] 이유식용 국산 다진 새우살 90g (냉동)",
+      "expected_cn8": "03061799",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "frozen minced shrimp meat",
+          "actual": "minced shrimp meat"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "conflict",
+          "oracle": "crustacean",
+          "actual": "shrimp meat"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "overlap",
+          "oracle": "minced crustacean meat",
+          "actual": "minced shrimp meat"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "overlap",
+          "oracle": "minced shrimp meat",
+          "actual": "minced"
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "frozen raw",
+          "actual": "processed"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "exact",
+          "oracle": "frozen",
+          "actual": "frozen"
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Frozen uncooked shrimp meat, minced, without other ingredients",
+          "actual": "processed fishery product; frozen; minced shrimp meat; shrimp meat; processed; frozen; minced"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "overlap",
+          "oracle": "shrimp meat",
+          "actual": "북쪽분홍새우 Alaskan pink shrimp"
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "exact",
+          "oracle": [
+            "crustacean"
+          ],
+          "actual": [
+            "crustacean"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "overlap",
+          "oracle": [
+            {
+              "term": "shrimp meat",
+              "ingredient": "shrimp meat",
+              "ingredient_name": "shrimp meat",
+              "percent": 100,
+              "term_aliases": [
+                "shrimp meat",
+                "crustacean"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_16:ingredient:1"
+              ]
+            }
+          ],
+          "actual": [
+            {
+              "term": "새우살",
+              "percent": 100.0,
+              "term_aliases": [
+                "shrimp",
+                "prawn",
+                "crustacean"
+              ]
+            }
+          ]
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        }
+      ]
+    },
+    {
+      "case_index": 9,
+      "product_name": "[전주 베테랑] 칼국수",
+      "expected_cn8": "19021990",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "conflict",
+          "oracle": "Korean knife-cut noodles",
+          "actual": "noodle"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "missing",
+          "oracle": "cereal",
+          "actual": "other"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "conflict",
+          "oracle": "noodles",
+          "actual": "noodle"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "missing",
+          "oracle": "flat cut noodles",
+          "actual": ""
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "missing",
+          "oracle": "uncooked",
+          "actual": "unknown"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "missing",
+          "oracle": "chilled",
+          "actual": ""
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "conflict",
+          "oracle": "Uncooked non-stuffed wheat noodles with separate broth",
+          "actual": "noodle"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "conflict",
+          "oracle": "wheat noodles",
+          "actual": "베테랑 칼국수"
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "cereal",
+            "soup",
+            "vegetable"
+          ],
+          "actual": [
+            "cereal",
+            "soy_legume",
+            "vegetable",
+            "seasoning_sauce"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "missing",
+          "oracle": [
+            {
+              "term": "wheat noodles",
+              "ingredient": "wheat noodles",
+              "ingredient_name": "wheat noodles",
+              "percent": 70,
+              "term_aliases": [
+                "wheat noodles",
+                "cereal"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_03:ingredient:1"
+              ]
+            },
+            {
+              "term": "broth",
+              "ingredient": "broth",
+              "ingredient_name": "broth",
+              "percent": 25,
+              "term_aliases": [
+                "broth",
+                "soup"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_03:ingredient:2"
+              ]
+            },
+            {
+              "term": "garnish",
+              "ingredient": "garnish",
+              "ingredient_name": "garnish",
+              "percent": 5,
+              "term_aliases": [
+                "garnish",
+                "vegetable"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_03:ingredient:3"
+              ]
+            }
+          ],
+          "actual": []
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": true,
+          "actual": true
+        }
+      ]
+    },
+    {
+      "case_index": 10,
+      "product_name": "[방방곡곡] 정통 부산식 밀면 (2인분)",
+      "expected_cn8": "19021990",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "conflict",
+          "oracle": "Busan wheat noodles",
+          "actual": "meal kit"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "missing",
+          "oracle": "cereal",
+          "actual": "other"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "conflict",
+          "oracle": "noodles",
+          "actual": "meal kit"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "missing",
+          "oracle": "thin wheat noodles",
+          "actual": ""
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "uncooked",
+          "actual": "prepared"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "missing",
+          "oracle": "chilled",
+          "actual": ""
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "conflict",
+          "oracle": "Uncooked non-stuffed wheat noodles with separate cold broth",
+          "actual": "meal kit; prepared"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "missing",
+          "oracle": "wheat noodles",
+          "actual": ""
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "missing",
+          "oracle": [
+            "cereal",
+            "soup",
+            "vegetable"
+          ],
+          "actual": []
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "missing",
+          "oracle": [
+            {
+              "term": "wheat noodles",
+              "ingredient": "wheat noodles",
+              "ingredient_name": "wheat noodles",
+              "percent": 65,
+              "term_aliases": [
+                "wheat noodles",
+                "cereal"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_06:ingredient:1"
+              ]
+            },
+            {
+              "term": "cold broth",
+              "ingredient": "cold broth",
+              "ingredient_name": "cold broth",
+              "percent": 30,
+              "term_aliases": [
+                "cold broth",
+                "soup"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_06:ingredient:2"
+              ]
+            },
+            {
+              "term": "garnish",
+              "ingredient": "garnish",
+              "ingredient_name": "garnish",
+              "percent": 5,
+              "term_aliases": [
+                "garnish",
+                "vegetable"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_06:ingredient:3"
+              ]
+            }
+          ],
+          "actual": []
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "conflict",
+          "oracle": true,
+          "actual": false
+        }
+      ]
+    },
+    {
+      "case_index": 11,
+      "product_name": "[이연복의 목란] 짬뽕 2인분",
+      "expected_cn8": "19023090",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "jjamppong noodle kit",
+          "actual": "noodle soup"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "missing",
+          "oracle": "cereal",
+          "actual": "other"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "overlap",
+          "oracle": "noodle meal kit",
+          "actual": "noodle soup"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "missing",
+          "oracle": "wheat noodles",
+          "actual": ""
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "uncooked",
+          "actual": "prepared"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "exact",
+          "oracle": "frozen",
+          "actual": "frozen"
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "conflict",
+          "oracle": "Wheat noodles with separate spicy seafood broth for cooking",
+          "actual": "frozen; noodle soup; prepared; frozen"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "missing",
+          "oracle": "wheat noodles",
+          "actual": ""
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "cereal",
+            "soup",
+            "mollusc"
+          ],
+          "actual": [
+            "mollusc",
+            "fish",
+            "cereal",
+            "soy_legume",
+            "vegetable",
+            "seasoning_sauce"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "missing",
+          "oracle": [
+            {
+              "term": "wheat noodles",
+              "ingredient": "wheat noodles",
+              "ingredient_name": "wheat noodles",
+              "percent": 50,
+              "term_aliases": [
+                "wheat noodles",
+                "cereal"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_07:ingredient:1"
+              ]
+            },
+            {
+              "term": "seafood broth",
+              "ingredient": "seafood broth",
+              "ingredient_name": "seafood broth",
+              "percent": 35,
+              "term_aliases": [
+                "seafood broth",
+                "soup"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_07:ingredient:2"
+              ]
+            },
+            {
+              "term": "seafood and vegetables",
+              "ingredient": "seafood and vegetables",
+              "ingredient_name": "seafood and vegetables",
+              "percent": 15,
+              "term_aliases": [
+                "seafood and vegetables",
+                "mollusc"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_07:ingredient:3"
+              ]
+            }
+          ],
+          "actual": []
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": true,
+          "actual": true
+        }
+      ]
+    },
+    {
+      "case_index": 12,
+      "product_name": "[고래사어묵] 김치 우동 전골",
+      "expected_cn8": "19021990",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "kimchi udon hot-pot kit",
+          "actual": "udon"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "missing",
+          "oracle": "cereal",
+          "actual": "other"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "conflict",
+          "oracle": "noodle meal kit",
+          "actual": "udon"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "missing",
+          "oracle": "thick wheat noodles",
+          "actual": ""
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "uncooked",
+          "actual": "prepared"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "missing",
+          "oracle": "chilled",
+          "actual": ""
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Uncooked wheat udon noodles packed with broth, fish cake and kimchi",
+          "actual": "udon noodles; udon; prepared"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "conflict",
+          "oracle": "wheat udon noodles",
+          "actual": "어묵탕 한그릇"
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "cereal",
+            "soup",
+            "fish",
+            "vegetable"
+          ],
+          "actual": [
+            "fish",
+            "cereal",
+            "vegetable",
+            "seasoning_sauce"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "missing",
+          "oracle": [
+            {
+              "term": "wheat udon noodles",
+              "ingredient": "wheat udon noodles",
+              "ingredient_name": "wheat udon noodles",
+              "percent": 55,
+              "term_aliases": [
+                "wheat udon noodles",
+                "cereal"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_02:ingredient:1"
+              ]
+            },
+            {
+              "term": "broth",
+              "ingredient": "broth",
+              "ingredient_name": "broth",
+              "percent": 25,
+              "term_aliases": [
+                "broth",
+                "soup"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_02:ingredient:2"
+              ]
+            },
+            {
+              "term": "fish cake",
+              "ingredient": "fish cake",
+              "ingredient_name": "fish cake",
+              "percent": 10,
+              "term_aliases": [
+                "fish cake",
+                "fish"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_02:ingredient:3"
+              ]
+            },
+            {
+              "term": "kimchi",
+              "ingredient": "kimchi",
+              "ingredient_name": "kimchi",
+              "percent": 10,
+              "term_aliases": [
+                "kimchi",
+                "vegetable"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_02:ingredient:4"
+              ]
+            }
+          ],
+          "actual": []
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": true,
+          "actual": true
+        }
+      ]
+    },
+    {
+      "case_index": 13,
+      "product_name": "[광화문 미진] 메밀국수 (2인분)",
+      "expected_cn8": "19021990",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "buckwheat noodles",
+          "actual": "buckwheat noodle set"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "missing",
+          "oracle": "cereal",
+          "actual": "other"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "conflict",
+          "oracle": "noodles",
+          "actual": "buckwheat noodle set"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "missing",
+          "oracle": "thin noodles",
+          "actual": ""
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "uncooked",
+          "actual": "processed"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "missing",
+          "oracle": "chilled",
+          "actual": ""
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Uncooked non-stuffed noodles containing buckwheat and wheat",
+          "actual": "noodles; buckwheat noodle set; processed"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "missing",
+          "oracle": "buckwheat and wheat noodles",
+          "actual": ""
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "cereal",
+            "sauce"
+          ],
+          "actual": [
+            "cereal",
+            "vegetable",
+            "seasoning_sauce"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "overlap",
+          "oracle": [
+            {
+              "term": "buckwheat and wheat noodles",
+              "ingredient": "buckwheat and wheat noodles",
+              "ingredient_name": "buckwheat and wheat noodles",
+              "percent": 90,
+              "term_aliases": [
+                "buckwheat and wheat noodles",
+                "cereal"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_05:ingredient:1"
+              ]
+            },
+            {
+              "term": "dipping sauce",
+              "ingredient": "dipping sauce",
+              "ingredient_name": "dipping sauce",
+              "percent": 10,
+              "term_aliases": [
+                "dipping sauce",
+                "sauce"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_05:ingredient:2"
+              ]
+            }
+          ],
+          "actual": [
+            {
+              "term": "소스 [광화문미진메밀소스1954] / Buckwheat Sauce",
+              "percent": 0.4257,
+              "term_aliases": [
+                "buckwheat"
+              ]
+            },
+            {
+              "term": "생면 [광화문미진메밀면] / Fresh Noodles",
+              "percent": 0.4991,
+              "term_aliases": [
+                "buckwheat"
+              ]
+            },
+            {
+              "term": "김치 [미진 면요리용 무우] / Radish Kimchi",
+              "percent": 0.0734
+            },
+            {
+              "term": "기타가공품 [미진김깨고명] / Seaweed Sesame Topping",
+              "percent": 0.0018,
+              "term_aliases": [
+                "Frozen Bovine Others",
+                "Frozen Swine Others",
+                "meat",
+                "edible",
+                "offal"
+              ]
+            }
+          ]
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": true,
+          "actual": true
+        }
+      ]
+    },
+    {
+      "case_index": 14,
+      "product_name": "[애플하우스] 즉석 떡볶기",
+      "expected_cn8": "19021990",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "instant tteokbokki kit",
+          "actual": "instant tteokbokki"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "conflict",
+          "oracle": "rice",
+          "actual": "wheat tteok"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "missing",
+          "oracle": "rice-cake meal kit",
+          "actual": "other"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "missing",
+          "oracle": "cylindrical rice cakes",
+          "actual": ""
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "prepared",
+          "actual": "instant"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "conflict",
+          "oracle": "chilled",
+          "actual": "ambient"
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "conflict",
+          "oracle": "Prepared meal kit of rice cakes with separate spicy sauce",
+          "actual": "ambient; wheat tteok; instant; ambient"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "missing",
+          "oracle": "rice cakes",
+          "actual": ""
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "rice",
+            "sauce",
+            "fish"
+          ],
+          "actual": [
+            "fish",
+            "cereal",
+            "soy_legume"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "missing",
+          "oracle": [
+            {
+              "term": "rice cakes",
+              "ingredient": "rice cakes",
+              "ingredient_name": "rice cakes",
+              "percent": 65,
+              "term_aliases": [
+                "rice cakes",
+                "rice"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_14:ingredient:1"
+              ]
+            },
+            {
+              "term": "spicy sauce",
+              "ingredient": "spicy sauce",
+              "ingredient_name": "spicy sauce",
+              "percent": 25,
+              "term_aliases": [
+                "spicy sauce",
+                "sauce"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_14:ingredient:2"
+              ]
+            },
+            {
+              "term": "fish cake",
+              "ingredient": "fish cake",
+              "ingredient_name": "fish cake",
+              "percent": 10,
+              "term_aliases": [
+                "fish cake",
+                "fish"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_14:ingredient:3"
+              ]
+            }
+          ],
+          "actual": []
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": true,
+          "actual": true
+        }
+      ]
+    },
+    {
+      "case_index": 15,
+      "product_name": "[고래사] 야채듬뿍 꼬마바",
+      "expected_cn8": "16042005",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "vegetable fish-cake bar",
+          "actual": "fish cake"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "missing",
+          "oracle": "fish",
+          "actual": "other"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "exact",
+          "oracle": "fish cake",
+          "actual": "fish cake"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "conflict",
+          "oracle": "bar of fish paste",
+          "actual": "piece"
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "cooked",
+          "actual": "processed"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "missing",
+          "oracle": "chilled",
+          "actual": ""
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Prepared fish paste product containing vegetables",
+          "actual": "fish cake; fish cake; green onion; processed; piece"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "missing",
+          "oracle": "fish paste",
+          "actual": ""
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "fish",
+            "vegetable",
+            "cereal"
+          ],
+          "actual": [
+            "fish",
+            "soy_legume",
+            "vegetable",
+            "seasoning_sauce"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "missing",
+          "oracle": [
+            {
+              "term": "fish paste",
+              "ingredient": "fish paste",
+              "ingredient_name": "fish paste",
+              "percent": 70,
+              "term_aliases": [
+                "fish paste",
+                "fish"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_08:ingredient:1"
+              ]
+            },
+            {
+              "term": "vegetables",
+              "ingredient": "vegetables",
+              "ingredient_name": "vegetables",
+              "percent": 20,
+              "term_aliases": [
+                "vegetables",
+                "vegetable"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_08:ingredient:2"
+              ]
+            },
+            {
+              "term": "starch",
+              "ingredient": "starch",
+              "ingredient_name": "starch",
+              "percent": 10,
+              "term_aliases": [
+                "starch",
+                "cereal"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_08:ingredient:3"
+              ]
+            }
+          ],
+          "actual": []
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "conflict",
+          "oracle": false,
+          "actual": true
+        }
+      ]
+    },
+    {
+      "case_index": 16,
+      "product_name": "[윤서울] 생들기름면",
+      "expected_cn8": "19021990",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "noodles with perilla oil",
+          "actual": "noodles"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "conflict",
+          "oracle": "cereal",
+          "actual": "organic whole wheat"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "exact",
+          "oracle": "noodles",
+          "actual": "noodles"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "missing",
+          "oracle": "wheat noodles",
+          "actual": ""
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "uncooked",
+          "actual": "processed"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "missing",
+          "oracle": "chilled",
+          "actual": ""
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Uncooked non-stuffed wheat noodles with separate perilla-oil seasoning",
+          "actual": "noodles; noodles; organic whole wheat; processed"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "missing",
+          "oracle": "wheat noodles",
+          "actual": ""
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "cereal",
+            "oil",
+            "sauce"
+          ],
+          "actual": [
+            "cereal",
+            "soy_legume",
+            "vegetable",
+            "seasoning_sauce"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "missing",
+          "oracle": [
+            {
+              "term": "wheat noodles",
+              "ingredient": "wheat noodles",
+              "ingredient_name": "wheat noodles",
+              "percent": 70,
+              "term_aliases": [
+                "wheat noodles",
+                "cereal"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_17:ingredient:1"
+              ]
+            },
+            {
+              "term": "perilla oil",
+              "ingredient": "perilla oil",
+              "ingredient_name": "perilla oil",
+              "percent": 20,
+              "term_aliases": [
+                "perilla oil",
+                "oil"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_17:ingredient:2"
+              ]
+            },
+            {
+              "term": "seasoning",
+              "ingredient": "seasoning",
+              "ingredient_name": "seasoning",
+              "percent": 10,
+              "term_aliases": [
+                "seasoning",
+                "sauce"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_17:ingredient:3"
+              ]
+            }
+          ],
+          "actual": []
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": true,
+          "actual": true
+        }
+      ]
+    },
+    {
+      "case_index": 17,
+      "product_name": "[윤서울] 모둠나물면",
+      "expected_cn8": "19021990",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "noodles with assorted vegetables",
+          "actual": "noodles"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "conflict",
+          "oracle": "cereal",
+          "actual": "organic whole wheat"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "exact",
+          "oracle": "noodles",
+          "actual": "noodles"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "missing",
+          "oracle": "wheat noodles",
+          "actual": ""
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "uncooked",
+          "actual": "processed"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "conflict",
+          "oracle": "chilled",
+          "actual": "ambient"
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Uncooked non-stuffed wheat noodles with separate vegetable garnish",
+          "actual": "ambient; noodles; organic whole wheat; processed; ambient"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "missing",
+          "oracle": "wheat noodles",
+          "actual": ""
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "cereal",
+            "vegetable",
+            "sauce"
+          ],
+          "actual": [
+            "cereal",
+            "soy_legume",
+            "vegetable",
+            "seasoning_sauce"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "missing",
+          "oracle": [
+            {
+              "term": "wheat noodles",
+              "ingredient": "wheat noodles",
+              "ingredient_name": "wheat noodles",
+              "percent": 70,
+              "term_aliases": [
+                "wheat noodles",
+                "cereal"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_10:ingredient:1"
+              ]
+            },
+            {
+              "term": "assorted vegetables",
+              "ingredient": "assorted vegetables",
+              "ingredient_name": "assorted vegetables",
+              "percent": 20,
+              "term_aliases": [
+                "assorted vegetables",
+                "vegetable"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_10:ingredient:2"
+              ]
+            },
+            {
+              "term": "seasoning sauce",
+              "ingredient": "seasoning sauce",
+              "ingredient_name": "seasoning sauce",
+              "percent": 10,
+              "term_aliases": [
+                "seasoning sauce",
+                "sauce"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_10:ingredient:3"
+              ]
+            }
+          ],
+          "actual": []
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": true,
+          "actual": true
+        }
+      ]
+    },
+    {
+      "case_index": 18,
+      "product_name": "[정호영셰프의 우동카덴] 오리지널 우동",
+      "expected_cn8": "19021990",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "original udon noodles",
+          "actual": "udon noodle"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "missing",
+          "oracle": "cereal",
+          "actual": "other"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "conflict",
+          "oracle": "noodles",
+          "actual": "udon noodle"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "missing",
+          "oracle": "thick wheat noodles",
+          "actual": ""
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "missing",
+          "oracle": "uncooked",
+          "actual": "unknown"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "conflict",
+          "oracle": "chilled",
+          "actual": "frozen"
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Uncooked non-stuffed wheat udon noodles with separate broth",
+          "actual": "frozen; udon noodle; frozen"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "conflict",
+          "oracle": "wheat udon noodles",
+          "actual": "카덴 우동면"
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "cereal",
+            "soup",
+            "vegetable"
+          ],
+          "actual": [
+            "cereal",
+            "vegetable",
+            "seasoning_sauce"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "missing",
+          "oracle": [
+            {
+              "term": "wheat udon noodles",
+              "ingredient": "wheat udon noodles",
+              "ingredient_name": "wheat udon noodles",
+              "percent": 70,
+              "term_aliases": [
+                "wheat udon noodles",
+                "cereal"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_18:ingredient:1"
+              ]
+            },
+            {
+              "term": "broth",
+              "ingredient": "broth",
+              "ingredient_name": "broth",
+              "percent": 25,
+              "term_aliases": [
+                "broth",
+                "soup"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_18:ingredient:2"
+              ]
+            },
+            {
+              "term": "garnish",
+              "ingredient": "garnish",
+              "ingredient_name": "garnish",
+              "percent": 5,
+              "term_aliases": [
+                "garnish",
+                "vegetable"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_18:ingredient:3"
+              ]
+            }
+          ],
+          "actual": []
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": true,
+          "actual": true
+        }
+      ]
+    },
+    {
+      "case_index": 19,
+      "product_name": "[정호영셰프의 우동카덴] 붓카케 냉우동",
+      "expected_cn8": "19021990",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "conflict",
+          "oracle": "bukkake cold udon noodles",
+          "actual": "grated radish"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "missing",
+          "oracle": "cereal",
+          "actual": "other"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "conflict",
+          "oracle": "noodles",
+          "actual": "grated radish"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "conflict",
+          "oracle": "thick wheat noodles",
+          "actual": "ground"
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "uncooked",
+          "actual": "processed"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "conflict",
+          "oracle": "chilled",
+          "actual": "frozen"
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "conflict",
+          "oracle": "Uncooked non-stuffed wheat udon noodles with separate concentrated sauce",
+          "actual": "frozen; grated radish; radish; processed; frozen; ground"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "conflict",
+          "oracle": "wheat udon noodles",
+          "actual": "카덴 우동면"
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "cereal",
+            "sauce",
+            "vegetable"
+          ],
+          "actual": [
+            "cereal",
+            "vegetable",
+            "seasoning_sauce"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "overlap",
+          "oracle": [
+            {
+              "term": "wheat udon noodles",
+              "ingredient": "wheat udon noodles",
+              "ingredient_name": "wheat udon noodles",
+              "percent": 70,
+              "term_aliases": [
+                "wheat udon noodles",
+                "cereal"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_19:ingredient:1"
+              ]
+            },
+            {
+              "term": "concentrated sauce",
+              "ingredient": "concentrated sauce",
+              "ingredient_name": "concentrated sauce",
+              "percent": 25,
+              "term_aliases": [
+                "concentrated sauce",
+                "sauce"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_19:ingredient:2"
+              ]
+            },
+            {
+              "term": "garnish",
+              "ingredient": "garnish",
+              "ingredient_name": "garnish",
+              "percent": 5,
+              "term_aliases": [
+                "garnish",
+                "vegetable"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_19:ingredient:3"
+              ]
+            }
+          ],
+          "actual": [
+            {
+              "term": "무",
+              "percent": 100.0
+            }
+          ]
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": true,
+          "actual": true
+        }
+      ]
+    },
+    {
+      "case_index": 20,
+      "product_name": "[조서형의 새벽종] 맑은 산채나물 비빔밥 (2개입)",
+      "expected_cn8": "19049010",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "conflict",
+          "oracle": "wild-herb bibimbap",
+          "actual": "instant"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "exact",
+          "oracle": "rice",
+          "actual": "rice"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "conflict",
+          "oracle": "prepared rice meal",
+          "actual": "instant"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "missing",
+          "oracle": "cooked rice with vegetables",
+          "actual": ""
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "conflict",
+          "oracle": "cooked",
+          "actual": "instant"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "exact",
+          "oracle": "frozen",
+          "actual": "frozen"
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Prepared cooked-rice meal containing wild herbs and vegetables",
+          "actual": "instant prepared food; frozen; instant; rice; frozen"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "conflict",
+          "oracle": "cooked rice",
+          "actual": "노호 산채나물비빔밥"
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "rice",
+            "vegetable",
+            "sauce"
+          ],
+          "actual": [
+            "mollusc",
+            "crustacean",
+            "cereal",
+            "vegetable",
+            "seasoning_sauce"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "missing",
+          "oracle": [
+            {
+              "term": "cooked rice",
+              "ingredient": "cooked rice",
+              "ingredient_name": "cooked rice",
+              "percent": 60,
+              "term_aliases": [
+                "cooked rice",
+                "rice"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_20:ingredient:1"
+              ]
+            },
+            {
+              "term": "wild herbs and vegetables",
+              "ingredient": "wild herbs and vegetables",
+              "ingredient_name": "wild herbs and vegetables",
+              "percent": 30,
+              "term_aliases": [
+                "wild herbs and vegetables",
+                "vegetable"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_20:ingredient:2"
+              ]
+            },
+            {
+              "term": "seasoning sauce",
+              "ingredient": "seasoning sauce",
+              "ingredient_name": "seasoning sauce",
+              "percent": 10,
+              "term_aliases": [
+                "seasoning sauce",
+                "sauce"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_20:ingredient:3"
+              ]
+            }
+          ],
+          "actual": []
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": true,
+          "actual": true
+        }
+      ]
+    },
+    {
+      "case_index": 21,
+      "product_name": "[해아람] 공주밤 설기 85g X 5개입",
+      "expected_cn8": "19059070",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "chestnut seolgi rice cake",
+          "actual": "rice cake"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "overlap",
+          "oracle": "rice",
+          "actual": "white rice"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "exact",
+          "oracle": "rice cake",
+          "actual": "rice cake"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "conflict",
+          "oracle": "steamed solid cake",
+          "actual": "piece"
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "exact",
+          "oracle": "cooked",
+          "actual": "cooked"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "overlap",
+          "oracle": "frozen after cooking",
+          "actual": "frozen"
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Cooked rice cake containing chestnut and sugar",
+          "actual": "rice cake; frozen; rice cake; white rice; cooked; frozen; piece"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "conflict",
+          "oracle": "rice flour",
+          "actual": "백미"
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "conflict",
+          "oracle": [
+            "rice",
+            "nut",
+            "sugar"
+          ],
+          "actual": [
+            "cereal"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "missing",
+          "oracle": [
+            {
+              "term": "rice flour",
+              "ingredient": "rice flour",
+              "ingredient_name": "rice flour",
+              "percent": 70,
+              "term_aliases": [
+                "rice flour",
+                "rice"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_21:ingredient:1"
+              ]
+            },
+            {
+              "term": "chestnut",
+              "ingredient": "chestnut",
+              "ingredient_name": "chestnut",
+              "percent": 20,
+              "term_aliases": [
+                "chestnut",
+                "nut"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_21:ingredient:2"
+              ]
+            },
+            {
+              "term": "sugar",
+              "ingredient": "sugar",
+              "ingredient_name": "sugar",
+              "percent": 10,
+              "term_aliases": [
+                "sugar",
+                "sugar"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_21:ingredient:3"
+              ]
+            }
+          ],
+          "actual": []
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        }
+      ]
+    },
+    {
+      "case_index": 22,
+      "product_name": "[갓지은] 서리태 콩찰떡 500g",
+      "expected_cn8": "19059070",
+      "fields": [
+        {
+          "field": "commercial_identity",
+          "path": "identity_hints.commercial_identity",
+          "status": "overlap",
+          "oracle": "black-soybean glutinous rice cake",
+          "actual": "rice cake"
+        },
+        {
+          "field": "ingredient_class",
+          "path": "identity_hints.ingredient_class",
+          "status": "overlap",
+          "oracle": "rice",
+          "actual": "glutinous rice"
+        },
+        {
+          "field": "food_form",
+          "path": "identity_hints.food_form",
+          "status": "exact",
+          "oracle": "rice cake",
+          "actual": "rice cake"
+        },
+        {
+          "field": "physical_form",
+          "path": "identity_hints.physical_form",
+          "status": "conflict",
+          "oracle": "solid glutinous cake",
+          "actual": "piece"
+        },
+        {
+          "field": "processing_state",
+          "path": "identity_hints.processing_state",
+          "status": "exact",
+          "oracle": "cooked",
+          "actual": "cooked"
+        },
+        {
+          "field": "preservation_state",
+          "path": "identity_hints.preservation_state",
+          "status": "missing",
+          "oracle": "chilled",
+          "actual": ""
+        },
+        {
+          "field": "tariff_description",
+          "path": "identity_hints.normalized_tariff_description",
+          "status": "overlap",
+          "oracle": "Cooked glutinous rice cake containing black soybeans",
+          "actual": "rice cake; rice cake; glutinous rice; cooked; piece"
+        },
+        {
+          "field": "principal_ingredient",
+          "path": "composition_facts.principal_ingredient",
+          "status": "conflict",
+          "oracle": "glutinous rice flour",
+          "actual": "찹쌀"
+        },
+        {
+          "field": "ingredient_classes",
+          "path": "composition_facts.ingredient_classes",
+          "status": "overlap",
+          "oracle": [
+            "rice",
+            "legume",
+            "sugar"
+          ],
+          "actual": [
+            "cereal",
+            "soy_legume"
+          ]
+        },
+        {
+          "field": "percentages",
+          "path": "composition_facts.ingredient_percentages",
+          "status": "overlap",
+          "oracle": [
+            {
+              "term": "glutinous rice flour",
+              "ingredient": "glutinous rice flour",
+              "ingredient_name": "glutinous rice flour",
+              "percent": 65,
+              "term_aliases": [
+                "glutinous rice flour",
+                "rice"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_22:ingredient:1"
+              ]
+            },
+            {
+              "term": "black soybeans",
+              "ingredient": "black soybeans",
+              "ingredient_name": "black soybeans",
+              "percent": 25,
+              "term_aliases": [
+                "black soybeans",
+                "legume"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_22:ingredient:2"
+              ]
+            },
+            {
+              "term": "sugar",
+              "ingredient": "sugar",
+              "ingredient_name": "sugar",
+              "percent": 10,
+              "term_aliases": [
+                "sugar",
+                "sugar"
+              ],
+              "source_refs": [
+                "golden:codex_perfect_22:ingredient:3"
+              ]
+            }
+          ],
+          "actual": [
+            {
+              "term": "백설탕 (정백당) / White Sugar",
+              "percent": 4.1
+            }
+          ]
+        },
+        {
+          "field": "wrapper_or_dough",
+          "path": "composition_facts.contains_wrapper_or_dough",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        },
+        {
+          "field": "sauce_or_broth",
+          "path": "composition_facts.contains_sauce_or_broth",
+          "status": "exact",
+          "oracle": false,
+          "actual": false
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "status_counts": {
+      "exact": 59,
+      "overlap": 74,
+      "filled": 0,
+      "missing": 59,
+      "conflict": 72
+    },
+    "total_cells": 264
+  }
+}

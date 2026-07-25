@@ -262,3 +262,8 @@ cn_hierarchy_analysis_grouping_20260702/*
 *.zip
 문서관련 테이블
 *.png
+
+# Stable Oracle-vs-runtime DTO comparison references.
+!reference/
+!reference/dto_comparison/
+!reference/dto_comparison/*.png

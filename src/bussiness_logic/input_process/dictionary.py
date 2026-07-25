@@ -1,21 +1,19 @@
-"""Deterministic dictionary retrieval for product input correction."""
+"""Deterministic database dictionary retrieval for product input correction."""
 
 from __future__ import annotations
 
-import csv
 import re
-from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field
 from rapidfuzz import fuzz
 
 from bussiness_logic.utils import NormalizeWhiteSpace
-
-
-DEFAULT_PRODUCT_INPUT_DICTIONARY_PATH = (
-    Path(__file__).resolve().parent / "resources/product_input_dictionary.csv"
+from bussiness_logic.core.runtime_asset_repository import (
+    LoadProductInputDictionary,
 )
+
+
 DEFAULT_FUZZY_MIN_RATIO = 0.86
 DEFAULT_MIN_FUZZY_CHARACTERS = 4
 DEFAULT_AMBIGUOUS_RATIO_MARGIN = 0.08
@@ -58,36 +56,37 @@ class ProductDictionaryMatch(BaseModel):
 
 
 class ProductDictionaryRepository:
-    """CSV 기반 표준 용어 dictionary repository."""
-
-    def __init__(self, dictionaryPath: Path = DEFAULT_PRODUCT_INPUT_DICTIONARY_PATH):
-        self._dictionaryPath = dictionaryPath
+    """Database-backed standard product input dictionary."""
 
     def LoadEntries(self) -> List[ProductDictionaryEntry]:
-        if not self._dictionaryPath.exists():
-            return []
-
-        with self._dictionaryPath.open("r", encoding="utf-8", newline="") as csvFile:
-            reader = csv.DictReader(csvFile)
-            return [
+        entries: List[ProductDictionaryEntry] = []
+        for row in LoadProductInputDictionary():
+            aliasesValue = row.get("aliases")
+            if isinstance(aliasesValue, list):
+                aliases = aliasesValue
+            else:
+                aliases = str(aliasesValue or "").split("|")
+            termId = str(row.get("term_id") or "").strip()
+            canonicalName = str(row.get("canonical_name") or "").strip()
+            if not termId or not canonicalName:
+                continue
+            entries.append(
                 ProductDictionaryEntry(
-                    term_id=row.get("term_id", "").strip(),
-                    canonical_name=row.get("canonical_name", "").strip(),
-                    term_type=row.get("term_type", "").strip(),
+                    term_id=termId,
+                    canonical_name=canonicalName,
+                    term_type=str(row.get("term_type") or "").strip(),
                     aliases=[
-                        NormalizeWhiteSpace(alias)
-                        for alias in row.get("aliases", "").split("|")
-                        if NormalizeWhiteSpace(alias)
+                        NormalizeWhiteSpace(str(alias))
+                        for alias in aliases
+                        if NormalizeWhiteSpace(str(alias))
                     ],
-                    source_name=row.get("source_name", "").strip(),
-                    source_id=row.get("source_id", "").strip(),
-                    source_url=row.get("source_url", "").strip(),
-                    updated_at=row.get("updated_at", "").strip(),
+                    source_name=str(row.get("source_name") or "").strip(),
+                    source_id=str(row.get("source_id") or "").strip(),
+                    source_url=str(row.get("source_url") or "").strip(),
+                    updated_at=str(row.get("updated_at") or "").strip(),
                 )
-                for row in reader
-                if row.get("term_id", "").strip()
-                and row.get("canonical_name", "").strip()
-            ]
+            )
+        return entries
 
 
 class ProductDictionaryRetriever:

@@ -34,6 +34,7 @@ function clearStoredJobId() {
 
 export function useClassificationRun(initialJobId = "") {
   const [result, setResultState] = useState(null);
+  const [answerBusy, setAnswerBusy] = useState(false);
   const sseRef = useRef(null);
   const resultRef = useRef(null);
 
@@ -210,6 +211,33 @@ export function useClassificationRun(initialJobId = "") {
     }
   }, [closeSse, hydrateRun, openSse, setResult]);
 
+  const answerQuestions = useCallback(async (answers) => {
+    const jobId = clean(resultRef.current?.job_id);
+    if (!jobId) {
+      throw new Error("답변을 반영할 실행 ID가 없습니다.");
+    }
+    const normalizedAnswers = (Array.isArray(answers) ? answers : [])
+      .filter((item) => clean(item?.user_question_id) && clean(item?.answer))
+      .map((item) => ({
+        user_question_id: clean(item.user_question_id),
+        answer: clean(item.answer).toLowerCase(),
+      }));
+    if (!normalizedAnswers.length) {
+      throw new Error("답변을 하나 이상 선택하세요.");
+    }
+    setAnswerBusy(true);
+    try {
+      const snapshot = await postJson(
+        `/api/runs/${encodeURIComponent(jobId)}/question-answers`,
+        { answers: normalizedAnswers },
+      );
+      setResult(snapshot);
+      return snapshot;
+    } finally {
+      setAnswerBusy(false);
+    }
+  }, [setResult]);
+
   // 상세 화면의 job 쿼리를 우선하고, 없으면 최근 run을 복원한다.
   useEffect(() => {
     const targetJobId = clean(initialJobId) || readStoredJobId();
@@ -232,7 +260,8 @@ export function useClassificationRun(initialJobId = "") {
 
   useEffect(() => closeSse, [closeSse]);
 
-  const busy = ACTIVE_STATUSES.includes(clean(result?.job_status).toLowerCase());
+  const busy =
+    answerBusy || ACTIVE_STATUSES.includes(clean(result?.job_status).toLowerCase());
 
-  return { result, busy, runPipeline, loadRun };
+  return { result, busy, runPipeline, loadRun, answerQuestions };
 }

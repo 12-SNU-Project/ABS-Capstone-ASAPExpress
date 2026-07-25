@@ -6,10 +6,7 @@ from bussiness_logic.pipeline.component_base import BasePipelineComponent
 from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
 from bussiness_logic.classification.model.hs2_routing import Hs2RoutingDecision
 from bussiness_logic.classification.repositories.chapter_index_repository import LoadPreClassificationChapterRows
-from bussiness_logic.classification.services.pre_classification_router import (
-    BuildPreClassificationRouteInput,
-    PreClassificationDomainRouter,
-)
+from bussiness_logic.classification.services.semantic_chapter_router import SemanticChapterRouter
 from bussiness_logic.utils.json_types import JsonValue
 
 
@@ -27,63 +24,9 @@ class Hs2RoutingComponent(BasePipelineComponent):
         productId = str(productUnderstanding.get("product_id") or "")
         self.ReadBlackBoard(understandingId)
 
-        identityLane = productUnderstanding.get("identity_hints") or {}
-        if not isinstance(identityLane, dict):
-            identityLane = {}
-        distilledIdentity = productUnderstanding.get("distilled_identity") or {}
-        if not isinstance(distilledIdentity, dict):
-            distilledIdentity = {}
-        identityTerms = self._StringTuple(identityLane.get("identity_terms") or [])
-        productFormTerms = self._StringTuple(identityLane.get("product_form_terms") or [])
-        distilledFormTerms = self._StringTuple(
-            distilledIdentity.get("product_form_signal_terms") or [],
-        )
-        distilledProcessingTerms = self._StringTuple(
-            distilledIdentity.get("processing_signal_terms") or [],
-        )
-        domainHints = self._StringTuple(identityLane.get("domain_hints") or [])
-        chapterHints = self._StringTuple(
-            identityLane.get("chapter_hint_terms") or [],
-        )
-        chapterHintSources = self._StringTuple(
-            identityLane.get("chapter_hint_source_terms") or [],
-        )
-        compositionFacts = productUnderstanding.get("composition_facts") or {}
-        if not isinstance(compositionFacts, dict):
-            compositionFacts = {}
-        # [8회차-1 (다)] routing_terms 사장 필드 정리 — PU가 조립한
-        # routing_terms(진실원)를 그대로 소비한다. 종전엔 이 지점이 동일
-        # 내용을 재조립해 routing_terms가 소비자 0의 사장 필드였다
-        # (NONFOOD_PERCEPTION_AUTOPSY [2] 실측). 부재 시(구 캐시) 재조립 폴백.
-        _pu_routing_terms = [
-            str(x).strip() for x in
-            (productUnderstanding.get("routing_terms") or []) if str(x).strip()
-        ]
-        routeInput = BuildPreClassificationRouteInput(
-            productName=str(productUnderstanding.get("product_name") or ""),
-            shortDescription="",
-            factTexts=tuple(_pu_routing_terms) if _pu_routing_terms else (
-                str(identityLane.get("commercial_identity") or ""),
-                str(identityLane.get("translated_product_name") or ""),
-                str(identityLane.get("normalized_tariff_description") or ""),
-                *identityTerms,
-                *productFormTerms,
-                *distilledFormTerms,
-                *distilledProcessingTerms,
-                *domainHints,
-                *chapterHints,
-                *chapterHintSources,
-            ),
-            structuredProductFacts=[],
-            processingState=str(identityLane.get("processing_state") or ""),
-            containsSauceOrBroth=(
-                bool(compositionFacts.get("contains_sauce_or_broth"))
-                if "contains_sauce_or_broth" in compositionFacts else None
-            ),
-        )
-        routeHint = PreClassificationDomainRouter(
+        routeHint = SemanticChapterRouter(
             chapterRowsProvider=LoadPreClassificationChapterRows,
-        ).Route(routeInput)
+        ).Route(productUnderstanding)
         routingDecisionId = store.next_id("route")
         routingContext = Hs2RoutingDecision(
             routingDecisionId=routingDecisionId,
@@ -98,6 +41,9 @@ class Hs2RoutingComponent(BasePipelineComponent):
             routingBasis=self._TraceDict(routeHint.routingBasis.ToTrace()),
             missingFacts=routeHint.missingFacts,
             candidateChapterDetails=routeHint.candidateChapterDetails,
+            selectedHs2=routeHint.selectedHs2,
+            alternativeHs2=routeHint.alternativeHs2,
+            semanticDecision=routeHint.semanticDecision,
         )
         store.put(
             "routing_context",
@@ -112,14 +58,6 @@ class Hs2RoutingComponent(BasePipelineComponent):
             f"allowed_hs2={list(routeHint.candidateHs2)}, "
             f"fallback_allowed={routingContext.fallbackAllowed}."
         )
-
-    @staticmethod
-    def _StringTuple(value: object) -> tuple[str, ...]:
-        if isinstance(value, str):
-            return (value.strip(),) if value.strip() else ()
-        if not isinstance(value, list):
-            return ()
-        return tuple(str(item).strip() for item in value if str(item).strip())
 
     @staticmethod
     def _TraceDict(value: dict[str, JsonValue]) -> dict[str, JsonValue]:

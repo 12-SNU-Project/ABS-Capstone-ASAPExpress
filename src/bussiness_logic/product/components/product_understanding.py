@@ -214,9 +214,17 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         # 식품유형 결정론 전사: 라벨의 법정 표기('식품유형: 어묵(...)')를
         # identity에 그대로 병기 — LLM 산출이 런마다 이 fact를 뽑다 말다
         # 하는 실측(22건 중 변형/누락 10) 때문에 출력 보장은 전사가 담당.
-        # 한→영은 법정 유한 어휘 사전(data/food_type_dictionary.json,
+        # 한→영은 DB의 법정 유한 어휘 사전(food_type_dictionary,
         # 수기 교정 우선). 창작 0 — 존재할 때만.
         identity = self._TranscribeFoodTypeFact(identity, factTexts=factTexts)
+        # 보관상태(냉동/냉장/실온) 병기 — LLM 누락 대비 결정론 전사
+        identity = self._TranscribeStorageState(identity, factTexts=factTexts)
+        # [ntd 조립 헤드 · 2026-07-23 설계자 승인] ntd 자유작문 제한의
+        # 짝: LLM ntd는 어휘집 게이트(identity_hint_agent)로 줄이고, 라벨
+        # 전사 EN(식품유형 사전·보관상태)을 ntd **앞에 병기**한다(prepend
+        # — 덮어쓰기 아님·합성어 구문 보존). 22셋 실측: 식품유형 사전히트
+        # 13/22·보관 11/22 — 과반의 ntd 헤드가 매런 동일해진다.
+        identity = self._AssembleNtdHead(identity, factTexts=factTexts)
         if intendedUse and intendedUse != "unknown":
             identity = dataclasses.replace(
                 identity,
@@ -319,7 +327,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
         from dataclasses import replace as _replace
         for raw in factTexts or ():
             s = _ud.normalize("NFC", str(raw))
-            m = re.match(r"^\s*(?:식품유형|제품유형|품목보고[^:：]*)[^:：]*[:：]\s*(.+)", s)
+            m = re.match(r"^\s*(?:식품\s*의?\s*유형|제품\s*의?\s*유형|품목\s*보고[^:：]*)[^:：]*[:：]\s*(.+)", s)
             if not m:
                 continue
             main = re.split(r"[\(（/,;]", m.group(1))[0].strip()
@@ -327,19 +335,106 @@ class ProductUnderstandingComponent(BasePipelineComponent):
                 continue
             en = ""
             try:
-                import json as _json
-                from pathlib import Path as _Path
-                dict_path = _Path(__file__).resolve().parents[4] / "data" / "food_type_dictionary.json"
-                en = str(_json.loads(dict_path.read_text(encoding="utf-8")).get(main) or "")
+                from bussiness_logic.core.runtime_asset_repository import (
+                    LoadFoodTypeDictionary,
+                )
+                _fd = LoadFoodTypeDictionary()
+                # 정확매칭 우선, 없으면 부분매칭(긴 키 우선) — 식품유형이
+                # 복합/포괄('만두류 및 소스류'·'기타 수산물가공품')일 때 핵심어
+                # 포착(만두류→dumplings). 창작 0 — 사전 등재 어휘만.
+                en = str(_fd.get(main) or "")
+                if not en:
+                    for _k, _v in sorted(_fd.items(), key=lambda p: -len(p[0])):
+                        if len(_k) >= 2 and _k in main:
+                            en = str(_v)
+                            break
             except Exception:  # noqa: BLE001 — 사전 부재는 한글 전사만
                 en = ""
-            toks = [w for w in (main, en) if w]
+            toks = [w for w in (main, *str(en).split()) if w]
             terms = tuple(dict.fromkeys([*identity.identityTerms, *toks]))
             food_form = identity.foodForm
             if en and (not food_form or food_form in ("other", "unknown")):
                 food_form = en
             return _replace(identity, identityTerms=terms, foodForm=food_form)
         return identity
+
+    @staticmethod
+    def _TranscribeStorageState(identity, *, factTexts):
+        """보관상태(냉동/냉장/실온) 결정론 전사 → preservationState +
+        identity/form 토큰. 닫힌 3상태 맵(자의적 사전 아님·창작 0). LLM이
+        런마다 놓치는 보존상태를 라벨에서 병기 — 냉동→0710 등 보존축 매칭."""
+        import unicodedata as _ud
+        from dataclasses import replace as _replace
+        _STATE = (("냉동", "frozen"), ("냉장", "chilled"),
+                  ("실온", "ambient"), ("상온", "ambient"))
+        for raw in factTexts or ():
+            s = _ud.normalize("NFC", str(raw))
+            m = re.match(
+                r"^\s*(?:보관\s*상태|보관\s*방법|보관|포장\s*타입|포장\s*상태)"
+                r"[^:：]*[:：]\s*(.+)", s)
+            if not m:
+                continue
+            en = next((v for k, v in _STATE if k in m.group(1)), "")
+            if not en:
+                continue
+            terms = tuple(dict.fromkeys([*identity.identityTerms, en]))
+            forms = tuple(dict.fromkeys([*identity.productFormTerms, en]))
+            pres = identity.preservationState
+            if not pres or pres in ("unknown", ""):
+                pres = en
+            return _replace(identity, identityTerms=terms,
+                            productFormTerms=forms, preservationState=pres)
+        return identity
+
+    @staticmethod
+    def _AssembleNtdHead(identity, *, factTexts):
+        """[ntd 조립 헤드] 라벨 전사 EN을 ntd 앞에 결정론 병기.
+
+        헤드 = [식품유형 사전 EN 구문] + [보관상태 EN]. 둘 다 라벨 존재
+        시에만(창작 0), 구문 통째 보존(합성어 파괴 금지 — 'fish cake'를
+        쪼개지 않음). LLM ntd(어휘집 게이트 통과분)는 뒤에 유지 — 덮어
+        쓰기 아님. 라벨 없으면 무변경."""
+        import unicodedata as _ud
+        from dataclasses import replace as _replace
+        head: list = []
+        # ① 식품유형 → 사전 EN 구문 (search — '옵션 N' 접두 무관)
+        for raw in factTexts or ():
+            s = _ud.normalize("NFC", str(raw))
+            m = re.search(
+                r"(?:식품\s*의?\s*유형|제품\s*의?\s*유형|품목\s*보고[^:：]*)"
+                r"[^:：]*[:：]\s*(.+)", s)
+            if not m:
+                continue
+            main = re.split(r"[\(（/,;]", m.group(1))[0].strip()
+            if not main or len(main) > 20:
+                continue
+            try:
+                from bussiness_logic.core.runtime_asset_repository import (
+                    LoadFoodTypeDictionary,
+                )
+                _fd = LoadFoodTypeDictionary()
+                en = str(_fd.get(main) or "")
+                if not en:
+                    for _k, _v in sorted(_fd.items(), key=lambda p: -len(p[0])):
+                        if len(_k) >= 2 and _k in main:
+                            en = str(_v)
+                            break
+                if en:
+                    head.append(en)
+                    break
+            except Exception:  # noqa: BLE001 — 사전 부재 = 헤드 없음
+                break
+        # ② 보관상태 EN (전사 결과 재사용 — preservationState가 이미 병기됨)
+        pres = str(identity.preservationState or "").strip()
+        if pres and pres not in ("unknown",):
+            head.append(pres)
+        if not head:
+            return identity
+        tail = str(identity.normalizedTariffDescription or "").strip()
+        parts = [*head, tail] if tail else head
+        # 중복 구문 제거(순서 보존)
+        joined = "; ".join(dict.fromkeys(parts))
+        return _replace(identity, normalizedTariffDescription=joined)
 
     def _BuildCoiEvidenceSet(
         self,
@@ -479,6 +574,7 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             "translatedProductName": result["translated_product_name"],
             "confidence": result["confidence"],
             "needsReview": result["needs_review"],
+            "conflictReason": str(result.get("conflict_reason") or ""),
             "understandingMode": "llm_json",
             "llmError": "",
         }
@@ -495,6 +591,10 @@ class ProductUnderstandingComponent(BasePipelineComponent):
             overlay["foodForm"] = result["food_form"]
         if result.get("processing_state"):
             overlay["processingState"] = result["processing_state"]
+        if result.get("preservation_state"):
+            overlay["preservationState"] = result["preservation_state"]
+        if result.get("physical_form"):
+            overlay["physicalForm"] = result["physical_form"]
         if result["commercial_identity"]:
             overlay["commercialIdentity"] = result["commercial_identity"]
         if result["normalized_tariff_description"]:
@@ -509,18 +609,18 @@ class ProductUnderstandingComponent(BasePipelineComponent):
 
     @classmethod
     def _MaterialVocab(cls) -> frozenset:
-        """재질 추출 어휘 — taxonomy CSV material_composition 패턴의
-        리터럴 대안을 기계 파싱 (수기 0, 원천 CSV 추종). 승선 스코프
+        """재질 추출 어휘 — taxonomy table material_composition 패턴의
+        리터럴 대안을 기계 파싱 (수기 0, 원천 table 추종). 승선 스코프
         어휘(소유 챕터 ≤3)는 다챕터 재질(steel 등)을 정당하게 배제하므로
         재질 추출에는 패턴 실소유분을 쓴다."""
         if cls._material_vocab_cache:
             return cls._material_vocab_cache[0]
         vocab: set[str] = set()
         try:
-            import csv as _csv
-            from pathlib import Path as _Path
-            _p = _Path(__file__).resolve().parents[4] / "data" /                 "classification_criterion_taxonomy_20260702.csv"
-            for _r in _csv.DictReader(open(_p, encoding="utf-8-sig")):
+            from bussiness_logic.core.runtime_asset_repository import (
+                LoadClassificationCriterionTaxonomy,
+            )
+            for _r in LoadClassificationCriterionTaxonomy():
                 if str(_r.get("criterion_type")) != "material_composition":
                     continue
                 for _grp in re.findall(r"\(\?\:([^()]+)\)", str(_r.get("examples") or "")):
