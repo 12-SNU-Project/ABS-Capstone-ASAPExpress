@@ -1,12 +1,16 @@
 """Classification_Component — staged HS4 -> HS6 -> CN8 classifier."""
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 
 from bussiness_logic.pipeline.component_base import BasePipelineComponent
 from bussiness_logic.classification.services.taric_branch_resolver import TaricBranchResolverTool
 from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
 from bussiness_logic.utils.json_types import JsonObject
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ClassificationComponent(BasePipelineComponent):
@@ -24,6 +28,7 @@ class ClassificationComponent(BasePipelineComponent):
         self._taric_resolver = TaricBranchResolverTool()
         self._selectionRuntimeAdapter = selectionRuntimeAdapter
         self._validationRuntimeAdapter = validationRuntimeAdapter
+        self._stagedFailure: JsonObject = {}
 
     def Run(self, store: BlackboardStore) -> None:
         bb = store.load()
@@ -46,11 +51,18 @@ class ClassificationComponent(BasePipelineComponent):
         if self._maybe_classify_staged(store, pes, routingContext, bb):
             return
 
+        failureCode = str(
+            self._stagedFailure.get("failure_code")
+            or "staged_classifier_unavailable"
+        )
         self._emit_unresolved(
             store,
             pes,
-            why="staged_classifier_unavailable",
+            why=failureCode,
+            debug={"failure": dict(self._stagedFailure)},
+            classificationStatus="failed",
         )
+        raise RuntimeError(failureCode)
 
     def _maybe_classify_staged(
         self,
@@ -61,17 +73,24 @@ class ClassificationComponent(BasePipelineComponent):
     ) -> bool:
         import os
 
+        self._stagedFailure = {}
         # Staged narrowing is the only runtime classification path. Legacy
         # Stage1 code remains in-tree as reference code, not as fallback.
         gate = (os.environ.get("ASAP_USE_STAGED_CLASSIFIER", "1") or "").strip().lower()
         if gate in ("0", "false", "no", "off"):
             self.reason("Staged classifier disabled by env; no legacy Stage1 fallback.")
-            return False
+            return self._remember_staged_failure(
+                "staged_classifier_disabled",
+                "configuration",
+            )
         try:
             product_facts = deepcopy(bb.get("product_understanding") or {})
             if not product_facts:
                 self.reason("Staged classifier: no product_understanding.")
-                return False
+                return self._remember_staged_failure(
+                    "product_understanding_missing",
+                    "product_understanding",
+                )
             answerFacts = bb.get("classification_answer_facts") or []
             if isinstance(answerFacts, list) and answerFacts:
                 product_facts["_classification_answer_facts"] = [
@@ -114,11 +133,31 @@ class ClassificationComponent(BasePipelineComponent):
             stages = staged.get("stages") or []
             candidates = staged.get("candidates") or []
             if staged.get("classification_status") == "needs_more_facts":
+                pendingQuestions = [
+                    dict(item)
+                    for item in (staged.get("pending_user_questions") or [])
+                    if (
+                        isinstance(item, dict)
+                        and str(item.get("contract_version") or "").isdigit()
+                        and int(item["contract_version"]) > 0
+                        and str(item.get("question_key") or "").strip()
+                        and str(item.get("question_text") or "").strip()
+                        and str(item.get("predicate_op") or "").strip()
+                    )
+                ]
+                if not pendingQuestions:
+                    return self._remember_staged_failure(
+                        self._safe_failure_code(
+                            staged.get("error"),
+                            "question_generation_failed",
+                        ),
+                        str(staged.get("unresolved_stage") or "classification"),
+                    )
                 self._emit_unresolved(
                     store,
                     pes,
                     why=str(staged.get("error") or "needs_more_facts"),
-                    userQuestions=list(staged.get("pending_user_questions") or []),
+                    userQuestions=pendingQuestions,
                     debug={
                         "resolved_level": staged.get("resolved_level") or "",
                         "resolved_prefix": staged.get("resolved_prefix") or "",
@@ -134,11 +173,25 @@ class ClassificationComponent(BasePipelineComponent):
                 )
                 return True
             if not staged.get("ok") or not candidates:
+                failureCode = self._safe_failure_code(
+                    staged.get("error"),
+                    "staged_no_candidates",
+                )
                 self.reason(
                     "Staged classifier produced no candidates "
-                    f"(error={staged.get('error') or 'no_candidates'})."
+                    f"(error={failureCode})."
                 )
-                return False
+                failureStage = str(staged.get("unresolved_stage") or "")
+                if not failureStage and stages and isinstance(stages[-1], dict):
+                    failureStage = str(
+                        stages[-1].get("level")
+                        or stages[-1].get("stage")
+                        or ""
+                    )
+                return self._remember_staged_failure(
+                    failureCode,
+                    failureStage or "classification",
+                )
 
             # Final validation (existing recommendation seam): closed-choice
             # veto over recorded recovery/reroute options. A fired override is
@@ -295,7 +348,10 @@ class ClassificationComponent(BasePipelineComponent):
 
             if not ccs_candidates:
                 self.reason("Staged classifier produced no valid CN8.")
-                return False
+                return self._remember_staged_failure(
+                    "invalid_cn8_candidates",
+                    "cn8",
+                )
             selectedCn8 = str((ccs_candidates[0] or {}).get("cn8") or "")[:8]
             selectedPath = pathByCn8.get(selectedCn8) or (
                 classificationPaths[0] if classificationPaths else {}
@@ -337,10 +393,37 @@ class ClassificationComponent(BasePipelineComponent):
                 f"(hs4->hs6->cn8, {len(stages)} stages)."
             )
             return True
-        except Exception as exc:  # noqa: BLE001 — component emits unresolved instead
-            self.reason(f"Staged classifier error ({exc!r}).")
-            return False
+        except Exception as exc:  # noqa: BLE001 — component boundary records failure
+            _LOGGER.exception("Staged classification failed")
+            self.reason(f"Staged classifier error ({type(exc).__name__}).")
+            return self._remember_staged_failure(
+                "staged_classifier_exception",
+                "classification",
+                exceptionType=type(exc).__name__,
+            )
 
+    @staticmethod
+    def _safe_failure_code(value: object, fallback: str) -> str:
+        code = str(value or "").strip().lower()
+        return code if code and code.replace("_", "").isalnum() else fallback
+
+    def _remember_staged_failure(
+        self,
+        code: str,
+        stage: str,
+        *,
+        exceptionType: str = "",
+    ) -> bool:
+        self._stagedFailure = {
+            "failure_code": self._safe_failure_code(
+                code,
+                "staged_classifier_unavailable",
+            ),
+            "failure_stage": str(stage or "classification"),
+        }
+        if exceptionType:
+            self._stagedFailure["exception_type"] = exceptionType
+        return False
 
     def _staged_static_tree(
         self,
@@ -533,6 +616,7 @@ class ClassificationComponent(BasePipelineComponent):
         why: str,
         debug: JsonObject | None = None,
         userQuestions: list[dict] | None = None,
+        classificationStatus: str = "needs_more_facts",
     ) -> None:
         ccs_id = store.next_id("ccs")
         candidateCodeSet = {
@@ -541,7 +625,7 @@ class ClassificationComponent(BasePipelineComponent):
             "created_at": now_iso(),
             "candidate_set_id": ccs_id,
             "product_id": pes["product_id"],
-            "classification_status": "needs_more_facts",
+            "classification_status": classificationStatus,
             "failure_reason": why,
             "shortlisted_candidates": list(self._ontology_reads),
             "candidates": [],

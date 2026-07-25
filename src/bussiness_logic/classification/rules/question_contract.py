@@ -182,20 +182,28 @@ def ApplyClassificationAnswers(
         return decisionStatus, updated, []
 
     effectiveVerdicts: list[str] = []
-    overridden = {
-        str(detail.get("overridden_by") or "")
-        for detail in updated
-        if detail.get("overridden_by")
-    }
+    alternativeGroups: dict[str, list[str]] = {}
     for detail in updated:
         op = str(detail.get("op") or "")
-        if op in ("axis_projection",):
-            continue
-        if str(detail.get("overridden_by") or "") in overridden:
+        if op in ("axis_projection", "user_answer"):
             continue
         verdict = str(detail.get("verdict") or "").lower()
         if verdict in ("true", "false", "silent", "unknown", "undecided", ""):
-            effectiveVerdicts.append(verdict or "silent")
+            normalizedVerdict = verdict or "silent"
+            alternativeGroup = str(detail.get("alt_group") or "")
+            if alternativeGroup:
+                alternativeGroups.setdefault(alternativeGroup, []).append(
+                    normalizedVerdict,
+                )
+            else:
+                effectiveVerdicts.append(normalizedVerdict)
+    for groupVerdicts in alternativeGroups.values():
+        if "true" in groupVerdicts:
+            effectiveVerdicts.append("true")
+        elif groupVerdicts and all(value == "false" for value in groupVerdicts):
+            effectiveVerdicts.append("false")
+        else:
+            effectiveVerdicts.append("silent")
     if "false" in effectiveVerdicts:
         status = "violated"
     elif effectiveVerdicts and all(value == "true" for value in effectiveVerdicts):

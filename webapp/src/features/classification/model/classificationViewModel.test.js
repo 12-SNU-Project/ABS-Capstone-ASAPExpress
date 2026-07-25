@@ -7,6 +7,7 @@ import {
   GetPipelineStageState,
   NormalizeStageState,
   NormalizeTariffCode,
+  PipelineFailureMessage,
   ResolveDocumentPackageSelection,
 } from "./classificationViewModel.js";
 
@@ -101,6 +102,29 @@ test("사용자 응답 대기 상태와 활성 질문만 UI에 전달한다", ()
 
 test("관세 코드는 구분 기호를 제거해 비교한다", () => {
   assert.equal(NormalizeTariffCode("1605 55-00 00"), "1605550000");
+});
+
+test("내부 분류 실패 코드를 사용자 문장으로 변환한다", () => {
+  assert.equal(
+    PipelineFailureMessage("RuntimeError: no_children_at_hs4"),
+    "현재 상품 정보로 분류 후보를 생성하지 못했습니다. 입력 정보를 확인한 뒤 다시 실행해주세요.",
+  );
+  assert.equal(
+    PipelineFailureMessage("staged_classifier_unavailable"),
+    "현재 상품 정보로 분류 후보를 생성하지 못했습니다. 입력 정보를 확인한 뒤 다시 실행해주세요.",
+  );
+  assert.equal(
+    PipelineFailureMessage("사용자 입력값을 확인해주세요."),
+    "사용자 입력값을 확인해주세요.",
+  );
+  assert.equal(
+    PipelineFailureMessage("unexpected internal failure"),
+    "품목 분류를 완료하지 못했습니다. 입력 정보와 실행 상태를 확인해주세요.",
+  );
+  assert.equal(
+    PipelineFailureMessage("Classification_Component 실패"),
+    "품목 분류를 완료하지 못했습니다. 입력 정보와 실행 상태를 확인해주세요.",
+  );
 });
 
 test("candidate_id가 없으면 선택 후보의 CN8 Branch를 우선 연결한다", () => {

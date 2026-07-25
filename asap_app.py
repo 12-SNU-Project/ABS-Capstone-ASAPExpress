@@ -26,8 +26,11 @@ for searchPath in (ASAP_ROOT, ASAP_SRC_ROOT):
     if searchPath.exists() and str(searchPath) not in sys.path:
         sys.path.insert(0, str(searchPath))
 
+from bussiness_logic.app_config import LoadAppConfig, LoadEnvironmentFile
+
+LoadEnvironmentFile(ASAP_ENV_FILE_PATH)
+
 from backend.app import CreateBackendApp
-from bussiness_logic.app_config import LoadAppConfig
 
 
 appConfig = LoadAppConfig(ASAP_ROOT)

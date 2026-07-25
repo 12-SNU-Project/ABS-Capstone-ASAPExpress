@@ -11,6 +11,7 @@ from backend.api_contract import (
     ClassificationCandidateSetView,
     DocumentPackageSummaryView,
     RunSnapshotResponse,
+    UserQuestionView,
 )
 from bussiness_logic.utils.json_types import JsonMapping, JsonObject
 
@@ -27,7 +28,7 @@ class PipelineRunResult(BaseModel):
         default=None,
         alias="candidate_code_set",
     )
-    userQuestions: list[JsonObject] = Field(
+    userQuestions: list[UserQuestionView] = Field(
         default_factory=list,
         alias="user_questions",
     )
@@ -758,7 +759,11 @@ class PipelineOutputProjector:
                 compact["routing_view"] = routingView
             userQuestions = blackboard.get("user_questions")
             if isinstance(userQuestions, list):
-                compact["user_questions"] = list(userQuestions)
+                compact["user_questions"] = [
+                    UserQuestionView.model_validate(question).ToDict()
+                    for question in userQuestions
+                    if isinstance(question, Mapping)
+                ]
         documentPackage = compact.get("document_package")
         if isinstance(documentPackage, Mapping):
             compact["document_package"] = (

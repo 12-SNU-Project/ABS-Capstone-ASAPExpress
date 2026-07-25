@@ -1787,10 +1787,8 @@ class StagedClassificationTool:
         H1: sibling-IDF within the family (skipped for a single child — there
         is nothing to discriminate). Residuals never win by wording.
         """
-        context_conditions_by_scope: dict[str, list[dict[str, Any]]] = {}
         context_scope_by_code: dict[str, str] = {}
         if discrete_only and level == "hs6":
-            contexts: list[str] = []
             for item in items:
                 row = item["row"]
                 code = _digits(row.get("code"), limit=6)
@@ -1802,62 +1800,6 @@ class StagedClassificationTool:
                 if context.lower() in ("", "other", "n/a", "none"):
                     continue
                 context_scope_by_code[code] = context
-                if context not in contexts:
-                    contexts.append(context)
-            if contexts:
-                from bussiness_logic.classification.offline.branch_decision_compiler import (
-                    CompileGroupDecisions,
-                )
-
-                parent = _digits(
-                    items[0]["row"].get("parent_code"),
-                    limit=4,
-                )
-                synthetic_by_context = {
-                    context: f"ctx{index:04d}"
-                    for index, context in enumerate(contexts, start=1)
-                }
-                context_by_synthetic = {
-                    synthetic: context
-                    for context, synthetic in synthetic_by_context.items()
-                }
-                compiled_context_rows = CompileGroupDecisions(
-                    "hs6_context",
-                    parent,
-                    {
-                        synthetic: context
-                        for context, synthetic in synthetic_by_context.items()
-                    },
-                )
-                context_exclusion_fields = ";".join((
-                    "identity_hints.commercial_identity",
-                    "identity_hints.food_form",
-                    "identity_hints.processing_state",
-                    "identity_hints.physical_form",
-                    "identity_hints.product_form_terms",
-                    "composition_facts.processing_state",
-                    "composition_facts.physical_form",
-                    "composition_facts.contains_wrapper_or_dough",
-                ))
-                for compiled_row in compiled_context_rows:
-                    if str(compiled_row.get("role") or "") == "qualifier":
-                        continue
-                    context = context_by_synthetic.get(
-                        str(compiled_row.get("then_code") or "")
-                    )
-                    if not context:
-                        continue
-                    normalized_row = dict(compiled_row)
-                    if (
-                        str(normalized_row.get("cond_type") or "")
-                        == "exclusion_boundary"
-                        and str(normalized_row.get("dto_field") or "")
-                        == "*tokens*"
-                    ):
-                        normalized_row["dto_field"] = context_exclusion_fields
-                    context_conditions_by_scope.setdefault(context, []).append(
-                        normalized_row
-                    )
 
         prepared: list[dict[str, Any]] = []
         for item in items:
@@ -2062,9 +2004,6 @@ class StagedClassificationTool:
             context_scope = context_scope_by_code.get(code, "")
             context_decision = ""
             context_detail: list[dict[str, str]] = []
-            context_conditions = list(
-                context_conditions_by_scope.get(context_scope, [])
-            )
             primary_axis = ""
             if discrete_only and raw_code_conditions:
                 from bussiness_logic.classification.services.axis_verdict import (
@@ -2076,19 +2015,10 @@ class StagedClassificationTool:
                     code,
                     list(raw_code_conditions),
                 )
-            if code_conditions or context_conditions:
+            if code_conditions:
                 from bussiness_logic.classification.rules.branch_decision_evaluator import EvaluateCodeDecision
 
-            if context_conditions:
-                context_decision, context_detail = EvaluateCodeDecision(
-                    context_conditions,
-                    product_facts,
-                    frozenset(),
-                    percentages,
-                    _quantitative_verdict,
-                    canonical_closed_world=True,
-                )
-            elif context_scope:
+            if context_scope:
                 context_decision = "undecided"
                 context_detail = [{
                     "cond": "branch_context",
@@ -2678,6 +2608,7 @@ class StagedClassificationTool:
         eligible = [
             row for row in ranked
             if str(row.get("decision") or "") != "violated"
+            and str(row.get("context_decision") or "") != "violated"
         ]
         confirmed = [
             row for row in eligible
@@ -2881,6 +2812,12 @@ class StagedClassificationTool:
                 ):
                     subject = ", ".join(values) or description
                     question_text = f"제품 상태 또는 형태가 다음 조건에 해당합니까: {subject}?"
+                elif predicate_op == "not_contains":
+                    subject = ", ".join(values) or description
+                    question_text = f"제품에 다음 분류 특성 또는 값이 존재합니까: {subject}?"
+                elif condition == "branch_context":
+                    subject = ", ".join(values) or context_scope or description
+                    question_text = f"제품이 다음 HS6 분류 범위에 해당합니까: {subject}?"
                 else:
                     level_name = {
                         4: "HS4",

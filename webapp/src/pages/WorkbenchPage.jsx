@@ -246,8 +246,9 @@ export default function WorkbenchPage() {
                 ) : null}
                 {classificationStep === "hierarchy" ? (
                   <>
-                    {activeQuestions.length ? (
+                    {activeQuestions.length && resultStatus === "awaiting_input" ? (
                       <UserQuestionPanel
+                        key={resultJobId}
                         questions={activeQuestions}
                         onSubmit={answerQuestions}
                         submitting={answering}

@@ -167,7 +167,7 @@ class AppPathsConfig(BaseModel):
     pipeline_outputs_root: Path = Path("artifacts/outputs")
     product_input_artifact_root: Path = Path("artifacts/product_input")
     blackboard_schema: Path = Path(
-        "docs/ASAP_Ontology_v1/linkml/generated/asap_runtime.schema.json",
+        "docs/ASAP_Ontology/linkml/generated/asap_runtime.schema.json",
     )
 
     def ResolvePath(self, projectRootPath: str | Path, configPath: Path) -> Path:
@@ -426,6 +426,32 @@ class AppConfig(BaseModel):
                 "provider differs from [llm].".format(profileName.value)
             )
         return LlmAppConfig.model_validate(resolvedValues)
+
+
+def LoadEnvironmentFile(environmentFilePath: str | Path) -> bool:
+    """Load non-empty values without overriding the process environment."""
+
+    try:
+        content = Path(environmentFilePath).expanduser().read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False
+
+    for rawLine in content.splitlines():
+        line = rawLine.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        key, _, rawValue = line.partition("=")
+        key = key.strip()
+        if not key or not key.replace("_", "").isalnum():
+            continue
+        value = rawValue.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        if value and key not in os.environ:
+            os.environ[key] = value
+    return True
 
 
 def LoadAppConfig(

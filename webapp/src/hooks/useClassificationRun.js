@@ -286,6 +286,7 @@ export function useClassificationRun(initialJobId = "") {
       const operation = lifecycle.CommitRestoreOperation(restoreOperation);
       if (!operation) return null;
       const restoredJobId = clean(snapshot?.job_id) || targetJobId;
+      setAnswerError("");
       SetResult(snapshot);
       RememberRestorableJob(restoredJobId);
       if (ShouldConnectRunSnapshot(snapshot)) {
@@ -315,6 +316,7 @@ export function useClassificationRun(initialJobId = "") {
     const operation = BeginOperation();
     lifecycle.CloseEventSource();
     setRestoreError("");
+    setAnswerError("");
     setRestoring(false);
     const productName = clean(form.productName);
     const url = clean(form.url);
@@ -440,6 +442,10 @@ export function useClassificationRun(initialJobId = "") {
   const answerQuestions = useCallback(async (answers) => {
     const jobId = clean(resultRef.current?.job_id);
     if (!jobId) return null;
+    if (clean(resultRef.current?.job_status).toLowerCase() !== "awaiting_input") {
+      setAnswerError("분류가 질문 응답 대기 상태일 때만 답변을 제출할 수 있습니다.");
+      return null;
+    }
     const operation = BeginOperation();
     lifecycle.CloseEventSource();
     setAnswerError("");
@@ -456,6 +462,16 @@ export function useClassificationRun(initialJobId = "") {
       return snapshot;
     } catch (error) {
       if (IsAbortError(error) || !IsCurrentOperation(operation)) return null;
+      try {
+        const failedSnapshot = await getJson(
+          `/api/runs/${encodeURIComponent(jobId)}`,
+          { signal: operation.signal },
+        );
+        if (IsCurrentOperation(operation)) SetResult(failedSnapshot);
+      } catch {
+        /* 원래 답변 오류를 유지한다. */
+      }
+      if (!IsCurrentOperation(operation)) return null;
       setAnswerError(String(error?.message || error));
       return null;
     } finally {

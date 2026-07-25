@@ -460,6 +460,35 @@ class PipelineEventPayload(ApiContractModel):
     )
 
 
+class UserQuestionView(ApiContractModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        frozen=True,
+        extra="ignore",
+    )
+
+    userQuestionId: str = Field(alias="user_question_id")
+    contractVersion: int | None = Field(default=None, alias="contract_version")
+    questionKey: str = Field(default="", alias="question_key")
+    questionText: str = Field(alias="question_text")
+    stage: str = ""
+    parentCode: str = Field(default="", alias="parent_code")
+    candidateCode: str = Field(default="", alias="candidate_code")
+    axis: str = ""
+    predicateOp: str = Field(default="", alias="predicate_op")
+    canonicalField: str = Field(default="", alias="canonical_field")
+    conditionValue: str = Field(default="", alias="condition_value")
+    contextScope: str = Field(default="", alias="context_scope")
+    btiEvidence: list[JsonObject] = Field(default_factory=list, alias="bti_evidence")
+    requiredFor: list[str] = Field(default_factory=list, alias="required_for")
+    options: list[str] = Field(default_factory=list)
+    answer: Literal["yes", "no", "unknown"] | None = None
+    answeredAt: str | None = Field(default=None, alias="answered_at")
+    answerId: str | None = Field(default=None, alias="answer_id")
+    active: bool = False
+    resolvedAt: str | None = Field(default=None, alias="resolved_at")
+
+
 class RunSnapshotResponse(ApiContractModel):
     jobId: str = Field(alias="job_id")
     jobStatus: RunStatus = Field(alias="job_status")
@@ -488,7 +517,7 @@ class RunSnapshotResponse(ApiContractModel):
         default=None,
         alias="candidate_code_set",
     )
-    userQuestions: list[JsonObject] = Field(
+    userQuestions: list[UserQuestionView] = Field(
         default_factory=list,
         alias="user_questions",
     )

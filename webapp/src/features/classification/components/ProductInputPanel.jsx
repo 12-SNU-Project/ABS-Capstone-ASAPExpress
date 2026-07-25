@@ -298,10 +298,6 @@ export default function ProductInputPanel({
     if (restoredForm) setForm(restoredForm);
   }, [resultJobId, result?.request?.facts]);
 
-  useEffect(() => {
-    if (compact && clean(result?.job_status).toLowerCase() === "failed") setEditorOpen(true);
-  }, [compact, result?.job_status]);
-
   const SetField = (key) => (event) => {
     setFormErrors({ ingredientRows: {} });
     setForm((previous) => ({ ...previous, [key]: event.target.value }));

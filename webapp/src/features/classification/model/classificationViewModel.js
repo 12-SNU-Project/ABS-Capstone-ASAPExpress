@@ -29,6 +29,37 @@ export function NormalizeTariffCode(value) {
   return clean(value).replace(/\D/g, "");
 }
 
+export function PipelineFailureMessage(value) {
+  const raw = clean(value);
+  const code = raw.replace(/^[A-Za-z]+Error:\s*/, "").toLowerCase();
+  if (code === "staged_classifier_disabled") {
+    return "단계별 품목 분류 기능이 비활성화되어 있습니다. 실행 설정을 확인해주세요.";
+  }
+  if (code === "product_understanding_missing") {
+    return "분류에 필요한 상품 이해 결과가 없습니다. 상품 정보를 다시 수집해주세요.";
+  }
+  if (code === "question_generation_failed") {
+    return "분류에 필요한 확인 질문을 만들지 못했습니다. 잠시 후 다시 실행해주세요.";
+  }
+  if (
+    [
+      "staged_classifier_unavailable",
+      "staged_classifier_exception",
+      "staged_no_candidates",
+      "invalid_cn8_candidates",
+      "no_route_chapters",
+    ].includes(code)
+    || code.startsWith("no_children_at_")
+  ) {
+    return "현재 상품 정보로 분류 후보를 생성하지 못했습니다. 입력 정보를 확인한 뒤 다시 실행해주세요.";
+  }
+  if (/_Component\b/.test(raw)) {
+    return "품목 분류를 완료하지 못했습니다. 입력 정보와 실행 상태를 확인해주세요.";
+  }
+  if (/[가-힣]/.test(raw)) return raw;
+  return "품목 분류를 완료하지 못했습니다. 입력 정보와 실행 상태를 확인해주세요.";
+}
+
 function PackageMatchLevel(taricKey, group, candidate) {
   const targetTaric10 = NormalizeTariffCode(candidate?.taric10);
   const targetCn8 = NormalizeTariffCode(candidate?.cn8) || targetTaric10.slice(0, 8);

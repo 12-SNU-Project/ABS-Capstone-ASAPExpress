@@ -37,6 +37,14 @@ def _ClassificationNeedsMoreFacts(result: JsonMapping) -> bool:
     )
 
 
+def _ClassificationFailed(result: JsonMapping) -> bool:
+    candidateCodeSet = result.get("candidate_code_set")
+    return (
+        isinstance(candidateCodeSet, Mapping)
+        and candidateCodeSet.get("classification_status") == "failed"
+    )
+
+
 def _RequiresUserInput(result: JsonMapping) -> bool:
     blackboard = result.get("blackboard")
     questions = result.get("user_questions") or (
@@ -524,16 +532,18 @@ class PipelineRunService:
             result = self._registry.BuildPipelineResultProjection(pipelineOutput)
             candidateCodeSet = pipelineOutput.get("candidate_code_set")
             needsMoreFacts = _ClassificationNeedsMoreFacts(pipelineOutput)
+            classificationFailed = _ClassificationFailed(pipelineOutput)
             status = (
                 "awaiting_input"
                 if _RequiresUserInput(pipelineOutput)
                 else "failed"
-                if needsMoreFacts
+                if needsMoreFacts or classificationFailed
                 else "completed"
             )
             failureReason = (
                 str(candidateCodeSet.get("failure_reason") or "classification unresolved")
-                if needsMoreFacts and isinstance(candidateCodeSet, Mapping)
+                if (needsMoreFacts or classificationFailed)
+                and isinstance(candidateCodeSet, Mapping)
                 else ""
             )
             self._registry.UpdateRun(
@@ -543,12 +553,16 @@ class PipelineRunService:
                 result=result,
                 partial_result=result,
                 document_packages=documentPackages,
-                error=failureReason or None,
+                error=failureReason if status == "failed" else None,
             )
             self._registry.AppendEvent(
                 runId,
                 {
-                    "stage": "Classification" if needsMoreFacts else "Pipeline",
+                    "stage": (
+                        "Classification"
+                        if needsMoreFacts or classificationFailed
+                        else "Pipeline"
+                    ),
                     "status": status,
                     "message": (
                         "분류를 계속하려면 사용자 응답이 필요합니다."
@@ -598,6 +612,8 @@ class PipelineRunService:
         from bussiness_logic.pipeline.blackboard import BlackboardStore, now_iso
         from bussiness_logic.pipeline.pipeline_context import PipelineContext
 
+        # ponytail: 데모 처리량에서는 전역 직렬화로 파일 갱신을 보호한다.
+        # 동시 답변 재실행이 병목이 되면 job별 worker/lock으로 교체한다.
         with self._answerLock:
             blackboardPath = runDirectory / "blackboard.json"
             if not blackboardPath.is_file():
@@ -666,6 +682,10 @@ class PipelineRunService:
                         question["answer_id"] = previousFact.get("answer_id")
                         question["answered_at"] = previousFact.get("answered_at")
                     continue
+                if snapshot.get("status") != "awaiting_input":
+                    raise ValueError(
+                        f"run {runId} is not awaiting classification answers"
+                    )
                 if not bool(question.get("active")):
                     raise ValueError(f"question {questionId} is no longer active")
                 if previousAnswer not in {"", "unknown"}:
@@ -693,6 +713,7 @@ class PipelineRunService:
                     "condition_value": str(question.get("condition_value") or ""),
                     "context_scope": str(question.get("context_scope") or ""),
                 }
+                store.ValidateWrite("classification_answer_facts", answerFact)
                 answerFacts.append(answerFact)
                 question["answer"] = answer
                 question["answered_at"] = answeredAt
@@ -720,10 +741,17 @@ class PipelineRunService:
             self._registry.UpdateRun(runId, status="running")
             componentResult = context.ExecuteComponent(ClassificationComponent())
             if not componentResult.success:
-                self._registry.UpdateRun(runId, status="awaiting_input")
-                raise RuntimeError(
+                failureReason = (
                     componentResult.error or "classification replay failed"
                 )
+                self._registry.UpdateRun(
+                    runId,
+                    status="failed",
+                    finished_at=time.time(),
+                    error=failureReason,
+                )
+                self._registry.PersistRun(runId)
+                raise RuntimeError(failureReason)
 
             replayedBlackboard = store.load()
             candidateSets = replayedBlackboard.get("candidate_code_sets") or []

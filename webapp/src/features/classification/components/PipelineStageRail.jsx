@@ -2,7 +2,10 @@ import { AlertCircle, Check, Circle, CircleHelp, Clock3, LoaderCircle, LockKeyho
 import { motion, useReducedMotion } from "motion/react";
 import { EVENT_STAGE_LABELS, STAGES } from "@/lib/labels.js";
 import { asList, clean, statusLabel } from "@/lib/format.js";
-import { GetPipelineStageState } from "@/features/classification/model/classificationViewModel.js";
+import {
+  GetPipelineStageState,
+  PipelineFailureMessage,
+} from "@/features/classification/model/classificationViewModel.js";
 
 function EventLabel(stage) {
   const key = clean(stage);
@@ -15,10 +18,6 @@ function GetCurrentStageInfo(result) {
     (event) => clean(event.stage) && clean(event.stage) !== "Pipeline",
   ) || events[events.length - 1] || null;
   const status = clean(result?.job_status || lastRelevant?.status || "idle");
-  if (result?.error) return { label: "처리 오류", status: "failed", message: result.error };
-  if (["completed", "complete"].includes(status)) {
-    return { label: "전체 완료", status: "done", message: "분류 결과와 서류 연결 정보를 확인할 수 있습니다." };
-  }
   if (status === "awaiting_input") {
     return {
       label: "사용자 응답 대기",
@@ -26,13 +25,25 @@ function GetCurrentStageInfo(result) {
       message: "분류 조건 질문에 답하면 중단 지점부터 계속 실행합니다.",
     };
   }
+  if (result?.error) {
+    return {
+      label: "처리 오류",
+      status: "failed",
+      message: PipelineFailureMessage(result.error),
+    };
+  }
+  if (["completed", "complete"].includes(status)) {
+    return { label: "전체 완료", status: "done", message: "분류 결과와 서류 연결 정보를 확인할 수 있습니다." };
+  }
   if (!lastRelevant) {
     return { label: "분석 대기", status: "idle", message: "상품 정보를 입력하고 분류를 실행하세요." };
   }
   return {
     label: EventLabel(lastRelevant.stage),
     status: clean(lastRelevant.status || status || "running"),
-    message: clean(lastRelevant.message) || "처리 중입니다.",
+    message: clean(lastRelevant.status) === "failed"
+      ? PipelineFailureMessage(lastRelevant.message)
+      : clean(lastRelevant.message) || "처리 중입니다.",
   };
 }
 
@@ -79,6 +90,7 @@ export default function PipelineStageRail({
   const info = restoring
     ? { label: "기존 작업 복원", status: "running", message: "저장된 실행 결과를 불러오는 중입니다." }
     : GetCurrentStageInfo(result);
+  const hasError = info.status === "failed";
   const completed = STAGES.filter(([key]) => (
     ["done", "skipped"].includes(GetPipelineStageState(result, viewModel, key))
   )).length;
@@ -93,8 +105,8 @@ export default function PipelineStageRail({
         <span className="text-xs font-semibold text-muted-foreground">{completed}/{STAGES.length} 완료</span>
       </div>
 
-      {busy || info.status === "awaiting-input" || result?.error ? (
-        <div className={`mt-3 flex gap-3 rounded-lg border px-3 py-2.5 ${result?.error ? "border-destructive/30 bg-destructive/5" : "bg-surface-muted"}`} role={result?.error ? "alert" : "status"}>
+      {busy || info.status === "awaiting-input" || hasError ? (
+        <div className={`mt-3 flex gap-3 rounded-lg border px-3 py-2.5 ${hasError ? "border-destructive/30 bg-destructive/5" : "bg-surface-muted"}`} role={hasError ? "alert" : "status"}>
           <StageIcon state={DisplayStageState(info.status)} />
           <div className="min-w-0">
             <strong className="block text-sm">{info.label}</strong>

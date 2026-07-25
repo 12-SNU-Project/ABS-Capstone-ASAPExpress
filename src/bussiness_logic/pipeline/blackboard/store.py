@@ -10,7 +10,7 @@ UI pipeline callers may provide an explicit run directory while retaining the
 schema-compatible ``run_<digits>`` internal run identifier.
 
 Schema validation is against the LinkML-generated JSON Schema
-(docs/ASAP_Ontology_v1/linkml/generated/asap_runtime.schema.json).
+(docs/ASAP_Ontology/linkml/generated/asap_runtime.schema.json).
 
 Identifier format: prefix_counter, zero-padded to 3 digits
 (cand_001, dp_001, …). Counters are derived from the live Blackboard so
@@ -53,6 +53,7 @@ OBJECT_KEY: dict[str, str] = {
     "Hs2RoutingDecision": "routing_context",
     "ClassificationCandidateSet": "candidate_code_sets",
     "UserQuestion": "user_questions",
+    "ClassificationAnswerFact": "classification_answer_facts",
     "TaricBranchSet": "taric_branch_sets",
     "DocumentPackage": "document_packages",
 }
@@ -62,6 +63,7 @@ COMPONENT_WRITE_KEYS: dict[str, set[str]] = {
     "Product_Understanding_Component": {"product_understanding"},
     "HS2_Routing_Component": {"routing_context"},
     "Classification_Component": {"candidate_code_sets", "user_questions"},
+    "User_Interaction_Component": {"classification_answer_facts"},
     "Taric_Branch_Resolution_Component": {"taric_branch_sets"},
     "Document_Component": {"document_packages"},
 }
@@ -214,7 +216,7 @@ class BlackboardStore:
     # ------------------------------------------------------------------ mutate
     def put(self, key: str, obj: JsonObject) -> JsonObject:
         """Overwrite ``bb[key]`` (single-instance slot like product_evidence_state)."""
-        self._enforce_write(key, obj)
+        self.ValidateWrite(key, obj)
         bb = self.load()
         bb[key] = obj
         self.save(bb)
@@ -222,14 +224,14 @@ class BlackboardStore:
 
     def append(self, key: str, obj: JsonObject) -> JsonObject:
         """Append ``obj`` to ``bb[key]`` (multivalued slot)."""
-        self._enforce_write(key, obj)
+        self.ValidateWrite(key, obj)
         bb = self.load()
         bb.setdefault(key, []).append(obj)
         self.save(bb)
         return obj
 
     @staticmethod
-    def _enforce_write(key: str, obj: JsonObject) -> None:
+    def ValidateWrite(key: str, obj: JsonObject) -> None:
         """Enforce the component write matrix for Blackboard writes."""
         object_type = obj.get("object_type")
         created_by = obj.get("created_by")
