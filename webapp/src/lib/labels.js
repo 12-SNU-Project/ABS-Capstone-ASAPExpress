@@ -97,37 +97,6 @@ export function ClassificationStepForResult(result) {
   return CLASSIFICATION_EVENT_STEPS[latest?.stage] || "understanding";
 }
 
-export function RoutingTermLabel(value) {
-  const term = String(value ?? "").trim();
-  if (term === "prepared_food_redirect_bonus") return "가공식품 분류 가산";
-  if (term === "condiment_product_form_bonus") return "조미·소스 상품 형태 일치";
-  if (term.startsWith("absorbed:")) {
-    return `연관 어휘 일치: ${UnderstandingValueLabel(term.slice(9).split("<", 1)[0])}`;
-  }
-  if (term.startsWith("universal_scope_muted:")) {
-    const terms = term.slice(22).split(",").map(UnderstandingValueLabel).join(" · ");
-    return `범용 가공 어휘(점수 제외): ${terms}`;
-  }
-  if (term.startsWith("ambiguous_only_disqualified:")) {
-    return `단독 판별력이 부족한 어휘: ${UnderstandingValueLabel(term.slice(28))}`;
-  }
-  return UnderstandingValueLabel(term.replaceAll("_", " "));
-}
-
-const ROUTING_SCORE_LABELS = {
-  guardrail_redirect: "가공식품 챕터 전환",
-  dictionary_gate: "상품 사전 일치",
-  dictionary_gate_redirect: "상품 사전 기반 챕터 전환",
-  product_form_bonus: "상품 형태 일치",
-  chapter_keywords: "챕터 핵심어 일치",
-  raw_scope: "원물 범위 일치",
-  prepared_scope: "가공식품 범위 일치",
-};
-
-export function RoutingScoreLabel(value) {
-  return ROUTING_SCORE_LABELS[String(value ?? "").trim()] || "기타 라우팅 근거";
-}
-
 const UNDERSTANDING_VALUE_LABELS = {
   mollusc: "연체동물류",
   molluscs: "연체동물류",
@@ -222,7 +191,7 @@ export const LABELS = {
   pre_gate_domains: "사전 게이트 도메인",
   missing_facts: "부족 정보",
   routing_basis: "라우팅 근거",
-  candidate_chapter_details: "챕터 점수 상세",
+  candidate_chapter_details: "챕터 판단 상세",
   product_id: "Product ID",
   short_description: "짧은 설명",
   commercial_identity: "상업적 식별명",

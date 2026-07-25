@@ -343,13 +343,12 @@ def _BuildInputReconstructionService(
 ) -> "ProductInputReconstructionService | None":
     from bussiness_logic.app_config import LlmProfileName
     from bussiness_logic.bridge.factory import (
-        BuildRuntimeAdapter,
         RuntimeAdapterBuildError,
     )
-    from bussiness_logic.bridge.selector import (
-        BuildLlmRuntimeConfigFromEnv,
-        UnsupportedLlmRuntimeError,
+    from bussiness_logic.bridge.runtime_adapter import (
+        BuildPipelineRuntimeAdapter,
     )
+    from bussiness_logic.bridge.selector import UnsupportedLlmRuntimeError
     from bussiness_logic.input_process.reconstruction import (
         ProductInputReconstructionService,
     )
@@ -360,12 +359,8 @@ def _BuildInputReconstructionService(
     runtime_adapter = None
     if smoke_config.use_llm_input_reconstruction:
         try:
-            runtime_adapter = BuildRuntimeAdapter(
-                BuildLlmRuntimeConfigFromEnv(
-                    projectRootPath=PROJECT_ROOT,
-                    profileName=LlmProfileName.INPUT_RECONSTRUCTION,
-                ),
-                requireAvailable=True,
+            runtime_adapter = BuildPipelineRuntimeAdapter(
+                LlmProfileName.INPUT_RECONSTRUCTION,
             )
         except (RuntimeAdapterBuildError, UnsupportedLlmRuntimeError) as exc:
             warnings.append(f"llm_input_reconstruction_unavailable: {exc}")

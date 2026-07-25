@@ -116,6 +116,11 @@ class ExportPipelineManager:
                             LlmProfileName.IDENTITY_HINT,
                         )
                     ),
+                    routingRuntimeAdapter=(
+                        BuildOptionalPipelineRuntimeAdapter(
+                            LlmProfileName.HS2_ROUTER,
+                        )
+                    ),
                     selectionRuntimeAdapter=(
                         BuildOptionalPipelineRuntimeAdapter(
                             LlmProfileName.CLASSIFICATION_SELECTOR,

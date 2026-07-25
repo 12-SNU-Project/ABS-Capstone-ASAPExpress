@@ -40,10 +40,12 @@ class HsCodeClassificationPipeline:
         self,
         *,
         identityHintRuntimeAdapter: object | None = None,
+        routingRuntimeAdapter: object | None = None,
         selectionRuntimeAdapter: object | None = None,
         validationRuntimeAdapter: object | None = None,
     ) -> None:
         self._identityHintRuntimeAdapter = identityHintRuntimeAdapter
+        self._routingRuntimeAdapter = routingRuntimeAdapter
         self._selectionRuntimeAdapter = selectionRuntimeAdapter
         self._validationRuntimeAdapter = validationRuntimeAdapter
 
@@ -76,7 +78,7 @@ class HsCodeClassificationPipeline:
             ),
             PipelineStep(
                 "hs2_routing",
-                Hs2RoutingComponent(),
+                Hs2RoutingComponent(self._routingRuntimeAdapter),
             ),
             PipelineStep(
                 "classification",

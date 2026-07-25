@@ -18,14 +18,15 @@ from urllib.parse import urlsplit, urlunsplit
 
 PROJECT_ROOT_PATH = Path(__file__).resolve().parent
 
-from bussiness_logic.app_config import LoadAppConfig  # noqa: E402
+from bussiness_logic.app_config import LlmProfileName, LoadAppConfig  # noqa: E402
 from bussiness_logic.artifact_paths import ExtractProductIdFromUrl  # noqa: E402
 from bussiness_logic.utils.json_types import JsonMapping, JsonObject  # noqa: E402
-from bussiness_logic.bridge.factory import (  # noqa: E402
-    BuildRuntimeAdapter,
-    RuntimeAdapterBuildError,
+from bussiness_logic.bridge.factory import RuntimeAdapterBuildError  # noqa: E402
+from bussiness_logic.bridge.runtime_adapter import (  # noqa: E402
+    BuildOptionalPipelineRuntimeAdapter,
+    BuildPipelineRuntimeAdapter,
 )
-from bussiness_logic.bridge.selector import BuildLlmRuntimeConfigFromEnv  # noqa: E402
+from bussiness_logic.bridge.selector import UnsupportedLlmRuntimeError  # noqa: E402
 from bussiness_logic.bridge.schema import LlmGenerationOptions, LlmRequest  # noqa: E402
 from bussiness_logic.input_process.reconstruction import (  # noqa: E402
     ProductInputReconstructionService,
@@ -1167,8 +1168,8 @@ class KurlyMarketSmokeRunner:
 
     @staticmethod
     def _RequireLlmRuntime() -> str:
-        runtimeConfig = BuildLlmRuntimeConfigFromEnv(projectRootPath=PROJECT_ROOT_PATH)
-        runtimeAdapter = BuildRuntimeAdapter(runtimeConfig, requireAvailable=True)
+        runtimeAdapter = BuildPipelineRuntimeAdapter()
+        runtimeConfig = runtimeAdapter.RuntimeConfig()
         response = runtimeAdapter.Generate(
             LlmRequest(
                 system_prompt="You are a connection health check.",
@@ -1236,14 +1237,13 @@ class KurlyMarketSmokeRunner:
         if self._useLlmInputReconstruction:
             reconstructionLogger = self._Logger("_BuildInputReconstructionService")
             try:
-                runtimeAdapter = BuildRuntimeAdapter(
-                    BuildLlmRuntimeConfigFromEnv(projectRootPath=PROJECT_ROOT_PATH),
-                    requireAvailable=True,
+                runtimeAdapter = BuildPipelineRuntimeAdapter(
+                    LlmProfileName.INPUT_RECONSTRUCTION,
                 )
                 reconstructionLogger.info(
                     "pipeline_step=llm_reconstruction component=ProductInputReconstructionService agent=ProductFactReconstructionAgent output_dto=RuntimeAdapter llm_status=adapter_ready"
                 )
-            except RuntimeAdapterBuildError as error:
+            except (RuntimeAdapterBuildError, UnsupportedLlmRuntimeError) as error:
                 reconstructionLogger.warning(
                     "pipeline_step=llm_reconstruction component=ProductInputReconstructionService agent=ProductFactReconstructionAgent output_dto=RuntimeAdapter llm_status=unavailable error={}",
                     error,
@@ -1439,7 +1439,20 @@ class KurlyMarketSmokeRunner:
                 facts=rawInput,
                 store=store,
             )
-            HsCodeClassificationPipeline().Run(context)
+            HsCodeClassificationPipeline(
+                identityHintRuntimeAdapter=BuildOptionalPipelineRuntimeAdapter(
+                    LlmProfileName.IDENTITY_HINT,
+                ),
+                routingRuntimeAdapter=BuildOptionalPipelineRuntimeAdapter(
+                    LlmProfileName.HS2_ROUTER,
+                ),
+                selectionRuntimeAdapter=BuildOptionalPipelineRuntimeAdapter(
+                    LlmProfileName.CLASSIFICATION_SELECTOR,
+                ),
+                validationRuntimeAdapter=BuildOptionalPipelineRuntimeAdapter(
+                    LlmProfileName.CLASSIFICATION_VALIDATOR,
+                ),
+            ).Run(context)
             stepResults = list(context.stepResults)
             componentResults = list(context.componentResults)
             rawInput = context.rawInput

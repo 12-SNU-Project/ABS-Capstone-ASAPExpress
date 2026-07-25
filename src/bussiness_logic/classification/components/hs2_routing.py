@@ -15,6 +15,9 @@ class Hs2RoutingComponent(BasePipelineComponent):
     stage = "Regulatory_Domain_Routing"
     llm_model = None
 
+    def __init__(self, runtimeAdapter: object | None = None) -> None:
+        self._runtimeAdapter = runtimeAdapter
+
     def Run(self, store: BlackboardStore) -> None:
         bb = store.load()
         productUnderstanding = bb.get("product_understanding") or {}
@@ -26,6 +29,7 @@ class Hs2RoutingComponent(BasePipelineComponent):
 
         routeHint = SemanticChapterRouter(
             chapterRowsProvider=LoadPreClassificationChapterRows,
+            runtimeAdapter=self._runtimeAdapter,
         ).Route(productUnderstanding)
         routingDecisionId = store.next_id("route")
         routingContext = Hs2RoutingDecision(

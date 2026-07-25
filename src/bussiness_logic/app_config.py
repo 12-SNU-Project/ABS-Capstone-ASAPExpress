@@ -50,6 +50,7 @@ class LlmProfileName(str, Enum):
     INPUT_RECONSTRUCTION_GEMINI = "input_reconstruction_gemini"
     INPUT_RECONSTRUCTION_CLAUDE = "input_reconstruction_claude"
     IDENTITY_HINT = "identity_hint"
+    HS2_ROUTER = "hs2_router"
     CLASSIFICATION_SELECTOR = "classification_selector"
     CLASSIFICATION_VALIDATOR = "classification_validator"
     CN_PREDICATE_COMPILER = "cn_predicate_compiler"

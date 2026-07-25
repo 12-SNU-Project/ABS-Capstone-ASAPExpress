@@ -1,35 +1,47 @@
 import DataTable from "@/components/DataTable";
-import { RoutingScoreLabel, RoutingTermLabel } from "@/lib/labels.js";
-import { asList, asObject, clean } from "@/lib/format.js";
+import { asList, asObject, clean, previewValue } from "@/lib/format.js";
 import { EvidenceTerms, FactLabel } from "./EvidenceElements";
+
+const AUTHORITY_LABELS = {
+  chapter_title: "챕터 명칭",
+  chapter_including: "포함 범위",
+  chapter_excluding: "제외 범위",
+  allowed_processing_scope: "허용 가공 범위",
+  classification_decision_axes: "분류 판단 기준",
+  routing_guardrails: "라우팅 제한 기준",
+  prepared_food_redirect_chapters: "가공식품 전환 기준",
+};
+
+function FactBindingLabel(binding) {
+  const source = asObject(binding);
+  const path = clean(source.path);
+  const field = path.split(".").at(-1);
+  const value = previewValue(source.value, 80);
+  return [FactLabel(field), value].filter(Boolean).join(": ");
+}
 
 export default function TariffRoutingPanel({ result }) {
   const routingView = asObject(result?.routing_view);
-  const understandingView = asObject(result?.product_understanding_view);
-  const hints = asObject(understandingView.identity_hints);
-  const chapterDetails = asList(routingView.candidate_chapter_details).map((detail) => {
+  const chapterDetails = asList(routingView.candidate_chapter_details).map((detail, index) => {
     const source = asObject(detail);
-    const scoreBreakdown = Object.entries(asObject(source.score_breakdown)).flatMap(
-      ([key, amount]) => {
-        const score = Number(amount);
-        return Number.isFinite(score) && score !== 0
-          ? [`${RoutingScoreLabel(key)} ${score > 0 ? "+" : ""}${score}`]
-          : [];
-      },
-    );
+    const supportStatus = clean(source.support_status);
     return {
+      rank: Number(source.rank) || index + 1,
       chapter: clean(source.chapter),
-      score: source.score,
-      scoreBreakdown: scoreBreakdown.length ? scoreBreakdown : ["세부 점수 기록 없음"],
-      rawEvidence: asList(source.matched_terms).length
-        ? asList(source.matched_terms).slice(0, 4).map(RoutingTermLabel)
-        : ["기록된 어휘 없음"],
+      status: source.selected
+        ? "선택 후보"
+        : supportStatus === "supported"
+          ? "근거 확인"
+          : "추가 검토",
+      reason: clean(source.reason) || "Semantic 판단 근거가 기록되지 않았습니다.",
+      factEvidence: asList(source.fact_bindings).map(FactBindingLabel).filter(Boolean),
+      authorityEvidence: asList(source.authority_bindings)
+        .map((field) => AUTHORITY_LABELS[clean(field)] || clean(field).replaceAll("_", " "))
+        .filter(Boolean),
     };
   });
   const missingFacts = asList(routingView.missing_facts).map(FactLabel);
   const topChapter = chapterDetails[0];
-  const scoredChapters = chapterDetails.filter((detail) => Number(detail.score) > 0).slice(0, 5);
-  const comparedChapters = scoredChapters.length ? scoredChapters : chapterDetails.slice(0, 5);
 
   return (
     <div className="cjs-panel cjs-routing-panel">
@@ -38,13 +50,9 @@ export default function TariffRoutingPanel({ result }) {
         <>
           <div className="cjs-routing-summary">
             <div className="cjs-routing-primary-result">
-              <span>현재 1순위 후보</span>
+              <span>Semantic 라우팅 결과</span>
               <div><small>HS2</small><strong>{topChapter.chapter}</strong></div>
-            </div>
-            <div className="cjs-routing-score-result">
-              <span>상대 점수</span>
-              <strong>{topChapter.score}</strong>
-              <small>확률이나 신뢰도가 아닌 후보 비교값</small>
+              <p>{topChapter.reason}</p>
             </div>
           </div>
 
@@ -56,41 +64,32 @@ export default function TariffRoutingPanel({ result }) {
           ) : null}
 
           <div className="cjs-routing-section-heading">
-            <strong>{scoredChapters.length ? "점수를 받은 후보" : "비교 후보"}</strong>
-            <span>같은 실행 안에서 상위 5개까지 비교합니다.</span>
+            <strong>Semantic 후보 순서</strong>
+            <span>숫자 점수가 아닌 상품 근거와 챕터 기준의 연결 순서입니다.</span>
           </div>
           <DataTable
-            rows={comparedChapters}
+            rows={chapterDetails}
             limit={5}
             className="cjs-routing-table"
             columns={[
+              { key: "rank", label: "순서", variant: "mono" },
               { key: "chapter", label: "HS2 챕터", variant: "mono" },
-              { key: "score", label: "상대 점수", variant: "mono" },
-              { key: "scoreBreakdown", label: "점수 구성", variant: "chips" },
+              { key: "status", label: "판단 상태" },
+              { key: "reason", label: "선택 근거" },
             ]}
           />
 
           <details className="cjs-secondary-evidence cjs-routing-details">
-            <summary>사전 힌트와 전체 후보 근거 보기</summary>
-            <div className="cjs-subpanel-title cjs-first">상품 이해에서 전달된 사전 힌트</div>
-            {clean(hints.chapter_hint_basis) ? (
-              <p className="cjs-desc-text">{clean(hints.chapter_hint_basis)}</p>
-            ) : (
-              <div className="cjs-muted">기록된 챕터 사전 힌트가 없습니다.</div>
-            )}
-            <EvidenceTerms label="챕터 힌트" terms={hints.chapter_hint_terms} />
-            <EvidenceTerms label="챕터 기준 어휘" terms={hints.chapter_hint_source_terms} />
-            <EvidenceTerms label="라우팅 어휘" terms={understandingView.routing_terms} />
-
-            <div className="cjs-subpanel-title">후보별 원문 근거</div>
+            <summary>Semantic 판단 근거 보기</summary>
+            <div className="cjs-subpanel-title cjs-first">후보별 근거 연결</div>
             <DataTable
               rows={chapterDetails}
               limit={chapterDetails.length}
               className="cjs-routing-detail-table"
               columns={[
                 { key: "chapter", label: "HS2 챕터", variant: "mono" },
-                { key: "score", label: "상대 점수", variant: "mono" },
-                { key: "rawEvidence", label: "라우팅에서 확인한 어휘", variant: "chips" },
+                { key: "factEvidence", label: "사용한 상품 근거", variant: "chips" },
+                { key: "authorityEvidence", label: "참조한 챕터 기준", variant: "chips" },
               ]}
             />
 

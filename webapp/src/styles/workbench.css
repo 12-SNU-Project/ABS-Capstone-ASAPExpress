@@ -378,23 +378,27 @@ summary.cjs-panel-title {
   margin-top: 8px;
 }
 
-.cjs-routing-table .cjs-table :is(th, td):nth-child(1), .cjs-routing-detail-table .cjs-table :is(th, td):nth-child(1) { width: 18%; }
-.cjs-routing-table .cjs-table :is(th, td):nth-child(2), .cjs-routing-detail-table .cjs-table :is(th, td):nth-child(2) { width: 18%; }
-.cjs-routing-table .cjs-table :is(th, td):nth-child(3), .cjs-routing-detail-table .cjs-table :is(th, td):nth-child(3) { width: 64%; }
+.cjs-routing-table .cjs-table :is(th, td):nth-child(1) { width: 10%; }
+.cjs-routing-table .cjs-table :is(th, td):nth-child(2) { width: 14%; }
+.cjs-routing-table .cjs-table :is(th, td):nth-child(3) { width: 18%; }
+.cjs-routing-table .cjs-table :is(th, td):nth-child(4) { width: 58%; }
+.cjs-routing-detail-table .cjs-table :is(th, td):nth-child(1) { width: 18%; }
+.cjs-routing-detail-table .cjs-table :is(th, td):nth-child(2),
+.cjs-routing-detail-table .cjs-table :is(th, td):nth-child(3) { width: 41%; }
 
 .cjs-routing-table .cjs-table th {
   font-size: 13px;
 }
 
-.cjs-routing-table .cjs-table td:first-child {
+.cjs-routing-table .cjs-table td:nth-child(2) {
   color: var(--cjs-text);
   font-size: 18px;
   font-weight: 800;
 }
 
-.cjs-routing-table .cjs-table td:nth-child(2) {
+.cjs-routing-table .cjs-table td:first-child {
   color: var(--cjs-accent);
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 800;
 }
 
@@ -448,23 +452,16 @@ summary.cjs-panel-title {
 }
 
 .cjs-routing-summary {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.45fr);
-  gap: 24px;
-  align-items: end;
   padding: 18px 0;
   border-block: 1px solid var(--cjs-border);
 }
 
-.cjs-routing-primary-result,
-.cjs-routing-score-result {
+.cjs-routing-primary-result {
   display: grid;
   gap: 4px;
 }
 
-.cjs-routing-primary-result > span,
-.cjs-routing-score-result > span,
-.cjs-routing-score-result > small {
+.cjs-routing-primary-result > span {
   color: var(--cjs-muted);
   font-size: 12px;
   font-weight: 650;
@@ -489,15 +486,12 @@ summary.cjs-panel-title {
   line-height: 1;
 }
 
-.cjs-routing-score-result {
-  justify-self: end;
-  text-align: right;
-}
-
-.cjs-routing-score-result strong {
-  color: var(--cjs-text);
-  font-size: 22px;
-  line-height: 1;
+.cjs-routing-primary-result p {
+  color: var(--cjs-muted);
+  font-size: 14px;
+  line-height: 1.55;
+  margin: 8px 0 0;
+  max-width: 760px;
 }
 
 .cjs-routing-warning {
@@ -548,16 +542,6 @@ summary.cjs-panel-title {
 }
 
 @media (max-width: 900px) {
-  .cjs-routing-summary {
-    grid-template-columns: 1fr;
-    gap: 14px;
-  }
-
-  .cjs-routing-score-result {
-    justify-self: start;
-    text-align: left;
-  }
-
   .cjs-routing-warning {
     grid-template-columns: 1fr;
     gap: 3px;

@@ -11,20 +11,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 from collections.abc import Mapping, Sequence
 
-from bussiness_logic.bridge.runtime_adapter import BuildPipelineRuntimeAdapter
 from bussiness_logic.bridge.schema import (
     LlmGenerationOptions,
     LlmRequest,
     LlmResponseFormat,
 )
-from bussiness_logic.classification.services.pre_classification_router import (
-    CHAPTER_DOMAIN_FALLBACK,
-    PreClassificationRouteHint,
-    PreClassificationRoutingBasis,
+from bussiness_logic.classification.model.semantic_chapter_routing import (
+    SemanticChapterRouteHint,
+    SemanticChapterRoutingBasis,
 )
 
 
@@ -99,13 +96,23 @@ _AUTHORITY_FIELDS = frozenset({
     "prepared_food_redirect_chapters",
 })
 
-_adapter_cache: list[object] = []
 
-
-def _GetAdapter() -> object:
-    if not _adapter_cache:
-        _adapter_cache.append(BuildPipelineRuntimeAdapter())
-    return _adapter_cache[0]
+_CHAPTER_DOMAIN_FALLBACK: dict[str, tuple[str, ...]] = {
+    **{
+        chapter: ("food",)
+        for chapter in (
+            "06", "07", "08", "09", "10", "11", "12", "13", "14", "15",
+            "17", "18", "19", "20", "21", "22", "24",
+        )
+    },
+    **{
+        chapter: ("food", "animal_origin")
+        for chapter in ("02", "03", "04", "16", "23")
+    },
+    "01": ("animal_origin",),
+    "05": ("animal_origin",),
+    "33": ("cosmetics",),
+}
 
 
 def _ReadPath(data: Mapping[str, object], path: str) -> object:
@@ -303,14 +310,16 @@ class SemanticChapterRouter:
         *,
         chapterRowsProvider,
         runtimeAdapter: object | None = None,
+        maxTokens: int = 2048,
     ) -> None:
         self._chapterRowsProvider = chapterRowsProvider
         self._runtimeAdapter = runtimeAdapter
+        self._maxTokens = max(1, maxTokens)
 
     def Route(
         self,
         productUnderstanding: Mapping[str, object],
-    ) -> PreClassificationRouteHint:
+    ) -> SemanticChapterRouteHint:
         rows = tuple(self._chapterRowsProvider())
         cards = BuildChapterAuthorityCards(rows)
         if not cards:
@@ -333,17 +342,23 @@ class SemanticChapterRouter:
             (_SYSTEM_PROMPT + "\n" + userPrompt).encode("utf-8")
         ).hexdigest()[:16]
 
+        if self._runtimeAdapter is None:
+            return self._Failure(
+                "semantic_runtime_not_configured",
+                rowCount=len(rows),
+                promptHash=promptHash,
+                authorityHash=authorityHash,
+            )
+
         try:
-            adapter = self._runtimeAdapter or _GetAdapter()
-            response = adapter.Generate(
+            response = self._runtimeAdapter.Generate(
                 LlmRequest(
                     user_prompt=userPrompt,
                     system_prompt=_SYSTEM_PROMPT,
                     response_format=LlmResponseFormat.JSON_OBJECT,
                     generation_options=LlmGenerationOptions(
                         temperature=0,
-                        max_tokens=int(os.environ.get(
-                            "ASAP_HS2_SEMANTIC_MAX_TOKENS", "2048")),
+                        max_tokens=self._maxTokens,
                     ),
                 )
             )
@@ -417,7 +432,7 @@ class SemanticChapterRouter:
         selectedRow = rowByChapter.get(selected, {})
         domainScopes = self._SplitValues(selectedRow.get("domain_scope_candidates"))
         if not domainScopes:
-            domainScopes = list(CHAPTER_DOMAIN_FALLBACK.get(selected, ()))
+            domainScopes = list(_CHAPTER_DOMAIN_FALLBACK.get(selected, ()))
         preGateDomains = self._SplitValues(
             selectedRow.get("pre_gate_domain_candidates"))
         rejected = [
@@ -449,7 +464,7 @@ class SemanticChapterRouter:
             "runtime_path": str(getattr(response, "runtimePath", "") or ""),
             "response_id": str(getattr(response, "responseId", "") or ""),
         }
-        return PreClassificationRouteHint(
+        return SemanticChapterRouteHint(
             candidateHs2=(selected, *alternatives),
             blockedHs2=tuple(
                 item["chapter"] for item in rejected
@@ -457,8 +472,8 @@ class SemanticChapterRouter:
             ),
             domainScopes=tuple(domainScopes),
             preGateDomains=tuple(preGateDomains),
-            routingBasis=PreClassificationRoutingBasis(
-                method="semantic_closed_choice_codex",
+            routingBasis=SemanticChapterRoutingBasis(
+                method="semantic_closed_choice_llm",
                 sourceTable="cn_chapter_index",
                 rowCount=len(rows),
             ),
@@ -489,10 +504,10 @@ class SemanticChapterRouter:
         promptHash: str = "",
         authorityHash: str = "",
         parsedDecision: Mapping[str, object] | None = None,
-    ) -> PreClassificationRouteHint:
-        return PreClassificationRouteHint(
-            routingBasis=PreClassificationRoutingBasis(
-                method="semantic_closed_choice_codex_unresolved",
+    ) -> SemanticChapterRouteHint:
+        return SemanticChapterRouteHint(
+            routingBasis=SemanticChapterRoutingBasis(
+                method="semantic_closed_choice_llm_unresolved",
                 blockedReason=reason,
                 sourceTable="cn_chapter_index",
                 rowCount=rowCount,

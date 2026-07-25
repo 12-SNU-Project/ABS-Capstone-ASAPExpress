@@ -4,8 +4,6 @@ import {
   BuildCandidateHierarchy,
   ClassificationStepForResult,
   DocumentReasonLabel,
-  RoutingScoreLabel,
-  RoutingTermLabel,
   UnderstandingValueLabel,
 } from "./labels.js";
 import {
@@ -66,20 +64,6 @@ test("분류 SSE의 최신 단계와 완료 상태를 4단계 화면에 연결�
     events: [{ stage: "Classification_Component" }],
   }), "hierarchy");
   assert.equal(ClassificationStepForResult({ job_status: "completed" }), "review");
-});
-
-test("HS2 라우팅 내부 용어를 근거가 남는 사용자 문구로 바꾼다", () => {
-  assert.equal(RoutingTermLabel("prepared_food_redirect_bonus"), "가공식품 분류 가산");
-  assert.equal(
-    RoutingTermLabel("absorbed:molluscs aquatic<fish crustaceans molluscs aquatic"),
-    "연관 어휘 일치: 연체동물류 · 수생",
-  );
-  assert.equal(
-    RoutingTermLabel("universal_scope_muted:boiled,cooked"),
-    "범용 가공 어휘(점수 제외): 삶음 · 조리",
-  );
-  assert.equal(RoutingScoreLabel("chapter_keywords"), "챕터 핵심어 일치");
-  assert.equal(RoutingScoreLabel("prepared_scope"), "가공식품 범위 일치");
 });
 
 test("분류 Trace 내부 판정값을 사용자 문구로 바꾼다", () => {

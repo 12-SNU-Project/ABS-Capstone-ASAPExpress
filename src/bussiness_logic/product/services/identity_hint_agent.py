@@ -52,15 +52,18 @@ WCO_SECTIONS: tuple[tuple[str, str, str], ...] = (
 DOMAIN_HINT_VOCAB = tuple(s[0] for s in WCO_SECTIONS)
 
 # [축질문 재설계 · 07-23 설계자 승인] 닫힌 enum은 기존 닫힌집합에서 유도
-# (수기 목록 0): 형태=_FORM_VOCAB(축스탬프 정본), 가공=_PREPARED/_RAW
-# STATE(라우터 정본 — frozen/chilled 등 보존어는 보존 슬롯으로 분리).
+# (수기 목록 0): 형태=_FORM_VOCAB(축스탬프 정본), 가공=분류 상태 어휘
+# (frozen/chilled 등 보존어는 보존 슬롯으로 분리).
 from bussiness_logic.classification.services.axis_verdict import (  # noqa: E402
     _FORM_VOCAB as _AXIS_FORM_VOCAB,
 )
-from bussiness_logic.classification.services.pre_classification_router import (  # noqa: E402
-    _PREPARED_STATE_WORDS as _PROC_PREPARED,
-    _RAW_STATE_WORDS as _PROC_RAW,
-)
+_PROC_RAW = frozenset({
+    "raw", "fresh", "frozen", "chilled", "minced", "dried", "live", "whole",
+})
+_PROC_PREPARED = frozenset({
+    "prepared", "cooked", "seasoned", "smoked", "roasted", "boiled", "fried",
+    "steamed", "preserved", "processed", "instant",
+})
 _PROC_ENUM = sorted(_PROC_PREPARED | (_PROC_RAW - {"frozen", "chilled", "whole", "minced", "live"}))
 _FORM_ENUM = sorted(_AXIS_FORM_VOCAB)
 
@@ -259,14 +262,6 @@ def _vocab_grounded_terms(values: object, *, limit: int) -> tuple[str, ...]:
             seen.add(g)
             out.append(g)
     return tuple(out[:limit])
-
-
-def _get_adapter() -> object:
-    if not _adapter_cache:
-        from bussiness_logic.bridge.runtime_adapter import BuildPipelineRuntimeAdapter
-
-        _adapter_cache.append(BuildPipelineRuntimeAdapter())
-    return _adapter_cache[0]
 
 
 def _extract_json(text: str) -> dict[str, object]:
