@@ -196,6 +196,161 @@ def test_no_to_positive_question_confirms_not_contains_predicate() -> None:
     assert details[-1]["verdict"] == "true"
 
 
+def test_answer_replay_preserves_alt_group_or_semantics() -> None:
+    first = {
+        **_detail(value='["uncooked"]'),
+        "alt_group": "preparation",
+    }
+    second = {
+        **_detail(value='["steamed"]'),
+        "alt_group": "preparation",
+    }
+    facts = []
+    for detail, answer, answer_id in (
+        (first, "yes", "qa_001"),
+        (second, "no", "qa_002"),
+    ):
+        facts.append({
+            "question_key": BuildClassificationQuestionKey(
+                stage="hs6",
+                parentCode="0710",
+                candidateCode="071080",
+                axis="material_composition",
+                canonicalField="composition_facts.ingredient_classes",
+                conditionValue=detail["value"],
+                predicateOp="contains",
+            ),
+            "answer": answer,
+            "answer_id": answer_id,
+        })
+
+    status, _, keys = ApplyClassificationAnswers(
+        decisionStatus="undecided",
+        decisionDetail=[first, second],
+        productFacts={"_classification_answer_facts": facts},
+        stage="hs6",
+        parentCode="0710",
+        candidateCode="071080",
+    )
+
+    assert status == "confirmed"
+    assert len(keys) == 2
+
+
+def test_generic_not_contains_question_asks_positive_fact() -> None:
+    from bussiness_logic.classification.services.staged_classification import (
+        StagedClassificationTool,
+    )
+
+    questions = StagedClassificationTool._question_options(
+        [{
+            "code": "190211",
+            "descr": "Containing eggs",
+            "decision": "undecided",
+            "decision_detail": [{
+                "cond": "exclusion_boundary",
+                "op": "not_contains",
+                "verdict": "silent",
+                "field": "composition_facts.ingredient_classes",
+                "value": '["egg"]',
+            }],
+        }],
+        level="hs6",
+        parents=["1902"],
+        bti_summons=[],
+    )
+
+    assert questions[0]["question_text"] == (
+        "제품에 다음 분류 특성 또는 값이 존재합니까: egg?"
+    )
+
+
+def test_hs6_context_uses_question_contract_without_offline_csv() -> None:
+    from bussiness_logic.classification.services.staged_classification import (
+        StagedClassificationTool,
+    )
+
+    tool = StagedClassificationTool()
+    items = [
+        {
+            "code": "160551",
+            "row": {
+                "code": "160551",
+                "parent_code": "1605",
+                "branch_context": "Octopus, prepared or preserved",
+                "option_label_en": "Octopus",
+                "residual_other_flag": "false",
+            },
+        },
+        {
+            "code": "160552",
+            "row": {
+                "code": "160552",
+                "parent_code": "1605",
+                "branch_context": "Scallops, prepared or preserved",
+                "option_label_en": "Scallops",
+                "residual_other_flag": "false",
+            },
+        },
+    ]
+
+    ranked = tool._rank_sibling_group(
+        items,
+        {},
+        set(),
+        [],
+        discrete_only=True,
+        level="hs6",
+    )
+    questions = tool._question_options(
+        ranked,
+        level="hs6",
+        parents=["1605"],
+        bti_summons=[],
+    )
+
+    assert ranked[0]["context_decision"] == "undecided"
+    assert questions[0]["question_text"] == (
+        "제품이 다음 HS6 분류 범위에 해당합니까: "
+        "Octopus, prepared or preserved?"
+    )
+
+    answered = tool._rank_sibling_group(
+        items,
+        {
+            "_classification_answer_facts": [{
+                "question_key": questions[0]["question_key"],
+                "answer": "yes",
+            }]
+        },
+        set(),
+        [],
+        discrete_only=True,
+        level="hs6",
+    )
+
+    assert answered[0]["context_decision"] == "confirmed"
+    assert answered[1]["context_decision"] == "undecided"
+
+    rejected = tool._rank_sibling_group(
+        items,
+        {
+            "_classification_answer_facts": [{
+                "question_key": questions[0]["question_key"],
+                "answer": "no",
+            }]
+        },
+        set(),
+        [],
+        discrete_only=True,
+        level="hs6",
+    )
+    rejected[0]["decision"] = "confirmed"
+
+    assert rejected[0]["context_decision"] == "violated"
+    assert tool._authoritative_selection([rejected[0]]) == ("", "none")
+
+
 def _confirmed(code: str) -> dict:
     return {
         "code": code,
