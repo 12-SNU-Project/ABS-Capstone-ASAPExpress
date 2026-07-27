@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   BuildDocumentPackageOptions,
+  PrioritizeRecommendedDocumentPackage,
   ResolveDocumentPackageSelection,
 } from "@/features/classification/model/classificationViewModel.js";
 import { importClassification } from "@/lib/enterpriseApi.js";
@@ -48,6 +49,11 @@ export default function DocumentRecommendationPanel({ result, viewModel, selecte
     : { taric: "", manual: false };
   const resolvedSelection = ResolveDocumentPackageSelection(packages, currentSelection);
   const selectedTaric = resolvedSelection.taric;
+  const recommendedTaric = ResolveDocumentPackageSelection(packages).taric;
+  const displayPackages = PrioritizeRecommendedDocumentPackage(
+    packages,
+    recommendedTaric,
+  );
 
   useEffect(() => {
     setProjectError("");
@@ -81,10 +87,12 @@ export default function DocumentRecommendationPanel({ result, viewModel, selecte
       </div>
       {packages.length ? (
         <div className="divide-y">
-          {packages.map(({ taric, group, matchLevel }, index) => {
+          {displayPackages.map(({ taric, group, matchLevel }) => {
             const summary = PackageSummary(group);
             const selected = selectedTaric === taric;
-            const branchIndex = Number(asObject(asList(group)[0]).taric10_branch_index) || index + 1;
+            const originalIndex = packages.findIndex((option) => option.taric === taric);
+            const branchIndex = Number(asObject(asList(group)[0]).taric10_branch_index)
+              || originalIndex + 1;
             return (
               <article className={`grid gap-3 px-4 py-4 transition-colors sm:grid-cols-[minmax(180px,1.3fr)_repeat(4,minmax(90px,0.7fr))_auto] sm:items-center sm:px-5 ${selected ? "bg-primary/5" : "hover:bg-muted/50"}`} key={taric}>
                 <label className="flex min-w-0 cursor-pointer items-center gap-3">

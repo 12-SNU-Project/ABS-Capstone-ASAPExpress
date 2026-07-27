@@ -139,6 +139,18 @@ export function ResolveDocumentPackageSelection(options, currentSelection = {}) 
   return { taric: clean(best?.taric), manual: false };
 }
 
+export function PrioritizeRecommendedDocumentPackage(options, recommendedTaric) {
+  const target = clean(recommendedTaric);
+  return asList(options)
+    .map((option, index) => ({ option, index }))
+    .sort((left, right) => (
+      Number(clean(right.option.taric) === target)
+      - Number(clean(left.option.taric) === target)
+      || left.index - right.index
+    ))
+    .map(({ option }) => option);
+}
+
 export function useClassificationViewModel(result) {
   return useMemo(() => {
     const candidateSet = asObject(result?.candidate_code_set);
