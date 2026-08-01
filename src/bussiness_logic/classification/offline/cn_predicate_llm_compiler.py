@@ -41,7 +41,7 @@ _TAXONOMY_CSV_PATH = None  # 지연 로드
 def _taxonomy_rows():
     import csv
     from pathlib import Path as _P
-    path = _P(__file__).resolve().parents[4] / "data" / "classification_criterion_taxonomy_20260702.csv"
+    path = _P(__file__).resolve().parents[4] / "data" / "decription_taxonomy.csv"
     return [r for r in csv.DictReader(open(path, encoding="utf-8-sig"))
             if str(r.get("criterion_type")) != "residual_other"]
 _AXES_V2 = frozenset(r["criterion_type"] for r in _taxonomy_rows())

@@ -210,7 +210,7 @@ def _LoadDictionaries(cursor: Any) -> None:
     stdPath = PROJECT_ROOT / "data/std_name_dictionary.jsonl"
     curatedPath = PROJECT_ROOT / "data/curated_term_bridge.jsonl"
     foodPath = PROJECT_ROOT / "data/food_type_dictionary.json"
-    criterionPath = PROJECT_ROOT / "data/classification_criterion_taxonomy_20260702.csv"
+    criterionPath = PROJECT_ROOT / "data/decription_taxonomy.csv"
 
     stdRows, stdHash = _JsonLines(stdPath)
     cursor.execute("TRUNCATE std_name_dictionary RESTART IDENTITY")
@@ -523,7 +523,7 @@ def Plan() -> None:
     curatedRows, _ = _JsonLines(PROJECT_ROOT / "data/curated_term_bridge.jsonl")
     foodPayload, _ = _JsonPayload(PROJECT_ROOT / "data/food_type_dictionary.json")
     criterionRows, _ = _CsvRows(
-        PROJECT_ROOT / "data/classification_criterion_taxonomy_20260702.csv"
+        PROJECT_ROOT / "data/decription_taxonomy.csv"
     )
     smokeRows, smokeHash = _CsvRows(PROJECT_ROOT / "data/EU_HS_test.csv")
     smokeValues = _BuildSmokeCaseValues(smokeRows, smokeHash)
