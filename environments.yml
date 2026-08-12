@@ -1,0 +1,35 @@
+name: asap_pw
+
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.12
+  - pip
+  - flask
+  - numpy
+  - pandas
+  - pydantic
+  - pyyaml
+  - rapidfuzz
+  - requests
+  - sqlalchemy
+  - pytest
+  - pip:
+      # Runtime validation / optional admin tooling
+      - jsonschema
+      - openai>=2.30.0
+      - psycopg2-binary
+
+      # Product page rendering and OCR
+      # After environment creation, install browser binaries with:
+      #   python -m playwright install chromium
+      - playwright
+      - opencv-python
+      - paddlepaddle>=3.3,<3.4
+      - paddleocr[doc-parser]>=3.7,<3.8
+
+      # Semantic CN candidate retrieval
+      - sentence-transformers
+      - torch

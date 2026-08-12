@@ -1,0 +1,68 @@
+# Example deployment configuration. Secrets belong in the service-specific .env file.
+
+[llm]
+runtime = "openai"
+provider = "google_ai_studio"
+model = "gemini-3.5-flash"
+endpoint_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+chat_completions_path = "/chat/completions"
+timeout_seconds = 120
+supports_response_format = true
+reasoning_effort = "minimal"
+api_key_env = "EU_EXPORT_GOOGLE_AI_STUDIO_KEY"
+
+[llm_profiles.product_vlm]
+runtime = "openai"
+provider = "openai"
+model = "gpt-5-mini"
+supports_response_format = true
+reasoning_effort = "minimal"
+api_key_env = "EU_EXPORT_OPENAI_KEY"
+
+[llm_profiles.input_reconstruction]
+runtime = "openai"
+provider = "google_ai_studio"
+model = "gemini-3.5-flash"
+api_key_env = "EU_EXPORT_GOOGLE_AI_STUDIO_KEY"
+
+[llm_profiles.identity_hint]
+runtime = "anthropic"
+provider = "anthropic"
+model = "claude-sonnet-4-6"
+api_key_env = "EU_EXPORT_ANTHROPIC_KEY"
+
+[llm_profiles.classification_selector]
+runtime = "openai"
+provider = "google_ai_studio"
+model = "gemini-3.5-flash"
+api_key_env = "EU_EXPORT_GOOGLE_AI_STUDIO_KEY"
+
+[llm_profiles.classification_validator]
+runtime = "openai"
+provider = "openai"
+model = "gpt-5-mini"
+supports_response_format = true
+reasoning_effort = "minimal"
+api_key_env = "EU_EXPORT_OPENAI_KEY"
+
+[embedding]
+enabled = true
+local_files_only = false
+
+[web]
+backend_host = "127.0.0.1"
+backend_port = 8060
+allowed_frontend_origins = [
+    "http://127.0.0.1:8050",
+    "http://localhost:8050",
+]
+
+[kurly_smoke]
+run_ocr_fallback = true
+use_structured_ocr = true
+structured_ocr_provider = "llm_bridge"
+use_input_reconstruction = true
+use_llm_input_reconstruction = true
+structured_ocr_vl_rec_backend = "mlx-vlm-server"
+structured_ocr_vl_rec_server_url = "http://localhost:8111/"
+structured_ocr_vl_rec_api_model_name = "PaddlePaddle/PaddleOCR-VL-1.6"

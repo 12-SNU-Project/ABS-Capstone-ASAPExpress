@@ -1,0 +1,596 @@
+.ddv-requirement-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.ddv-procedure-card {
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  padding: 18px 0;
+}
+
+.ddv-procedure-card:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+
+
+.ddv-procedure-card.exporter,
+.ddv-procedure-card.broker {
+  background: transparent;
+}
+
+.ddv-procedure-card.exporter {
+  padding-inline: 0;
+}
+
+.ddv-procedure-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.ddv-procedure-card-head strong {
+  font-size: 1.125rem;
+  line-height: 1.35;
+}
+
+.ddv-procedure-card-head span {
+  color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 10%, transparent);
+  border-radius: 999px;
+  padding: 5px 8px;
+  font-size: 0.875rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.ddv-cert-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.ddv-cert-row {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  gap: 10px;
+  border-top: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
+  padding-top: 10px;
+}
+
+.ddv-cert-row > span {
+  color: var(--primary);
+  font-weight: 800;
+}
+
+.ddv-cert-row strong {
+  display: block;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.ddv-cert-row p {
+  color: var(--muted-foreground);
+  font-size: 1rem;
+  margin: 4px 0 0;
+  line-height: 1.6;
+}
+
+.ddv-cert-row em {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
+  font-style: normal;
+  line-height: 1.45;
+  margin-top: 6px;
+}
+
+.ddv-group-guidance {
+  border: 0;
+  border-left: 3px solid color-mix(in oklch, var(--primary) 45%, transparent);
+  border-radius: 0;
+  background: transparent;
+  margin-top: 14px;
+  padding: 2px 0 2px 16px;
+  width: 100%;
+}
+
+.ddv-group-guidance.compact {
+  margin-top: 0;
+  padding: 2px 0 2px 16px;
+}
+
+.ddv-group-guidance h3,
+.ddv-guidance-checkpoints strong {
+  display: block;
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.ddv-group-guidance p {
+  color: var(--foreground);
+  font-size: 1rem;
+  line-height: 1.65;
+  margin: 0;
+  max-width: 920px;
+}
+
+.ddv-group-guidance p + p {
+  margin-top: 8px;
+}
+
+.ddv-guidance-section {
+  border-top: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.ddv-guidance-section strong {
+  display: block;
+  font-size: 1rem;
+  margin-bottom: 8px;
+}
+
+.ddv-guidance-section ul,
+.ddv-guidance-section ol {
+  color: var(--foreground);
+  display: grid;
+  font-size: 1rem;
+  gap: 7px;
+  line-height: 1.65;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.ddv-guidance-section li::marker {
+  color: var(--primary);
+  font-weight: 800;
+}
+
+.ddv-guidance-section .ddv-guidance-step-list {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ddv-guidance-step {
+  align-items: start;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 30px minmax(0, 1fr);
+  padding: 9px 10px;
+  transition: background-color 180ms ease-out, color 180ms ease-out;
+}
+
+.ddv-guidance-step:hover {
+  background: color-mix(in oklch, var(--primary) 6%, transparent);
+}
+
+.ddv-guidance-step-number {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  display: inline-flex;
+  font-size: 0.8rem;
+  font-weight: 800;
+  height: 26px;
+  justify-content: center;
+  transition: background-color 180ms ease-out, border-color 180ms ease-out, color 180ms ease-out;
+  width: 26px;
+}
+
+.ddv-guidance-step:hover .ddv-guidance-step-number {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.ddv-guidance-checkpoints {
+  border-top: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.ddv-guidance-checkpoints ul {
+  color: var(--muted-foreground);
+  font-size: 1rem;
+  line-height: 1.65;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.ddv-footnote-guidelines {
+  margin-top: 14px;
+}
+
+.ddv-footnote-guidelines {
+  border-top: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
+  margin-top: 14px;
+  padding-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.ddv-requirement-list .ddv-footnote-guidelines {
+  border-top: 0;
+  border-bottom: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
+  margin-top: 14px;
+  padding-top: 0;
+  padding-bottom: 14px;
+}
+
+.ddv-footnote-guidelines h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.ddv-footnote-guide {
+  border: 0;
+  border-left: 3px solid color-mix(in oklch, var(--primary) 32%, transparent);
+  background: color-mix(in oklch, var(--primary) 8%, transparent);
+  border-radius: 0;
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 10px;
+  padding: 10px;
+}
+
+.ddv-footnote-guide > span {
+  color: var(--primary);
+  font-weight: 800;
+}
+
+.ddv-footnote-guide p {
+  color: var(--foreground);
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.ddv-footnote-guide p + p {
+  margin-top: 6px;
+  color: var(--muted-foreground);
+}
+
+.ddv-footnote-guide em {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
+  font-style: normal;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+
+.ddv-review-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-top: 14px;
+}
+
+.ddv-review-grid > div {
+  border: 0;
+  border-left: 2px solid color-mix(in oklch, var(--primary) 22%, transparent);
+  border-radius: 0;
+  background: transparent;
+  min-width: 0;
+  padding: 2px 12px;
+}
+
+.ddv-review-grid span {
+  color: var(--muted-foreground);
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 800;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.ddv-review-grid strong {
+  display: block;
+  font-size: 1rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.ddv-broker-section {
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  margin-top: 20px;
+  padding: 18px 0 0;
+}
+
+.ddv-broker-section h3 {
+  font-size: 1.125rem;
+  margin: 0 0 12px;
+}
+
+.ddv-broker-review-list {
+  border: 1px solid color-mix(in oklch, var(--official-source) 14%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklch, var(--official-source) 7%, var(--surface));
+  display: grid;
+  gap: 7px;
+  margin-bottom: 12px;
+  padding: 12px;
+}
+
+.ddv-broker-review-list p {
+  color: var(--foreground);
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.ddv-evidence-list {
+  color: var(--muted-foreground);
+  display: grid;
+  gap: 6px;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.ddv-source-section-list {
+  background: transparent;
+  border: 0;
+  border-left: 2px solid var(--border);
+  border-radius: 0;
+  padding: 2px 0 2px 12px;
+}
+
+.ddv-source-section-list > strong {
+  display: block;
+  font-size: 0.95rem;
+  margin-bottom: 8px;
+}
+
+.ddv-source-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.ddv-footnote-guidelines.broker {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+@media (min-width: 900px) {
+  .ddv-requirement-list .ddv-procedure-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+    gap: 0 18px;
+  }
+
+  .ddv-requirement-list .ddv-procedure-card-head,
+  .ddv-requirement-list .ddv-group-guidance,
+  .ddv-requirement-list .ddv-review-grid,
+  .ddv-requirement-list .ddv-broker-section {
+    grid-column: 1 / -1;
+  }
+
+  .ddv-requirement-list .ddv-footnote-guidelines {
+    grid-column: 1 / -1;
+  }
+
+  .ddv-requirement-list .ddv-cert-list {
+    grid-column: 1 / -1;
+    align-self: start;
+  }
+}
+
+.ddv-duty-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.ddv-duty-priority-flow {
+  display: grid;
+  gap: 16px;
+}
+
+.ddv-duty-priority-section {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.ddv-duty-priority-head {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.ddv-duty-priority-head strong {
+  color: var(--foreground);
+  font-size: 1.125rem;
+}
+
+.ddv-duty-priority-head span {
+  color: var(--muted-foreground);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.ddv-duty-priority-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+}
+
+.ddv-branch-card {
+  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 16px;
+}
+
+.ddv-branch-card.success {
+  border-color: color-mix(in oklch, var(--primary) 32%, transparent);
+  background: color-mix(in oklch, var(--primary) 8%, transparent);
+}
+
+.ddv-branch-card.conditional {
+  background: color-mix(in oklch, var(--warning) 8%, var(--surface));
+  border-color: color-mix(in oklch, var(--warning) 24%, transparent);
+}
+
+.ddv-branch-card span {
+  color: var(--muted-foreground);
+  display: block;
+  font-size: 0.95rem;
+  margin-bottom: 10px;
+}
+
+.ddv-branch-card strong {
+  display: block;
+  font-size: 1.7rem;
+  line-height: 1.1;
+}
+
+.ddv-branch-card p {
+  color: var(--muted-foreground);
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: 12px 0 0;
+}
+
+.ddv-branch-card small {
+  color: var(--muted-foreground);
+  display: block;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  margin-top: 10px;
+}
+
+.ddv-duty-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.ddv-duty-badges em {
+  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  font-style: normal;
+  line-height: 1;
+  padding: 5px 8px;
+}
+
+.ddv-duty-branches {
+  border-top: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+}
+
+.ddv-duty-branch-row {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+}
+
+.ddv-duty-branch-row span {
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.ddv-duty-branch-row strong {
+  font-size: 1rem;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.ddv-duty-units {
+  border-top: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.ddv-duty-units span,
+.ddv-duty-units em {
+  border-radius: 999px;
+  font-size: 0.875rem;
+  line-height: 1;
+  padding: 5px 8px;
+}
+
+.ddv-duty-units span {
+  background: color-mix(in oklch, var(--foreground) 6%, transparent);
+  color: var(--foreground);
+  font-weight: 800;
+}
+
+.ddv-duty-units em {
+  background: var(--surface);
+  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
+  color: var(--muted-foreground);
+  font-style: normal;
+}
+
+.ddv-duty-arrow,
+.ddv-duty-split {
+  align-self: center;
+  color: var(--primary);
+  font-weight: 800;
+  text-align: center;
+}
+
+.ddv-duty-split {
+  grid-column: 1 / -1;
+  border-top: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
+  margin-top: 4px;
+  padding-top: 16px;
+}
+
+.ddv-duty-conditions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+
+@media (max-width: 880px) {
+  .ddv-duty-flow {
+    grid-template-columns: 1fr;
+  }
+
+  .ddv-duty-arrow {
+    padding: 2px 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .ddv-cert-row {
+    grid-template-columns: 1fr;
+  }
+}
