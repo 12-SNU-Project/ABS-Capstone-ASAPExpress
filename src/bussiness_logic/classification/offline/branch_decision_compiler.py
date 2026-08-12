@@ -40,10 +40,10 @@ from bussiness_logic.classification.rules.axis_field_binding import (
 )
 
 # ── 기준 유형 taxonomy (7/2 설계 사양서) ─────────────────────────────
-# data/classification_criterion_taxonomy_20260702.csv 가 유일한 축 정의다:
+# data/decription_taxonomy.csv 가 유일한 축 정의다:
 # criterion_type + 탐지 정규식(examples) + role. 손으로 재발명했던 7축
 # (species/form/... )은 이 16유형의 부분집합이라 폐기.
-_TAXONOMY_CSV = Path(__file__).resolve().parents[4] / "data" / "classification_criterion_taxonomy_20260702.csv"
+_TAXONOMY_CSV = Path(__file__).resolve().parents[4] / "data" / "decription_taxonomy.csv"
 
 # criterion_type -> 질문에 답할 DTO 필드. Runtime과 offline compiler가
 # 같은 registry를 읽어 split-brain binding을 만들지 않는다.

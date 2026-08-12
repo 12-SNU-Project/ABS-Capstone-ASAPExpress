@@ -152,7 +152,7 @@ class AppPathsConfig(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    ontology_root: Path = Path("docs/ASAP_Ontology_v1")
+    ontology_root: Path = Path("docs/ASAP_Ontology/linkml")
     ontology_smoke_summary_artifact: Path = Path(
         "artifacts/core-smoke/runtime-smoke-summary.json",
     )
