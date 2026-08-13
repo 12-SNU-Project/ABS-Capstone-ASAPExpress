@@ -888,7 +888,7 @@ class KurlyMarketSmokeRunner:
         productUrls: Sequence[str] | None = None,
     ) -> None:
         if loadDotEnv:
-            _LoadDotEnvDefaults(PROJECT_ROOT_PATH / ".env")
+            _LoadDotEnvDefaults(PROJECT_ROOT_PATH / "config/" / ".env.kurly_market_smoke")
         appConfig = LoadAppConfig(PROJECT_ROOT_PATH)
         pathConfig = appConfig.paths
         smokeConfig = appConfig.kurly_smoke
